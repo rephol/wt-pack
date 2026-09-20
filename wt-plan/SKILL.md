@@ -140,6 +140,24 @@ The failures are self-inflicted and always the same shapes:
 - **the plan targets a file that does not exist, or the wrong one of two with the same name** — a config
   override at the wrong level is the canonical case: it looks configured and is decorative
 
+### Score it, if the judgment layer is configured
+
+The plan is the one artifact in this loop no skill owns scoring — `wt-review` reads it for defects in what it
+says, not for its shape as a plan. These four dimensions are the ones this pack measurably keeps failing on,
+and they were written from plans produced by this very step.
+
+```bash
+node ~/.claude/skills/wt-shared/scripts/wt-eval.mjs <plan> --type plan
+```
+
+It reports; it decides nothing, and the scores never appear in the plan. Read a low dimension as "re-read
+this part of what I just wrote": weak `evidence` means claims went in from memory, a weak `definition_of_done`
+means an evaluator reading only a transcript could not tell whether the work landed, weak `unit_decomposition`
+means the stated order breaks partway through. **Confidence near zero means the question did not apply** —
+ignore that row rather than editing the plan to satisfy it.
+
+Exit 3 means no key: self-trace by reading, exactly as above. Never block on it, never ask for a key.
+
 ## 7. Review, then apply
 
 Invoke `wt-review` with the plan path, the scratchpad findings table (still live this session), and the
