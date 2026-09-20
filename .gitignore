@@ -1,0 +1,5 @@
+# Machine-local observations, not source: the judgment log and the thresholds
+# calibrated from it live in ~/.claude and belong to the machine that made them.
+*.jsonl
+wt-judge-thresholds.json
+.env
