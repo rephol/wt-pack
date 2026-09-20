@@ -89,9 +89,14 @@ node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs lenses <target> [--mode pla
 
 **Exit 3 means no key: size from the trigger table below, exactly as before.** Never skip sizing.
 
-Read the numbers, not just the marks. The threshold is 0.6 because 0.5 fired all seven lenses on a real
+Read the numbers, not just the marks. The threshold is 0.4 because 0.5 fired all seven lenses on a real
 plan; anything landing between 0.4 and 0.6 is genuinely your call, and adding that lens is the safer error.
 The always-on lenses are never judged — they are structural, and asking invites dropping one.
+
+**What `mark` means here, exactly: did the lens belong in the set — not did it pay off on the day.** A
+security lens on an auth change belonged there even if it found nothing, or found only things verification
+later refuted. Mark it `no` only when the lens had no business running against that target at all. Marking
+the two questions interchangeably is how a calibration log quietly stops meaning anything.
 
 ## Size from the target, not from judgement
 
@@ -205,34 +210,43 @@ never as a filter, and do not let it shrink the surface.
 
 Exit 3 means no key: read the diff as you always have.
 
-## Verify before returning
+## Every returned finding carries a verification state
 
-Findings go out unverified today, and on a measured run two of eight were plainly false against the file
-they named — a receiver with no sender check on a module whose manifest is empty, a "typo ships green" on
-a string a test pins. Neither reviewer had opened the file.
+**This is part of the return contract, not an extra.** A findings table whose entries do not each say
+`confirmed`, `refuted` or `unverifiable` is an incomplete return, however good the findings are.
+
+The state means one thing: someone opened the file the finding cites and looked. On a measured run, two
+of eight load-bearing findings were plainly false against that file — a receiver with no sender check on a
+module whose manifest is empty, a "typo ships green" on a string a test pins. Neither reviewer had opened it.
+
+- **confirmed** — the file shows the defect, and the failure predicted follows from it.
+- **refuted** — the file contradicts it. **Report it as refuted; do not delete it.** A lens producing
+  refuted findings is itself a finding about the review.
+- **unverifiable** — the answer lives outside the files at hand: a dependency's behaviour, a runtime value,
+  a build output. Ships with the word attached. These are the ones worth a human minute, and they are not
+  a pass.
+
+Verify by reading, or let the judgment layer do the reading:
 
 ```bash
 node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs verify findings.json --rev <sha> --json
 ```
 
-Each finding is judged against the **real contents** of the file it cites: confirmed, refuted, or
-unverifiable. Give every finding a `file`, a `line` where there is one, and `related` — the paths where a
-refutation would live, the test that pins the string, the caller. A finding whose answer is in a file you
-did not supply comes back unverifiable, which is correct and is not a pass.
+Give every finding a `file`, a `line` where there is one, and `related` — the paths where a refutation would
+live, the test that pins the string, the caller. A finding whose answer is in a file you did not supply comes
+back unverifiable, correctly.
 
-Refuted findings go back to the lens that raised them; do not drop them silently, because a lens producing
-refuted findings is itself the finding. Unverifiable ones ship with that word attached — they are the ones
-worth a human minute.
+**Exit 3 means no key: verify by reading. The contract is unchanged** — the tool is the fast path to it, never
+the reason for it. And the tool is a filter on findings you already have, never a substitute for finding them:
+on that same run it confirmed at 60% a finding a pinning test refutes, with the test in front of it. Read the
+number.
 
-**Exit 3 means no key: return findings as before.** It is a filter on what you already found, never a
-substitute for finding it. It also does not catch everything: on that same run it confirmed a finding a
-pinning test refutes, at 60%, with the test in front of it. Read the number.
+Findings ranked most-severe first. Each one: what is wrong, the concrete failure it produces, where, and its
+verification state.
 
-Findings ranked most-severe first.
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
 `node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
- Each one: what is wrong, the concrete failure it produces, and where.
 Deduplicate across lenses before returning — two agents finding the same thing is one finding, and reporting
 it twice inflates the apparent yield of a bigger panel.
 

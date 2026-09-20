@@ -111,7 +111,7 @@ Measured once: on a real OTP question over 60 candidates, the four files that ca
 
 Exit 3 means no key: read the candidates as you always have.
 
-## Optional: check every citation before consolidating
+## Every record's quote must establish its claim
 
 A record can carry a real quote that does not establish the claim drawn from it — a document-level evidence
 score sees that only in aggregate, and the shard that wrote it cannot see it at all.
@@ -119,6 +119,10 @@ score sees that only in aggregate, and the shard that wrote it cannot see it at 
 ```bash
 node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs cite records.json
 ```
+
+**The contract already says records carry quoted evidence; this is what makes that mean something.** A
+quote that is real but does not establish the claim drawn from it passes every check the schema makes, and
+is the failure a document-level evidence score cannot see. Check each one by reading, or in one call:
 
 One Noul per record: *does this quote establish this claim on its own?* It catches a path cited without its
 contents, and a quote that contradicts the claim made from it. Re-shard what fails rather than passing it to

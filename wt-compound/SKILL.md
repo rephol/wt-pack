@@ -74,10 +74,16 @@ Read `references/discoverability.md`. Three checks: would anyone searching find 
 depends on need defining; did this just make an older document wrong. Ask before editing a root instruction
 file — it is the user's.
 
-## Optional: ask something other than yourself
+## Name what makes it new, against artifacts you name
 
-Steps 1 and 4 both ask the author to judge their own work — whether the reasoning is already recoverable, and
-whether the wording is findable. An outside judgment is cheap:
+**Part of what this skill returns, not an extra.** A learning ships with the claim stated explicitly: *this
+reasoning is absent from <these artifacts>* — the diff, its tests, the plan, the docs you actually checked,
+each named. A learning without that line is an incomplete return, because "is this already recoverable from
+the work itself" is the only question that separates a store that compounds from one that accumulates.
+
+Answer it by reading those artifacts. Steps 1 and 4 both ask the author to judge their own work — whether
+the reasoning is already recoverable, and whether the wording is findable — so an outside judgment is worth
+its one call:
 
 ```bash
 node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs learning LEARNING.md --against <diff> --against <plan>
@@ -86,7 +92,8 @@ node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs learning LEARNING.md --agai
 `redundant` high means the artifacts already carry the reasoning — do not write it. `findable` low means
 reword around the trigger situation, in the words someone hitting it would search for.
 
-**Exit 3 means no key: judge it yourself against steps 1 and 4.**
+**Exit 3 means no key: judge it yourself against steps 1 and 4.** The named-artifacts line is owed either
+way; the tool is the fast path to it, never the reason for it.
 
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
 `node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
