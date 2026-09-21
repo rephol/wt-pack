@@ -29,3 +29,17 @@ You check whether the plan agrees with itself. You are not checking whether it i
 
 Findings ranked by severity. Each: the defect in one sentence, the concrete failure it causes, and where.
 No summary of the plan, no praise, no restatement of what is fine.
+
+**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/coherence.json` as one array,
+and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
+against the file it cites, and both read this file — a prose reply means neither runs.
+
+```json
+[{ "lens": "coherence", "title": "one line", "detail": "the defect and the concrete failure it produces",
+   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
+   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
+   "severity": "high|medium|low" }]
+```
+
+`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
+wrong, not the one you already read.

@@ -166,6 +166,35 @@ In diff mode, add the plan's Definition of Done and one more line:
 
 > Work that does not meet the Definition of Done is a finding. Work beyond it is also a finding.
 
+### Every reviewer writes JSON, not prose
+
+**Tell each agent to append its findings to `<scratchpad>/findings/<lens>.json`** and to return only a short
+summary in its reply. One array, one object per finding:
+
+```json
+[{ "lens": "correctness",
+   "title": "arm() awaits the handshake with no timeout",
+   "detail": "What is wrong, and the concrete failure it produces.",
+   "file": "src/auth/otp-autofill.ts",
+   "line": 78,
+   "related": ["src/auth/__tests__/otp-autofill.test.tsx"],
+   "severity": "high" }]
+```
+
+`file` and `line` are **the location the finding is about** — in plan mode that is usually the plan itself
+(`docs/plans/….md`, and the line in it), in diff mode a source file. `related` names the paths where a
+*refutation* would live: the test that pins the string, the caller, the doc that contradicts it. A finding
+with no `related` is the one most likely to come back unverifiable.
+
+This is the difference between the judgments being used and not. A panel that returns prose leaves the caller
+to retype eighteen findings into an array before `dedupe` or `verify` will run, so it reads them by hand
+instead — observed, on a real run where the full three-agent panel returned prose and neither judgment was
+invoked. Collecting the files costs nothing:
+
+```bash
+cat <scratchpad>/findings/*.json | jq -s 'add' > <scratchpad>/findings.json
+```
+
 ## What review is actually for
 
 On a measured run, the majority of findings were **not** research gaps. They were self-inflicted errors in
@@ -184,7 +213,7 @@ Before returning, deduplicate. `~/.claude/skills/wt-shared/scripts/wt-judge.mjs 
 them transitively, so A~B and B~C come back as one group rather than two pairs you must merge yourself:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs dedupe findings.json --json
+node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs dedupe <scratchpad>/findings.json --json
 ```
 
 Exit 3: deduplicate by reading, as before. The threshold is 0.6 and deliberately asymmetric — a false merge
@@ -229,12 +258,14 @@ module whose manifest is empty, a "typo ships green" on a string a test pins. Ne
 Verify by reading, or let the judgment layer do the reading:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs verify findings.json --rev <sha> --json
+node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs verify <scratchpad>/findings.json [--rev <sha>] --json
 ```
 
-Give every finding a `file`, a `line` where there is one, and `related` — the paths where a refutation would
-live, the test that pins the string, the caller. A finding whose answer is in a file you did not supply comes
-back unverifiable, correctly.
+**Both modes.** `--rev` reads each cited file at that commit and is for diff mode; without it the working
+tree is read, which is what plan mode needs — a finding citing `docs/plans/….md:88` is checked against the
+plan as written, exactly like one citing a source file. The reviewers already wrote `file`, `line` and
+`related`, so this is a pipe, not a transcription job. A finding whose answer lives in a file nobody supplied
+comes back unverifiable, correctly.
 
 **Exit 3 means no key: verify by reading. The contract is unchanged** — the tool is the fast path to it, never
 the reason for it. And the tool is a filter on findings you already have, never a substitute for finding them:

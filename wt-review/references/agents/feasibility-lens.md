@@ -33,3 +33,17 @@ expects. This is the lens that catches the most, and the class it catches is sel
 ## Return
 
 Findings ranked by severity. Each: the defect, the concrete failure, the file you verified it against.
+
+**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/feasibility.json` as one array,
+and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
+against the file it cites, and both read this file — a prose reply means neither runs.
+
+```json
+[{ "lens": "feasibility", "title": "one line", "detail": "the defect and the concrete failure it produces",
+   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
+   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
+   "severity": "high|medium|low" }]
+```
+
+`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
+wrong, not the one you already read.
