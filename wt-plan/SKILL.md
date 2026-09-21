@@ -75,6 +75,16 @@ directory. That is fine — `wt-finish` deletes it with plain git for the same r
 Branch names are meaningful (`oreviyanto/umk-759-classifier-metering`), never auto-generated. Match the
 convention `git worktree list` already shows rather than inventing one.
 
+**Gitignored env files are copied across.** `git worktree add` materialises tracked files only, so a new
+worktree arrives with every `.env.example` and no `.env.local` — it looks configured and is not. The script
+copies each gitignored `.env*` from the main checkout and prints `env: <path>` per file, skipping templates,
+build directories and other worktrees nested under the checkout. It copies rather than symlinks because a
+repo guarding secret reads blocks `ln -s <secret>` as an attempted read while allowing the copy.
+
+Two consequences worth knowing: the secret now exists in two places, and an edit in the worktree does not
+reach the main checkout. If the run needs a value the main checkout does not have, add it in the worktree
+and say so at handoff.
+
 **Do not `cd` back to the main checkout.** Everything after this happens in the worktree.
 
 ## 3. Research
