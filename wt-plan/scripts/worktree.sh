@@ -12,12 +12,30 @@ root="$(git rev-parse --show-toplevel)"
 # conventional names that exists. Repos integrating to preview/develop/staging are common,
 # so main is the last guess, not the first.
 base=""
-if ref=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null); then
-  base="${ref#refs/remotes/origin/}"
+# 1. An explicit answer always wins: WT_BASE=preview worktree.sh ...
+if [ -n "${WT_BASE:-}" ]; then
+  base="${WT_BASE#origin/}"
+# 2. The branch the checkout is SITTING on, when that is itself an integration
+#    branch. origin/HEAD is the repo's default branch, which is not the same
+#    thing: umkmall publishes origin/HEAD -> main while integrating to preview,
+#    so trusting HEAD first silently branched every worktree off the wrong base.
 else
+  cur=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
   for c in preview develop staging main master; do
-    if git show-ref --verify --quiet "refs/remotes/origin/$c"; then base="$c"; break; fi
+    if [ "$cur" = "$c" ] && git show-ref --verify --quiet "refs/remotes/origin/$c"; then
+      base="$c"; break
+    fi
   done
+fi
+# 3. Then the published default, then the conventional names.
+if [ -z "$base" ]; then
+  if ref=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null); then
+    base="${ref#refs/remotes/origin/}"
+  else
+    for c in preview develop staging main master; do
+      if git show-ref --verify --quiet "refs/remotes/origin/$c"; then base="$c"; break; fi
+    done
+  fi
 fi
 [ -n "$base" ] || { echo "worktree.sh: no integration branch found on origin" >&2; exit 1; }
 

@@ -68,6 +68,15 @@ unrelated in-flight work plans against a tree nobody else has. Resolve it from t
 repo's existing convention. **Creation stays plain git** — `EnterWorktree` branches from the repository's
 default branch, which is the wrong base wherever the integration branch is not `main`.
 
+**The base is resolved in three steps, and the first two exist because `origin/HEAD` lies.** A repo can
+publish `origin/HEAD -> main` while integrating to `preview` — umkmall does — so the script takes, in order:
+`WT_BASE` if set; the branch the main checkout is sitting on when that is itself an integration name
+(`preview`, `develop`, `staging`, `main`, `master`); then `origin/HEAD`, then those names in order. It prints
+`base: origin/<branch>` — **read that line.** A worktree on the wrong base produces a plan reviewed against
+work that is not in it, and a PR whose diff includes someone else's.
+
+Override when the ticket belongs somewhere else: `WT_BASE=origin/preview scripts/worktree.sh <branch>`.
+
 Enter it with `EnterWorktree` by `path`. The harness did not create it, so it owns it only loosely: `keep`
 works, `remove` is refused, and if the entry never registered, leaving is a no-op and the directory is just a
 directory. That is fine — `wt-finish` deletes it with plain git for the same reason.
