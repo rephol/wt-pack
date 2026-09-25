@@ -8,7 +8,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { Badge } from '@astryxdesign/core/Badge'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { shortAgo } from './notifyGate'
-import { switcherItems, needsYou, type SwAgent, type SwItem, type SwRoom } from './switcherData'
+import { switcherItems, needsYou, agentInitials, type SwAgent, type SwItem, type SwRoom } from './switcherData'
 
 export type { SwAgent, SwRoom }
 const RECENT_KEY = 'recent-agents'
@@ -17,7 +17,6 @@ export function rememberRecent(key: string) {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([key, ...loadRecent().filter((k) => k !== key)].slice(0, 5))) } catch { /* private mode */ }
 }
 const DOT = { working: 'accent', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral' } as const
-const initials = (name: string) => name.split(/[^A-Za-z0-9]+/).filter(Boolean).slice(-2).map((w) => w[0].toUpperCase()).join('')
 
 // A dialog other than our own palette/sheet is open (settings, inbox drawer, agent panel on a phone, …).
 function useOtherDialogOpen(mine: boolean) {
@@ -38,7 +37,7 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   return (
     <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: 12, height: phone ? 56 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
       <div style={{ position: 'relative', flex: '0 0 28px', width: 28, height: 28, borderRadius: 14, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
-        {a ? initials(a.name) : '#'}
+        {a ? agentInitials(a.name) : '#'}
         <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
           <StatusDot variant={!a || needsYou(a) ? 'error' : DOT[a.status]} label={a ? (needsYou(a) ? 'needs you' : a.status) : 'waiting on you'} isPulsing={a?.status === 'working'} />
         </span>

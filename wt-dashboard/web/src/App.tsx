@@ -287,10 +287,11 @@ export default function App() {
   const narrow = useNarrow()
   const phone = useNarrow('(max-width: 639px)')
   const panel = useResizable({ defaultSize: 480, minSize: 380, maxSize: Math.max(400, Math.round(window.innerWidth / 2)), autoSaveId: 'agent-panel-width' })
-  const [collapsed, setCollapsedState] = useState(() => { try { return localStorage.getItem('agent-panel-collapsed') === '1' } catch { return false } })
+  // The agent panel is shown or hidden (no rail); `]` / Esc / X hide it, selecting an agent shows it.
+  // ponytail: the old rail state is not carried over — the stored key is dropped and every load starts hidden.
+  const [collapsed, setCollapsedState] = useState(() => { try { localStorage.removeItem('agent-panel-collapsed') } catch { /* private mode */ } return false })
   const setCollapsed = (c: boolean) => {
     setCollapsedState(c)
-    try { localStorage.setItem('agent-panel-collapsed', c ? '1' : '0') } catch { /* private mode */ }
   }
   const [navCollapsed, setNavCollapsedState] = useState(() => { try { return localStorage.getItem('nav-collapsed') === '1' } catch { return false } })
   const setNavCollapsed = (c: boolean) => {
@@ -379,24 +380,14 @@ export default function App() {
       </VStack>
       </LayoutContent>
         }
-        end={openAgent && !narrow ? (
-          collapsed ? (
-            <LayoutPanel width={48} hasDivider label="Agent panel (collapsed)" isScrollable={false}>
-              <VStack gap={3} align="center" paddingBlock={4}>
-                <Button label="‹" size="sm" variant="ghost" tooltip={`Expand ${openAgent.name} (])`} onClick={() => setCollapsed(false)} />
-                <StatusDot variant={needsYou(openAgent) ? 'error' : AGENT_DOT[openAgent.status]} label={openAgent.status} />
-                <Text weight="semibold" size="sm">{initials(openAgent.name)}</Text>
-              </VStack>
+        end={openAgent && !narrow && !collapsed ? (
+          <>
+            <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize agent panel" />
+            <LayoutPanel resizable={panel.props} label={`Agent ${openAgent.name}`} isScrollable={false} padding={0}>
+              <AgentPanelBody key={openAgent.key} agent={openAgent} task={all?.tasks.find((t) => t.id === openAgent.task) ?? null}
+                onCollapse={() => setCollapsed(true)} autoFocus />
             </LayoutPanel>
-          ) : (
-            <>
-              <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize agent panel" />
-              <LayoutPanel resizable={panel.props} label={`Agent ${openAgent.name}`} isScrollable={false} padding={0}>
-                <AgentPanelBody key={openAgent.key} agent={openAgent} task={all?.tasks.find((t) => t.id === openAgent.task) ?? null}
-                  onCollapse={() => setCollapsed(true)} autoFocus />
-              </LayoutPanel>
-            </>
-          )
+          </>
         ) : undefined}
       />
       {openAgent && narrow && (

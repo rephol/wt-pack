@@ -20,3 +20,12 @@ test('switcher: fuzzy name, ticket id and recap search; rooms only when waiting 
   const rooms = [{ slug: 'ops', title: 'Ops', needsYou: [{ agent: 'w-01', text: 'ok?' }] }, { slug: 'quiet', title: 'Quiet' }]
   assert.deepEqual(switcherItems([], rooms, []).map((x) => x.id), ['room:ops'])
 })
+import { agentInitials } from './switcherData.ts'
+test('agentInitials: role letter + number without leading zeros', () => {
+  assert.equal(agentInitials('umkmall-planner-02'), 'P2')
+  assert.equal(agentInitials('worker-05'), 'W5')
+  assert.equal(agentInitials('umkmall-worker-10'), 'W10')
+  assert.equal(agentInitials('umkmall-orchestrator'), 'O')
+  assert.equal(agentInitials('code-reviewer/w5:p9'), 'CR')
+  assert.equal(agentInitials('Code-reviewer agent startup command'), 'CR')
+})
