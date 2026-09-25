@@ -56,7 +56,7 @@ tabs and finished workers are recycled instead of piling up. List the free ones 
 in the repo's **main checkout**; a worker parked inside a worktree is work already in flight:
 
 ```bash
-~/.claude/skills/wt-plan/scripts/handoff.sh --list <worktree>   # pane-id, worker name, cwd
+~/.claude/skills/wt-handoff/scripts/handoff.sh --list <worktree>   # pane-id, worker name, cwd
 ```
 
 Put that list in the question. With candidates, ask **which worker, and whether to clear it**, and carry a
@@ -72,9 +72,12 @@ Clearing is not free either: a `SessionStart` memory hook re-injects project con
 to spawn one.
 
 ```bash
-printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-plan/scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] <worktree>
+printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
+  [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] <worktree>
 ```
+
+Pass `--task` with the ticket and a few-word title; it labels the worker in wt-dashboard. The script lives in
+the `wt-handoff` skill (read its SKILL.md for the tokens and the reply footer it adds).
 
 `--pane` prompts that worker; `--clear` sends `/clear` first; `--new` skips reuse and spawns the next worker
 (`<repo>-worker-NN`, opened in the worktree) through `agents.sh`, which owns the numbering and the naming. With neither it takes the first free worker itself, so pass one
