@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { isUserSkip } from './pickerGuard.ts'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppShell } from '@astryxdesign/core/AppShell'
@@ -34,6 +35,7 @@ import { Link } from '@astryxdesign/core/Link'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { ChatMarkdown } from './links'
+import { VirtualRows } from './virtual'
 import { sortAgents, initialSort, activityOf, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
@@ -1152,9 +1154,10 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   // The list is built only when the transcript (or working state) changes, never per keystroke:
   // the draft lives in this component, and re-rendering 200+ Markdown messages per key was the lag.
   const working = agent.status === 'working'
+  const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
   const messageList = useMemo(() => (
               <ChatMessageList density="compact" isStreaming={working}>
-                {rows.map((r) =>
+                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
                   r.kind === 'tools' ? (
                     <ChatMessage key={r.id} sender="assistant">
                       <ChatMessageBubble variant="ghost" width="100%">
@@ -1187,8 +1190,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                         {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
                       </ChatMessageBubble>
                     </ChatMessage>
-                  ),
-                )}
+                  )} />
               </ChatMessageList>
   ), [rows, working])
 
@@ -1217,7 +1219,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             {streamErr && <Banner status="warning" title="Transcript stream disconnected — retrying" />}
             {send.isError && <Banner status="error" title="Send failed" description={String(send.error)} />}
             <div ref={chatBox} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <ChatLayout
+            <ChatLayout ref={layoutRef}
               emptyState={<EmptyState isCompact title="No messages yet" />}
               composer={heldPicker ? null : (
                 <ChatComposer
@@ -1321,9 +1323,9 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center', minHeight: 0 }}>
               <div style={{ width: '100%', maxWidth: 860, display: 'flex', flexDirection: 'column', minHeight: 0 }}>{conversation}</div>
             </div>
-            <div style={{ flex: '0 0 300px', minWidth: 0, overflowY: 'auto', overflowWrap: 'anywhere' }}>
+            <ScrollableArea label="Summary" style={{ flex: '0 0 300px', minWidth: 0, overflowWrap: 'anywhere' }}>
               <Collapsible defaultIsOpen chevronPosition="start" trigger={<Text weight="semibold">Summary</Text>}>{summary}</Collapsible>
-            </div>
+            </ScrollableArea>
           </div>
         ) : (
           <>

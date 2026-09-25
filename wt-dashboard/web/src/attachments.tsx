@@ -85,6 +85,7 @@ function FilePreview({ f, onClose }: { f: SharedFile; onClose: () => void }) {
             <Button label="Close" size="sm" variant="secondary" onClick={onClose} />
           </HStack>
         </HStack>
+        {/* ponytail: native scroller (themed by the shared rule) — the iframe/img need height:100%, which ScrollableArea's content box does not give */}
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: isHtml(f.name) ? 0 : 16 }}>
           {isHtml(f.name) && <iframe src={url} sandbox="allow-scripts" title={f.name} style={{ width: '100%', height: '100%', border: 0, background: 'white' }} />}
           {isImage(f.name) && <img src={url} alt={f.name} style={{ display: 'block', margin: 'auto', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />}

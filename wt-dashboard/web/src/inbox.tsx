@@ -1,5 +1,6 @@
 // Notifications inbox: a right-side panel over the feed at /api/notifications. "Needs you" (unresolved
 // actionables) pinned on top, then "Recent". Opened from the sidebar bell or openInbox(kind).
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
@@ -164,13 +165,13 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
             </SegmentedControl>
           </div>
         </VStack>
-        <div className="hd-inbox-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <ScrollableArea label="Notifications" className="hd-inbox-list" style={{ flex: 1, minHeight: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}>
           {!shown.length && <EmptyState isCompact title="Nothing here" description="Questions, @mentions and agent updates land here." />}
           {pinned.length > 0 && <div className="hd-sub">Needs you</div>}
           {pinned.map(row)}
           {recent.length > 0 && <div className="hd-sub">Recent</div>}
           {recent.map(row)}
-        </div>
+        </ScrollableArea>
       </div>
       <AlertDialog isOpen={confirmAll} onOpenChange={setConfirmAll} title="Clear the whole inbox?"
         description="Every item leaves the list, including ones that still need you. They stay in the log file." actionLabel="Clear all" actionVariant="destructive"

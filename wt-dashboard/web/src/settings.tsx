@@ -1,6 +1,7 @@
 // Settings modal: Profile, Rooms, Notifications, Server, About. Opened from the sidebar (Settings / Server),
 // ⌘, in the app, or `openSettings(section)` from anywhere. Server-side settings save on change ("Saved");
 // the profile has an explicit Save because name/handle are typed.
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Fragment, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
@@ -50,7 +51,7 @@ export function SettingsHost() {
       <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', minWidth: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <HStack justify="between" align="center" padding={3}><Heading level={3}>Settings</Heading>{close}</HStack>
         <div style={{ display: 'flex', gap: 4, overflowX: 'auto', padding: '0 12px 8px', flexShrink: 0 }}>{tabs}</div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: 16 }}>{body}</div>
+        <ScrollableArea label="Settings" style={{ flex: 1, minHeight: 0 }} padding={4}>{body}</ScrollableArea>
       </div>
     </Dialog>
   )
@@ -63,10 +64,10 @@ export function SettingsHost() {
             {tabs}
           </VStack>
         </nav>
-        <div style={{ flex: '1 1 320px', minWidth: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', padding: 24 }}>
+        <ScrollableArea label="Settings" style={{ flex: '1 1 320px', minWidth: 0, height: '100%' }} padding={6}>
           <HStack justify="end">{close}</HStack>
           {body}
-        </div>
+        </ScrollableArea>
       </div>
     </Dialog>
   )

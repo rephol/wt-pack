@@ -1,5 +1,6 @@
 // Spawn and remove agents. The server runs the wt-agents skill's agents.sh for both, so naming and pools
 // stay in one place; this file is only the dialogs.
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
@@ -69,7 +70,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
           <Heading level={3}>New agent</Heading>
           <Button label="Close" size="sm" variant="ghost" onClick={onClose} isDisabled={spawn.isPending} />
         </HStack>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
+        <ScrollableArea label="New agent" style={{ flex: 1, minHeight: 0, padding: '8px 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
           <VStack gap={4}>
             <VStack gap={1}>
               <SegmentedControl label="Kind" value={kind} onChange={(v) => setKind(v as Kind)}>
@@ -96,7 +97,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
             {spawn.isPending && <Text type="supporting">{prompt.trim() ? 'Starting… then waiting until it is ready for the prompt (up to a minute).' : 'Starting…'}</Text>}
             <Button label={spawn.isPending ? 'Starting…' : `Start ${kind}`} variant="primary" width="100%" isLoading={spawn.isPending} isDisabled={!canSubmit} onClick={() => spawn.mutate()} />
           </VStack>
-        </div>
+        </ScrollableArea>
       </div>
     </Dialog>
   )

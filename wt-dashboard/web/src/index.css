@@ -40,3 +40,9 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 
 /* Quick switcher (CommandPalette): small uppercase group headings. */
 .astryx-command-palette-group-heading { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+
+/* One scrollbar look everywhere (native scrollers inside Astryx layouts and ScrollableArea alike): thin, rounded,
+   transparent track, thumb only while the region is hovered. Touch devices keep their own overlay scrollbars. */
+* { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+*:hover { scrollbar-color: var(--color-border-emphasized, rgba(128, 128, 128, .5)) transparent; }
+@media (hover: none) { * { scrollbar-color: auto; } }

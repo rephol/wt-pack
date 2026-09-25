@@ -1,4 +1,5 @@
 // Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger } from '@astryxdesign/core/Chat'
@@ -18,6 +19,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { ChatMarkdown } from './links'
+import { VirtualRows } from './virtual'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Avatar } from '@astryxdesign/core/Avatar'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
@@ -224,10 +226,11 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
       ))}
     </VStack>
   )
+  const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
   // Built only when messages/members change, never per keystroke (the draft lives in this component).
   const messageList = useMemo(() => (
         <ChatMessageList density="compact">
-          {msgs.map((m) => m.author.kind === 'system' ? (
+          <VirtualRows items={msgs} scrollRef={layoutRef} keyOf={(m) => m.id} render={(m) => m.author.kind === 'system' ? (
             <ChatMessage key={m.id} sender="system">
               <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" />
                 {m.agentKey && <>{' · '}<Link onClick={() => onOpenAgent(m.agentKey!)}>open agent</Link></>}</Text>
@@ -254,7 +257,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
             </ChatMessage>
-          ))}
+          )} />
         </ChatMessageList>
   ), [msgs, profile, agents]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
@@ -264,7 +267,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
         <Heading level={3}>Room settings</Heading>
         <IconButton label="Close" icon={<Icon icon="close" />} variant="ghost" onClick={() => setSheet(false)} style={{ minWidth: 44, minHeight: 44, visibility: narrow ? 'visible' : 'hidden' }} />
       </HStack>
-      <div style={{ overflowY: 'auto', padding: `8px 16px calc(env(safe-area-inset-bottom) + 16px)` }}>
+      <ScrollableArea label="Room settings" style={{ padding: `8px 16px calc(env(safe-area-inset-bottom) + 16px)` }}>
         <VStack gap={4}>
           {room.title !== room.slug && <Text type="supporting" size="sm">{room.title}</Text>}
           {!room.archived && (
@@ -285,7 +288,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
             <Button label="Delete…" variant="destructive" width="100%" onClick={act(() => { setTyped(''); setDeleting(true) })} />
           </VStack>
         </VStack>
-      </div>
+      </ScrollableArea>
     </div>
   )
   return (
@@ -334,7 +337,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
           </HStack>
         </VStack>
       </Dialog>
-      <ChatLayout style={{ flex: 1, minHeight: 0 }}
+      <ChatLayout ref={layoutRef} style={{ flex: 1, minHeight: 0 }}
         emptyState={<EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
           <VStack gap={1}>
