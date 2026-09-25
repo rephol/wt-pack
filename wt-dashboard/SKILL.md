@@ -12,7 +12,8 @@ A local control room for herdr-managed Claude Code agents: overview, tasks (work
 - **Restart:** kill only the listening pid and let the app restart it: `kill $(lsof -nP -iTCP:7777 -sTCP:LISTEN -t)`. Without the app: `npm start` here.
 - **After code changes:** `npm run build` (web), then restart as above; `npm test`. Rebuilding the app (`npm run app:build`) requires quitting it first.
 - **Data:** `$WT_DASHBOARD_DATA` or `~/.local/share/wt-dashboard` → `data/` (rooms, rooms.json, settings.json, notifications.jsonl) and `uploads/`.
-- **Config:** `~/.config/wt-dashboard/env` (`KEY=VALUE`: `LINEAR_API_KEY`, `WT_DASHBOARD_ALLOWED_HOSTS` for tailnet access).
+- **Config:** `~/.config/wt-dashboard/env` (`KEY=VALUE`: `LINEAR_API_KEY`, `WT_DASHBOARD_ALLOWED_HOSTS` for tailnet access, `WT_DASHBOARD_PROJECTS` extra repo paths offered in "New agent").
+- **Spawn/remove agents:** the Agents page's "New agent" and the ⋯ "Remove agent" run `wt-agents/scripts/agents.sh spawn`/`rm`; nothing reimplements it.
 - **Logs:** `~/Library/Logs/wt-dashboard/app.log`.
 
 Never use the dashboard to type into, answer or stop real agents unless the user asks.

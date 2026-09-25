@@ -7,6 +7,7 @@ import { Card } from '@astryxdesign/core/Card'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Icon } from '@astryxdesign/core/Icon'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
@@ -19,6 +20,7 @@ import { useDesktop } from './desktop'
 import { SettingsHost, openSettings } from './settings'
 import { InboxButton, InboxHost } from './inbox'
 import { RoomsPage, useRoomsList } from './rooms'
+import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { TabList, Tab } from '@astryxdesign/core/TabList'
@@ -347,6 +349,7 @@ export default function App() {
                 Updated <Timestamp value={data.at} format="relative" isLive />
               </Text>
             )}
+            {(page === 'agents' || page === 'overview') && <Button label="New agent" size="sm" variant="primary" onClick={openSpawn} />}
             <Button label="Refresh" size="sm" onClick={() => q.refetch()} />
           </HStack>
         </HStack>}
@@ -393,6 +396,8 @@ export default function App() {
         </Dialog>
       )}
       <SettingsHost />
+      <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
+      <RemoveHost />
       <InboxHost onOpenAgent={open} />
     </AppShell>
   )
@@ -910,6 +915,12 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
                             <StatusDot variant={needsYou(a) ? 'error' : AGENT_DOT[a.status]} label={a.status} isPulsing={a.status === 'working' || needsYou(a)} />
                             <Button label={a.name} variant={selected === a.key ? "secondary" : "ghost"} size="sm" onClick={(e) => { e.stopPropagation(); onOpen(a.key) }} />
                             {needsYou(a) && <Badge variant="error" label="Needs you" />}
+                            <span onClick={(e) => e.stopPropagation()} style={{ marginInlineStart: 'auto' }}>
+                              <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
+                                { label: 'Open', onClick: () => onOpen(a.key) },
+                                a.local ? { label: 'Remove agent…', onClick: () => openRemove(a) } : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
+                              ]} />
+                            </span>
                           </HStack>
                         </TableCell>
                         <TableCell>
@@ -973,7 +984,7 @@ function toRows(msgs: Msg[]): Row[] {
 function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; task: Task | null; onCollapse: () => void; autoFocus: boolean }) {
   const [tab, setTab] = useState('conversation')
   const narrow = useNarrow()
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(() => takePrefill(agent.key))
   const [atts, setAtts] = useState<Attachment[]>([])
   const [attErr, setAttErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -1111,7 +1122,14 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
                 : `${agent.machine} · ${agent.pool} · ${agent.status} for ${idleFor(agent)}`}</Text>
             </VStack>
           </HStack>
+          <HStack gap={0} style={{ flexShrink: 0 }}>
+          <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
+            agent.local
+              ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
+              : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
+          ]} />
           <IconButton label="Close panel" icon={<Icon icon="close" />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Close (Esc)" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />
+          </HStack>
         </HStack>
         <TabList value={tab} onChange={setTab} hasDivider>
           <Tab value="summary" label="Summary" />

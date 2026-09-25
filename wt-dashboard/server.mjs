@@ -498,6 +498,60 @@ async function streamTranscript(req, res, session) {
 // ---- git / gh / linear ----
 const ticketOf = (s) => (s?.match(/umk-(\d+)/i) ? `UMK-${s.match(/umk-(\d+)/i)[1]}` : null)
 
+// ---- spawn / remove agents: always through the wt-agents skill's script (naming, pools, trust seed) ----
+const AGENTS_SH = join(homedir(), '.claude', 'skills', 'wt-agents', 'scripts', 'agents.sh')
+// Project name → main checkout: the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
+// and every repo a local agent is working in.
+async function projectRoots() {
+  return cached('projectRoots', 30_000, async () => {
+    const dirs = [REPO, ...(envOf('PROJECTS') ?? '').split(':').filter(Boolean), ...(await agents()).filter((a) => a.local && a.cwd).map((a) => a.cwd)]
+    const map = new Map()
+    for (const d of new Set(dirs)) {
+      const c = await git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
+      if (c) { const root = dirname(c.trim()); map.set(basename(root), root) }
+    }
+    return map
+  })
+}
+// Linked worktrees of a repo (the main checkout excluded: workers start inside a worktree).
+async function linkedWorktrees(root) {
+  const out = await git(root, 'worktree', 'list', '--porcelain')
+  return out.split('\n\n').map((b) => ({ path: b.match(/^worktree (.+)$/m)?.[1], branch: b.match(/^branch refs\/heads\/(.+)$/m)?.[1] ?? null }))
+    .filter((w) => w.path && w.path !== root)
+}
+async function projectsApi() {
+  const ag = (await agents()).filter((a) => a.local)
+  const inside = (dir) => ag.filter((a) => a.cwd === dir || a.cwd?.startsWith(dir + '/')).map((a) => a.name)
+  return Promise.all([...(await projectRoots())].map(async ([name, root]) => ({
+    name, root,
+    worktrees: (await linkedWorktrees(root).catch(() => [])).map((w) => ({ ...w, ticket: ticketOf(w.branch) ?? ticketOf(w.path), agents: inside(w.path) })),
+  })))
+}
+async function spawnAgent(b) {
+  if (!['planner', 'worker'].includes(b.kind)) throw Object.assign(new Error('kind must be planner or worker'), { status: 400 })
+  const root = (await projectRoots()).get(b.project)
+  if (!root) throw Object.assign(new Error('unknown project'), { status: 400 })
+  const args = ['spawn', b.kind]
+  if (b.kind === 'worker') {
+    // Never a free path: only one of this project's own worktrees.
+    const wt = (await linkedWorktrees(root)).find((w) => w.path === b.cwd)
+    if (!wt) throw Object.assign(new Error('cwd must be one of the project\'s worktrees'), { status: 400 })
+    args.push(wt.path)
+  }
+  const out = await run(AGENTS_SH, args, root, 120_000)
+  const [name, pane] = out.trim().split('\n').pop().split(' ')
+  if (!name || !PANE.test(pane ?? '')) throw new Error(`unexpected agents.sh output: ${out.trim().slice(0, 200)}`)
+  store.delete('agents:local'); store.delete('overview'); store.delete('projectRoots')
+  const machine = (await machines()).find((m) => m.local)?.label
+  let prompted = false
+  if (typeof b.prompt === 'string' && b.prompt.trim()) {
+    await herdr('agent', 'wait', pane, '--until', 'idle', '--timeout', '60000').catch(() => {})
+    await herdr('agent', 'prompt', pane, b.prompt.trim())
+    prompted = true
+  }
+  return { name, pane, machine, key: `${machine}/${pane}`, prompted }
+}
+
 async function worktrees() {
   return cached('worktrees', 10_000, async () => {
     const out = await git(REPO, 'worktree', 'list', '--porcelain')
@@ -1197,6 +1251,12 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'content-type': EXT_MIME[extname(f).slice(1)], 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' })
         return res.end(await readFile(f))
       }
+      if (url.pathname === '/api/projects' && req.method === 'GET') return send(res, 200, await projectsApi())
+      if (url.pathname === '/api/agents/spawn' && req.method === 'POST') {
+        if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
+        const [code, out] = await spawnAgent(JSON.parse((await body(req)) || '{}')).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
+        return send(res, code, out)
+      }
       if (parts[0] === 'api' && parts[1] === 'agents') {
         if (!parts[2]) return send(res, 200, await agents())
         // /api/agents/:machine/:pane[/stream]
@@ -1238,6 +1298,20 @@ const server = http.createServer(async (req, res) => {
           return send(res, 200, await commandsFor(a))
         }
         if (parts[4]) return send(res, 404, { error: 'not found' })
+        // Remove = the wt-agents script's rm (closes the tab). Refuses a working agent unless forced;
+        // an orchestrator needs its name typed back.
+        if (req.method === 'DELETE') {
+          if (!m.local) return send(res, 400, { error: 'removing remote agents is not supported yet' })
+          const b = JSON.parse((await body(req)) || '{}')
+          store.delete('agents:local')
+          const a = (await agents()).find((x) => x.local && x.id === pane)
+          if (!a) return send(res, 404, { error: 'unknown agent' })
+          if (/orchestrator/i.test(a.name) && b.confirmName !== a.name) return send(res, 409, { error: 'type the orchestrator\'s name to remove it', needs: 'name' })
+          if (a.status === 'working' && b.force !== true) return send(res, 409, { error: `${a.name} is working; a turn in flight dies with it`, needs: 'force' })
+          const out = await run(AGENTS_SH, ['rm', pane, ...(b.force === true ? ['--force'] : [])], homedir(), 30_000)
+          store.delete('agents:local'); store.delete('overview')
+          return send(res, 200, { ok: true, message: out.trim() })
+        }
         if (req.method === 'GET') {
           const lines = String(Math.min(2000, Number(url.searchParams.get('lines')) || 300))
           const raw = url.searchParams.get('visible') ? await herdrOn(m, 'agent', 'read', pane, '--source', 'visible', '--ansi') : await readPane(m, pane, lines)
