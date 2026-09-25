@@ -3,6 +3,7 @@
 #   room list
 #   room read <slug> [--since N]
 #   room post <slug> "text" [--attach <image>]...   (@name addresses someone; agents cannot @all)
+#   room create <slug> "title" [--invite name1,name2]  (only if the user enabled it; you become the responder)
 #       --attach: a png/jpeg/webp/gif (<=10MB, <=5) under your cwd or /tmp; the server copies it.
 # Identity: the pane herdr runs you in ($HERDR_PANE_ID); the server rejects unknown panes.
 set -eu
@@ -30,5 +31,19 @@ case "$cmd" in
     done
     call -X POST -H 'content-type: application/json' --data "{\"text\":\"$(esc "$text")\"${atts:+,\"attach\":[$atts]}}" "$API/api/rooms/$slug/messages" >/dev/null
     echo "posted to #$slug" ;;
-  *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <image>]...' ;;
+  create)
+    [ $# -ge 2 ] || die 'usage: room create <slug> "title" [--invite name1,name2]'
+    [ -n "${HERDR_PANE_ID:-}" ] || die "not inside a herdr pane (HERDR_PANE_ID is unset)"
+    slug=$1; title=$2; shift 2; inv=""
+    if [ $# -gt 0 ]; then
+      [ "$1" = "--invite" ] && [ $# -ge 2 ] || die "unknown argument: $1"
+      inv=$(printf '%s\n' "$2" | tr ',' '\n' | sed '/^$/d' | while read -r n; do printf '"%s",' "$(esc "$n")"; done); inv=${inv%,}
+    fi
+    out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
+      --data "{\"slug\":\"$(esc "$slug")\",\"title\":\"$(esc "$title")\"${inv:+,\"invite\":[$inv]}}" "$API/api/rooms") || die "server unreachable at $API"
+    code=$(printf '%s' "$out" | tail -n1); body=$(printf '%s' "$out" | sed '$d')
+    if [ "$code" != 200 ]; then die "$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"; fi
+    case "$body" in *'"existing":true'*) echo "#$slug already exists — post there" ;; *) echo "created #$slug (you are its responder)" ;; esac
+    case "$body" in *'"unknown":["'*) echo "not invited (unknown agents): $(printf '%s' "$body" | sed -n 's/.*"unknown":\[\([^]]*\)\].*/\1/p')" ;; esac ;;
+  *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <image>]... | room create <slug> "title" [--invite a,b]' ;;
 esac
