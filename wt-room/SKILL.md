@@ -18,7 +18,9 @@ Who receives a message from the user:
   "Reply only if this is addressed to you or concerns your work". Silence is fine when it isn't for you.
 
 A room message that reaches you arrives as a prompt starting with `[room #<slug>] N new messages:`.
-Answer with `room post <slug> "…"`, not in your own conversation.
+Answer with `room post <slug> "…"`, not in your own conversation. After posting, end the turn with one short
+line (e.g. "Posted to #<slug>.") — never repeat the answer in your session: the user already reads it in the
+room, and the duplicate only spends your context.
 
 Rules:
 - Post only when it moves the work forward: an answer, a result, a blocker. No acknowledgements, no small talk.
