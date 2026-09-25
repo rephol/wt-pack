@@ -307,7 +307,7 @@ export default function App() {
 
   const nav = (
     <SideNav
-      header={<SideNavHeading heading="Agent Control Room" subheading={phone ? undefined : 'herdr · umkmall'} />}
+      header={<SideNavHeading heading="wt-dashboard" subheading={phone ? undefined : 'herdr · umkmall'} />}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings('profile')} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'agents', 'rooms'] as const).map((p) => {

@@ -24,6 +24,9 @@ import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { BottomSheet } from '@astryxdesign/core/BottomSheet'
+import { Selector } from '@astryxdesign/core/Selector'
+import { Divider } from '@astryxdesign/core/Divider'
+import { Icon } from '@astryxdesign/core/Icon'
 import { useToast } from '@astryxdesign/core/Toast'
 import { openInbox } from './inbox'
 
@@ -192,24 +195,36 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
       ))}
     </VStack>
   )
+  // One body for the phone sheet and the desktop popover.
   const roomSettings = (
-    <VStack gap={3} padding={3} style={{ minWidth: 280, maxWidth: 360 }}>
-      {room.title !== room.slug && <Text type="supporting" size="sm">{room.title}</Text>}
-      {!room.archived && (
-        <DropdownMenu button={{ label: `Responder: ${room.responderName ?? 'none'}${room.responder && !room.responderPinned ? ' (auto)' : ''}`, size: 'sm', variant: 'secondary' }} items={[
-          { label: 'None', description: 'unmentioned messages go to nobody', onClick: () => patch.mutate({ responder: null }) },
-          ...room.members.map((n) => byName.get(n)).filter((a): a is RoomAgent => Boolean(a)).map((a) => ({ label: a.name, description: a.status, onClick: () => patch.mutate({ responder: a.key }) })),
-        ]} />
-      )}
-      {!room.archived && <Switch label="All members hear the user" description="each message = one turn per member" value={Boolean(room.broadcast)} onChange={(v) => patch.mutate({ broadcast: v })} />}
-      {!room.archived && <Switch label="Paused" value={room.paused} onChange={(v) => patch.mutate({ paused: v })} />}
-      <HStack gap={2}>
-        {room.archived
-          ? <Button label="Restore" size="sm" variant="secondary" onClick={act(() => patch.mutate({ archived: false }))} />
-          : <Button label="Archive…" size="sm" variant="secondary" onClick={act(() => setArchiving(true))} />}
-        <Button label="Delete…" size="sm" variant="destructive" onClick={act(() => { setTyped(''); setDeleting(true) })} />
+    <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>
+      <HStack justify="between" align="center" style={{ padding: '4px 8px 4px 16px', flexShrink: 0 }}>
+        <Heading level={3}>Room settings</Heading>
+        <IconButton label="Close" icon={<Icon icon="close" />} variant="ghost" onClick={() => setSheet(false)} style={{ minWidth: 44, minHeight: 44, visibility: narrow ? 'visible' : 'hidden' }} />
       </HStack>
-    </VStack>
+      <div style={{ overflowY: 'auto', padding: `8px 16px calc(env(safe-area-inset-bottom) + 16px)` }}>
+        <VStack gap={4}>
+          {room.title !== room.slug && <Text type="supporting" size="sm">{room.title}</Text>}
+          {!room.archived && (
+            <Selector label="Responder" width="100%" value={room.responder ?? ''}
+              description={room.responder && !room.responderPinned ? 'Chosen automatically; pick one to pin it.' : 'Answers messages that mention nobody.'}
+              options={[{ value: '', label: 'None', description: 'unmentioned messages go to nobody' },
+                ...room.members.map((n) => byName.get(n)).filter((a): a is RoomAgent => Boolean(a)).map((a) => ({ value: a.key, label: a.name, description: a.status }))]}
+              onChange={(v) => patch.mutate({ responder: v || null })} />
+          )}
+          {!room.archived && <Switch label="All members hear the user" description="Each message costs one turn per member." value={Boolean(room.broadcast)} onChange={(v) => patch.mutate({ broadcast: v })} />}
+          {!room.archived && <Switch label="Paused" description="Agents receive nothing until resumed." value={room.paused} onChange={(v) => patch.mutate({ paused: v })} />}
+          <Divider />
+          <VStack gap={2}>
+            <Text weight="semibold" size="sm">Danger zone</Text>
+            {room.archived
+              ? <Button label="Restore" variant="secondary" width="100%" onClick={act(() => patch.mutate({ archived: false }))} />
+              : <Button label="Archive…" variant="secondary" width="100%" onClick={act(() => setArchiving(true))} />}
+            <Button label="Delete…" variant="destructive" width="100%" onClick={act(() => { setTyped(''); setDeleting(true) })} />
+          </VStack>
+        </VStack>
+      </div>
+    </div>
   )
   return (
     <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
@@ -226,10 +241,10 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
         {narrow ? (
           <>
             <IconButton icon={<span aria-hidden>⋯</span>} label="Room settings" size="sm" variant="ghost" onClick={() => setSheet(true)} />
-            <BottomSheet label={`#${room.slug} settings`} isOpen={sheet} onOpenChange={setSheet} height="auto">{roomSettings}</BottomSheet>
+            <BottomSheet label="Room settings" isOpen={sheet} onOpenChange={setSheet} height="auto">{roomSettings}</BottomSheet>
           </>
         ) : (
-          <Popover placement="below" alignment="end" content={roomSettings}>
+          <Popover placement="below" alignment="end" content={roomSettings} isOpen={sheet} onOpenChange={setSheet}>
             <IconButton icon={<span aria-hidden>⋯</span>} label="Room settings" size="sm" variant="ghost" />
           </Popover>
         )}
