@@ -5,13 +5,14 @@ import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs'
-import { homedir, hostname } from 'node:os'
+import { homedir, hostname, tmpdir } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES } from './usage.mjs'
 import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
 // else passes it in. A variable already in the environment wins.
@@ -1383,6 +1384,145 @@ async function configApi(req, res, parts) {
   send(res, 200, state())
 }
 
+// ---- Terminals (terminals.mjs): shells owned by herdr, mirrored and typed into from the dashboard ----
+const terms = new TerminalSettings(DATA)
+const hj = async (...a) => JSON.parse(await herdr(...a))
+async function shellWorkspaces() {
+  const ws = (await hj('workspace', 'list')).result.workspaces
+  return new Map(ws.filter((w) => w.label?.endsWith('-shells')).map((w) => [w.workspace_id, w.label]))
+}
+async function shellPane(id) {
+  const ws = await shellWorkspaces()
+  const p = await hj('pane', 'get', id).then((j) => j.result.pane, () => null)
+  if (!isShellPane(p, new Set(ws.keys()))) throw Object.assign(new Error('not a dashboard shell (agents keep their own controls)'), { status: 404 })
+  return p
+}
+async function listShells() {
+  const ws = await shellWorkspaces()
+  const panes = (await hj('pane', 'list')).result.panes.filter((p) => isShellPane(p, new Set(ws.keys())))
+  return Promise.all(panes.map(async (p) => {
+    const tab = await hj('tab', 'get', p.tab_id).then((j) => j.result.tab, () => null)
+    const tail = await herdr('pane', 'read', p.pane_id, '--source', 'recent-unwrapped', '--lines', '20').catch(() => '')
+    return {
+      pane: p.pane_id, name: tab?.label || basename(p.cwd ?? '') || p.pane_id, cwd: p.foreground_cwd ?? p.cwd, workspace: ws.get(p.workspace_id),
+      title: p.terminal_title_stripped || null, rows: p.scroll?.viewport_rows ?? null,
+      lastLine: stripAnsi(tail).split('\n').map((l) => l.trimEnd()).filter(Boolean).at(-1) ?? '',
+    }
+  }))
+}
+async function knownPlaces() {
+  const roots = [...(await projectRoots())]
+  const worktrees = (await Promise.all(roots.map(([, root]) => linkedWorktrees(root).catch(() => [])))).flat().map((w) => w.path)
+  return { roots: roots.map(([, r]) => r), worktrees, home: homedir(), tmp: ['/private/tmp', '/tmp', realpathSync(tmpdir())], byRoot: roots }
+}
+async function createShell(b) {
+  const places = await knownPlaces()
+  const cwd = typeof b.cwd === 'string' ? b.cwd : places.byRoot.find(([n]) => n === b.project)?.[1]
+  if (!allowedCwd(cwd, places)) throw Object.assign(new Error('cwd must be a project, one of its worktrees, $HOME or /private/tmp'), { status: 400 })
+  const project = places.byRoot.find(([, root]) => cwd === root || cwd.startsWith(root + '/') || places.worktrees.includes(cwd))?.[0] ?? REPO_PROJECT
+  const label = shellsLabel(project)
+  const name = typeof b.name === 'string' && /^[\w .:@+-]{1,40}$/.test(b.name) ? b.name : basename(cwd) || 'shell'
+  const ws = [...(await shellWorkspaces())].find(([, l]) => l === label)?.[0]
+  // A new workspace comes with a tab and a shell pane: that is the first terminal. Otherwise, a new tab.
+  const res = ws ? await hj('tab', 'create', '--workspace', ws, '--cwd', cwd, '--label', name, '--no-focus')
+    : await hj('workspace', 'create', '--label', label, '--cwd', cwd, '--no-focus')
+  const pane = res.result.root_pane?.pane_id
+  if (!ws && res.result.tab?.tab_id) await herdr('tab', 'rename', res.result.tab.tab_id, name).catch(() => {})
+  return { pane, name, cwd }
+}
+// One poller per pane, only while someone is watching; unchanged screens are not re-sent.
+const screenSubs = new Map() // pane -> { clients:Set<res>, timer, last }
+function watchScreen(pane, res) {
+  let w = screenSubs.get(pane)
+  if (!w) {
+    w = { clients: new Set(), last: null, busy: false }
+    w.timer = setInterval(async () => {
+      if (w.busy) return
+      w.busy = true
+      try {
+        const screen = await herdr('pane', 'read', pane, '--source', 'visible', '--format', 'ansi')
+        if (screen !== w.last) { w.last = screen; for (const c of w.clients) c.write(`event: screen\ndata: ${JSON.stringify(screen)}\n\n`) }
+      } catch (e) { for (const c of w.clients) c.write(`event: gone\ndata: ${JSON.stringify(e.message)}\n\n`) } finally { w.busy = false }
+    }, 300)
+    screenSubs.set(pane, w)
+  }
+  w.clients.add(res)
+  if (w.last != null) res.write(`event: screen\ndata: ${JSON.stringify(w.last)}\n\n`)
+  return () => { w.clients.delete(res); if (!w.clients.size) { clearInterval(w.timer); screenSubs.delete(pane) } }
+}
+const who = (req) => ({ remoteAddr: req.socket.remoteAddress ?? null, host: req.headers.host ?? null })
+async function terminalSettingsApi(req, res) {
+  const loopback = isLoopbackRequest(req)
+  if (req.method === 'GET') return send(res, 200, { ...terms.s, loopback, audit: hasSession(req.headers.cookie) ? await terms.tail(100) : [] })
+  if (!loopback) return send(res, 403, { error: 'terminal settings can be changed only from http://127.0.0.1 on this machine' })
+  const b = JSON.parse((await body(req)) || '{}')
+  await terms.set(b)
+  await terms.log({ action: 'settings', text: JSON.stringify(terms.s), ...who(req) })
+  send(res, 200, { ...terms.s, loopback })
+}
+async function terminalsApi(req, res, url, parts) {
+  const denied = terms.gate({ loopback: isLoopbackRequest(req), session: hasSession(req.headers.cookie) })
+  if (denied) return send(res, denied[0], { error: denied[1] })
+  const pane = parts[2] ? decodeURIComponent(parts[2]) : null
+  if (!pane) {
+    if (req.method === 'GET') return send(res, 200, await listShells())
+    if (req.method === 'POST') {
+      const out = await createShell(JSON.parse((await body(req)) || '{}'))
+      await terms.log({ pane: out.pane, action: 'create', text: out.cwd, ...who(req) })
+      return send(res, 200, out)
+    }
+    return send(res, 405, { error: 'method' })
+  }
+  if (url.pathname === '/api/terminals/places' || pane === 'places') {
+    const pl = await knownPlaces()
+    return send(res, 200, { projects: pl.byRoot.map(([name, root]) => ({ name, root })), worktrees: pl.worktrees, home: pl.home, tmp: '/private/tmp' })
+  }
+  const p = await shellPane(pane)
+  const sub = parts[3]
+  if (req.method === 'DELETE' && !sub) {
+    await herdr('pane', 'close', p.pane_id)
+    await terms.log({ pane: p.pane_id, action: 'close', ...who(req) })
+    return send(res, 200, { ok: true })
+  }
+  if (req.method === 'PATCH' && !sub) {
+    const b = JSON.parse((await body(req)) || '{}')
+    if (typeof b.name !== 'string' || !/^[\w .:@+-]{1,40}$/.test(b.name)) return send(res, 400, { error: 'name: 1–40 letters, digits, space . : @ + -' })
+    await herdr('tab', 'rename', p.tab_id, b.name)
+    return send(res, 200, { ok: true })
+  }
+  if (sub === 'screen' && req.method === 'GET') {
+    const lines = Math.min(Number(url.searchParams.get('lines')) || 0, 5000)
+    const screen = lines ? await herdr('pane', 'read', p.pane_id, '--source', 'recent', '--format', 'ansi', '--lines', String(lines))
+      : await herdr('pane', 'read', p.pane_id, '--source', 'visible', '--format', 'ansi')
+    return send(res, 200, { screen, rows: p.scroll?.viewport_rows ?? null })
+  }
+  if (sub === 'stream' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+    const stop = watchScreen(p.pane_id, res)
+    const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
+    req.on('close', () => { stop(); clearInterval(beat) })
+    return
+  }
+  if (sub === 'input' && req.method === 'POST') {
+    const b = JSON.parse((await body(req)) || '{}')
+    if (typeof b.text === 'string' && b.text) {
+      if (b.text.length > 8000) return send(res, 400, { error: 'text too long' })
+      await herdr('pane', 'send-text', p.pane_id, b.text)
+      if (b.submit) await herdr('pane', 'send-keys', p.pane_id, 'enter')
+      await terms.log({ pane: p.pane_id, action: 'input', text: b.text + (b.submit ? '⏎' : ''), ...who(req) })
+    } else if (b.keys) {
+      const keys = herdrKeys(b.keys)
+      await herdr('pane', 'send-keys', p.pane_id, ...keys)
+      await terms.log({ pane: p.pane_id, action: 'keys', text: b.keys.join(' '), ...who(req) })
+    } else if (b.submit) {
+      await herdr('pane', 'send-keys', p.pane_id, 'enter')
+      await terms.log({ pane: p.pane_id, action: 'keys', text: 'Enter', ...who(req) })
+    } else return send(res, 400, { error: 'text, keys or submit' })
+    return send(res, 200, { ok: true })
+  }
+  send(res, 404, { error: 'not found' })
+}
+
 const server = http.createServer(async (req, res) => {
     try {
       // DNS-rebinding + CSRF guard: this can type into agents running with bypassed permissions.
@@ -1402,6 +1542,8 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
       if (url.pathname === '/api/uploads' && req.method === 'POST') {
@@ -1529,7 +1671,7 @@ const crashed = (kind) => async (e) => {
 // Loopback only. Guarded so parse.test.mjs can import without listening.
 // WT_DASHBOARD_SERVE=1: the desktop app's single-executable build, where argv/import.meta differ.
 if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url))
-  cfg.load().catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
+  Promise.all([cfg.load(), terms.load()]).catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
     console.log(`agent control room api → http://127.0.0.1:${PORT}`)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
     process.on('uncaughtException', crashed('uncaughtException'))

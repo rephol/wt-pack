@@ -486,3 +486,36 @@ test('service plist: valid, crash-only KeepAlive, launchd marker, escaped paths'
   assert.equal(j.EnvironmentVariables.WT_DASHBOARD_APP, undefined) // APP=1 would make it exit when its parent (launchd, pid 1) "dies"
   assert.equal(j.ThrottleInterval, 10)
 })
+
+import { herdrKeys, allowedCwd, isShellPane, TerminalSettings } from './terminals.mjs'
+test('terminals: key whitelist maps to herdr names and refuses anything else', () => {
+  assert.deepEqual(herdrKeys(['C-c', 'Enter', 'Up']), ['ctrl+c', 'enter', 'up'])
+  assert.throws(() => herdrKeys(['C-c', 'rm -rf']), /not allowed/)
+  assert.throws(() => herdrKeys(['__proto__']), /not allowed/)
+  assert.throws(() => herdrKeys([]), /1–32/)
+})
+test('terminals: a shell starts only in a project, a worktree, $HOME or tmp', () => {
+  const pl = { roots: ['/r/umkmall'], worktrees: ['/r/umkmall/.wt/umk-1'], home: '/Users/me', tmp: ['/private/tmp'] }
+  for (const ok of ['/r/umkmall', '/r/umkmall/', '/r/umkmall/.wt/umk-1', '/Users/me', '/private/tmp']) assert.ok(allowedCwd(ok, pl), ok)
+  for (const bad of ['/', '/etc', '/r/umkmall/src', '/r/umkmall/../x', 'relative', null]) assert.ok(!allowedCwd(bad, pl), String(bad))
+})
+test('terminals: only agent-less panes in a -shells workspace are shells', () => {
+  const ws = new Set(['wS'])
+  assert.ok(isShellPane({ workspace_id: 'wS', agent: null }, ws))
+  assert.ok(!isShellPane({ workspace_id: 'wS', agent: 'claude' }, ws))
+  assert.ok(!isShellPane({ workspace_id: 'wM', agent: null }, ws))
+})
+test('terminals: off by default; tailnet needs its own switch; audit is appended', async () => {
+  const dir = mkdtempSync(pj(tmpdir(), 'wtd-term-'))
+  const t = await new TerminalSettings(dir).load()
+  assert.match(t.gate({ loopback: true, session: true })[1], /disabled/)
+  await t.set({ enabled: true })
+  assert.equal(t.gate({ loopback: true, session: true }), null)
+  assert.match(t.gate({ loopback: false, session: true })[1], /tailnet/)
+  assert.match(t.gate({ loopback: true, session: false })[1], /session/)
+  await t.set({ tailnet: true })
+  assert.equal(t.gate({ loopback: false, session: true }), null)
+  assert.deepEqual((await new TerminalSettings(dir).load()).s, { enabled: true, tailnet: true })
+  await t.log({ pane: 'wS:p1', action: 'input', text: 'echo hi⏎' })
+  assert.equal((await t.tail())[0].text, 'echo hi⏎')
+})

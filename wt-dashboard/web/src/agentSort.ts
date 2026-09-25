@@ -21,3 +21,21 @@ export function initialSort(search: string, stored: string | null): AgentSort {
   const q = new URLSearchParams(search).get('sort')
   return (SORTS as string[]).includes(q ?? '') ? (q as AgentSort) : (SORTS as string[]).includes(stored ?? '') ? (stored as AgentSort) : 'attention'
 }
+
+// Sidebar project counts: AGENTS only (the same agent list and `project` field the Agents page uses, local and
+// remote), plus how many are working and how many need you. Tasks are not counted. `known` keeps a project that
+// has tasks but no agents listed (with 0) so it can still be picked as the scope.
+export interface ProjectCount { agents: number; working: number; needs: number }
+type CA = A & { project: string | null }
+export function projectCounts(agents: CA[], known: string[] = []) {
+  const zero = (): ProjectCount => ({ agents: 0, working: 0, needs: 0 })
+  const all = zero()
+  const by = new Map<string, ProjectCount>(known.map((p) => [p, zero()]))
+  for (const a of agents) {
+    const slots = [all, ...(a.project ? [by.get(a.project) ?? by.set(a.project, zero()).get(a.project)!] : [])]
+    for (const c of slots) { c.agents++; if (a.status === 'working') c.working++; if (needsYou(a)) c.needs++ }
+  }
+  return { all, by: [...by].sort((x, y) => y[1].agents - x[1].agents || x[0].localeCompare(y[0])) }
+}
+export const countTooltip = (c: ProjectCount) =>
+  [`${c.agents} agent${c.agents === 1 ? '' : 's'}`, c.working ? `${c.working} working` : '', c.needs ? `${c.needs} need${c.needs === 1 ? 's' : ''} you` : ''].filter(Boolean).join(' · ')

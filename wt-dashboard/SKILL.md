@@ -18,3 +18,7 @@ A local control room for herdr-managed Claude Code agents: overview, tasks (work
 - **Logs:** `~/Library/Logs/wt-dashboard/app.log`.
 
 Never use the dashboard to type into, answer or stop real agents unless the user asks.
+
+## Terminals
+
+Shells that herdr owns: each is a pane with no agent in a `<project>-shells` workspace. The dashboard mirrors the screen (`pane read --format ansi`, streamed at ~300ms only while someone watches) and types into it (`send-text`, plus whitelisted `send-keys`: Enter, Tab, Esc, arrows, Backspace, Ctrl+C/D/Z/L, PageUp/PageDown, Home/End). A shell may start only in a project, one of its worktrees, `$HOME` or `/private/tmp`, and agent panes are refused. **Off by default:** Settings › Terminals turns it on, and separately allows the tailnet, both changeable only from `http://127.0.0.1` on this machine; every endpoint needs the page's session cookie. Creation, input, keys, close and settings changes are appended to `~/.local/share/wt-dashboard/data/terminal-audit.jsonl` (viewable in Settings). The command bar's Enter always runs the line, on a phone too.

@@ -20,11 +20,12 @@ import { useToast } from '@astryxdesign/core/Toast'
 import { api, type Profile, type RoomSettings } from './rooms'
 import { ServerPanel } from './status'
 import { IntegrationsSection } from './integrations'
+import { TerminalsSection } from './terminals'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 
-export type Section = 'profile' | 'rooms' | 'notifications' | 'integrations' | 'server' | 'about'
-const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['server', 'Server'], ['about', 'About']]
+export type Section = 'profile' | 'rooms' | 'notifications' | 'integrations' | 'terminals' | 'server' | 'about'
+const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
 export const openSettings = (section: Section = 'profile') => dispatchEvent(new CustomEvent('open-settings', { detail: section }))
 
 const PHONE = '(max-width: 639px)'
@@ -79,6 +80,7 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
+          {section === 'terminals' && <TerminalsSection />}
           {section === 'server' && <ServerPanel />}
           {section === 'about' && <AboutSection />}
     </>

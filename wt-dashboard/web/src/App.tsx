@@ -36,7 +36,8 @@ import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { ChatMarkdown } from './links'
 import { VirtualRows } from './virtual'
-import { sortAgents, initialSort, activityOf, type AgentSort } from './agentSort'
+import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
+import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
@@ -181,7 +182,7 @@ const idleFor = (a: Agent) => {
 }
 
 // ---------- app ----------
-type Page = 'overview' | 'tasks' | 'agents' | 'rooms'
+type Page = 'overview' | 'tasks' | 'agents' | 'rooms' | 'terminals'
 // Project scope: ?project= wins, then localStorage, else all.
 const initialProject = () => {
   const q = new URLSearchParams(location.search).get('project')
@@ -235,6 +236,7 @@ const NAV_PATHS: Record<string, import('react').ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
   tasks: <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth={3} /></>,
   rooms: <><path d="M4 5h16v10H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>,
+  terminals: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12 15h5" /></>,
   agents: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.9 2.6 2.7 3 5.2" /></>,
 }
 const navIcon = (page: string, dot: boolean) => svgIcon(page, () => NAV_PATHS[page], dot)
@@ -243,6 +245,7 @@ const initialsIcon = (text: string, dot: boolean) =>
     <text x="12" y="16.5" textAnchor="middle" fontSize={text.length > 1 ? 10 : 13} fontWeight={700} fill="currentColor" stroke="none">{text}</text>
   ), dot, 'currentColor')
 
+const termFromHash = () => decodeURIComponent(location.hash.match(/^#terminals\/(.+)$/)?.[1] ?? '') || null
 const roomFromHash = () => decodeURIComponent(location.hash.match(/^#rooms\/(.+)$/)?.[1] ?? '') || null
 // Full-page conversation: #agents/<machine>/<pane> (hash route like #rooms/<slug>, so a reload or the tailnet
 // URL needs no server fallback). Returns the agent key `${machine}/${pane}`.
@@ -255,7 +258,7 @@ const agentHash = (key: string) => { const i = key.indexOf('/'); return `agents/
 let fullBack = false
 const pageFromHash = (): Page => {
   const h = location.hash.slice(1)
-  return h === 'tasks' ? h : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : 'overview'
+  return h === 'tasks' ? h : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('terminals') ? 'terminals' : 'overview'
 }
 
 export default function App() {
@@ -264,11 +267,14 @@ export default function App() {
   const hideLinear = () => { setLinearHidden(true); try { localStorage.setItem('linear-banner-hidden', '1') } catch { /* private mode */ } }
   const [roomSlug, setRoomSlug] = useState<string | null>(roomFromHash)
   const [fullKey, setFullKey] = useState<string | null>(agentFromHash)
+  const [termPage, setTermPage] = useState<string | null>(termFromHash)
+  const termSettings = useTermSettings()
+  const termsOn = Boolean(termSettings.data?.enabled)
   const roomsQ = useRoomsList()
   const suggested = new Set((roomsQ.data?.suggestions ?? []).map((x) => x.ticket))
   const [openPane, setOpenPane] = useState<string | null>(null)
   useEffect(() => {
-    const on = () => { setPage(pageFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()) }
+    const on = () => { setPage(pageFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()); setTermPage(termFromHash()) }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [])
@@ -290,13 +296,8 @@ export default function App() {
     try { localStorage.setItem('project', p) } catch { /* private mode */ }
   }
   const data = useMemo(() => (all ? scopeToProject(all, project) : undefined), [all, project])
-  const projects = useMemo(() => {
-    const n = new Map<string, number>()
-    // count = agents + active tasks
-    for (const t of activeTasks(all?.tasks ?? [])) if (t.project) n.set(t.project, (n.get(t.project) ?? 0) + 1)
-    for (const a of all?.agents ?? []) if (a.project) n.set(a.project, (n.get(a.project) ?? 0) + 1)
-    return [...n].sort((a, b) => b[1] - a[1])
-  }, [all])
+  // Sidebar badges count AGENTS (same list and project field as the Agents page); tasks are not counted.
+  const counts = useMemo(() => projectCounts(all?.agents ?? [], [...new Set(activeTasks(all?.tasks ?? []).map((t) => t.project).filter((p): p is string => Boolean(p)))]), [all])
   const openAgent = all?.agents.find((a) => a.key === openPane) ?? null
   const narrow = useNarrow()
   const phone = useNarrow('(max-width: 639px)')
@@ -314,6 +315,10 @@ export default function App() {
   }
   const open = (key: string) => {
     if (key.startsWith('room:')) { location.hash = `rooms/${encodeURIComponent(key.slice(5).split(':')[0])}`; return }
+    if (key.startsWith('term:')) {
+      if (narrow) { location.hash = `terminals/${encodeURIComponent(key.slice(5))}`; return }
+      setOpenPane(key); setCollapsed(false); return
+    }
     if (narrow) { openFull(key); return }
     setOpenPane(key); setCollapsed(false); rememberRecent(key)
   }
@@ -333,7 +338,8 @@ export default function App() {
     return () => { document.title = prev }
   }, [fullKey, fullAgent?.name])
   // The quick-switcher button stays off the agent panel (open, desktop) and a room's composer.
-  const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || (!!openAgent && !narrow && !collapsed)
+  const openTerm = openPane?.startsWith('term:') ? openPane.slice(5) : null
+  const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || !!termPage || (!!openTerm && !narrow && !collapsed) || (!!openAgent && !narrow && !collapsed)
   useDesktop(collapsed ? null : openPane, open)
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
@@ -354,7 +360,7 @@ export default function App() {
       header={<SideNavHeading heading="wt-dashboard" subheading={phone ? undefined : 'herdr · umkmall'} />}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings('profile')} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
-      {(['overview', 'tasks', 'agents', 'rooms'] as const).map((p) => {
+      {(['overview', 'tasks', 'agents', 'rooms', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
         const alert = p === 'overview' && data?.counts.needsYou ? data.counts.needsYou : 0
         return (
           <SideNavItem
@@ -368,9 +374,14 @@ export default function App() {
         )
       })}
       <SideNavSection title="Projects">
-        {[['all', 'All projects', all ? all.agents.length + activeTasks(all.tasks).length : 0] as const, ...projects.map(([p, n]) => [p, p, n] as const)].map(([v, label, n]) => (
-          <SideNavItem key={v} label={label} icon={initialsIcon(v === 'all' ? '*' : initials(label), navCollapsed && n > 0)}
-            isSelected={project === v} onClick={() => setProject(v)} endContent={<Badge label={String(n)} />} />
+        {[['all', 'All projects', counts.all] as const, ...counts.by.map(([p, c]) => [p, p, c] as const)].map(([v, label, c]) => (
+          <SideNavItem key={v} label={label} icon={initialsIcon(v === 'all' ? '*' : initials(label), navCollapsed && c.needs > 0)}
+            isSelected={project === v} onClick={() => setProject(v)}
+            endContent={<Tooltip content={countTooltip(c)}><HStack gap={1} align="center">
+              {c.needs > 0 && <StatusDot variant="error" label={`${c.needs} need you`} />}
+              {c.working > 0 && <Text type="supporting" size="sm">{`${c.working}▸`}</Text>}
+              <Badge label={String(c.agents)} />
+            </HStack></Tooltip>} />
         ))}
       </SideNavSection>
     </SideNav>
@@ -382,13 +393,15 @@ export default function App() {
         height="fill"
         content={
       <LayoutContent>
-      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || fullKey ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
+      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || fullKey || termPage ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
         {fullKey && (fullAgent
           ? <AgentPanelBody key={`full-${fullAgent.key}`} agent={fullAgent} task={all?.tasks.find((t) => t.id === fullAgent.task) ?? null}
               mode="page" onCollapse={leaveFull} onAsPanel={narrow ? undefined : () => fullToPanel(fullAgent.key)} autoFocus={!phone} />
           : all && <EmptyState title="Agent not found" description={`No agent ${fullKey} is running (it may have been removed).`}
               actions={<Button label="Back to Agents" variant="primary" onClick={() => { location.hash = 'agents' }} />} />)}
-        {!fullKey && !(page === 'rooms' && roomSlug) && <HStack justify="between" align="center" wrap="wrap" gap={3}>
+        {termPage && termsOn && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <TerminalView pane={termPage} phone={phone} onBack={() => { location.hash = 'terminals' }} /></div>}
+        {!fullKey && !termPage && !(page === 'rooms' && roomSlug) && <HStack justify="between" align="center" wrap="wrap" gap={3}>
           <Heading level={1}>{page[0].toUpperCase() + page.slice(1)}</Heading>
           <HStack gap={3} align="center">
             {data && (
@@ -412,11 +425,21 @@ export default function App() {
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
         {!fullKey && data && page === 'tasks' && <TaskBoard tasks={data.tasks} onOpen={open} selected={openPane} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
+        {!fullKey && !termPage && page === 'terminals' && (termsOn
+          ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
+          : <Banner status="info" title="Terminals are off" description="Turn them on in Settings › Terminals, from http://127.0.0.1 on this machine." />)}
         {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
       </VStack>
       </LayoutContent>
         }
-        end={openAgent && !narrow && !collapsed && !fullKey ? (
+        end={openTerm && termsOn && !narrow && !collapsed && !termPage ? (
+          <>
+            <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize terminal panel" />
+            <LayoutPanel resizable={panel.props} label={`Terminal ${openTerm}`} isScrollable={false} padding={0}>
+              <TerminalView key={openTerm} pane={openTerm} phone={false} onClose={() => setCollapsed(true)} />
+            </LayoutPanel>
+          </>
+        ) : openAgent && !narrow && !collapsed && !fullKey ? (
           <>
             <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize agent panel" />
             <LayoutPanel resizable={panel.props} label={`Agent ${openAgent.name}`} isScrollable={false} padding={0}>

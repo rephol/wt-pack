@@ -34,3 +34,7 @@ open app/src-tauri/target/release/bundle/macos/wt-dashboard.app
 Nothing is written into this source tree. The data root is `$WT_DASHBOARD_DATA`, default `~/.local/share/wt-dashboard`:
 `data/` (rooms/*.jsonl, rooms.json, settings.json, notifications.jsonl) and `uploads/` (images pasted into the composer).
 Env names are `WT_DASHBOARD_*`; the old `HERDR_DASH_*` names still work as a fallback.
+
+## Terminals
+
+Shells that herdr owns: each is a pane with no agent in a `<project>-shells` workspace. The dashboard mirrors the screen (`pane read --format ansi`, streamed at ~300ms only while someone watches) and types into it (`send-text`, plus whitelisted `send-keys`: Enter, Tab, Esc, arrows, Backspace, Ctrl+C/D/Z/L, PageUp/PageDown, Home/End). A shell may start only in a project, one of its worktrees, `$HOME` or `/private/tmp`, and agent panes are refused. **Off by default:** Settings › Terminals turns it on, and separately allows the tailnet, both changeable only from `http://127.0.0.1` on this machine; every endpoint needs the page's session cookie. Creation, input, keys, close and settings changes are appended to `~/.local/share/wt-dashboard/data/terminal-audit.jsonl` (viewable in Settings). The command bar's Enter always runs the line, on a phone too.

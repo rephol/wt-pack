@@ -17,3 +17,12 @@ test('initialSort: ?sort= over storage, invalid ignored', () => {
   assert.equal(initialSort('?sort=bogus', 'activity'), 'activity')
   assert.equal(initialSort('', null), 'attention')
 })
+
+import { projectCounts, countTooltip } from './agentSort.ts'
+test('projectCounts: agents only, working and needs-you, tasks-only projects kept at 0', () => {
+  const ag = (project: string | null, status: 'working' | 'idle', asks = false) => ({ name: 'x', status, asks, statusSince: 0, project })
+  const r = projectCounts([ag('umkmall', 'working'), ag('umkmall', 'idle', true), ag('umkmall', 'idle'), ag('ops', 'idle'), ag(null, 'working')], ['umkmall', 'tasks-only'])
+  assert.deepEqual(r.all, { agents: 5, working: 2, needs: 1 })
+  assert.deepEqual(r.by, [['umkmall', { agents: 3, working: 1, needs: 1 }], ['ops', { agents: 1, working: 0, needs: 0 }], ['tasks-only', { agents: 0, working: 0, needs: 0 }]])
+  assert.equal(countTooltip(r.by[0][1]), '3 agents · 1 working · 1 needs you')
+})
