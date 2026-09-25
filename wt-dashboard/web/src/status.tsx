@@ -15,7 +15,7 @@ import { useToast } from '@astryxdesign/core/Toast'
 
 type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: string; message: string } | null; enabled?: boolean; online?: number; total?: number }
 interface Health {
-  pid: number; startedAt: string; managedBy: 'app' | 'external'; webBuiltAt: string | null
+  pid: number; startedAt: string; managedBy: 'app' | 'launchd' | 'external'; webBuiltAt: string | null
   runtime?: { kind: string; path: string }
   sources: Record<'herdr' | 'git' | 'gh' | 'linear' | 'machines', Source>
 }
@@ -39,11 +39,11 @@ export function useServerControl() {
       const r = e.payload as { action: string; ok: boolean; error: string | null }
       setBusy(null)
       if (!r.ok) { console.error('server control failed', r); toast({ body: `${r.action} failed: ${r.error}`, type: 'error' }) }
-      else toast({ body: `Server ${r.action === 'start' ? 'started' : r.action === 'takeover' ? 'taken over' : 'restarted'}` })
+      else toast({ body: `Server ${r.action === 'start' ? 'started' : r.action === 'takeover' ? 'taken over' : r.action === 'install' ? 'installed as a service' : 'restarted'}` })
     })
     return () => { un.then((f) => f()) }
   }, [toast])
-  const run = (action: 'restart' | 'takeover' | 'start') => {
+  const run = (action: 'restart' | 'takeover' | 'install' | 'start') => {
     setBusy(action)
     tauri?.event.emit('server-control', { action }).catch((e) => { setBusy(null); console.error(e); toast({ body: `${action} failed: ${e}`, type: 'error' }) })
   }
@@ -93,12 +93,18 @@ export function ServerPanel() {
   return <Details h={h} ctl={ctl} state={state} />
 }
 
+const MANAGED = {
+  app: ['App-managed', 'Managed by the app'],
+  launchd: ['launchd', 'launchd service (npm run service:restart / service:status; log ~/Library/Logs/wt-dashboard/server.log)'],
+  external: ['External', 'External (e.g. npm start in a terminal)'],
+} as const
+
 function Details({ h, ctl, state }: { h: Health; ctl: ReturnType<typeof useServerControl>; state: string }) {
   return (
     <VStack gap={2}>
       <Text weight="semibold">{`Dashboard server — ${state}`}</Text>
-      <Text size="sm" type="supporting">{`${h.managedBy === 'app' ? 'App-managed' : 'External'} · pid ${h.pid} · up ${ago(h.startedAt)} · web built ${ago(h.webBuiltAt)} ago`}</Text>
-      <Text size="sm">{`${h.managedBy === 'app' ? 'Managed by the app' : 'External (e.g. npm start in a terminal)'} · pid ${h.pid}`}</Text>
+      <Text size="sm" type="supporting">{`${MANAGED[h.managedBy][0]} · pid ${h.pid} · up ${ago(h.startedAt)} · web built ${ago(h.webBuiltAt)} ago`}</Text>
+      <Text size="sm">{`${MANAGED[h.managedBy][1]} · pid ${h.pid}`}</Text>
       <Text size="sm" type="supporting" style={{ overflowWrap: 'anywhere' }}>{`Started ${new Date(h.startedAt).toLocaleString()} · ${h.runtime?.kind ?? ''} ${h.runtime?.path ?? ''}`}</Text>
       <Text size="sm" type="supporting">{`web/dist built ${h.webBuiltAt ? new Date(h.webBuiltAt).toLocaleString() : 'unknown'}`}</Text>
       {Object.entries(h.sources).map(([k, s]) => (
@@ -110,9 +116,9 @@ function Details({ h, ctl, state }: { h: Health; ctl: ReturnType<typeof useServe
       ))}
       {isApp && (
         <HStack gap={2}>
-          {h.managedBy === 'app'
+          {h.managedBy !== 'external'
             ? <Button label="Restart server" size="sm" isLoading={ctl.busy === 'restart'} onClick={() => ctl.run('restart')} />
-            : <Button label="Take over" size="sm" tooltip="Stop the external server on :7777 and run one managed by the app" isLoading={ctl.busy === 'takeover'} onClick={() => ctl.run('takeover')} />}
+            : <Button label="Install as service" size="sm" tooltip="Stop the external server on :7777 and run it as a launchd service (starts at login, restarts after a crash, survives quitting the app)" isLoading={ctl.busy === 'install'} onClick={() => ctl.run('install')} />}
         </HStack>
       )}
     </VStack>

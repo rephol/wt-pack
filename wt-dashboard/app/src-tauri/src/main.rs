@@ -23,6 +23,42 @@ use tauri_plugin_notification::NotificationExt;
 const ADDR: &str = "127.0.0.1:7777";
 const URL: &str = "http://127.0.0.1:7777/";
 const HOTKEY: &str = "alt+cmd+h"; // ⌥⌘H toggles the window
+/// `npm run service:install` makes the server a LaunchAgent; then the app never spawns or stops it.
+const SERVICE: &str = "id.local.wtdashboard.server";
+
+fn service_plist() -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}/Library/LaunchAgents/{SERVICE}.plist", std::env::var("HOME").unwrap_or_default()))
+}
+fn service_installed() -> bool {
+    service_plist().is_file()
+}
+fn uid() -> String {
+    Command::new("/usr/bin/id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+}
+/// launchctl kickstart [-k] gui/$UID/<label>; bootstraps the plist first if it is installed but not loaded.
+fn kickstart(kill: bool) -> Result<(), String> {
+    let target = format!("gui/{}/{SERVICE}", uid());
+    let loaded = Command::new("/bin/launchctl").args(["print", &target]).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+    if !loaded {
+        let st = Command::new("/bin/launchctl").args(["bootstrap", &format!("gui/{}", uid()), &service_plist().to_string_lossy()]).status().map_err(|e| e.to_string())?;
+        log(&format!("service: bootstrap -> {st}"));
+    }
+    let mut args = vec!["kickstart"];
+    if kill { args.push("-k") }
+    args.push(&target);
+    let o = Command::new("/bin/launchctl").args(&args).output().map_err(|e| e.to_string())?;
+    log(&format!("service: launchctl {} -> {}", args.join(" "), o.status));
+    if o.status.success() { Ok(()) } else { Err(format!("launchctl kickstart failed: {}", String::from_utf8_lossy(&o.stderr).trim())) }
+}
+/// `npm run service:install` equivalent, run with the login PATH's node from the live source.
+fn install_service() -> Result<(), String> {
+    let root = live_root();
+    let path = login_path();
+    let node = path.split(':').map(|d| std::path::Path::new(d).join("node")).find(|p| p.is_file()).ok_or("node not found on the login PATH")?;
+    let o = Command::new(node).arg("scripts/service.mjs").arg("install").current_dir(&root).env("PATH", &path).output().map_err(|e| e.to_string())?;
+    log(&format!("service: install -> {} {}", o.status, String::from_utf8_lossy(&o.stderr).trim()));
+    if o.status.success() { Ok(()) } else { Err(format!("service install failed: {}", String::from_utf8_lossy(&o.stderr).trim())) }
+}
 
 struct Sidecar(Mutex<Option<Child>>);
 
@@ -48,6 +84,15 @@ fn healthy() -> bool {
     let mut body = String::new();
     let _ = s.read_to_string(&mut body);
     body.starts_with("HTTP/1.1 200") && body.contains("\"app\":\"wt-dashboard\"")
+}
+/// The answering server says it runs under launchd (its /api/health managedBy).
+fn healthy_launchd() -> bool {
+    let Ok(mut s) = TcpStream::connect_timeout(&ADDR.parse().unwrap(), Duration::from_millis(500)) else { return false };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    if s.write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:7777\r\nConnection: close\r\n\r\n").is_err() { return false }
+    let mut body = String::new();
+    let _ = s.read_to_string(&mut body);
+    body.contains("\"managedBy\":\"launchd\"")
 }
 
 /// GUI apps get a minimal PATH; herdr/git/gh/node live in user dirs. Ask a login shell, then add the usual suspects.
@@ -166,6 +211,7 @@ fn short(s: &str, n: usize) -> String {
 enum Srv {
     Starting,
     AppManaged,
+    Launchd,
     External,
     Down,
 }
@@ -215,6 +261,11 @@ fn wait_until(secs: u64, f: impl Fn() -> bool) -> bool {
     f()
 }
 fn spawn_and_wait(app: &AppHandle) -> Result<(), String> {
+    if service_installed() {
+        // launchd owns the server; the app only asks it to start.
+        kickstart(false)?;
+        return if wait_until(15, healthy) { Ok(()) } else { Err("the launchd service did not become healthy within 15s (see ~/Library/Logs/wt-dashboard/server.log)".into()) };
+    }
     let c = start_server(app)?;
     log(&format!("server: spawned pid {}", c.id()));
     *lock(&app.state::<Sidecar>().0) = Some(c);
@@ -222,7 +273,7 @@ fn spawn_and_wait(app: &AppHandle) -> Result<(), String> {
 }
 /// Recompute who serves :7777; on change, log, refresh the tray, and leave the error page if we can.
 fn update_state(app: &AppHandle) {
-    let s = if healthy() { if child_alive(app) { Srv::AppManaged } else { Srv::External } } else { Srv::Down };
+    let s = if healthy() { if child_alive(app) { Srv::AppManaged } else if healthy_launchd() { Srv::Launchd } else { Srv::External } } else { Srv::Down };
     let prev = std::mem::replace(&mut *lock(&SRV), s);
     if prev != s {
         log(&format!("server state: {prev:?} -> {s:?}"));
@@ -253,6 +304,25 @@ fn control(app: &AppHandle, action: &str) {
     std::thread::spawn(move || {
         log(&format!("control: {action}"));
         let r: Result<(), String> = match action.as_str() {
+            "restart" if srv() == Srv::Launchd || (service_installed() && !child_exists(&app)) => {
+                kickstart(true).and_then(|_| {
+                    std::thread::sleep(Duration::from_millis(500));
+                    if wait_until(15, healthy) { Ok(()) } else { Err("the service did not come back within 15s".into()) }
+                })
+            }
+            "install" => {
+                // An external (npm start) server holds :7777: stop it (only after /api/health said it is ours), then
+                // hand the port to the LaunchAgent.
+                if healthy() && !healthy_launchd() {
+                    for pid in listening_pids() {
+                        log(&format!("install: kill {pid}"));
+                        let _ = Command::new("/bin/kill").arg(&pid).status();
+                    }
+                    wait_until(5, || listening_pids().is_empty());
+                }
+                stop_child(&app);
+                install_service().and_then(|_| if wait_until(15, healthy) { Ok(()) } else { Err("the service did not become healthy within 15s".into()) })
+            }
             "restart" if child_exists(&app) => {
                 stop_child(&app);
                 wait_until(5, || !healthy());
@@ -354,13 +424,14 @@ fn build_menu(app: &AppHandle, st: &TrayState) -> tauri::Result<Menu<Wry>> {
     let line = match s {
         Srv::Starting => "Server: starting…",
         Srv::AppManaged => "Server: healthy (app-managed)",
+        Srv::Launchd => "Server: healthy (launchd)",
         Srv::External => "Server: healthy (external)",
         Srv::Down => "Server: down",
     };
     items.push(Box::new(MenuItem::new(app, line, false, None::<&str>)?));
     match s {
-        Srv::AppManaged => items.push(Box::new(MenuItem::with_id(app, "srv:restart", "Restart server", true, None::<&str>)?)),
-        Srv::External => items.push(Box::new(MenuItem::with_id(app, "srv:takeover", "Take over server", true, None::<&str>)?)),
+        Srv::AppManaged | Srv::Launchd => items.push(Box::new(MenuItem::with_id(app, "srv:restart", "Restart server", true, None::<&str>)?)),
+        Srv::External => items.push(Box::new(MenuItem::with_id(app, "srv:install", "Install as service", true, None::<&str>)?)),
         Srv::Down => items.push(Box::new(MenuItem::with_id(app, "srv:start", "Start server", true, None::<&str>)?)),
         Srv::Starting => {}
     }

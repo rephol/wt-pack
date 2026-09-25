@@ -4,14 +4,23 @@ import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { existsSync, watch, realpathSync, statSync } from 'node:fs'
+import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES } from './usage.mjs'
-import { Config, KEYS, isLoopbackRequest } from './config.mjs'
+import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
+
+// ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
+// else passes it in. A variable already in the environment wins.
+for (const f of [join(homedir(), '.config', 'wt-dashboard', 'env'), join(homedir(), '.config', 'herdr-dash', 'env')]) {
+  let text
+  try { text = readFileSync(f, 'utf8') } catch { continue }
+  for (const [k, v] of Object.entries(parseEnvFile(text))) if (process.env[k] === undefined) process.env[k] = v
+  break
+}
 
 const PORT = Number(process.env.PORT ?? 7777)
 // Integrations & environment (config.mjs): env var > Keychain > ~/.config/wt-dashboard/env > default.
@@ -746,6 +755,8 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
 
 // Per-source health for /api/health: last success, last error. Filled by every overview.
 const STARTED_AT = new Date().toISOString()
+// launchd: the LaunchAgent from `npm run service:install` sets WT_DASHBOARD_MANAGED=launchd.
+const MANAGED_BY = envOf('MANAGED') === 'launchd' ? 'launchd' : envOf('APP') === '1' ? 'app' : 'external'
 // The desktop app restarts a dead server at most 3 times in 5 minutes, then leaves it down. A restart can't see
 // its own history, so each start is recorded and a burst becomes a visible inbox item instead of a silent outage.
 export const RESTART_WINDOW_MS = 5 * 60_000
@@ -761,7 +772,7 @@ async function health() {
   const dist = await stat(join(DIST, 'index.html')).catch(() => null)
   return {
     ok: true, app: 'wt-dashboard', runtime: RUNTIME, pid: process.pid, startedAt: STARTED_AT,
-    managedBy: envOf('APP') === '1' ? 'app' : 'external',
+    managedBy: MANAGED_BY,
     webBuiltAt: dist?.mtime.toISOString() ?? null,
     sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
   }
@@ -1507,7 +1518,7 @@ async function recordStart() {
   const { recent, warn } = restartBurst([...prev, Date.now()])
   await writeFile(f, JSON.stringify(recent))
   if (warn) inbox.add({ kind: 'server', key: `server|burst|${STARTED_AT}`, title: `Server restarted ${warn} times in 5 minutes`,
-    body: envOf('APP') === '1' ? 'The app gives up after 3 automatic restarts in 5 minutes; if it stops again, use Start server in the menu-bar icon. Crashes: ~/Library/Logs/wt-dashboard/server.log' : 'Crashes: ~/Library/Logs/wt-dashboard/server.log', target: {} })
+    body: MANAGED_BY === 'launchd' ? 'launchd restarts it after a crash (at most every 10s). Crashes: ~/Library/Logs/wt-dashboard/server.log' : MANAGED_BY === 'app' ? 'The app gives up after 3 automatic restarts in 5 minutes; if it stops again, use Start server in the menu-bar icon. Crashes: ~/Library/Logs/wt-dashboard/server.log' : 'Crashes: ~/Library/Logs/wt-dashboard/server.log', target: {} })
 }
 // The app spawns the server with stdio going nowhere, so a crash would leave no trace: write it to a log first.
 const CRASH_LOG = join(homedir(), 'Library', 'Logs', 'wt-dashboard', 'server.log')
@@ -1527,7 +1538,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     setInterval(tick, 4000)
     setTimeout(tick, 500)
     recordStart().catch((e) => console.error('starts:', e.message))
-    inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${envOf('APP') === '1' ? 'app-managed' : 'external'})`, body: `pid ${process.pid}`, target: {}, quiet: true })
+    inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${MANAGED_BY === 'app' ? 'app-managed' : MANAGED_BY})`, body: `pid ${process.pid}`, target: {}, quiet: true })
   }))
 // Spawned by the desktop app: exit with it, however it quit (a macOS quit can skip the app's own kill).
 if (envOf('APP') === '1') setInterval(() => process.ppid === 1 && process.exit(0), 2000).unref()

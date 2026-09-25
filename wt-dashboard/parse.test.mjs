@@ -472,3 +472,17 @@ test('restartBurst: warns at 3+ starts inside 5 minutes, forgets older ones', ()
   assert.equal(restartBurst([now - 400_000, now - 60_000, now], now).warn, 0)
   assert.deepEqual(restartBurst([now - 400_000, now - 200_000, now - 60_000, now], now), { recent: [now - 200_000, now - 60_000, now], warn: 3 })
 })
+
+import { plist, LABEL } from './scripts/service.mjs'
+import { execFileSync as xfs } from 'node:child_process'
+test('service plist: valid, crash-only KeepAlive, launchd marker, escaped paths', () => {
+  const f = pj(mkdtempSync(pj(tmpdir(), 'wtd-pl-')), 'x.plist')
+  wfs(f, plist({ node: '/opt/homebrew/bin/node', root: '/a b/wt&d', path: '/usr/bin:/bin', log: '/tmp/l.log' }))
+  const j = JSON.parse(xfs('/usr/bin/plutil', ['-convert', 'json', '-o', '-', f], { encoding: 'utf8' }))
+  assert.equal(j.Label, LABEL)
+  assert.deepEqual(j.ProgramArguments, ['/opt/homebrew/bin/node', '/a b/wt&d/server.mjs'])
+  assert.deepEqual(j.KeepAlive, { SuccessfulExit: false })
+  assert.equal(j.EnvironmentVariables.WT_DASHBOARD_MANAGED, 'launchd')
+  assert.equal(j.EnvironmentVariables.WT_DASHBOARD_APP, undefined) // APP=1 would make it exit when its parent (launchd, pid 1) "dies"
+  assert.equal(j.ThrottleInterval, 10)
+})
