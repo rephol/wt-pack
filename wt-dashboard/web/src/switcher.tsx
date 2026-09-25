@@ -1,7 +1,7 @@
 // Quick switcher: a floating button (bottom-right) and ⌘K / Ctrl+K open Astryx's CommandPalette over agent
 // conversations and rooms that need you (grouping, keyboard ↑/↓/Enter/Esc and the active row are the palette's).
 // Desktop: the palette's own centered dialog. Phone: the same palette inline in a full-height BottomSheet.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CommandPalette } from '@astryxdesign/core/CommandPalette'
 import { BottomSheet } from '@astryxdesign/core/BottomSheet'
 import { Text } from '@astryxdesign/core/Text'
@@ -58,9 +58,17 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
 
 export function QuickSwitcher({ agents, rooms, phone, hidden, onOpenAgent, onOpenRoom }: {
   agents: SwAgent[]; rooms: SwRoom[]; phone: boolean; hidden: boolean
-  onOpenAgent: (key: string) => void; onOpenRoom: (slug: string) => void
+  onOpenAgent: (key: string, full?: boolean) => void; onOpenRoom: (slug: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // ⌘Enter / Ctrl+Enter on a row opens the agent as a full page (the palette reports only which row).
+  const fullPick = useRef(false)
+  useEffect(() => {
+    if (!open) return
+    const on = (e: KeyboardEvent) => { if (e.key === 'Enter') fullPick.current = e.metaKey || e.ctrlKey }
+    addEventListener('keydown', on, true)
+    return () => removeEventListener('keydown', on, true)
+  }, [open])
   const otherDialog = useOtherDialogOpen(open)
   const show = !hidden && !open && !otherDialog
   const needCount = agents.filter(needsYou).length
@@ -80,12 +88,15 @@ export function QuickSwitcher({ agents, rooms, phone, hidden, onOpenAgent, onOpe
   }, [agents, rooms, open]) // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (id: string) => {
     setOpen(false)
-    if (id.startsWith('agent:')) onOpenAgent(id.slice(6))
+    const full = fullPick.current
+    fullPick.current = false
+    if (id.startsWith('agent:')) onOpenAgent(id.slice(6), full)
     else if (id.startsWith('room:')) onOpenRoom(id.slice(5))
   }
   const palette = (inline: boolean) => (
     <CommandPalette<SwItem> isOpen={open} onOpenChange={setOpen} searchSource={source} label="Agent conversations"
       value="" onValueChange={pick} renderItem={(it) => <Row it={it} phone={phone} />}
+      footer={phone ? null : <div style={{ padding: '8px 12px' }}><Text type="supporting" size="sm">↑↓ navigate · ↩ open · ⌘↩ full page · esc close</Text></div>}
       emptySearchText="No agent or room matches" emptyBootstrapText="No agents yet"
       isInline={inline} width={inline ? '100%' : 640} maxHeight={inline ? '100%' : 'min(560px, 80vh)'} />
   )

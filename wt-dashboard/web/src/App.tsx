@@ -37,7 +37,6 @@ import { ChatMarkdown } from './links'
 import { sortAgents, initialSort, activityOf, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
-import { Dialog } from '@astryxdesign/core/Dialog'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
 import { Grid } from '@astryxdesign/core/Grid'
@@ -171,6 +170,9 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
 const STATE_ORDER = Object.keys(STATE) as TaskState[]
 const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'accent', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral' }
 
+const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
+const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
 const idleFor = (a: Agent) => {
   const m = Math.floor((Date.now() - a.statusSince) / 60_000)
   return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
@@ -240,9 +242,18 @@ const initialsIcon = (text: string, dot: boolean) =>
   ), dot, 'currentColor')
 
 const roomFromHash = () => decodeURIComponent(location.hash.match(/^#rooms\/(.+)$/)?.[1] ?? '') || null
+// Full-page conversation: #agents/<machine>/<pane> (hash route like #rooms/<slug>, so a reload or the tailnet
+// URL needs no server fallback). Returns the agent key `${machine}/${pane}`.
+const agentFromHash = () => {
+  const m = location.hash.match(/^#agents\/([^/]+)\/([^/]+)$/)
+  return m ? `${decodeURIComponent(m[1])}/${decodeURIComponent(m[2])}` : null
+}
+const agentHash = (key: string) => { const i = key.indexOf('/'); return `agents/${encodeURIComponent(key.slice(0, i))}/${encodeURIComponent(key.slice(i + 1))}` }
+// Where the full page's Back goes: set when we navigate in-app, so Back is history.back(); a deep link has none.
+let fullBack = false
 const pageFromHash = (): Page => {
   const h = location.hash.slice(1)
-  return h === 'tasks' || h === 'agents' ? h : h.startsWith('rooms') ? 'rooms' : 'overview'
+  return h === 'tasks' ? h : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : 'overview'
 }
 
 export default function App() {
@@ -250,11 +261,12 @@ export default function App() {
   const [linearHidden, setLinearHidden] = useState(() => { try { return localStorage.getItem('linear-banner-hidden') === '1' } catch { return false } })
   const hideLinear = () => { setLinearHidden(true); try { localStorage.setItem('linear-banner-hidden', '1') } catch { /* private mode */ } }
   const [roomSlug, setRoomSlug] = useState<string | null>(roomFromHash)
+  const [fullKey, setFullKey] = useState<string | null>(agentFromHash)
   const roomsQ = useRoomsList()
   const suggested = new Set((roomsQ.data?.suggestions ?? []).map((x) => x.ticket))
   const [openPane, setOpenPane] = useState<string | null>(null)
   useEffect(() => {
-    const on = () => { setPage(pageFromHash()); setRoomSlug(roomFromHash()) }
+    const on = () => { setPage(pageFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()) }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [])
@@ -300,16 +312,33 @@ export default function App() {
   }
   const open = (key: string) => {
     if (key.startsWith('room:')) { location.hash = `rooms/${encodeURIComponent(key.slice(5).split(':')[0])}`; return }
+    if (narrow) { openFull(key); return }
     setOpenPane(key); setCollapsed(false); rememberRecent(key)
   }
+  const openFull = (key: string) => {
+    rememberRecent(key)
+    setCollapsed(true) // the panel is never open alongside the full page
+    fullBack = true
+    location.hash = agentHash(key)
+  }
+  const leaveFull = () => { if (fullBack) { fullBack = false; history.back() } else location.hash = 'agents' }
+  const fullToPanel = (key: string) => { leaveFull(); setOpenPane(key); setCollapsed(false) }
+  const fullAgent = fullKey ? all?.agents.find((a) => a.key === fullKey) ?? null : null
+  useEffect(() => {
+    if (!fullKey) return
+    const prev = document.title
+    document.title = fullAgent?.name ?? 'Agent not found'
+    return () => { document.title = prev }
+  }, [fullKey, fullAgent?.name])
   // The quick-switcher button stays off the agent panel (open, desktop) and a room's composer.
-  const fabHidden = (page === 'rooms' && !!roomSlug) || (!!openAgent && !narrow && !collapsed)
+  const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || (!!openAgent && !narrow && !collapsed)
   useDesktop(collapsed ? null : openPane, open)
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       const typing = el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
-      if (e.key === ']' && !typing && openPane) setCollapsed(!collapsed)
+      if (e.key === ']' && !typing && openPane && !fullKey) setCollapsed(!collapsed)
+      if (e.key === 'Enter' && e.shiftKey && (e.metaKey || e.ctrlKey) && openPane && !collapsed && !fullKey) { e.preventDefault(); openFull(openPane) }
       if (e.key === '[' && !typing) setNavCollapsed(!navCollapsed)
       // Esc inside the panel collapses it, unless something (a menu) already handled it.
       if (e.key === 'Escape' && !e.defaultPrevented && !el.closest('dialog') && openPane && !collapsed && el.closest('[data-agent-panel]')) setCollapsed(true)
@@ -351,8 +380,13 @@ export default function App() {
         height="fill"
         content={
       <LayoutContent>
-      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
-        {!(page === 'rooms' && roomSlug) && <HStack justify="between" align="center" wrap="wrap" gap={3}>
+      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || fullKey ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
+        {fullKey && (fullAgent
+          ? <AgentPanelBody key={`full-${fullAgent.key}`} agent={fullAgent} task={all?.tasks.find((t) => t.id === fullAgent.task) ?? null}
+              mode="page" onCollapse={leaveFull} onAsPanel={narrow ? undefined : () => fullToPanel(fullAgent.key)} autoFocus={!phone} />
+          : all && <EmptyState title="Agent not found" description={`No agent ${fullKey} is running (it may have been removed).`}
+              actions={<Button label="Back to Agents" variant="primary" onClick={() => { location.hash = 'agents' }} />} />)}
+        {!fullKey && !(page === 'rooms' && roomSlug) && <HStack justify="between" align="center" wrap="wrap" gap={3}>
           <Heading level={1}>{page[0].toUpperCase() + page.slice(1)}</Heading>
           <HStack gap={3} align="center">
             {data && (
@@ -373,35 +407,29 @@ export default function App() {
             endContent={<Button label="Dismiss" size="sm" variant="ghost" onClick={hideLinear} />} />
         )}
 
-        {data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
-        {data && page === 'tasks' && <TaskBoard tasks={data.tasks} onOpen={open} selected={openPane} showProject={data.allProjects} suggested={suggested} />}
-        {data && page === 'agents' && <AgentsPage data={data} onOpen={open} selected={openPane} />}
+        {!fullKey && data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
+        {!fullKey && data && page === 'tasks' && <TaskBoard tasks={data.tasks} onOpen={open} selected={openPane} showProject={data.allProjects} suggested={suggested} />}
+        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
         {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
       </VStack>
       </LayoutContent>
         }
-        end={openAgent && !narrow && !collapsed ? (
+        end={openAgent && !narrow && !collapsed && !fullKey ? (
           <>
             <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize agent panel" />
             <LayoutPanel resizable={panel.props} label={`Agent ${openAgent.name}`} isScrollable={false} padding={0}>
               <AgentPanelBody key={openAgent.key} agent={openAgent} task={all?.tasks.find((t) => t.id === openAgent.task) ?? null}
-                onCollapse={() => setCollapsed(true)} autoFocus />
+                onCollapse={() => setCollapsed(true)} onExpand={() => openFull(openAgent.key)} autoFocus />
             </LayoutPanel>
           </>
         ) : undefined}
       />
-      {openAgent && narrow && (
-        <Dialog isOpen onOpenChange={(o) => !o && setOpenPane(null)} variant="fullscreen" padding={0}>
-          <AgentPanelBody key={openAgent.key} agent={openAgent} task={all?.tasks.find((t) => t.id === openAgent.task) ?? null}
-            onCollapse={() => setOpenPane(null)} autoFocus />
-        </Dialog>
-      )}
       <SettingsHost />
       <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} phone={phone} hidden={fabHidden}
-        onOpenAgent={open} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
+        onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
   )
 }
@@ -818,7 +846,7 @@ const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
 }
 const shortPath = (p: string | null) => (p ? p.split('/').filter(Boolean).at(-1) ?? p : null)
 
-function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects: boolean }; onOpen: (p: string) => void; selected: string | null }) {
+function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & { allProjects: boolean }; onOpen: (p: string) => void; onOpenFull: (p: string) => void; selected: string | null }) {
   const [filter, setFilter] = useState('all')
   const [machine, setMachine] = useState('all')
   const [sort, setSortState] = useState<AgentSort>(() => initialSort(location.search, (() => { try { return localStorage.getItem('agentSort') } catch { return null } })()))
@@ -842,6 +870,7 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
     <span onClick={(e) => e.stopPropagation()}>
       <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
         { label: 'Open', onClick: () => onOpen(a.key) },
+        { label: 'Open full page', onClick: () => onOpenFull(a.key) },
         a.local ? { label: 'Remove agent…', onClick: () => openRemove(a) } : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
       ]} />
     </span>
@@ -989,7 +1018,11 @@ function toRows(msgs: Msg[]): Row[] {
   return rows.filter((r) => r.kind === 'msg' || r.calls.length)
 }
 
-function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; task: Task | null; onCollapse: () => void; autoFocus: boolean }) {
+// One conversation component for the side panel and the full page (#agents/<machine>/<pane>).
+// mode="page": Back instead of X, "Open as panel", and on a wide screen the Summary beside a centered column.
+function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = 'panel', autoFocus }: {
+  agent: Agent; task: Task | null; onCollapse: () => void; onExpand?: () => void; onAsPanel?: () => void; mode?: 'panel' | 'page'; autoFocus: boolean
+}) {
   const [tab, setTab] = useState('conversation')
   const narrow = useNarrow()
   const [draft, setDraft] = useState(() => takePrefill(agent.key))
@@ -1159,36 +1192,8 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
               </ChatMessageList>
   ), [rows, working])
 
-  return (
-      <VStack gap={3} height="100%" padding={4} data-agent-panel="">
-        <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
-          <HStack gap={2} align="center" style={{ minWidth: 0, flex: 1 }}>
-            <StatusDot variant={needsYou(agent) ? 'error' : AGENT_DOT[agent.status]} label={agent.status} isPulsing={agent.status === 'working'} />
-            <VStack gap={0.5} style={{ minWidth: 0 }}>
-              <HStack gap={1} align="center" style={{ minWidth: 0 }}>
-                <Text weight="semibold" maxLines={1}>{agent.name}</Text>
-                {agent.background > 0 && <Badge label={`${agent.background} background`} />}
-              </HStack>
-              <Text type="supporting" size="sm" maxLines={1}>{narrow
-                ? `${agent.local ? '' : `${agent.machine} · `}${agent.status} · ${idleFor(agent)}`
-                : `${agent.machine} · ${agent.pool} · ${agent.status} for ${idleFor(agent)}`}</Text>
-            </VStack>
-          </HStack>
-          <HStack gap={0} style={{ flexShrink: 0 }}>
-          <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
-            agent.local
-              ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
-              : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
-          ]} />
-          <IconButton label="Close panel" icon={<Icon icon="close" />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Close (Esc)" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />
-          </HStack>
-        </HStack>
-        <TabList value={tab} onChange={setTab} hasDivider>
-          <Tab value="summary" label="Summary" />
-          <Tab value="conversation" label="Conversation" />
-        </TabList>
-
-        {tab === 'summary' ? (
+  const page = mode === 'page'
+  const summary = (
           <VStack gap={3} isScrollable>
             <Text type="label">Recap</Text>
             <Text>{agent.recap ?? '—'}</Text>
@@ -1204,7 +1209,8 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
               </>
             )}
           </VStack>
-        ) : (
+  )
+  const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
             {!live && <Text type="supporting" size="sm">{agent.local ? 'no transcript · pane view' : 'remote · pane view'}</Text>}
             {pane.isError && <Banner status="error" title="Couldn't read pane" description={String(pane.error)} />}
@@ -1281,6 +1287,53 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
             {/* The question card sits BELOW the list (not in the sticky dock), so nothing can draw over it. */}
             {heldPicker && <PickerCard agent={agent} picker={heldPicker} onSent={bumpPicker} />}
           </VStack>
+  )
+  return (
+      <VStack gap={3} height="100%" padding={page ? 0 : 4} data-agent-panel={page ? undefined : ''} data-agent-page={page ? '' : undefined}>
+        <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
+          <HStack gap={2} align="center" style={{ minWidth: 0, flex: 1 }}>
+            {page && <IconButton label="Back" icon={<BackIcon />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Back" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />}
+            <StatusDot variant={needsYou(agent) ? 'error' : AGENT_DOT[agent.status]} label={agent.status} isPulsing={agent.status === 'working'} />
+            <VStack gap={0.5} style={{ minWidth: 0 }}>
+              <HStack gap={1} align="center" style={{ minWidth: 0 }}>
+                <Text weight="semibold" maxLines={1}>{agent.name}</Text>
+                {agent.background > 0 && <Badge label={`${agent.background} background`} />}
+              </HStack>
+              <Text type="supporting" size="sm" maxLines={1}>{narrow
+                ? `${agent.local ? '' : `${agent.machine} · `}${agent.status} · ${lastActive(agent)}`
+                : `${agent.local ? '' : `${agent.machine} · `}${agent.pool} · ${agent.status} for ${idleFor(agent)} · active ${lastActive(agent)}`}</Text>
+            </VStack>
+          </HStack>
+          <HStack gap={0} style={{ flexShrink: 0 }}>
+          {page && onAsPanel && <Button label="Open as panel" size="sm" variant="ghost" onClick={onAsPanel} />}
+          <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
+            ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
+            agent.local
+              ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
+              : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
+          ]} />
+          {!page && !narrow && onExpand && <IconButton label="Open full page" icon={<ExpandIcon />} size="sm" variant="ghost" tooltip="Open full page (⌘⇧↩)" onClick={onExpand} style={{ flexShrink: 0 }} />}
+          {!page && <IconButton label="Close panel" icon={<Icon icon="close" />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Close (Esc)" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />}
+          </HStack>
+        </HStack>
+        {page && !narrow ? (
+          <div style={{ display: 'flex', gap: 24, flex: 1, minHeight: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center', minHeight: 0 }}>
+              <div style={{ width: '100%', maxWidth: 860, display: 'flex', flexDirection: 'column', minHeight: 0 }}>{conversation}</div>
+            </div>
+            <div style={{ flex: '0 0 300px', minWidth: 0, overflowY: 'auto', overflowWrap: 'anywhere' }}>
+              <Collapsible defaultIsOpen chevronPosition="start" trigger={<Text weight="semibold">Summary</Text>}>{summary}</Collapsible>
+            </div>
+          </div>
+        ) : (
+          <>
+        <TabList value={tab} onChange={setTab} hasDivider>
+          <Tab value="summary" label="Summary" />
+          <Tab value="conversation" label="Conversation" />
+        </TabList>
+
+            {tab === 'summary' ? summary : conversation}
+          </>
         )}
       </VStack>
   )

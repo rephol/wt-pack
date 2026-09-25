@@ -229,7 +229,7 @@ function NotificationsSection() {
 function AboutSection() {
   const rows: [string, string][] = [
     ['⌥⌘H', 'Show / hide the window (app)'], ['⌘,', 'Settings (app)'], ['[', 'Collapse the left nav'],
-    [']', 'Collapse the agent panel'], ['Esc', 'Stop a working agent (in its composer); skip a question (on its card)'],
+    [']', 'Show / hide the agent panel'], ['⌘K', 'Quick switcher (⌘↩ on a row: full page)'], ['⌘⇧↩', 'Open the agent panel as a full page'], ['Esc', 'Stop a working agent (in its composer); skip a question (on its card)'],
   ]
   return (
     <VStack gap={3}>
