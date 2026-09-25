@@ -176,6 +176,9 @@ const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'accent', idle: 'neutral'
 const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
 const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
+// The right panel (agent or terminal): its handle is on the panel's LEFT edge, so dragging left must widen it
+// (isReversed); double-click puts it back to this width.
+const PANEL_DEFAULT = 480
 const idleFor = (a: Agent) => {
   const m = Math.floor((Date.now() - a.statusSince) / 60_000)
   return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
@@ -301,7 +304,7 @@ export default function App() {
   const openAgent = all?.agents.find((a) => a.key === openPane) ?? null
   const narrow = useNarrow()
   const phone = useNarrow('(max-width: 639px)')
-  const panel = useResizable({ defaultSize: 480, minSize: 380, maxSize: Math.max(400, Math.round(window.innerWidth / 2)), autoSaveId: 'agent-panel-width' })
+  const panel = useResizable({ defaultSize: PANEL_DEFAULT, minSize: 380, maxSize: Math.max(400, Math.round(window.innerWidth / 2)), autoSaveId: 'agent-panel-width' })
   // The agent panel is shown or hidden (no rail); `]` / Esc / X hide it, selecting an agent shows it.
   // ponytail: the old rail state is not carried over — the stored key is dropped and every load starts hidden.
   const [collapsed, setCollapsedState] = useState(() => { try { localStorage.removeItem('agent-panel-collapsed') } catch { /* private mode */ } return false })
@@ -434,14 +437,14 @@ export default function App() {
         }
         end={openTerm && termsOn && !narrow && !collapsed && !termPage ? (
           <>
-            <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize terminal panel" />
+            <ResizeHandle direction="horizontal" isReversed hasDivider isAlwaysVisible={false} resizable={panel.props} label="Resize terminal panel" onDoubleClick={() => panel.resize(PANEL_DEFAULT)} />
             <LayoutPanel resizable={panel.props} label={`Terminal ${openTerm}`} isScrollable={false} padding={0}>
               <TerminalView key={openTerm} pane={openTerm} phone={false} onClose={() => setCollapsed(true)} />
             </LayoutPanel>
           </>
         ) : openAgent && !narrow && !collapsed && !fullKey ? (
           <>
-            <ResizeHandle direction="horizontal" hasDivider resizable={panel.props} label="Resize agent panel" />
+            <ResizeHandle direction="horizontal" isReversed hasDivider isAlwaysVisible={false} resizable={panel.props} label="Resize agent panel" onDoubleClick={() => panel.resize(PANEL_DEFAULT)} />
             <LayoutPanel resizable={panel.props} label={`Agent ${openAgent.name}`} isScrollable={false} padding={0}>
               <AgentPanelBody key={openAgent.key} agent={openAgent} task={all?.tasks.find((t) => t.id === openAgent.task) ?? null}
                 onCollapse={() => setCollapsed(true)} onExpand={() => openFull(openAgent.key)} autoFocus />

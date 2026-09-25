@@ -17,6 +17,7 @@ import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { Card } from '@astryxdesign/core/Card'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { termInput } from './termKeys'
@@ -28,10 +29,31 @@ export const useTermSettings = () => useQuery({ queryKey: ['terminal-settings'],
 const paneUrl = (pane: string) => `/api/terminals/${encodeURIComponent(pane)}`
 const sendInput = (pane: string, body: object) => api(`${paneUrl(pane)}/input`, { method: 'POST', body: JSON.stringify(body) })
 
+// Close = `herdr pane close` on the server (a running process is ended; herdr drops an emptied -shells
+// workspace itself). Confirmed with an in-page AlertDialog: window.confirm() returns false in the desktop app's
+// WKWebView without a UI delegate, which silently cancelled every close.
+function useCloseShell(onClosed?: () => void) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [target, setTarget] = useState<Shell | { pane: string; name: string } | null>(null)
+  const close = useMutation({
+    mutationFn: (pane: string) => api(paneUrl(pane), { method: 'DELETE' }),
+    onSuccess: () => { setTarget(null); qc.invalidateQueries({ queryKey: ['terminals'] }); onClosed?.() },
+    onError: (e) => { console.error('close shell failed', e); toast({ body: `Could not close the shell: ${e instanceof Error ? e.message : e}`, type: 'error' }) },
+  })
+  const dialog = (
+    <AlertDialog isOpen={!!target} onOpenChange={(o) => !o && setTarget(null)} title={`Close ${target?.name ?? 'shell'}?`}
+      description="The shell and whatever runs in it are ended." actionLabel="Close shell" actionVariant="destructive"
+      isActionLoading={close.isPending} onAction={() => target && close.mutate(target.pane)} />
+  )
+  return { ask: setTarget, dialog }
+}
+
 // ---------- list ----------
 export function TerminalsPage({ onOpen, phone }: { onOpen: (pane: string) => void; phone: boolean }) {
   const q = useQuery({ queryKey: ['terminals'], queryFn: () => api<Shell[]>('/api/terminals'), refetchInterval: 5000 })
   const [creating, setCreating] = useState(false)
+  const closer = useCloseShell()
   return (
     <VStack gap={3}>
       <HStack justify="between" align="center">
@@ -44,13 +66,17 @@ export function TerminalsPage({ onOpen, phone }: { onOpen: (pane: string) => voi
         {q.data?.map((t) => (
           <Card key={t.pane} padding={3} style={{ cursor: 'pointer' }} onClick={() => onOpen(t.pane)}>
             <VStack gap={0.5}>
-              <HStack gap={2} align="center"><Text weight="semibold" maxLines={1}>{t.name}</Text><Text type="supporting" size="sm" maxLines={1}>{t.cwd}</Text></HStack>
+              <HStack gap={2} align="center"><Text weight="semibold" maxLines={1}>{t.name}</Text><Text type="supporting" size="sm" maxLines={1}>{t.cwd}</Text>
+                <span style={{ marginInlineStart: 'auto' }} onClick={(e) => e.stopPropagation()}>
+                  <IconButton label={`Close ${t.name}`} icon={<Icon icon="close" />} size="sm" variant="ghost" tooltip="Close shell" onClick={() => closer.ask(t)} />
+                </span></HStack>
               <Text type="code" size="sm" maxLines={1}>{t.lastLine || ' '}</Text>
               {!phone && <Text type="supporting" size="sm">{`${t.workspace} · ${t.pane}`}</Text>}
             </VStack>
           </Card>
         ))}
       </VStack>
+      {closer.dialog}
       {creating && <NewTerminal onClose={() => setCreating(false)} onCreated={(p) => { setCreating(false); onOpen(p) }} />}
     </VStack>
   )
@@ -92,7 +118,6 @@ const STRIP: [string, string][] = [['C-c', 'Ctrl+C'], ['Tab', 'Tab'], ['Up', '�
 
 export function TerminalView({ pane, onClose, onBack, phone }: { pane: string; onClose?: () => void; onBack?: () => void; phone: boolean }) {
   const toast = useToast()
-  const qc = useQueryClient()
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<{ reset: () => void; write: (s: string) => void; resize: (c: number, r: number) => void; dispose: () => void } | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -128,11 +153,7 @@ export function TerminalView({ pane, onClose, onBack, phone }: { pane: string; o
   }, [pane, phone]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => { if (!line) return sendInput(pane, { submit: true }).catch(fail); sendInput(pane, { text: line, submit: true }).then(() => setLine(''), fail) }
-  const close = useMutation({
-    mutationFn: () => api(paneUrl(pane), { method: 'DELETE' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['terminals'] }); (onClose ?? onBack)?.() },
-    onError: fail,
-  })
+  const closer = useCloseShell(() => (onClose ?? onBack)?.())
   return (
     <VStack gap={2} height="100%" padding={phone ? 2 : 4} style={{ minHeight: 0 }}>
       <HStack gap={2} align="center" style={{ minWidth: 0 }}>
@@ -141,9 +162,10 @@ export function TerminalView({ pane, onClose, onBack, phone }: { pane: string; o
           <Text weight="semibold" maxLines={1}>{me?.name ?? pane}</Text>
           <Text type="supporting" size="sm" maxLines={1}>{me ? `${me.cwd}${me.rows ? ` · ${me.rows} rows` : ''}` : pane}</Text>
         </VStack>
-        <Button label="Close shell" size="sm" variant="ghost" isLoading={close.isPending} onClick={() => { if (confirm('Close this shell? Whatever runs in it is ended.')) close.mutate() }} />
+        <Button label="Close shell" size="sm" variant="ghost" onClick={() => closer.ask({ pane, name: me?.name ?? pane })} />
         {onClose && <IconButton label="Close panel" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} />}
       </HStack>
+      {closer.dialog}
       {err && <Banner status="warning" title={err} />}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#111', borderRadius: 8, padding: 6 }} onClick={() => !phone && host.current?.querySelector('textarea')?.focus()}>
         <div ref={host} />
