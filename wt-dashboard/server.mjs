@@ -2,7 +2,7 @@
 // ponytail: no deps, polling instead of websockets; switch to SSE if refresh feels laggy.
 import http from 'node:http'
 import { execFile } from 'node:child_process'
-import { readFile, readdir, open as fopen, stat, mkdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { existsSync, watch, realpathSync, statSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
@@ -746,6 +746,13 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
 
 // Per-source health for /api/health: last success, last error. Filled by every overview.
 const STARTED_AT = new Date().toISOString()
+// The desktop app restarts a dead server at most 3 times in 5 minutes, then leaves it down. A restart can't see
+// its own history, so each start is recorded and a burst becomes a visible inbox item instead of a silent outage.
+export const RESTART_WINDOW_MS = 5 * 60_000
+export function restartBurst(starts, now = Date.now()) {
+  const recent = starts.filter((t) => now - t < RESTART_WINDOW_MS)
+  return { recent, warn: recent.length >= 3 ? recent.length : 0 }
+}
 const SOURCES = Object.fromEntries(['herdr', 'git', 'gh', 'linear', 'machines'].map((k) => [k, { ok: null, lastOkAt: null, lastError: null }]))
 const track = (name, p) => p.then(
   (v) => (Object.assign(SOURCES[name], { ok: true, lastOkAt: new Date().toISOString() }), v),
@@ -1494,15 +1501,32 @@ const server = http.createServer(async (req, res) => {
       send(res, 500, { error: String(e.message ?? e) })
     }
   })
+async function recordStart() {
+  const f = join(DATA, 'server-starts.json')
+  const prev = await readFile(f, 'utf8').then(JSON.parse, () => [])
+  const { recent, warn } = restartBurst([...prev, Date.now()])
+  await writeFile(f, JSON.stringify(recent))
+  if (warn) inbox.add({ kind: 'server', key: `server|burst|${STARTED_AT}`, title: `Server restarted ${warn} times in 5 minutes`,
+    body: envOf('APP') === '1' ? 'The app gives up after 3 automatic restarts in 5 minutes; if it stops again, use Start server in the menu-bar icon. Crashes: ~/Library/Logs/wt-dashboard/server.log' : 'Crashes: ~/Library/Logs/wt-dashboard/server.log', target: {} })
+}
+// The app spawns the server with stdio going nowhere, so a crash would leave no trace: write it to a log first.
+const CRASH_LOG = join(homedir(), 'Library', 'Logs', 'wt-dashboard', 'server.log')
+const crashed = (kind) => async (e) => {
+  await mkdir(dirname(CRASH_LOG), { recursive: true }).then(() => appendFile(CRASH_LOG, `${new Date().toISOString()} pid ${process.pid} ${kind}: ${e?.stack ?? e}\n`)).catch(() => {})
+  process.exit(1)
+}
 // Loopback only. Guarded so parse.test.mjs can import without listening.
 // WT_DASHBOARD_SERVE=1: the desktop app's single-executable build, where argv/import.meta differ.
 if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url))
   cfg.load().catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
     console.log(`agent control room api → http://127.0.0.1:${PORT}`)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
+    process.on('uncaughtException', crashed('uncaughtException'))
+    process.on('unhandledRejection', crashed('unhandledRejection'))
     setInterval(roomsLoop, 4000)
     setInterval(tick, 4000)
     setTimeout(tick, 500)
+    recordStart().catch((e) => console.error('starts:', e.message))
     inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${envOf('APP') === '1' ? 'app-managed' : 'external'})`, body: `pid ${process.pid}`, target: {}, quiet: true })
   }))
 // Spawned by the desktop app: exit with it, however it quit (a macOS quit can skip the app's own kill).

@@ -465,3 +465,10 @@ test('isLoopbackRequest: only this machine\'s own 127.0.0.1 page, never a tailne
   assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777', 'tailscale-user-login': 'a@b' })), false)
   assert.equal(isLoopbackRequest(r('100.64.0.2', { host: '127.0.0.1:7777' })), false)
 })
+
+import { restartBurst } from './server.mjs'
+test('restartBurst: warns at 3+ starts inside 5 minutes, forgets older ones', () => {
+  const now = 10_000_000
+  assert.equal(restartBurst([now - 400_000, now - 60_000, now], now).warn, 0)
+  assert.deepEqual(restartBurst([now - 400_000, now - 200_000, now - 60_000, now], now), { recent: [now - 200_000, now - 60_000, now], warn: 3 })
+})
