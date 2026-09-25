@@ -1431,8 +1431,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
         {tagsMode && <TagsDialog agent={agent} mode={tagsMode} onClose={() => setTagsMode(null)} />}
         <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
           <HStack gap={2} align="center" style={{ minWidth: 0, flex: 1 }}>
-            <RoleBadge role={byId(agent.pool)} />
             {page && <IconButton label="Back" icon={<BackIcon />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Back" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />}
+            <RoleBadge role={byId(agent.pool)} />
             <StatusDot variant={needsYou(agent) ? 'error' : AGENT_DOT[agent.status]} label={agent.status} isPulsing={agent.status === 'working'} />
             <VStack gap={0.5} style={{ minWidth: 0 }}>
               <HStack gap={1} align="center" style={{ minWidth: 0 }}>
