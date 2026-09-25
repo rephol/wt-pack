@@ -79,6 +79,12 @@ git -C <main> branch -d <branch>        # -D only after the user accepts the los
 `-d` refuses an unmerged branch. That refusal is a third gate and is load-bearing — reaching for `-D` to
 silence it is the failure this skill is written to prevent.
 
+Then drop the task label wt-handoff put on your pane (display-only; best effort, a no-op outside herdr):
+
+```
+[ -n "${HERDR_PANE_ID:-}" ] && herdr pane report-metadata "$HERDR_PANE_ID" --source wt-dashboard --clear-token task >/dev/null 2>&1 || true
+```
+
 ## 4. Report
 
 What was deleted, what is left, and where the session now is. If the branch survives on the remote, say so —
