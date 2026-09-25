@@ -3,7 +3,7 @@
 // own root, so its stick-to-bottom (a ResizeObserver on the content re-scrolls while "locked") and its
 // scroll-to-bottom button keep working unchanged. A row above the viewport that changes height (an image
 // finishing) shifts the scroll offset by the same amount — react-virtual's default — so the view does not jump.
-import type { ReactNode, RefObject } from 'react'
+import { useEffect, useReducer, type ReactNode, type RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
 export const THRESHOLD = 150
@@ -19,6 +19,12 @@ export function VirtualRows<T>({ items, keyOf, render, scrollRef, gap = 12, esti
 function Virtual<T>({ items, keyOf, render, scrollRef, gap, estimate }: {
   items: T[]; keyOf: (t: T) => string; render: (t: T) => ReactNode; scrollRef: RefObject<HTMLElement | null>; gap: number; estimate: number
 }) {
+  // The scroll element is an ANCESTOR (ChatLayout's root), and React attaches an ancestor's ref only after its
+  // descendants' layout effects ran — so on a remount with the data already there (switching back to the
+  // Conversation tab) the virtualizer's first look finds no scroll element, lays out zero rows, and nothing else
+  // re-renders it: an empty conversation that never recovers. One render after mount, when the ref is attached.
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => { rerender() }, [])
   const v = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
