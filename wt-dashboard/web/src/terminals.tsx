@@ -21,6 +21,8 @@ import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { termInput } from './termKeys'
+import { Delayed, LoadError, Rows, FieldsSkeleton } from './skeletons'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
 
 export interface TermSettings { enabled: boolean; tailnet: boolean; loopback: boolean; audit: { ts: string; pane?: string; action: string; text?: string; remoteAddr?: string; host?: string }[] }
 export interface Shell { pane: string; name: string; cwd: string; workspace: string; title: string | null; lastLine: string; rows: number | null }
@@ -60,7 +62,8 @@ export function TerminalsPage({ onOpen, phone }: { onOpen: (pane: string) => voi
         <Text type="supporting" size="sm">Shells in herdr&apos;s &lt;project&gt;-shells workspaces. Everything typed is audited (Settings › Terminals).</Text>
         <Button label="New terminal" size="sm" variant="primary" onClick={() => setCreating(true)} />
       </HStack>
-      {q.isError && <Banner status="error" title="Terminals unavailable" description={String(q.error)} />}
+      {q.isError && <LoadError what="terminals" error={q.error} retry={() => q.refetch()} />}
+      {!q.data && !q.isError && <Delayed><Rows n={3} lines={2} height={56} /></Delayed>}
       {q.data && !q.data.length && <EmptyState isCompact title="No terminals" description="New terminal starts a shell in a project, a worktree, your home or /private/tmp." />}
       <VStack gap={2}>
         {q.data?.map((t) => (
@@ -124,6 +127,7 @@ export function TerminalView({ pane, onClose, onBack, phone }: { pane: string; o
   const [line, setLine] = useState('')
   const list = useQuery({ queryKey: ['terminals'], queryFn: () => api<Shell[]>('/api/terminals'), refetchInterval: 10_000 })
   const me = list.data?.find((t) => t.pane === pane)
+  const [ready, setReady] = useState(false) // xterm loaded and mounted
   const fail = (e: unknown) => { console.error('terminal', e); toast({ body: `Terminal: ${e instanceof Error ? e.message : e}`, type: 'error' }) }
 
   useEffect(() => {
@@ -134,6 +138,7 @@ export function TerminalView({ pane, onClose, onBack, phone }: { pane: string; o
       if (cancelled || !host.current) return
       const t = new Terminal({ fontSize: phone ? 11 : 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', cursorBlink: false, disableStdin: phone, convertEol: true, scrollback: 0, cols: 100, rows: 30 })
       t.open(host.current)
+      setReady(true)
       t.onData((d) => { const i = termInput(d); if (i) sendInput(pane, i).catch(fail) })
       termRef.current = t
       es = new EventSource(`${paneUrl(pane)}/stream`)
@@ -168,6 +173,7 @@ export function TerminalView({ pane, onClose, onBack, phone }: { pane: string; o
       {closer.dialog}
       {err && <Banner status="warning" title={err} />}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#111', borderRadius: 8, padding: 6 }} onClick={() => !phone && host.current?.querySelector('textarea')?.focus()}>
+        {!ready && <Delayed><VStack gap={1}>{Array.from({ length: 12 }, (_, i) => <Skeleton key={i} width={`${40 + ((i * 29) % 55)}%`} height={12} radius={1} index={i} />)}</VStack></Delayed>}
         <div ref={host} />
       </div>
       <HStack gap={1} wrap="wrap">
@@ -196,7 +202,7 @@ export function TerminalsSection() {
     onError: (e) => toast({ body: `Could not save: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
   const s = q.data
-  if (!s) return <Text type="supporting">…</Text>
+  if (!s) return q.isError ? <LoadError what="terminal settings" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton /></Delayed>
   return (
     <VStack gap={4}>
       <Heading level={3}>Terminals</Heading>

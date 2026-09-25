@@ -38,6 +38,7 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
+import { Delayed, LoadError, OverviewSkeleton, GroupedRows, Rows, ChatSkeleton } from './skeletons'
 import { useStream, mergeAgentMsgs } from './streamStore'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
@@ -455,9 +456,13 @@ export default function App() {
           </HStack>
         </HStack>}
 
-        {q.isError && (
-          <Banner status="error" title="Can't reach the dashboard server" description={`Is \`node server.mjs\` running on 127.0.0.1:7777? ${String(q.error)}`} />
+        {q.isError && (data
+          ? <Banner status="warning" title="Can't reach the dashboard server — showing the last data" description={String(q.error)} endContent={<Button label="Retry" size="sm" onClick={() => q.refetch()} />} />
+          : <LoadError what="the dashboard (is the server running on 127.0.0.1:7777?)" error={q.error} retry={() => q.refetch()} />)}
+        {!data && !q.isError && !fullKey && (page === 'overview' || page === 'tasks' || page === 'agents') && (
+          <Delayed>{page === 'overview' ? <OverviewSkeleton /> : page === 'agents' ? <GroupedRows phone={phone} /> : <Rows n={8} />}</Delayed>
         )}
+        {fullKey && !all && !q.isError && <Delayed><ChatSkeleton /></Delayed>}
         {data && !data.linearEnabled && !linearHidden && (page === 'overview' || page === 'tasks') && (
           <Banner status="info" title="Set LINEAR_API_KEY to show tickets" description="Tasks come from worktrees, PRs and agents only."
             endContent={<Button label="Dismiss" size="sm" variant="ghost" onClick={hideLinear} />} />
@@ -496,7 +501,7 @@ export default function App() {
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
       <PwaHost openInbox={() => openInbox()} />
-      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} phone={phone} hidden={fabHidden}
+      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} loading={!all} phone={phone} hidden={fabHidden}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
   )
@@ -1276,7 +1281,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     const call = c?.kind === 'tools' ? c.calls.at(-1) : undefined
     return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
   }, [rows])
-  const messageList = useMemo(() => (
+  const noneYet = live && !stream.synced && !msgs.length // nothing cached and the stream has not answered
+  const messageList = useMemo(() => noneYet ? <Delayed><ChatSkeleton /></Delayed> : (
               <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
                 <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
                   r.kind === 'tools' ? (
@@ -1315,7 +1321,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     </ChatMessage>
                   )} />
               </ChatMessageList>
-  ), [rows, working, density])
+  ), [rows, working, density, noneYet])
 
   const page = mode === 'page'
   const summary = (
@@ -1340,10 +1346,13 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             {!live && <Text type="supporting" size="sm">{agent.local ? 'no transcript · pane view' : 'remote · pane view'}</Text>}
             {pane.isError && <Banner status="error" title="Couldn't read pane" description={String(pane.error)} />}
             {streamErr && <Banner status="warning" title="Transcript stream disconnected — retrying" />}
+            {live && !streamErr && !stream.synced && msgs.length > 0 && (
+              <div role="status" style={{ height: 0, overflow: 'visible', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1, pointerEvents: 'none' }}>
+                <HStack gap={1} align="center" style={{ height: 20 }}><StatusDot variant="neutral" label="" /><Text type="supporting" size="sm">syncing…</Text></HStack></div>)}
             {send.isError && <Banner status="error" title="Send failed" description={String(send.error)} />}
             <div ref={chatBox} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <ChatLayout ref={layoutRef}
-              emptyState={<EmptyState isCompact title="No messages yet" />}
+              emptyState={live && !stream.synced ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" />}
               composer={heldPicker ? null : (<VStack gap={1}>
                 <ChatComposer
                   sendButton={working ? <Tooltip content="Queue: Claude picks it up after its current step"><span><ChatSendButton /></span></Tooltip> : undefined}

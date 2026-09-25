@@ -28,7 +28,8 @@ type QMsg = Keyed & { role: string; questions?: unknown }
 export const mergeAgentMsgs = <T extends QMsg>(prev: T[], incoming: T[]) =>
   mergeById(prev, incoming, (o, n) => (n.role === 'question' ? { ...o, ...n, questions: o.questions ?? n.questions } : o))
 
-export interface Entry<T> { items: T[]; cursor: string | null; error: boolean; loaded: boolean; version: number }
+// synced: the stream has answered since it (re)connected (the backlog, or a resume with nothing new).
+export interface Entry<T> { items: T[]; cursor: string | null; error: boolean; loaded: boolean; synced: boolean; version: number }
 interface Spec<T> {
   url: (cursor: string | null, items: T[]) => string
   attach: (es: EventSource, apply: (fn: (items: T[]) => T[], cursor?: string | null) => void) => void
@@ -50,11 +51,13 @@ function open<T>(key: string, e: Live<T>) {
   const es = new EventSource(e.spec.url(e.cursor, e.items))
   connections.opened++
   e.es = es
+  e.synced = false
+  es.addEventListener('open', () => { if (!e.synced) { e.synced = true; notify(e) } })
   const apply = (fn: (items: T[]) => T[], cursor?: string | null) => {
     const next = fn(e.items)
     const moved = cursor !== undefined && cursor !== e.cursor
     if (moved) e.cursor = cursor
-    if (next !== e.items || moved || e.error) { e.items = next; e.error = false; notify(e); save(key, e) }
+    if (next !== e.items || moved || e.error || !e.synced) { e.items = next; e.error = false; e.synced = true; notify(e); save(key, e) }
   }
   e.spec.attach(es, apply)
   es.onerror = () => { if (!e.error) { e.error = true; notify(e) } } // EventSource retries on its own, with Last-Event-ID
@@ -63,7 +66,7 @@ function open<T>(key: string, e: Live<T>) {
 export function acquire<T>(key: string, spec: Spec<T>): () => void {
   let e = entries.get(key) as Live<T> | undefined
   if (!e) {
-    e = { items: [], cursor: null, error: false, loaded: !spec.persistKey, version: 0, spec, es: null, refs: 0, timer: null, subs: new Set() }
+    e = { items: [], cursor: null, error: false, loaded: !spec.persistKey, synced: false, version: 0, spec, es: null, refs: 0, timer: null, subs: new Set() }
     entries.set(key, e as Live<unknown>)
     if (spec.persistKey) {
       const ent = e
@@ -86,7 +89,7 @@ export function acquire<T>(key: string, spec: Spec<T>): () => void {
   }
 }
 
-const EMPTY: Entry<never> = { items: [], cursor: null, error: false, loaded: false, version: 0 }
+const EMPTY: Entry<never> = { items: [], cursor: null, error: false, loaded: false, synced: false, version: 0 }
 export function useStream<T>(key: string | null, spec: () => Spec<T>): Entry<T> {
   useEffect(() => (key ? acquire(key, spec()) : undefined), [key]) // eslint-disable-line react-hooks/exhaustive-deps
   const e = key ? (entries.get(key) as Live<T> | undefined) : undefined

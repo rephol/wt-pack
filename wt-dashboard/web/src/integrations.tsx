@@ -14,6 +14,7 @@ import { Banner } from '@astryxdesign/core/Banner'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { useServerControl } from './status'
+import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
 type Item = { key: string; label: string; source: 'env' | 'keychain' | 'file' | 'default'; overridden: boolean }
   & ({ secret: true; set: boolean; last4: string | null } | { secret?: undefined; value: string | string[] | null; restartNeeded: boolean; loopbackOnly: boolean })
@@ -39,7 +40,7 @@ export function IntegrationsSection() {
     onSuccess: (s) => { qc.setQueryData(['config'], s); qc.invalidateQueries({ queryKey: ['projects'] }); toast({ body: 'Saved' }) },
     onError: (e) => toast({ body: `Could not save: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
-  if (!q.data) return <Text type="supporting">…</Text>
+  if (!q.data) return q.isError ? <LoadError what="integrations" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={5} /></Delayed>
   const by = Object.fromEntries(q.data.items.map((i) => [i.key, i])) as Record<string, Item>
   const put = (key: string, value: unknown) => save.mutateAsync({ key, value }).then(() => true, () => false)
   return (

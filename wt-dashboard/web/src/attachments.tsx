@@ -12,6 +12,7 @@ import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { Markdown } from '@astryxdesign/core/Markdown'
+import { Delayed, Rows } from './skeletons'
 
 export interface SharedFile { path: string; name: string; size: number | null }
 
@@ -89,7 +90,7 @@ function FilePreview({ f, onClose }: { f: SharedFile; onClose: () => void }) {
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: isHtml(f.name) ? 0 : 16 }}>
           {isHtml(f.name) && <iframe src={url} sandbox="allow-scripts" title={f.name} style={{ width: '100%', height: '100%', border: 0, background: 'white' }} />}
           {isImage(f.name) && <img src={url} alt={f.name} style={{ display: 'block', margin: 'auto', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />}
-          {isText(f.name) && (text === null ? <Text type="supporting">Loading…</Text>
+          {isText(f.name) && (text === null ? <Delayed><Rows n={10} height={20} /></Delayed>
             : ext(f.name) === 'md' ? <Markdown>{text}</Markdown> : <CodeBlock code={text.slice(0, 200_000)} />)}
           {!isHtml(f.name) && !isImage(f.name) && !isText(f.name) && <Text type="supporting">No preview for this file type — use the actions above.</Text>}
         </div>

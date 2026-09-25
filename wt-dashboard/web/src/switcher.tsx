@@ -12,6 +12,7 @@ import { Icon } from '@astryxdesign/core/Icon'
 import { HStack } from '@astryxdesign/core/HStack'
 import { shortAgo } from './notifyGate'
 import { switcherItems, needsYou, agentInitials, type SwAgent, type SwItem, type SwRoom } from './switcherData'
+import { Delayed, Rows } from './skeletons'
 
 export type { SwAgent, SwRoom }
 const RECENT_KEY = 'recent-agents'
@@ -62,8 +63,8 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   )
 }
 
-export function QuickSwitcher({ agents, rooms, phone, hidden, onOpenAgent, onOpenRoom }: {
-  agents: SwAgent[]; rooms: SwRoom[]; phone: boolean; hidden: boolean
+export function QuickSwitcher({ agents, rooms, phone, hidden, loading = false, onOpenAgent, onOpenRoom }: {
+  agents: SwAgent[]; rooms: SwRoom[]; phone: boolean; hidden: boolean; loading?: boolean
   onOpenAgent: (key: string, full?: boolean) => void; onOpenRoom: (slug: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -103,7 +104,7 @@ export function QuickSwitcher({ agents, rooms, phone, hidden, onOpenAgent, onOpe
     <CommandPalette<SwItem> isOpen={open} onOpenChange={setOpen} searchSource={source} label="Agent conversations"
       value="" onValueChange={pick} renderItem={(it) => <Row it={it} phone={phone} />}
       footer={phone ? false : <div style={{ padding: '8px 12px' }}><Text type="supporting" size="sm">↑↓ navigate · ↩ open · ⌘↩ full page · esc close</Text></div>}
-      emptySearchText="No agent or room matches" emptyBootstrapText="No agents yet"
+      emptySearchText="No agent or room matches" emptyBootstrapText={loading ? <Delayed><Rows n={6} avatar={phone ? 32 : 28} height={phone ? 48 : 52} /></Delayed> : 'No agents yet'}
       isInline={inline} width={inline ? '100%' : 640} maxHeight={inline ? '100%' : 'min(560px, 80vh)'} />
   )
 

@@ -25,6 +25,7 @@ import { InstallRow } from './pwa'
 import { useChatDensity, setChatDensity, useLinkPreviews, setLinkPreviews, type ChatDensity } from './density'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
+import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
 export type Section = 'profile' | 'rooms' | 'notifications' | 'integrations' | 'terminals' | 'server' | 'about'
 const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
@@ -99,7 +100,7 @@ function useServerSettings() {
     onSuccess: (s) => { qc.setQueryData(['room-settings'], s); qc.invalidateQueries({ queryKey: ['rooms'] }); setSavedAt(Date.now()) },
     onError: (e) => { console.error('settings save failed', e); toast({ body: `Could not save: ${e instanceof Error ? e.message : e}`, type: 'error' }) },
   })
-  return { s: q.data, set, saved: set.isPending ? 'Saving…' : Date.now() - savedAt < 3000 ? 'Saved' : '' }
+  return { s: q.data, q, set, saved: set.isPending ? 'Saving…' : Date.now() - savedAt < 3000 ? 'Saved' : '' }
 }
 
 function SectionHead({ title, status }: { title: string; status?: string }) {
@@ -112,8 +113,8 @@ function SectionHead({ title, status }: { title: string; status?: string }) {
 }
 
 function ProfileSection() {
-  const { s, set, saved } = useServerSettings()
-  if (!s) return <Text type="supporting">…</Text>
+  const { s, q, set, saved } = useServerSettings()
+  if (!s) return q.isError ? <LoadError what="settings" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={4} /></Delayed>
   return <ProfileForm key={JSON.stringify(s.profile)} profile={s.profile} save={(profile) => set.mutate({ profile })} status={saved} busy={set.isPending} />
 }
 
@@ -177,8 +178,8 @@ function NumberBox({ label, value, onSave, width = 72 }: { label: string; value:
 }
 
 function RoomsSection() {
-  const { s, set, saved } = useServerSettings()
-  if (!s) return <Text type="supporting">…</Text>
+  const { s, q, set, saved } = useServerSettings()
+  if (!s) return q.isError ? <LoadError what="settings" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={4} /></Delayed>
   return (
     <VStack gap={4}>
       <SectionHead title="Rooms" status={saved} />

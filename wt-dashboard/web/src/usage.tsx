@@ -10,6 +10,8 @@ import { Badge } from '@astryxdesign/core/Badge'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { api } from './rooms'
+import { Delayed, LoadError } from './skeletons'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
 
 interface Limits {
   session: number | null; sessionResetAt: string | null; weekly: number | null; weeklyResetAt: string | null
@@ -48,7 +50,7 @@ export function UsagePanel() {
   const q = useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/usage'), refetchInterval: 30_000, refetchIntervalInBackground: true })
   const [range, setRange] = useState<'today' | 'week'>('today')
   const [by, setBy] = useState<By>('agent')
-  if (!q.data) return null
+  if (!q.data) return q.isError ? <LoadError what="Claude usage" error={q.error} retry={() => q.refetch()} /> : <Delayed><VStack gap={2}><Skeleton width={120} height={16} radius={1} /><Skeleton width="100%" height={120} radius={2} /></VStack></Delayed> // the first transcript scan takes ~1.6s
   const l = q.data.limits
   const s = q.data[range][by]
   return (

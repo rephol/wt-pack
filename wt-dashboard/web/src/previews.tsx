@@ -9,6 +9,7 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
 import { linkClick, linksIn } from './links.ts'
 import { useChatDensity, useLinkPreviews } from './density.ts'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
 
 type CardData = { kind: 'page' | 'pr' | 'issue' | 'linear' | 'artifact'; url: string; title?: string | null; description?: string | null; image?: string | null
   icon?: string | null; siteName?: string | null; error?: string; number?: number; identifier?: string; state?: string; review?: string | null
@@ -35,6 +36,7 @@ function Preview({ url }: { url: string }) {
     },
   })
   const c = q.data
+  if (q.isPending) return <Skeleton width="100%" height={58} radius={2} /> // reserve the card's height: no jump when it lands
   if (!c || c.error || (!c.title && !c.description)) return null // nothing worth a card (fetch refused, no metadata)
   const badges = c.kind === 'pr' ? [c.state, c.ci && `CI ${c.ci}`, c.review?.replace('_', ' ').toLowerCase()]
     : c.kind === 'issue' ? [c.state] : c.kind === 'linear' ? [c.state, c.priority, c.assignee] : []

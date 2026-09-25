@@ -39,6 +39,8 @@ import { Link } from '@astryxdesign/core/Link'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
 import { useStream, mergeById } from './streamStore'
+import { Delayed, LoadError, ChatSkeleton } from './skeletons'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -100,6 +102,8 @@ export function RoomsPage({ slug, agents, onSelect, onOpenAgent }: { slug: strin
       {(q.data?.suggestions.length ?? 0) > 0 && (
         <Button label={`${q.data!.suggestions.length} room suggestion${q.data!.suggestions.length === 1 ? '' : 's'} →`} size="sm" variant="ghost" onClick={() => openInbox('room-suggestion')} />
       )}
+      {q.isError && !q.data && <LoadError what="rooms" error={q.error} retry={() => q.refetch()} />}
+      {!q.data && !q.isError && <Delayed><VStack gap={2}>{[0, 1, 2].map((i) => <Skeleton key={i} width="100%" height={64} radius={2} index={i} />)}</VStack></Delayed>}
       {q.data && !live.length && <EmptyState title={archived.length ? 'No active rooms' : 'No rooms yet'} description={archived.length ? `${archived.length} archived room${archived.length === 1 ? '' : 's'} below — restore one, or create a new room.` : 'Create one, then @mention agents to bring them in.'} />}
       {live.map((r) => (
         <Card key={r.slug} padding={3} onClick={() => onSelect(r.slug)} style={{ cursor: 'pointer' }}>
@@ -175,7 +179,9 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   })
   const qc = useQueryClient()
   const toast = useToast()
-  const msgs = useStream<RoomMsg>(`room|${room.slug}`, () => roomStreamSpec(room.slug)).items
+  const roomStream = useStream<RoomMsg>(`room|${room.slug}`, () => roomStreamSpec(room.slug))
+  const msgs = roomStream.items
+  const syncing = !roomStream.synced && !msgs.length
   const [draft, setDraft] = useState('')
   const density = useChatDensity()
   const [confirm, setConfirm] = useState<string | null>(null)
@@ -251,7 +257,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
     }
     return out
   }, [msgs, room.members, byName])
-  const messageList = useMemo(() => (
+  const messageList = useMemo(() => syncing ? <Delayed><ChatSkeleton /></Delayed> : (
         <ChatMessageList density={density}>
           <VirtualRows items={msgs} scrollRef={layoutRef} keyOf={(m) => m.id} render={(m) => m.author.kind === 'system' ? (
             <ChatMessage key={m.id} sender="system">
@@ -284,7 +290,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
             </ChatMessage>
           )} />
         </ChatMessageList>
-  ), [msgs, profile, agents, workingAfter, density]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [msgs, profile, agents, workingAfter, density, syncing]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>
@@ -363,11 +369,11 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
         </VStack>
       </Dialog>
       <ChatLayout ref={layoutRef} style={{ flex: 1, minHeight: 0 }}
-        emptyState={<EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
+        emptyState={syncing ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
           <VStack gap={1}>
           <Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text>
-          <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null) }} onSubmit={submit} isDisabled={post.isPending} density="compact"
+          <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null) }} onSubmit={submit} isDisabled={post.isPending || syncing} density="compact"
             status={sendErr ? { type: 'error', message: sendErr } : attErr ? { type: 'warning', message: attErr }
               : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}
             headerActions={<>

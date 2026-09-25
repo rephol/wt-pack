@@ -19,6 +19,7 @@ import { useToast } from '@astryxdesign/core/Toast'
 import { ACTIONABLE_KINDS, collapseRepeats, shortAgo, type InboxItem, type InboxRow, type Kind } from './notifyGate'
 import { loadPrefs } from './desktop'
 import { api } from './rooms'
+import { Delayed, LoadError, Rows } from './skeletons'
 
 export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
 const LABEL: Record<Kind, string> = {
@@ -30,7 +31,7 @@ export function useInbox() {
   const q = useQuery({ queryKey: ['inbox'], queryFn: () => api<{ items: InboxItem[] }>('/api/notifications'), refetchInterval: 5000, refetchIntervalInBackground: true })
   const prefs = loadPrefs()
   const items = (q.data?.items ?? []).filter((it) => prefs.inbox[it.kind] !== false)
-  return { items, unread: items.filter((it) => !it.read).length, open: items.filter((it) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)) }
+  return { items, loaded: Boolean(q.data), error: q.isError ? q.error : null, retry: () => q.refetch(), unread: items.filter((it) => !it.read).length, open: items.filter((it) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)) }
 }
 
 // Sidebar footer row: bell + unread count (a dot on the icon when the nav is collapsed).
@@ -86,7 +87,7 @@ const ICON: Record<Kind, React.ReactNode> = {
 function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void }) {
   const qc = useQueryClient()
   const toast = useToast()
-  const { items } = useInbox()
+  const { items, loaded, error, retry } = useInbox()
   const [confirmAll, setConfirmAll] = useState(false)
   const refresh = () => { qc.invalidateQueries({ queryKey: ['inbox'] }); qc.invalidateQueries({ queryKey: ['rooms'] }) }
   const post = (path: string) => (b: object) => api(`/api/notifications/${path}`, { method: 'POST', body: JSON.stringify(b) })
@@ -166,7 +167,8 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
           </div>
         </VStack>
         <ScrollableArea label="Notifications" className="hd-inbox-list" style={{ flex: 1, minHeight: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}>
-          {!shown.length && <EmptyState isCompact title="Nothing here" description="Questions, @mentions and agent updates land here." />}
+          {!loaded && (error ? <LoadError what="the inbox" error={error} retry={retry} /> : <Delayed><Rows n={6} avatar={24} lines={2} height={60} /></Delayed>)}
+          {loaded && !shown.length && <EmptyState isCompact title="Nothing here" description="Questions, @mentions and agent updates land here." />}
           {pinned.length > 0 && <div className="hd-sub">Needs you</div>}
           {pinned.map(row)}
           {recent.length > 0 && <div className="hd-sub">Recent</div>}
