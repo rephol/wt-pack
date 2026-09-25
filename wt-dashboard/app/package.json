@@ -1,0 +1,13 @@
+{
+  "name": "wt-dashboard-app",
+  "private": true,
+  "scripts": {
+    "sidecar": "sh scripts/build-sidecar.sh",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "esbuild": "^0.25.0",
+    "postject": "^1.0.0-alpha.6"
+  }
+}

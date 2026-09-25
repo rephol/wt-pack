@@ -1,0 +1,42 @@
+▝▜██████▀  Opus 5.5 (1M context) with low effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/herdr-dash-hitl · /rc
+
+  ⎿  SessionStart:startup says: # claude-mem status
+
+     This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past
+     work.
+
+     Memory injection starts on your second session in a project.
+
+     `/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo,
+     optional). Otherwise memory builds passively as work happens.
+
+     Live activity: http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=welcome-hint&trial=30
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
+
+❯ Call AskUserQuestion now (no other tools), 1 question, header "Polish", question "Which dashboard polish do you want?", multiSelect true, NO
+  previews. Options: "Compact question card" description "Make the pinned question card collapsible so the conversation is not squeezed, and
+  also remember whether it was collapsed across reloads of the dashboard page in local storage so it stays out of the way." ; "Wider Task
+  column" description "Stop the Agents table scrolling sideways when the chat panel is open."
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Polish  ✔ Submit  →
+
+Which dashboard polish do you want?
+
+❯ 1. [ ] Compact question card
+         Make the pinned question card collapsible so the conversation is not squeezed, and also remember whether it was collapsed across
+         reloads of the dashboard page in local storage so it stays out of the way.
+  2. [ ] Wider Task column
+         Stop the Agents table scrolling sideways when the chat panel is open.
+  3. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

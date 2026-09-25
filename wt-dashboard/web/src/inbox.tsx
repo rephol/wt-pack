@@ -1,0 +1,180 @@
+// Notifications inbox: a right-side panel over the feed at /api/notifications. "Needs you" (unresolved
+// actionables) pinned on top, then "Recent". Opened from the sidebar bell or openInbox(kind).
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Dialog } from '@astryxdesign/core/Dialog'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
+import { SideNavItem } from '@astryxdesign/core/SideNav'
+import { Badge } from '@astryxdesign/core/Badge'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { HStack } from '@astryxdesign/core/HStack'
+import { VStack } from '@astryxdesign/core/VStack'
+import { Heading } from '@astryxdesign/core/Heading'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
+import { EmptyState } from '@astryxdesign/core/EmptyState'
+import { useToast } from '@astryxdesign/core/Toast'
+import { ACTIONABLE_KINDS, collapseRepeats, shortAgo, type InboxItem, type InboxRow, type Kind } from './notifyGate'
+import { loadPrefs } from './desktop'
+import { api } from './rooms'
+
+export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
+const LABEL: Record<Kind, string> = {
+  question: 'Question', 'mention-user': '@you', 'needs-you': 'Needs you', 'room-suggestion': 'Suggestion',
+  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server',
+}
+
+export function useInbox() {
+  const q = useQuery({ queryKey: ['inbox'], queryFn: () => api<{ items: InboxItem[] }>('/api/notifications'), refetchInterval: 5000, refetchIntervalInBackground: true })
+  const prefs = loadPrefs()
+  const items = (q.data?.items ?? []).filter((it) => prefs.inbox[it.kind] !== false)
+  return { items, unread: items.filter((it) => !it.read).length, open: items.filter((it) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)) }
+}
+
+// Sidebar footer row: bell + unread count (a dot on the icon when the nav is collapsed).
+export function InboxButton({ collapsed }: { collapsed: boolean }) {
+  const { unread } = useInbox()
+  return (
+    <SideNavItem label="Inbox" onClick={() => openInbox()}
+      icon={<span style={{ position: 'relative', display: 'inline-flex' }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+        {collapsed && unread > 0 && <span style={{ position: 'absolute', top: -3, right: -3 }}><StatusDot variant="error" label={`${unread} unread`} /></span>}
+      </span>}
+      endContent={unread > 0 ? <Badge variant="error" label={String(unread)} /> : undefined} />
+  )
+}
+
+export function InboxHost({ onOpenAgent }: { onOpenAgent: (key: string) => void }) {
+  const [filter, setFilter] = useState<'all' | Kind | null>(null)
+  useEffect(() => {
+    const on = (e: Event) => setFilter((e as CustomEvent<'all' | Kind>).detail)
+    addEventListener('open-inbox', on)
+    return () => removeEventListener('open-inbox', on)
+  }, [])
+  if (!filter) return null
+  return <InboxPanel filter={filter} setFilter={setFilter} onClose={() => setFilter(null)} onOpenAgent={onOpenAgent} />
+}
+
+const HOVER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
+const tip = (t: string) => (HOVER ? t : undefined) // no hover tooltips on touch: they stick open after a tap
+const COLOR: Record<Kind, string> = {
+  question: 'var(--hd-red)', 'mention-user': 'var(--hd-red)', 'needs-you': 'var(--hd-red)', 'room-suggestion': 'var(--hd-blue)',
+  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)',
+}
+const sv = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
+const I = {
+  check: <svg {...sv}><path d="M20 6 9 17l-5-5" /></svg>,
+  checkAll: <svg {...sv}><path d="M18 6 7 17l-5-5M22 10l-7.5 7.5L13 16" /></svg>,
+  x: <svg {...sv}><path d="M18 6 6 18M6 6l12 12" /></svg>,
+  plus: <svg {...sv}><path d="M12 5v14M5 12h14" /></svg>,
+  trash: <svg {...sv}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>,
+  q: <svg {...sv}><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01" /></svg>,
+  at: <svg {...sv}><circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></svg>,
+  bulb: <svg {...sv}><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z" /></svg>,
+  clock: <svg {...sv}><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>,
+  server: <svg {...sv}><rect x="2" y="3" width="20" height="8" rx="2" /><rect x="2" y="13" width="20" height="8" rx="2" /><path d="M6 7h.01M6 17h.01" /></svg>,
+}
+const ICON: Record<Kind, React.ReactNode> = {
+  question: I.q, 'mention-user': I.at, 'needs-you': I.q, 'room-suggestion': I.bulb, 'agent-done': I.check,
+  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server,
+}
+
+function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const { items } = useInbox()
+  const [confirmAll, setConfirmAll] = useState(false)
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['inbox'] }); qc.invalidateQueries({ queryKey: ['rooms'] }) }
+  const post = (path: string) => (b: object) => api(`/api/notifications/${path}`, { method: 'POST', body: JSON.stringify(b) })
+  const read = useMutation({ mutationFn: post('read'), onSuccess: refresh, onError: (e) => toast({ body: `Could not mark read: ${e}`, type: 'error' }) })
+  const clear = useMutation({ mutationFn: post('clear'), onSuccess: refresh, onError: (e) => toast({ body: `Could not clear: ${e}`, type: 'error' }) })
+  const createRoom = useMutation({
+    mutationFn: (ticket: string) => api<{ slug: string }>('/api/rooms', { method: 'POST', body: JSON.stringify({ ticket }) }),
+    onSuccess: (r) => { refresh(); onClose(); location.hash = `rooms/${encodeURIComponent(r.slug)}` },
+    onError: (e) => toast({ body: `Could not create the room: ${e}`, type: 'error' }),
+  })
+  const dismiss = useMutation({
+    mutationFn: (ticket: string) => api('/api/rooms/dismiss', { method: 'POST', body: JSON.stringify({ ticket }) }),
+    onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
+  })
+  const shown = items.filter((it) => filter === 'all' || it.kind === filter)
+  const isPinned = (it: InboxItem) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)
+  const pinned = collapseRepeats(shown.filter(isPinned))
+  const recent = collapseRepeats(shown.filter((it) => !isPinned(it))).slice(0, 150)
+  const go = (it: InboxRow) => {
+    if (it.anyUnread) read.mutate({ ids: it.ids })
+    if (it.kind === 'room-suggestion' && !it.resolvedAt) return
+    onClose()
+    if (it.target.room) location.hash = `rooms/${encodeURIComponent(it.target.room)}`
+    else if (it.target.agent) onOpenAgent(it.target.agent)
+    else if (it.target.url) window.open(it.target.url, '_blank', 'noopener')
+  }
+  const act = (label: string, icon: React.ReactNode, f: () => void) => (
+    <IconButton label={label} tooltip={tip(label)} icon={icon} size="sm" variant="ghost" onClick={(e: React.MouseEvent) => { e.stopPropagation(); f() }} />
+  )
+  const row = (it: InboxRow) => (
+    <div key={it.id} className="hd-inbox-row" role="button" tabIndex={0} onClick={() => go(it)} onKeyDown={(e) => e.key === 'Enter' && go(it)}
+      aria-label={`${LABEL[it.kind]}: ${it.title}${it.count > 1 ? `, ${it.count} times` : ''}${it.anyUnread ? ', unread' : ''}`}>
+      <span className="hd-kind" style={{ color: COLOR[it.kind] }}>{ICON[it.kind]}</span>
+      <span className="hd-main">
+        <span className={`hd-title${it.anyUnread ? ' unread' : ''}`}>
+          {it.anyUnread && <span className="hd-dot" />}<span className="hd-trunc">{it.title}</span>
+          {it.count > 1 && <span className="hd-count">{`×${it.count}`}</span>}
+          {it.resolvedAt && <span className="hd-count">resolved</span>}
+        </span>
+        {it.body && <span className="hd-body hd-trunc">{it.body}</span>}
+      </span>
+      <span className="hd-side">
+        <span className="hd-time">{shortAgo(it.ts)}</span>
+        <span className="hd-acts">
+          {it.kind === 'room-suggestion' && !it.resolvedAt && act('Create room', I.plus, () => createRoom.mutate(it.target.task!))}
+          {it.kind === 'room-suggestion' && !it.resolvedAt && act('Dismiss suggestion', I.x, () => dismiss.mutate(it.target.task!))}
+          {it.anyUnread && act('Mark read', I.check, () => read.mutate({ ids: it.ids }))}
+          {!(it.kind === 'room-suggestion' && !it.resolvedAt) && act('Clear', I.x, () => clear.mutate({ ids: it.ids }))}
+        </span>
+      </span>
+    </div>
+  )
+  return (
+    <Dialog isOpen onOpenChange={(o) => !o && onClose()} width={420} maxHeight="100dvh" padding={0} position={{ top: 0, end: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', minWidth: 0 }}>
+        <VStack gap={2} padding={3}>
+          <HStack justify="between" align="center">
+            <Heading level={3}>Inbox</Heading>
+            <HStack gap={0.5}>
+              <IconButton label="Mark all read" tooltip={tip('Mark all read')} icon={I.checkAll} size="sm" variant="ghost" onClick={() => read.mutate({ all: true })} />
+              <DropdownMenu button={{ label: 'Clear', icon: I.trash, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
+                { label: 'Clear all read', onClick: () => clear.mutate({ allRead: true }) },
+                { label: 'Clear all…', onClick: () => setConfirmAll(true) },
+              ]} />
+              <IconButton label="Close" tooltip={tip('Close (Esc)')} icon={I.x} size="sm" variant="ghost" onClick={onClose} />
+            </HStack>
+          </HStack>
+          <div style={{ overflowX: 'auto', margin: '0 -4px', padding: '0 4px' }}>
+            <SegmentedControl label="Filter" value={filter} onChange={(v) => setFilter(v as 'all' | Kind)} size="sm">
+              <SegmentedControlItem value="all" label="All" />
+              <SegmentedControlItem value="question" label="Questions" />
+              <SegmentedControlItem value="mention-user" label="@you" />
+              <SegmentedControlItem value="room-suggestion" label="Suggestions" />
+              <SegmentedControlItem value="agent-done" label="Done" />
+              <SegmentedControlItem value="ci-failed" label="CI" />
+            </SegmentedControl>
+          </div>
+        </VStack>
+        <div className="hd-inbox-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          {!shown.length && <EmptyState isCompact title="Nothing here" description="Questions, @mentions and agent updates land here." />}
+          {pinned.length > 0 && <div className="hd-sub">Needs you</div>}
+          {pinned.map(row)}
+          {recent.length > 0 && <div className="hd-sub">Recent</div>}
+          {recent.map(row)}
+        </div>
+      </div>
+      <AlertDialog isOpen={confirmAll} onOpenChange={setConfirmAll} title="Clear the whole inbox?"
+        description="Every item leaves the list, including ones that still need you. They stay in the log file." actionLabel="Clear all" actionVariant="destructive"
+        onAction={() => { setConfirmAll(false); clear.mutate({ all: true }) }} />
+    </Dialog>
+  )
+}

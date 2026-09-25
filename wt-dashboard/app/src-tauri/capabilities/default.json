@@ -1,0 +1,40 @@
+{
+  "identifier": "default",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:7777/*"
+    ]
+  },
+  "permissions": [
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:webview:allow-create-webview-window",
+    "window-state:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "http://127.0.0.1:7777/api/files*"
+        }
+      ]
+    },
+    {
+      "identifier": "opener:allow-reveal-item-in-dir",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "/private/tmp/**"
+        },
+        {
+          "path": "/tmp/**"
+        }
+      ]
+    }
+  ]
+}

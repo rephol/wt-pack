@@ -1,0 +1,42 @@
+ ▝▝   ▝▝   /private/tmp/herdr-dash-hitl · /rc
+
+  ⎿  SessionStart:startup says: # claude-mem status
+
+     This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past
+     work.
+
+     Memory injection starts on your second session in a project.
+
+     `/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo,
+     optional). Otherwise memory builds passively as work happens.
+
+     Live activity: http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=welcome-hint&trial=30
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
+
+❯ Call AskUserQuestion now (no other tools) with 2 questions. Q1 header "Next up", question "What should the planners pick up next?", single
+  select, options each WITH a preview field: label "UMK-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan UMK-1177", label "M5
+  video tickets" preview "planner-03 -> M5 tickets\nthen review", label "UMK-1176 download log" preview "planner-04 -> /wt-plan UMK-1176". Q2
+  header "Polish", question "Which polish items?", multiSelect true, options with previews: "Dark mode tweaks" preview "css tokens", "Keyboard
+  shortcuts for everything in the app" preview "keys.ts", "Empty states" preview "EmptyState". Descriptions short.
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Next up  ☐ Polish  ✔ Submit  →
+
+What should the planners pick up next?
+
+❯ 1. UMK-1177 OTP hang            ┌──────────────────────────────────────────┐
+    (Recommended)                 │ planner-02 -> /wt-plan UMK-1177          │
+  2. M5 video tickets             └──────────────────────────────────────────┘
+  3. UMK-1176 download log
+                                  Notes: press n to add notes
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Tab to switch questions · Esc to cancel

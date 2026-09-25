@@ -1,0 +1,42 @@
+  ⎿  SessionStart:startup says: # claude-mem status
+
+     This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past
+     work.
+
+     Memory injection starts on your second session in a project.
+
+     `/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo,
+     optional). Otherwise memory builds passively as work happens.
+
+     Live activity: http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=welcome-hint&trial=30
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
+
+❯ Call AskUserQuestion now (no other tools) with 2 questions. Q1 header "Next up", question "What should the planners pick up next?", single
+  select, options each WITH a preview: "UMK-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan UMK-1177"; "M5 video tickets" preview
+  "planner-03 -> M5 tickets"; "UMK-1176 download log" preview "planner-04 -> /wt-plan UMK-1176". Q2 header "Polish", question "Which
+  dashboard polish do you want?", multiSelect true, no previews, options: "Compact question card" desc "Make the pinned question card
+  collapsible so the conversation isn't squeezed."; "Wider Task column" desc "Stop the Agents table scrolling sideways when the chat panel is
+  open."; "Nav overlay dots" desc "Hide collapsed-count dots inside the narrow-screen nav overlay."
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Next up  ☐ Polish  ✔ Submit  →
+
+Which dashboard polish do you want?
+
+❯ 1. [ ] Compact question card
+         Make the pinned question card collapsible so the conversation isn't squeezed.
+  2. [ ] Wider Task column
+         Stop the Agents table scrolling sideways when the chat panel is open.
+  3. [ ] Nav overlay dots
+         Hide collapsed-count dots inside the narrow-screen nav overlay.
+  4. [ ] Type something
+     Submit
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

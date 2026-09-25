@@ -1,0 +1,313 @@
+// Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, type ChatComposerTrigger } from '@astryxdesign/core/Chat'
+import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
+import { Popover } from '@astryxdesign/core/Popover'
+import { Switch } from '@astryxdesign/core/Switch'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { HStack } from '@astryxdesign/core/HStack'
+import { VStack } from '@astryxdesign/core/VStack'
+import { Text } from '@astryxdesign/core/Text'
+import { Heading } from '@astryxdesign/core/Heading'
+import { Badge } from '@astryxdesign/core/Badge'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { Banner } from '@astryxdesign/core/Banner'
+import { EmptyState } from '@astryxdesign/core/EmptyState'
+import { Markdown } from '@astryxdesign/core/Markdown'
+import { Timestamp } from '@astryxdesign/core/Timestamp'
+import { Avatar } from '@astryxdesign/core/Avatar'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
+import { Dialog } from '@astryxdesign/core/Dialog'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { BottomSheet } from '@astryxdesign/core/BottomSheet'
+import { useToast } from '@astryxdesign/core/Toast'
+import { openInbox } from './inbox'
+
+export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
+interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
+export interface Profile { name: string; handle: string; avatar: string | null }
+interface Suggestion { ticket: string; slug: string; title: string; agent: string | null; reason: string }
+interface RoomMsg {
+  id: string; ts: string; text: string; mentions: string[]; deliveredTo: string[]
+  author: { kind: 'user' | 'agent' | 'system'; name: string; machine?: string; avatar?: string | null }
+  blocked?: { name: string; reason: string }[]
+  queuedFor?: string[]; notified?: boolean
+}
+export interface RoomSettings { profile: Profile; agentToAgent: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
+
+const dotOf = (a?: RoomAgent) => (!a ? 'neutral' : a.asks ? 'error' : a.status === 'working' ? 'accent' : a.status === 'done' ? 'success' : 'neutral') as 'neutral' | 'error' | 'accent' | 'success'
+export const api = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`)
+  return j as T
+}
+
+export function useRoomsList() {
+  return useQuery({ queryKey: ['rooms'], queryFn: () => api<{ rooms: Room[]; settings: RoomSettings; suggestions: Suggestion[]; pending: Record<string, number> }>('/api/rooms'), refetchInterval: 10_000 })
+}
+
+export function RoomsPage({ slug, agents, onSelect }: { slug: string | null; agents: RoomAgent[]; onSelect: (slug: string | null) => void }) {
+  const q = useRoomsList()
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [title, setTitle] = useState('')
+  const [responder, setResponder] = useState<RoomAgent | null>(null)
+  const refresh = () => qc.invalidateQueries({ queryKey: ['rooms'] })
+  const create = useMutation({
+    mutationFn: (b: { title?: string; ticket?: string; responder?: string }) => api<Room>('/api/rooms', { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: (r) => { setTitle(''); setResponder(null); refresh(); onSelect(r.slug) },
+    onError: (e) => toast({ body: `Could not create the room: ${e}`, type: 'error' }),
+  })
+  const room = q.data?.rooms.find((r) => r.slug === slug) ?? null
+  const restore = useMutation({
+    mutationFn: (s: string) => api(`/api/rooms/${s}`, { method: 'PATCH', body: JSON.stringify({ archived: false }) }),
+    onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
+  })
+  if (room && q.data) return <RoomView room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} />
+  const live = (q.data?.rooms ?? []).filter((r) => !r.archived)
+  const archived = (q.data?.rooms ?? []).filter((r) => r.archived)
+  return (
+    <VStack gap={4} isScrollable style={{ flex: 1, minHeight: 0 }}>
+      {q.isError && <Banner status="error" title="Could not load rooms" description={String(q.error)} />}
+      <HStack gap={2} align="end">
+        <TextInput label="New room" placeholder="e.g. Release coordination" value={title} onChange={setTitle} />
+        <DropdownMenu button={{ label: `Responder: ${responder?.name ?? 'none'}`, variant: 'ghost' }} items={[
+          { label: 'None', onClick: () => setResponder(null) },
+          ...agents.map((a) => ({ label: a.name, description: a.status, onClick: () => setResponder(a) })),
+        ]} />
+        <Button label="Create" variant="primary" isDisabled={!title.trim()} isLoading={create.isPending} onClick={() => create.mutate({ title, responder: responder?.key })} />
+      </HStack>
+      {(q.data?.suggestions.length ?? 0) > 0 && (
+        <Button label={`${q.data!.suggestions.length} room suggestion${q.data!.suggestions.length === 1 ? '' : 's'} →`} size="sm" variant="ghost" onClick={() => openInbox('room-suggestion')} />
+      )}
+      {q.data && !live.length && <EmptyState title={archived.length ? 'No active rooms' : 'No rooms yet'} description={archived.length ? `${archived.length} archived room${archived.length === 1 ? '' : 's'} below — restore one, or create a new room.` : 'Create one, then @mention agents to bring them in.'} />}
+      {live.map((r) => (
+        <Card key={r.slug} padding={3} onClick={() => onSelect(r.slug)} style={{ cursor: 'pointer' }}>
+          <HStack gap={2} align="center" justify="between" wrap="wrap">
+            <VStack gap={0}>
+              <Text weight="semibold">{`#${r.slug}`}</Text>
+              <Text type="supporting" size="sm">{r.title}</Text>
+            </VStack>
+            <HStack gap={2} align="center">
+              {r.needsYou?.length ? <Badge variant="error" label={`Needs you · ${r.needsYou.map((n) => n.agent).join(', ')}`} /> : null}
+              {r.paused && <Badge variant="warning" label="Paused" />}
+              <Text type="supporting" size="sm">{`${r.members.length} member${r.members.length === 1 ? '' : 's'}`}</Text>
+            </HStack>
+          </HStack>
+        </Card>
+      ))}
+      {archived.length > 0 && (
+        <VStack gap={2}>
+          <Text weight="semibold">Archived</Text>
+          {archived.map((r) => (
+            <Card key={r.slug} padding={2}>
+              <HStack gap={2} align="center" justify="between">
+                <Button label={`#${r.slug}`} size="sm" variant="ghost" onClick={() => onSelect(r.slug)} />
+                <Button label="Restore" size="sm" variant="secondary" isLoading={restore.isPending} onClick={() => restore.mutate(r.slug)} />
+              </HStack>
+            </Card>
+          ))}
+        </VStack>
+      )}
+    </VStack>
+  )
+}
+
+function mentionSource(agents: RoomAgent[], profile: Profile): SearchSource<SearchableItem> {
+  const items: SearchableItem[] = [{ id: 'all', label: 'all', auxiliaryData: { status: 'everyone in the room' } },
+    { id: 'user', label: profile.handle, auxiliaryData: { status: `you (${profile.name})` } },
+    ...agents.map((a) => ({ id: a.key, label: a.name, auxiliaryData: a }))]
+  return {
+    bootstrap: () => items.slice(0, 50),
+    search: (query) => items.filter((it) => it.label.toLowerCase().includes(query.toLowerCase().trim())).slice(0, 50),
+  }
+}
+
+function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomAgent[]; profile: Profile; onBack: () => void }) {
+  const [deleting, setDeleting] = useState(false)
+  const [archiving, setArchiving] = useState(false)
+  const [typed, setTyped] = useState('')
+  const del = useMutation({
+    mutationFn: () => api(`/api/rooms/${room.slug}`, { method: 'DELETE' }),
+    onSuccess: () => { setDeleting(false); onBack(); qc.invalidateQueries({ queryKey: ['rooms'] }) },
+    onError: (e) => toast({ body: `Could not delete: ${e}`, type: 'error' }),
+  })
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [msgs, setMsgs] = useState<RoomMsg[]>([])
+  const [draft, setDraft] = useState('')
+  const [confirm, setConfirm] = useState<string | null>(null)
+  useEffect(() => {
+    setMsgs([])
+    const es = new EventSource(`/api/rooms/${encodeURIComponent(room.slug)}/stream`)
+    es.addEventListener('backlog', (e) => setMsgs(JSON.parse((e as MessageEvent).data)))
+    es.addEventListener('message', (e) => { const m = JSON.parse((e as MessageEvent).data) as RoomMsg; setMsgs((xs) => [...xs.filter((x) => x.id !== m.id), m]) })
+    es.addEventListener('delivered', (e) => {
+      const d = JSON.parse((e as MessageEvent).data) as { id: string; to: string }
+      setMsgs((xs) => xs.map((x) => (x.id === d.id && !x.deliveredTo.includes(d.to) ? { ...x, deliveredTo: [...x.deliveredTo, d.to] } : x)))
+    })
+    return () => es.close()
+  }, [room.slug])
+  const post = useMutation({
+    mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST', body: JSON.stringify(b) }),
+    onSuccess: () => { setDraft(''); setConfirm(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
+    onError: (e) => toast({ body: `Could not post: ${e}`, type: 'error' }),
+  })
+  const patch = useMutation({
+    mutationFn: (b: Partial<Room>) => api<Room>(`/api/rooms/${room.slug}`, { method: 'PATCH', body: JSON.stringify(b) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rooms'] }),
+    onError: (e) => toast({ body: String(e), type: 'error' }),
+  })
+  const mention = useMemo<ChatComposerTrigger>(() => ({
+    character: '@',
+    searchSource: mentionSource(agents, profile),
+    renderItem: (item) => {
+      const a = item.auxiliaryData as RoomAgent
+      return <TypeaheadItem item={item} description={a.status} icon={item.id === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="xsm" /> : <StatusDot variant={dotOf(item.id === 'all' ? undefined : a)} label={a.status} />} />
+    },
+    onSelect: (item) => ({ value: `@${item.label}`, label: `@${item.label}`, variant: 'blue' as const }),
+  }), [agents, profile])
+  const submit = (v: string) => {
+    const text = v.trim()
+    if (!text) return
+    if (/(^|[^\w@])@all\b/i.test(text)) setConfirm(text)
+    else post.mutate({ text })
+  }
+  const byName = new Map(agents.map((a) => [a.name, a]))
+  const narrow = useNarrow()
+  const [sheet, setSheet] = useState(false)
+  const act = (f: () => void) => () => { setSheet(false); f() }
+  const members = (
+    <VStack gap={2} padding={3} style={{ minWidth: 240 }}>
+      <Text weight="semibold">Members</Text>
+      {!room.members.length && <Text type="supporting" size="sm">Nobody yet — @mention an agent.</Text>}
+      {room.members.map((n) => (
+        <HStack key={n} gap={2} align="center"><StatusDot variant={dotOf(byName.get(n))} label={byName.get(n)?.status ?? 'offline'} /><Text size="sm">{n}</Text>
+          <Text size="sm" type="supporting">{byName.get(n)?.asks ? 'needs you' : byName.get(n)?.status ?? 'gone'}</Text></HStack>
+      ))}
+    </VStack>
+  )
+  const roomSettings = (
+    <VStack gap={3} padding={3} style={{ minWidth: 280, maxWidth: 360 }}>
+      {room.title !== room.slug && <Text type="supporting" size="sm">{room.title}</Text>}
+      {!room.archived && (
+        <DropdownMenu button={{ label: `Responder: ${room.responderName ?? 'none'}${room.responder && !room.responderPinned ? ' (auto)' : ''}`, size: 'sm', variant: 'secondary' }} items={[
+          { label: 'None', description: 'unmentioned messages go to nobody', onClick: () => patch.mutate({ responder: null }) },
+          ...room.members.map((n) => byName.get(n)).filter((a): a is RoomAgent => Boolean(a)).map((a) => ({ label: a.name, description: a.status, onClick: () => patch.mutate({ responder: a.key }) })),
+        ]} />
+      )}
+      {!room.archived && <Switch label="All members hear the user" description="each message = one turn per member" value={Boolean(room.broadcast)} onChange={(v) => patch.mutate({ broadcast: v })} />}
+      {!room.archived && <Switch label="Paused" value={room.paused} onChange={(v) => patch.mutate({ paused: v })} />}
+      <HStack gap={2}>
+        {room.archived
+          ? <Button label="Restore" size="sm" variant="secondary" onClick={act(() => patch.mutate({ archived: false }))} />
+          : <Button label="Archive…" size="sm" variant="secondary" onClick={act(() => setArchiving(true))} />}
+        <Button label="Delete…" size="sm" variant="destructive" onClick={act(() => { setTyped(''); setDeleting(true) })} />
+      </HStack>
+    </VStack>
+  )
+  return (
+    <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
+      <HStack gap={1} align="center" style={{ minWidth: 0, flexWrap: 'nowrap' }}>
+        <IconButton icon={<span aria-hidden style={{ fontSize: 20, lineHeight: 1 }}>‹</span>} label="Back to rooms" size="sm" variant="ghost" onClick={onBack} />
+        <Heading level={3} maxLines={1} style={{ minWidth: 0 }}>{`#${room.slug}`}</Heading>
+        {room.paused && !room.archived && <Badge variant="warning" label="paused" />}
+        {room.broadcast && !room.archived && <Badge variant="blue" label="broadcast" />}
+        {room.archived && <Badge label="archived" />}
+        <div style={{ flex: 1 }} />
+        <Popover placement="below" alignment="end" content={members}>
+          <Button label={`${room.members.length}`} size="sm" variant="ghost" tooltip="Members" icon={<PeopleIcon />} />
+        </Popover>
+        {narrow ? (
+          <>
+            <IconButton icon={<span aria-hidden>⋯</span>} label="Room settings" size="sm" variant="ghost" onClick={() => setSheet(true)} />
+            <BottomSheet label={`#${room.slug} settings`} isOpen={sheet} onOpenChange={setSheet} height="auto">{roomSettings}</BottomSheet>
+          </>
+        ) : (
+          <Popover placement="below" alignment="end" content={roomSettings}>
+            <IconButton icon={<span aria-hidden>⋯</span>} label="Room settings" size="sm" variant="ghost" />
+          </Popover>
+        )}
+      </HStack>
+      {room.archived && <Banner status="info" title="Archived — read-only" description="Restore it from the ⋯ menu to post again." />}
+      {room.paused && !room.archived && (
+        <Card padding={2} variant="yellow">
+          <HStack gap={2} align="center" justify="between">
+            <Text size="sm">Room paused — agents won't receive messages</Text>
+            <Button label="Resume" size="sm" variant="secondary" onClick={() => patch.mutate({ paused: false })} />
+          </HStack>
+        </Card>
+      )}
+      <AlertDialog isOpen={archiving} onOpenChange={setArchiving} title={`Archive #${room.slug}?`}
+        description="It leaves the Rooms list and becomes read-only. Restore it any time from the Archived section." actionLabel="Archive" actionVariant="primary"
+        onAction={() => { setArchiving(false); patch.mutate({ archived: true }) }} />
+      <Dialog isOpen={deleting} onOpenChange={setDeleting} width={440} padding={4}>
+        <VStack gap={3}>
+          <Heading level={3}>{`Delete #${room.slug}?`}</Heading>
+          <Text type="supporting">This removes the room and all its messages, and drops anything still queued for agents. Type the room name to confirm.</Text>
+          <TextInput label="Room name" value={typed} onChange={setTyped} placeholder={room.slug} />
+          <HStack gap={2} justify="end">
+            <Button label="Cancel" variant="ghost" onClick={() => setDeleting(false)} />
+            <Button label="Delete room" variant="destructive" isDisabled={typed !== room.slug} isLoading={del.isPending} onClick={() => del.mutate()} />
+          </HStack>
+        </VStack>
+      </Dialog>
+      <ChatLayout style={{ flex: 1, minHeight: 0 }}
+        emptyState={<EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
+        composer={room.archived ? null : (
+          <VStack gap={1}>
+          <Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text>
+          <ChatComposer value={draft} onChange={setDraft} onSubmit={submit} isDisabled={post.isPending} density="compact"
+            input={<ChatComposerInput triggers={[mention]} placeholder={`Message #${room.slug}`} />} />
+          </VStack>
+        )}>
+        <ChatMessageList density="compact">
+          {msgs.map((m) => m.author.kind === 'system' ? (
+            <ChatMessage key={m.id} sender="system">
+              <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" /></Text>
+            </ChatMessage>
+          ) : (
+            <ChatMessage key={m.id} sender={m.author.kind === 'user' ? 'user' : 'assistant'}
+              avatar={m.author.kind === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="sm" /> : undefined}
+              name={m.author.kind === 'agent'
+                ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
+                : <Text size="sm" weight="medium">{profile.name}</Text>}
+              metadata={
+                <VStack gap={0}>
+                  <Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" />{m.deliveredTo.length ? ` · delivered to ${m.deliveredTo.join(', ')}` : ''}</Text>
+                  {(m.blocked ?? []).map((b) => <Text key={b.name} type="supporting" size="sm">{`@${b.name}: ${b.reason}`}</Text>)}
+                  {(m.queuedFor ?? m.mentions.filter((n) => n !== 'all' && n.toLowerCase() !== profile.handle.toLowerCase()))
+                    .filter((n) => !m.deliveredTo.includes(n) && !(m.blocked ?? []).some((b) => b.name === n)).map((n) =>
+                    <Text key={n} type="supporting" size="sm">{`@${n}: queued until the agent is idle`}</Text>)}
+                  {(m.notified ?? (m.author.kind === 'agent' && m.mentions.some((n) => n.toLowerCase() === profile.handle.toLowerCase()))) &&
+                    <Text type="supporting" size="sm">notified you</Text>}
+                </VStack>
+              }>
+              <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><Markdown density="compact">{m.text}</Markdown></ChatMessageBubble>
+            </ChatMessage>
+          ))}
+        </ChatMessageList>
+      </ChatLayout>
+      <AlertDialog isOpen={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)} title="Message everyone?"
+        description={`@all delivers this to all ${room.members.length} members of #${room.slug}.`} actionLabel="Send to all" actionVariant="primary"
+        isActionLoading={post.isPending} onAction={() => confirm && post.mutate({ text: confirm, confirmAll: true })} />
+    </VStack>
+  )
+}
+
+
+const PeopleIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
+    <circle cx="9" cy="8" r="4" /><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3" />
+  </svg>
+)
+function useNarrow(q = '(max-width: 639px)') {
+  const [n, setN] = useState(() => matchMedia(q).matches)
+  useEffect(() => { const m = matchMedia(q); const on = () => setN(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on) }, [q])
+  return n
+}

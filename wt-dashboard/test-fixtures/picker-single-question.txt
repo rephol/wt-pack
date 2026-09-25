@@ -1,0 +1,42 @@
+
+     View Observations Live @ http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
+
+❯ Call AskUserQuestion now, 1 question, header "Color", question "Which color?", single select, options Red, Blue, Green with short
+  descriptions, no previews.
+
+⏺ User declined to answer questions
+  ⎿  · Which color? (Red / Blue / Green)
+
+⏺ What would you like to clarify about the color question?
+
+✻ Churned for 4s · done 11:32 AM
+
+❯ Now call AskUserQuestion with 1 question header "Pick", question "Which ticket?", single select, 3 options each with a short preview field
+  ("a", "b", "c").
+
+⏺ User declined to answer questions
+  ⎿  · Which ticket? (Ticket A / Ticket B / Ticket C)
+
+⏺ You declined the ticket question without picking an option. What would you like to clarify about it?
+
+✻ Crunched for 3s · done 11:33 AM
+
+❯ Call AskUserQuestion: 1 question, header "Color", question "Which color?", single select, options Red, Blue, Green with short descriptions,
+  no previews.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Color
+
+Which color?
+
+❯ 1. Red
+     Warm, bold
+  2. Blue
+     Cool, calm
+  3. Green
+     Natural, fresh
+  4. Type something.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

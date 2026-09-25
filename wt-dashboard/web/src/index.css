@@ -1,0 +1,39 @@
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+@import '@astryxdesign/theme-neutral/theme.css';
+
+/* ponytail: neutral theme sets no font family; system stack instead of the serif fallback. */
+body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+/* WKWebView (the Tauri app) paints ChatLayout's frosted backdrop layer OVER the sticky composer that sits
+   above it in z-order, so the composer renders blurred. Keep the dock's non-composer layers unfiltered. */
+.astryx-chat-layout > :last-child > :not(:last-child) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Sidebar footer (Inbox / Settings / Server) pinned to the bottom of the nav, in the rail and the mobile drawer. */
+div:has(> div > .hd-nav-footer) { display: flex; flex-direction: column; }
+div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; background: inherit; padding-bottom: env(safe-area-inset-bottom); }
+
+/* Phones: stable height as the URL bar shows/hides; composer clear of the home indicator. */
+.astryx-app-shell { height: 100dvh; }
+.astryx-chat-layout > :last-child { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Inbox rows: compact list, kind icon, one-line title/body, short time; actions on hover (always shown on touch). */
+:root { --hd-red: #e5534b; --hd-green: #3fa35a; --hd-amber: #c69026; --hd-blue: #4493f8; --hd-muted: #8b949e; }
+.hd-inbox-row { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 12px; cursor: pointer; border-bottom: 1px solid rgba(128,128,128,.14); }
+.hd-inbox-row:hover, .hd-inbox-row:focus-visible { background: rgba(128,128,128,.10); outline: none; }
+.hd-kind { flex: 0 0 20px; display: inline-flex; justify-content: center; }
+.hd-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hd-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; opacity: .72; }
+.hd-title.unread { font-weight: 600; opacity: 1; }
+.hd-trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hd-body { font-size: 12.5px; opacity: .6; }
+.hd-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--hd-blue); }
+.hd-count { flex: none; font-size: 11px; font-weight: 500; opacity: .7; padding: 0 5px; border-radius: 8px; background: rgba(128,128,128,.2); }
+.hd-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.hd-time { font-size: 12px; opacity: .6; }
+.hd-acts { display: flex; gap: 0; }
+@media (hover: hover) and (pointer: fine) { .hd-inbox-row .hd-acts { opacity: 0; } .hd-inbox-row:hover .hd-acts, .hd-inbox-row:focus-within .hd-acts { opacity: 1; } }
+.hd-sub { position: sticky; top: 0; z-index: 1; padding: 6px 12px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .9; background: var(--color-background-surface, #1e1f22); }

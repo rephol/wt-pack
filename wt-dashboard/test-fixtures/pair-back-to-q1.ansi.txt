@@ -1,0 +1,41 @@
+[0m[38;2;153;153;153m  ⎿  SessionStart:startup says: # claude-mem status[0m
+
+     [0m[38;2;153;153;153mThis project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past[0m
+     [0m[38;2;153;153;153mwork.[0m
+
+     [0m[38;2;153;153;153mMemory injection starts on your second session in a project.[0m
+
+     [0m[38;2;153;153;153m`/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo,[0m
+     [0m[38;2;153;153;153moptional). Otherwise memory builds passively as work happens.[0m
+
+     [0m[38;2;153;153;153mLive activity: http://localhost:37701[0m
+     [0m[38;2;153;153;153m✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=welcome-hint&trial=30[0m
+     [0m[38;2;153;153;153mHow it works: `/how-it-works`[0m
+
+     [0m[38;2;153;153;153mThis message disappears once the first observation lands.[0m
+
+     [0m[38;2;153;153;153mView Observations Live @ http://localhost:37701[0m
+     [0m[38;2;153;153;153m✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30[0m
+
+[0m[38;2;80;80;80m[48;2;55;55;55m❯ [0m[38;2;255;255;255m[48;2;55;55;55mCall AskUserQuestion now (no other tools) with 2 questions. Q1 header "Next up", question "What should the planners pick up next?", single [0m[48;2;55;55;55m  [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mselect, options each WITH a preview: "UMK-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan UMK-1177"; "M5 video tickets" preview[0m[48;2;55;55;55m [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55m"planner-03 -> M5 tickets"; "UMK-1176 download log" preview "planner-04 -> /wt-plan UMK-1176". Q2 header "Polish", question "Which [0m[48;2;55;55;55m          [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mdashboard polish do you want?", multiSelect true, no previews, options: "Compact question card" desc "Make the pinned question card [0m[48;2;55;55;55m         [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mcollapsible so the conversation isn't squeezed."; "Wider Task column" desc "Stop the Agents table scrolling sideways when the chat panel is [0m[48;2;55;55;55m [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mopen."; "Nav overlay dots" desc "Hide collapsed-count dots inside the narrow-screen nav overlay."[0m[48;2;55;55;55m                                            [0m
+
+[0m[38;2;153;153;153m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[38;2;153;153;153m← [0m[38;2;0;0;0m[48;2;177;185;249m ☒ Next up  [0m☐ Polish  ✔ Submit  →
+
+[0m[1m[38;2;255;255;255mWhat should the planners pick up next?[0m
+
+[0m[38;2;177;185;249m❯[0m[38;2;153;153;153m 1.[0m[1m[38;2;78;186;101m UMK-1177 OTP hang [0m[38;2;78;186;101m ✔[0m         [0m[38;2;153;153;153m┌──────────────────────────────────────────┐[0m
+    [0m[1m[38;2;78;186;101m(Recommended)[0m                 [0m[38;2;153;153;153m│ [0mplanner-02 -> /wt-plan UMK-1177[0m[38;2;153;153;153m          │[0m
+ [0m[38;2;153;153;153m 2.[0m M5 video tickets             [0m[38;2;153;153;153m└──────────────────────────────────────────┘[0m
+ [0m[38;2;153;153;153m 3. [0mUMK-1176 download log
+                                  [0m[38;2;177;185;249mNotes:[0m [0m[3m[38;2;153;153;153mpress n to add notes[0m
+  
+[0m[38;2;153;153;153m───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  Chat about this
+
+[0m[38;2;153;153;153mEnter to select · ↑/↓ to navigate · n to add notes · Tab to switch questions · Esc to cancel[0m

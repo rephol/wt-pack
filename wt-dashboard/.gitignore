@@ -1,0 +1,10 @@
+node_modules/
+web/dist/
+app/build/
+app/src-tauri/target/
+app/src-tauri/binaries/
+app/src-tauri/gen/
+data/
+uploads/
+*.log
+.DS_Store
