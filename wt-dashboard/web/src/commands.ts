@@ -4,7 +4,7 @@ import type { SearchSource, SearchableItem } from '@astryxdesign/core/Typeahead'
 export interface Command { name: string; description: string; source: string }
 const SOURCE_ORDER = ['Project', 'Personal', 'Plugins', 'Built-in']
 // Fuzzy: every query char in order; contiguous/early hits in the name score higher; description is a weaker fallback.
-function fuzzy(q: string, s: string): number {
+export function fuzzy(q: string, s: string): number {
   let i = 0, score = 0, last = -2
   for (let j = 0; j < s.length && i < q.length; j++) {
     if (s[j] === q[i]) { score += j === last + 1 ? 3 : 1; last = j; i++ }

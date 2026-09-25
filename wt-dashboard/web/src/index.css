@@ -37,3 +37,6 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 .hd-acts { display: flex; gap: 0; }
 @media (hover: hover) and (pointer: fine) { .hd-inbox-row .hd-acts { opacity: 0; } .hd-inbox-row:hover .hd-acts, .hd-inbox-row:focus-within .hd-acts { opacity: 1; } }
 .hd-sub { position: sticky; top: 0; z-index: 1; padding: 6px 12px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .9; background: var(--color-background-surface, #1e1f22); }
+
+/* Quick switcher (CommandPalette): small uppercase group headings. */
+.astryx-command-palette-group-heading { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }

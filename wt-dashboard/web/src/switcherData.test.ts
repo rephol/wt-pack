@@ -1,0 +1,22 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { switcherItems, type SwAgent } from './switcherData.ts'
+
+const ag = (name: string, o: Partial<SwAgent> = {}): SwAgent => ({ key: name, name, pool: 'worker', machine: 'm', local: true, status: 'idle', asks: false, statusSince: 0, lastActivity: 0, recap: null, question: null, task: null, ...o })
+const A = [ag('w-01', { status: 'working', lastActivity: 5 }), ag('w-02', { asks: true, question: 'Merge?', lastActivity: 9 }), ag('p-10', { lastActivity: 7, recap: 'fixing the parser' }), ag('p-02', { lastActivity: 1, task: 'UMK-1183' })]
+const rows = (xs: ReturnType<typeof switcherItems>) => xs.map((x) => `${x.auxiliaryData!.group}:${x.label}`)
+
+test('switcher: each agent once, in its highest section; recent capped at 5', () => {
+  assert.deepEqual(rows(switcherItems(A, [], ['w-02', 'p-02', 'w-01'])), ['Needs you:w-02', 'Recent:p-02', 'Recent:w-01', 'Agents:p-10'])
+})
+test('switcher: subtitle is never empty', () => {
+  for (const it of switcherItems(A, [], [])) assert.ok(it.auxiliaryData!.line.length > 0)
+  assert.equal(switcherItems(A, [], []).find((x) => x.label === 'p-02')!.auxiliaryData!.line, 'idle · no recent summary')
+})
+test('switcher: fuzzy name, ticket id and recap search; rooms only when waiting on you', () => {
+  assert.deepEqual(switcherItems(A, [], [], 'p10').map((x) => x.label), ['p-10'])
+  assert.deepEqual(switcherItems(A, [], [], 'umk-1183').map((x) => x.label), ['p-02'])
+  assert.deepEqual(switcherItems(A, [], [], 'parser').map((x) => x.label), ['p-10'])
+  const rooms = [{ slug: 'ops', title: 'Ops', needsYou: [{ agent: 'w-01', text: 'ok?' }] }, { slug: 'quiet', title: 'Quiet' }]
+  assert.deepEqual(switcherItems([], rooms, []).map((x) => x.id), ['room:ops'])
+})
