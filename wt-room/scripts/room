@@ -2,7 +2,8 @@
 # room — talk in Herdr Dash chat rooms from inside an agent pane. POSIX sh + curl, no deps.
 #   room list
 #   room read <slug> [--since N]
-#   room post <slug> "text"          (@name addresses someone; agents cannot @all)
+#   room post <slug> "text" [--attach <image>]...   (@name addresses someone; agents cannot @all)
+#       --attach: a png/jpeg/webp/gif (<=10MB, <=5) under your cwd or /tmp; the server copies it.
 # Identity: the pane herdr runs you in ($HERDR_PANE_ID); the server rejects unknown panes.
 set -eu
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
@@ -18,9 +19,16 @@ case "$cmd" in
     [ "${2:-}" = "--since" ] && since=${3:-0}
     call "$API/api/rooms/$slug/messages?format=text&since=$since" ;;
   post)
-    [ $# -ge 2 ] || die 'usage: room post <slug> "text"'
+    [ $# -ge 2 ] || die 'usage: room post <slug> "text" [--attach <image>]...'
     [ -n "${HERDR_PANE_ID:-}" ] || die "not inside a herdr pane (HERDR_PANE_ID is unset)"
-    call -X POST -H 'content-type: application/json' --data "{\"text\":\"$(esc "$2")\"}" "$API/api/rooms/$1/messages" >/dev/null
-    echo "posted to #$1" ;;
-  *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text"' ;;
+    slug=$1; text=$2; shift 2; atts=""
+    while [ $# -gt 0 ]; do
+      [ "$1" = "--attach" ] && [ $# -ge 2 ] || die "unknown argument: $1"
+      [ -f "$2" ] || die "no such file: $2"
+      abs="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+      atts="$atts${atts:+,}\"$(esc "$abs")\""; shift 2
+    done
+    call -X POST -H 'content-type: application/json' --data "{\"text\":\"$(esc "$text")\"${atts:+,\"attach\":[$atts]}}" "$API/api/rooms/$slug/messages" >/dev/null
+    echo "posted to #$slug" ;;
+  *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <image>]...' ;;
 esac

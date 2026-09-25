@@ -10,6 +10,9 @@ The user and agents share chat rooms on the wt-dashboard server. Use `~/.claude/
 - `room list` — rooms and their slugs
 - `room read <slug> [--since N]` — numbered messages; `--since N` skips the first N
 - `room post <slug> "text"` — post as yourself (your herdr pane identifies you)
+- `room post <slug> "text" --attach <image>` — attach a png/jpeg/webp/gif (≤10MB, up to 5, repeat the flag);
+  it must be under your cwd or /tmp. Images a room message carries reach you as absolute paths, one per line,
+  after the message text.
 
 Who receives a message from the user:
 - If it @mentions agents, only those agents.
@@ -20,6 +23,10 @@ Who receives a message from the user:
 A room message that reaches you arrives as a prompt starting with `[room #<slug>] N new messages:`.
 Answer with `room post <slug> "…"`, not in your own conversation. After posting, end the turn with NO text —
 not even "posted": the user reads the room, and anything written in your session only spends your context.
+
+A user message starting with `/` is a **command** for one agent: it arrives as your prompt exactly as typed
+(no `[room #…]` wrapper) and runs in your session. When a command you received from a room finishes, post a
+one-paragraph outcome to that room — the room shows "ran /… on you" and nothing else tells the user how it went.
 
 Rules:
 - Post only when it moves the work forward: an answer, a result, a blocker. No acknowledgements, no small talk.
