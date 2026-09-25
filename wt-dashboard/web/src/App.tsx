@@ -33,7 +33,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { Link } from '@astryxdesign/core/Link'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
-import { Markdown } from '@astryxdesign/core/Markdown'
+import { ChatMarkdown } from './links'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
@@ -714,7 +714,7 @@ function PickerCard({ agent, picker, onSent }: { agent: Agent; picker: Picker; o
             ))
           ) : (
             <>
-              <Markdown density="compact">{picker.question ?? ''}</Markdown>
+              <ChatMarkdown>{picker.question ?? ''}</ChatMarkdown>
               {picker.multiSelect ? (
                 <CheckboxList label="Choose any" isLabelHidden value={multi} onChange={setMulti}>
                   {(picker.options ?? []).map((o) => (
@@ -1105,7 +1105,7 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
                   ) : (
                     <ChatMessage key={r.m.id} sender="assistant">
                       <ChatMessageBubble variant="ghost" width="100%">
-                        {r.m.text && <Markdown density="compact">{r.m.text}</Markdown>}
+                        {r.m.text && <ChatMarkdown>{r.m.text}</ChatMarkdown>}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
                         {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
                       </ChatMessageBubble>

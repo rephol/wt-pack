@@ -17,7 +17,7 @@ import { Card } from '@astryxdesign/core/Card'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { Markdown } from '@astryxdesign/core/Markdown'
+import { ChatMarkdown } from './links'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Avatar } from '@astryxdesign/core/Avatar'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
@@ -251,7 +251,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
                     <Text type="supporting" size="sm">notified you</Text>}
                 </VStack>
               }>
-              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><Markdown density="compact">{m.text}</Markdown></ChatMessageBubble>}
+              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
             </ChatMessage>
           ))}
