@@ -11,9 +11,13 @@ import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES } from './usage.mjs'
+import { Config, KEYS, isLoopbackRequest } from './config.mjs'
 
 const PORT = Number(process.env.PORT ?? 7777)
-const REPO = process.env.UMKMALL_REPO ?? join(homedir(), 'Work', 'projects', 'umkmall')
+// Integrations & environment (config.mjs): env var > Keychain > ~/.config/wt-dashboard/env > default.
+const cfg = new Config({ file: join(homedir(), '.config', 'wt-dashboard', 'env') })
+// ponytail: the default repo is read once; changing it asks for a restart (it is threaded through many paths).
+const REPO = cfg.get('UMKMALL_REPO') ?? join(homedir(), 'Work', 'projects', 'umkmall')
 // WT_DASHBOARD_* env names; the old HERDR_DASH_* names are still read as a fallback.
 const envOf = (k) => process.env[`WT_DASHBOARD_${k}`] ?? process.env[`HERDR_DASH_${k}`]
 // Everything the dashboard writes lives outside the source tree: <root>/data and <root>/uploads.
@@ -513,7 +517,7 @@ const AGENTS_SH = join(homedir(), '.claude', 'skills', 'wt-agents', 'scripts', '
 // and every repo a local agent is working in.
 async function projectRoots() {
   return cached('projectRoots', 30_000, async () => {
-    const dirs = [REPO, ...(envOf('PROJECTS') ?? '').split(':').filter(Boolean), ...(await agents()).filter((a) => a.local && a.cwd).map((a) => a.cwd)]
+    const dirs = [REPO, ...cfg.list('WT_DASHBOARD_PROJECTS'), ...(await agents()).filter((a) => a.local && a.cwd).map((a) => a.cwd)]
     const map = new Map()
     for (const d of new Set(dirs)) {
       const c = await git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
@@ -643,7 +647,7 @@ const LINEAR_Q = `query {
   }) { nodes { identifier title priority url updatedAt state { name } } }
 }`
 async function linear() {
-  const key = process.env.LINEAR_API_KEY
+  const key = cfg.get('LINEAR_API_KEY')
   if (!key) return null
   return cached('linear', 60_000, async () => {
     const r = await fetch('https://api.linear.app/graphql', {
@@ -745,7 +749,7 @@ async function health() {
     ok: true, app: 'wt-dashboard', runtime: RUNTIME, pid: process.pid, startedAt: STARTED_AT,
     managedBy: envOf('APP') === '1' ? 'app' : 'external',
     webBuiltAt: dist?.mtime.toISOString() ?? null,
-    sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(process.env.LINEAR_API_KEY) } },
+    sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
   }
 }
 
@@ -755,14 +759,14 @@ async function overview() {
       track('herdr', agents()),
       track('git', worktrees()),
       track('gh', prs()).catch((e) => (console.error(e.message), [])),
-      (process.env.LINEAR_API_KEY ? track('linear', linear()) : linear()).catch((e) => (console.error(e.message), [])),
+      (cfg.get('LINEAR_API_KEY') ? track('linear', linear()) : linear()).catch((e) => (console.error(e.message), [])),
     ])
     const tasks = [...deriveTasks({ agents: ag, worktrees: wt, prs: pr, issues }), ...(await rooms.needsTasks())]
     const taskOf = new Map(tasks.filter((t) => t.agent).map((t) => [t.agent.key, t.id]))
     const n = (s) => tasks.filter((t) => t.state === s).length
     return {
       at: new Date().toISOString(),
-      linearEnabled: Boolean(process.env.LINEAR_API_KEY),
+      linearEnabled: Boolean(cfg.get('LINEAR_API_KEY')),
       agents: ag.map((a) => ({ ...a, task: taskOf.get(a.key) ?? null })),
       machines: await track('machines', machineSummaries(ag).then((ms) => {
         SOURCES.machines.online = ms.filter((m) => m.status === 'online').length
@@ -1141,11 +1145,9 @@ const send = (res, code, data, type = 'application/json') => {
 
 // Extra exact hostnames allowed through the Host/Origin guard, e.g. the tailnet name that
 // `tailscale serve` proxies from. Comma-separated; exact match only, never a wildcard.
-const EXTRA_HOSTS = (envOf('ALLOWED_HOSTS') ?? '')
-  .split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)
 const LOCAL = {
   test: (h) =>
-    /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h) || EXTRA_HOSTS.includes(h.toLowerCase().replace(/:443$/, '')),
+    /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
 }
 const PANE = /^[\w.:-]+$/
 const KEY = /^[\w+-]{1,20}$/
@@ -1308,6 +1310,54 @@ async function roomsApi(req, res, url, parts) {
   send(res, 404, { error: 'not found' })
 }
 
+// ---- Settings → Integrations & environment ----
+// GET lists every key with its source; a secret is only ever "set · …last4". Writes are session-gated (needsSession)
+// and allowed hosts additionally need a request from this machine's own 127.0.0.1 page.
+async function linearViewer(key) {
+  const r = await fetch('https://api.linear.app/graphql', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: key },
+    body: JSON.stringify({ query: '{ viewer { name email organization { name } } }' }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok || j.errors) throw new Error(j.errors?.[0]?.message ?? `Linear answered ${r.status}`)
+  return { user: j.data.viewer.name ?? j.data.viewer.email, workspace: j.data.viewer.organization?.name ?? null }
+}
+async function repoRoot(p) {
+  if (typeof p !== 'string' || !p.startsWith('/')) throw Object.assign(new Error('an absolute path'), { status: 400 })
+  const c = await git(p, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
+  if (!c) throw Object.assign(new Error(`not a git repository: ${p}`), { status: 400 })
+  return dirname(c.trim())
+}
+async function configApi(req, res, parts) {
+  const state = () => ({ items: cfg.publicState(), loopback: isLoopbackRequest(req), app: process.env.WT_DASHBOARD_APP === '1' })
+  if (req.method === 'GET' && parts.length === 2) return send(res, 200, state())
+  const b = JSON.parse((await body(req)) || '{}')
+  if (req.method === 'POST' && parts[2] === 'linear-test') {
+    const key = cfg.get('LINEAR_API_KEY')
+    if (!key) return send(res, 400, { error: 'no Linear API key set' })
+    return send(res, 200, await linearViewer(key).then((v) => ({ ok: true, ...v }), (e) => ({ ok: false, error: e.message })))
+  }
+  if (req.method === 'POST' && parts[2] === 'check-repo') return send(res, 200, await repoRoot(b.path).then((root) => ({ ok: true, root }), (e) => ({ ok: false, error: e.message })))
+  const k = parts[2]
+  const d = KEYS[k]
+  if (!d || !(req.method === 'PUT' || req.method === 'DELETE')) return send(res, 404, { error: 'not found' })
+  if (cfg.override(k) != null) return send(res, 409, { error: `${k} is set in the server's environment; change it there` })
+  if (d.loopbackOnly && !isLoopbackRequest(req)) return send(res, 403, { error: 'allowed hosts can be changed only from http://127.0.0.1 on this machine' })
+  if (d.secret) {
+    if (req.method === 'DELETE') await cfg.removeSecret(k)
+    else await cfg.setSecret(k, typeof b.value === 'string' ? b.value.trim() : '')
+    store.delete('linear')
+  } else {
+    const v = req.method === 'DELETE' ? (d.list ? [] : '') : b.value
+    if (k === 'WT_DASHBOARD_PROJECTS') for (const p of v ?? []) await repoRoot(p)
+    if (k === 'UMKMALL_REPO' && v) await repoRoot(v)
+    await cfg.setValue(k, v)
+    store.delete('projectRoots')
+  }
+  send(res, 200, state())
+}
+
 const server = http.createServer(async (req, res) => {
     try {
       // DNS-rebinding + CSRF guard: this can type into agents running with bypassed permissions.
@@ -1327,6 +1377,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
       if (url.pathname === '/api/uploads' && req.method === 'POST') {
         const [code, out] = await saveUpload(req).catch((e) => [e.status ?? 500, { error: e.message }])
@@ -1439,13 +1490,13 @@ const server = http.createServer(async (req, res) => {
 // Loopback only. Guarded so parse.test.mjs can import without listening.
 // WT_DASHBOARD_SERVE=1: the desktop app's single-executable build, where argv/import.meta differ.
 if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url))
-  server.listen(PORT, '127.0.0.1', () => {
+  cfg.load().catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
     console.log(`agent control room api → http://127.0.0.1:${PORT}`)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
     setInterval(roomsLoop, 4000)
     setInterval(tick, 4000)
     setTimeout(tick, 500)
     inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${envOf('APP') === '1' ? 'app-managed' : 'external'})`, body: `pid ${process.pid}`, target: {}, quiet: true })
-  })
+  }))
 // Spawned by the desktop app: exit with it, however it quit (a macOS quit can skip the app's own kill).
 if (envOf('APP') === '1') setInterval(() => process.ppid === 1 && process.exit(0), 2000).unref()

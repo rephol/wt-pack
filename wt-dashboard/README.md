@@ -25,7 +25,7 @@ open app/src-tauri/target/release/bundle/macos/wt-dashboard.app
 - Needs Rust (`~/.cargo/env`) and Xcode command-line tools. The app is unsigned: first launch via Finder right-click → Open (Gatekeeper).
 - On start it reuses a server already answering `127.0.0.1:7777/api/health`, else it runs the live `server.mjs` from `$WT_DASHBOARD_HOME` or `~/.claude/skills/wt-dashboard` (symlink resolved), else the bundled `wt-dashboard-server` sidecar (server.mjs as a Node single executable). It restarts a crashed server and stops it on quit.
 - GUI apps get a minimal PATH, so the sidecar's PATH comes from `zsh -lc 'echo $PATH'` plus nvm, Homebrew, `~/.cargo/bin` and `~/.local/bin`.
-- Env for the server (e.g. Linear, tailnet hosts): `~/.config/wt-dashboard/env` with `KEY=VALUE` lines, e.g. `LINEAR_API_KEY=lin_api_…`, `WT_DASHBOARD_ALLOWED_HOSTS=…`. The old `~/.config/herdr-dash/env` is read as a fallback (logged).
+- Env for the server (e.g. Linear, tailnet hosts): `~/.config/wt-dashboard/env` with `KEY=VALUE` lines, e.g. `LINEAR_API_KEY=lin_api_…`, `WT_DASHBOARD_ALLOWED_HOSTS=…`. The old `~/.config/herdr-dash/env` is read as a fallback (logged). Editable in Settings › Integrations (applies without a restart, except `UMKMALL_REPO`); precedence is process env var › Keychain (`LINEAR_API_KEY`, service `wt-dashboard`) › env file › default. Allowed hosts can be changed only from `http://127.0.0.1` on this machine.
 - Logs: `~/Library/Logs/wt-dashboard/app.log`.
 
 ## Data

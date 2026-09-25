@@ -388,3 +388,80 @@ test('usage: limits never expose tokenHash; missing fields are null; stale after
   assert.equal(JSON.stringify(l).includes('secret'), false)
   assert.equal(l.session, 21); assert.equal(l.sessionResetAt, null); assert.equal(l.stale, true)
 })
+
+// ---- Integrations & environment (config.mjs) ----
+import { Config, isLoopbackRequest, setEnvLine, keychain } from './config.mjs'
+import { mkdtempSync, writeFileSync as wfs, readFileSync as rfs, statSync as sfs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join as pj } from 'node:path'
+
+const KEYVAL = 'lin_api_SECRETsecret1234abcd'
+const fakeKc = () => { const m = {}; return { m, get: async (a) => m[a] ?? null, set: async (a, v) => { m[a] = v }, del: async (a) => { delete m[a] } } }
+const tmpCfg = (text = '', env = {}, kc = fakeKc()) => {
+  const f = pj(mkdtempSync(pj(tmpdir(), 'wtd-cfg-')), 'env'); wfs(f, text)
+  return { f, kc, cfg: new Config({ file: f, env, kc, platform: 'darwin' }) }
+}
+
+test('config: the secret never appears in the public state, only last4', async () => {
+  const { cfg, kc, f } = tmpCfg('LINEAR_API_KEY=lin_api_oldoldoldold\nOTHER=1\n', {})
+  await cfg.load()
+  assert.equal(await cfg.setSecret('LINEAR_API_KEY', KEYVAL), 'keychain')
+  assert.equal(kc.m.LINEAR_API_KEY, KEYVAL)
+  assert.equal(rfs(f, 'utf8'), 'OTHER=1\n') // the plaintext copy is gone from the file
+  const pub = JSON.stringify(cfg.publicState())
+  assert.ok(!pub.includes(KEYVAL) && !pub.includes('SECRETsecret'))
+  assert.match(pub, /"last4":"abcd"/)
+  assert.equal(cfg.source('LINEAR_API_KEY'), 'keychain')
+})
+
+test('config: keychain failure falls back to a 0600 env file', async () => {
+  const kc = { get: async () => null, set: async () => { throw new Error('no') }, del: async () => {} }
+  const { cfg, f } = tmpCfg('', {}, kc)
+  await cfg.load()
+  assert.equal(await cfg.setSecret('LINEAR_API_KEY', KEYVAL), 'file')
+  assert.equal(sfs(f).mode & 0o777, 0o600)
+  assert.equal(cfg.source('LINEAR_API_KEY'), 'file')
+  assert.ok(!JSON.stringify(cfg.publicState()).includes(KEYVAL))
+})
+
+test('config: precedence env var > keychain > file; an app-injected file value is not an override', async () => {
+  const { cfg } = tmpCfg('WT_DASHBOARD_ALLOWED_HOSTS=a.ts.net\n', { WT_DASHBOARD_ALLOWED_HOSTS: 'a.ts.net', LINEAR_API_KEY: 'lin_api_fromtheenv0000' })
+  await cfg.load()
+  assert.equal(cfg.source('WT_DASHBOARD_ALLOWED_HOSTS'), 'file')
+  assert.equal(cfg.override('WT_DASHBOARD_ALLOWED_HOSTS'), null)
+  await cfg.setValue('WT_DASHBOARD_ALLOWED_HOSTS', ['B.ts.net', 'c.ts.net'])
+  assert.deepEqual(cfg.list('WT_DASHBOARD_ALLOWED_HOSTS'), ['b.ts.net', 'c.ts.net']) // applies at runtime
+  await cfg.setSecret('LINEAR_API_KEY', KEYVAL)
+  assert.equal(cfg.get('LINEAR_API_KEY'), 'lin_api_fromtheenv0000')
+  assert.equal(cfg.source('LINEAR_API_KEY'), 'env')
+})
+
+test('config: allowed hosts are exact hostnames only', async () => {
+  const { cfg } = tmpCfg()
+  for (const bad of [['*.ts.net'], ['https://x.ts.net'], ['x.ts.net:443'], ['a b']])
+    await assert.rejects(cfg.setValue('WT_DASHBOARD_ALLOWED_HOSTS', bad), /exact hostnames/)
+})
+
+test('config: the keychain writer passes the secret on stdin, never in argv', async () => {
+  const calls = []
+  const kc = keychain(async (cmd, args, input) => { calls.push({ cmd, args, input }); return '' })
+  await kc.set('LINEAR_API_KEY', KEYVAL)
+  assert.ok(!calls[0].args.join(' ').includes(KEYVAL))
+  assert.ok(calls[0].input.includes(KEYVAL))
+  await assert.rejects(kc.set('LINEAR_API_KEY', 'x" ; delete-keychain'), /unexpected/)
+})
+
+test('setEnvLine keeps other lines and comments', () => {
+  assert.equal(setEnvLine('# c\nA=1\nB=2\n', 'A', '3'), '# c\nB=2\nA=3\n')
+  assert.equal(setEnvLine('A=1\n', 'A', null), '')
+})
+
+test('isLoopbackRequest: only this machine\'s own 127.0.0.1 page, never a tailnet proxy', () => {
+  const r = (addr, headers) => ({ socket: { remoteAddress: addr }, headers })
+  assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777' })), true)
+  assert.equal(isLoopbackRequest(r('::1', { host: 'localhost:7777' })), true)
+  assert.equal(isLoopbackRequest(r('127.0.0.1', { host: 'mac.tail1234.ts.net' })), false) // tailscale serve
+  assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777', 'x-forwarded-for': '100.64.0.2' })), false)
+  assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777', 'tailscale-user-login': 'a@b' })), false)
+  assert.equal(isLoopbackRequest(r('100.64.0.2', { host: '127.0.0.1:7777' })), false)
+})

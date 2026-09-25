@@ -30,7 +30,7 @@ const ago = (iso: string | null) => {
 }
 const dot = (s: Source) => (s.enabled === false ? 'neutral' : s.ok === null ? 'neutral' : s.ok ? 'success' : 'error') as 'neutral' | 'success' | 'error'
 
-function useServerControl() {
+export function useServerControl() {
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
   useEffect(() => {

@@ -1,0 +1,160 @@
+// Integrations & environment: the settings that used to live only in ~/.config/wt-dashboard/env, editable from
+// Settings. Precedence per key: process env var > Keychain (secrets only) > env file > default.
+// The desktop app injects the env file into the server's env at launch, so a process env var that EQUALS the
+// file's value at boot is treated as coming from the file, not as an override.
+// Secrets never leave this module except to the caller that uses them (the Linear client): publicState() carries
+// only "set" and the last four characters.
+import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { writeFile, rename, mkdir, chmod } from 'node:fs/promises'
+import { dirname } from 'node:path'
+
+export const KEYS = {
+  LINEAR_API_KEY: { secret: true, label: 'Linear API key' },
+  WT_DASHBOARD_PROJECTS: { list: ':', legacy: 'HERDR_DASH_PROJECTS', label: 'Extra projects' },
+  WT_DASHBOARD_ALLOWED_HOSTS: { list: ',', legacy: 'HERDR_DASH_ALLOWED_HOSTS', label: 'Allowed hosts', loopbackOnly: true },
+  UMKMALL_REPO: { label: 'Default repo', restart: true },
+}
+const SERVICE = 'wt-dashboard'
+const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/
+const SECRET = /^[\w-]{8,200}$/ // Linear keys are lin_api_…; also keeps the value safe inside `security -i` quoting
+
+export function parseEnvFile(text) {
+  const out = {}
+  for (const l of text.split('\n')) {
+    if (l.trim().startsWith('#')) continue
+    const i = l.indexOf('=')
+    if (i > 0) out[l.slice(0, i).trim()] = l.slice(i + 1).trim().replace(/^"|"$/g, '')
+  }
+  return out
+}
+// Replace or drop one KEY= line, keeping every other line (comments included) as written.
+export function setEnvLine(text, key, value) {
+  const lines = text.split('\n').filter((l) => !(l.includes('=') && l.slice(0, l.indexOf('=')).trim() === key))
+  while (lines.length && lines.at(-1) === '') lines.pop()
+  if (value != null && value !== '') lines.push(`${key}=${value}`)
+  return lines.length ? lines.join('\n') + '\n' : ''
+}
+
+// macOS login Keychain via `security`. The secret goes in on STDIN (`security -i` reads commands from it), never
+// argv, so it never shows up in `ps`. Reads use `-w`, which prints only the password to our pipe.
+export function keychain(run = defaultRun) {
+  return {
+    get: (acct) => run('security', ['find-generic-password', '-s', SERVICE, '-a', acct, '-w']).then((o) => o.replace(/\n$/, '') || null, () => null),
+    set: (acct, v) => {
+      if (!SECRET.test(v) || !/^\w+$/.test(acct)) return Promise.reject(new Error('refusing an unexpected character'))
+      return run('security', ['-i'], `add-generic-password -s ${SERVICE} -a ${acct} -w "${v}" -U\n`).then(() => undefined)
+    },
+    del: (acct) => run('security', ['delete-generic-password', '-s', SERVICE, '-a', acct]).then(() => undefined, () => undefined),
+  }
+}
+function defaultRun(cmd, args, input) {
+  return new Promise((resolve, reject) => {
+    const p = execFile(cmd, args, { timeout: 10_000 }, (err, out) => (err ? reject(new Error(`${cmd} ${args[0]} failed (${err.code ?? 'error'})`)) : resolve(out)))
+    p.stdin.end(input ?? '')
+  })
+}
+
+export class Config {
+  constructor({ file, env = process.env, kc = keychain(), platform = process.platform }) {
+    this.file = file
+    this.env = env
+    this.kc = platform === 'darwin' ? kc : null
+    this.fileVals = this.readFile()
+    this.boot = { ...this.fileVals } // what the app injected at launch
+    this.secrets = {} // key -> value from the Keychain
+    this.bootValues = {} // resolved at start, for keys that need a restart
+  }
+  readFile() { try { return parseEnvFile(readFileSync(this.file, 'utf8')) } catch { return {} } }
+  async load() {
+    if (this.kc) for (const k of Object.keys(KEYS)) if (KEYS[k].secret) this.secrets[k] = await this.kc.get(k)
+    for (const k of Object.keys(KEYS)) this.bootValues[k] = this.get(k)
+    return this
+  }
+  // A real process override: set in the env and not merely the file's own value injected at launch.
+  override(k) {
+    const v = this.env[k] ?? (KEYS[k].legacy ? this.env[KEYS[k].legacy] : undefined)
+    return v != null && v !== '' && v !== this.boot[k] ? v : null
+  }
+  source(k) {
+    if (this.override(k) != null) return 'env'
+    if (KEYS[k].secret && this.secrets[k]) return 'keychain'
+    if (this.fileVals[k]) return 'file'
+    return 'default'
+  }
+  get(k) {
+    return this.override(k) ?? (KEYS[k].secret ? this.secrets[k] : null) ?? this.fileVals[k] ?? null
+  }
+  list(k) { return (this.get(k) ?? '').split(KEYS[k].list).map((s) => s.trim()).filter(Boolean) }
+
+  async writeFileKey(k, v) {
+    const text = (() => { try { return readFileSync(this.file, 'utf8') } catch { return '' } })()
+    await mkdir(dirname(this.file), { recursive: true })
+    const tmp = `${this.file}.${process.pid}.tmp`
+    await writeFile(tmp, setEnvLine(text, k, v), { mode: 0o600 })
+    await chmod(tmp, 0o600)
+    await rename(tmp, this.file)
+    this.fileVals = this.readFile()
+  }
+  // Returns where it went. Keychain first; on failure the 0600 env file.
+  async setSecret(k, v) {
+    if (!SECRET.test(v)) throw Object.assign(new Error('that does not look like an API key'), { status: 400 })
+    if (this.kc) {
+      try {
+        await this.kc.set(k, v)
+        this.secrets[k] = v
+        if (this.fileVals[k]) await this.writeFileKey(k, null) // no plaintext copy left behind
+        return 'keychain'
+      } catch { /* fall through to the file */ }
+    }
+    await this.writeFileKey(k, v)
+    return 'file'
+  }
+  async removeSecret(k) {
+    if (this.kc) await this.kc.del(k)
+    this.secrets[k] = null
+    await this.writeFileKey(k, null)
+  }
+  // Validates and writes a non-secret key. Lists arrive as arrays.
+  async setValue(k, v) {
+    const d = KEYS[k]
+    let s
+    if (d.list) {
+      if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) throw Object.assign(new Error('expected a list'), { status: 400 })
+      const items = [...new Set(v.map((x) => x.trim()).filter(Boolean))]
+      if (k === 'WT_DASHBOARD_ALLOWED_HOSTS') {
+        const bad = items.map((h) => h.toLowerCase()).filter((h) => !HOST.test(h))
+        if (bad.length) throw Object.assign(new Error(`exact hostnames only (no scheme, port or wildcard): ${bad.join(', ')}`), { status: 400 })
+        s = items.map((h) => h.toLowerCase()).join(',')
+      } else {
+        if (items.some((p) => !p.startsWith('/') || p.includes(':') || /[\n"]/.test(p))) throw Object.assign(new Error('absolute paths only'), { status: 400 })
+        s = items.join(':')
+      }
+    } else {
+      if (typeof v !== 'string' || (v && (!v.startsWith('/') || /[\n"]/.test(v)))) throw Object.assign(new Error('an absolute path'), { status: 400 })
+      s = v.trim()
+    }
+    await this.writeFileKey(k, s)
+  }
+  publicState() {
+    return Object.entries(KEYS).map(([k, d]) => {
+      const o = { key: k, label: d.label, source: this.source(k), overridden: this.override(k) != null }
+      if (d.secret) {
+        const v = this.get(k)
+        return { ...o, secret: true, set: Boolean(v), last4: v ? v.slice(-4) : null }
+      }
+      const value = d.list ? this.list(k) : this.get(k)
+      return { ...o, value, restartNeeded: Boolean(d.restart && this.get(k) !== this.bootValues[k]), loopbackOnly: Boolean(d.loopbackOnly) }
+    })
+  }
+}
+
+// Only a request made on this machine to 127.0.0.1/localhost itself — not one `tailscale serve` proxied in
+// (that also arrives from loopback, but with the tailnet Host and forwarding headers).
+export function isLoopbackRequest(req) {
+  const addr = req.socket?.remoteAddress ?? ''
+  const h = req.headers ?? {}
+  return /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(addr)
+    && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h.host ?? '')
+    && !h['x-forwarded-for'] && !h['x-forwarded-host'] && !h['tailscale-user-login'] && !h.forwarded
+}
