@@ -22,7 +22,7 @@ import { ServerPanel } from './status'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
-import { useChatDensity, setChatDensity, type ChatDensity } from './density'
+import { useChatDensity, setChatDensity, useLinkPreviews, setLinkPreviews, type ChatDensity } from './density'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 
@@ -119,6 +119,7 @@ function ProfileSection() {
 
 function ProfileForm({ profile, save, status, busy }: { profile: Profile; save: (p: Profile) => void; status: string; busy: boolean }) {
   const density = useChatDensity()
+  const previews = useLinkPreviews()
   const toast = useToast()
   const [name, setName] = useState(profile.name)
   const [handle, setHandle] = useState(profile.handle)
@@ -144,6 +145,7 @@ function ProfileForm({ profile, save, status, busy }: { profile: Profile; save: 
             <SegmentedControlItem value="spacious" label="Spacious" />
           </SegmentedControl>
         </Field>
+        <Switch label="Link previews" description="A card under messages with links: title, summary, image; PR, issue and Linear status. Pages are fetched by the server, never your browser." value={previews} onChange={setLinkPreviews} />
         <Field label="Avatar" inputID="profile-avatar" description="png, jpeg, webp or gif">
           <HStack gap={3} align="center">
             <Avatar name={name} src={avatar ?? undefined} size="lg" />

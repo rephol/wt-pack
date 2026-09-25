@@ -14,3 +14,13 @@ export function setChatDensity(d: ChatDensity) {
 }
 export const useChatDensity = () => useSyncExternalStore((f) => { subs.add(f); return () => { subs.delete(f) } }, () => current, () => current)
 export const markdownDensity = (d: ChatDensity) => (d === 'compact' ? 'compact' : 'default')
+
+// Settings › Profile "Link previews" (on by default).
+let previews = (() => { try { return localStorage.getItem('link-previews') !== '0' } catch { return true } })()
+const psubs = new Set<() => void>()
+export function setLinkPreviews(v: boolean) {
+  previews = v
+  try { localStorage.setItem('link-previews', v ? '1' : '0') } catch { /* private mode */ }
+  psubs.forEach((f) => f())
+}
+export const useLinkPreviews = () => useSyncExternalStore((f) => { psubs.add(f); return () => { psubs.delete(f) } }, () => previews, () => previews)

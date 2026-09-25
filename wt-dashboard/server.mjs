@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
+import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -566,6 +567,63 @@ async function streamTranscript(req, res, session) {
   const poll = setInterval(pull, 1000) // fs.watch on macOS can miss appends
   const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
   req.on('close', () => (w.close(), clearInterval(poll), clearInterval(beat)))
+}
+
+// ---- link previews (unfurl.mjs has the SSRF guards) ----
+// 24h cache in memory and on disk (data/unfurl-cache.json, 500 entries). Images are proxied only for URLs an
+// unfurl produced, never an arbitrary URL the client names.
+const UNFURL_FILE = join(DATA, 'unfurl-cache.json')
+const unfurlCache = new Map((() => { try { return Object.entries(JSON.parse(readFileSync(UNFURL_FILE, 'utf8'))) } catch { return [] } })())
+const unfurlImages = new Set([...unfurlCache.values()].flatMap((v) => [v.card?.image, v.card?.icon].filter(Boolean)))
+let unfurlSave = null
+const DAY = 86_400_000
+async function unfurlApi(res, url) {
+  const target = url.searchParams.get('url') ?? ''
+  const hit = unfurlCache.get(target)
+  if (hit && Date.now() - hit.at < (hit.card?.kind === 'pr' || hit.card?.kind === 'linear' ? 60_000 : DAY)) return send(res, 200, hit.card)
+  const card = await richCard(target) ?? await pageCard(target)
+  unfurlCache.set(target, { at: Date.now(), card })
+  for (const k of [...unfurlCache.keys()].slice(0, Math.max(0, unfurlCache.size - 500))) unfurlCache.delete(k)
+  clearTimeout(unfurlSave)
+  unfurlSave = setTimeout(() => writeFile(UNFURL_FILE, JSON.stringify(Object.fromEntries(unfurlCache))).catch(() => {}), 2000)
+  return send(res, 200, card)
+}
+async function pageCard(target) {
+  const r = await safeFetch(target, 'text/html,application/xhtml+xml')
+  if (r.status >= 400) return { kind: 'page', url: target, error: `HTTP ${r.status}` }
+  if (!/^text\/html|application\/xhtml/i.test(r.headers['content-type'] ?? '')) return { kind: 'page', url: target, title: null, siteName: new URL(r.url).hostname }
+  const c = parseHtml(r.body.toString('utf8'), r.url)
+  for (const i of [c.image, c.icon]) if (i) unfurlImages.add(i)
+  return { kind: 'page', url: target, ...c }
+}
+const repoName = () => cached('repoName', 3_600_000, async () => JSON.parse(await run('gh', ['repo', 'view', '--json', 'nameWithOwner'], REPO)).nameWithOwner).catch(() => null)
+async function richCard(target) {
+  const c = classifyUrl(target, await repoName())
+  if (!c) return null
+  if (c.kind === 'artifact') return { kind: 'artifact', url: target, title: 'Claude artifact', siteName: 'claude.ai' }
+  if (c.kind === 'pr') {
+    const p = JSON.parse(await run('gh', ['pr', 'view', String(c.number), '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup'], REPO))
+    return { kind: 'pr', url: target, number: p.number, title: p.title, state: p.isDraft && p.state === 'OPEN' ? 'DRAFT' : p.state, review: p.reviewDecision || null, ci: ciOf(p.statusCheckRollup ?? []), siteName: 'GitHub' }
+  }
+  if (c.kind === 'issue') {
+    const p = JSON.parse(await run('gh', ['issue', 'view', String(c.number), '--json', 'number,title,state'], REPO))
+    return { kind: 'issue', url: target, number: p.number, title: p.title, state: p.state, siteName: 'GitHub' }
+  }
+  const key = cfg.get('LINEAR_API_KEY')
+  if (!key) return null // falls back to the page (a login wall, usually just the title)
+  const r = await fetch('https://api.linear.app/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: key },
+    body: JSON.stringify({ query: 'query($id: String!) { issue(id: $id) { identifier title priorityLabel state { name } assignee { name } } }', variables: { id: c.identifier } }) })
+  const i = (await r.json()).data?.issue
+  return i ? { kind: 'linear', url: target, identifier: i.identifier, title: i.title, state: i.state?.name, priority: i.priorityLabel, assignee: i.assignee?.name ?? null, siteName: 'Linear' } : null
+}
+async function unfurlImage(res, url) {
+  const target = url.searchParams.get('url') ?? ''
+  if (!unfurlImages.has(target)) return send(res, 403, { error: 'not an unfurled image' })
+  const r = await safeFetch(target, 'image/*')
+  const type = r.headers['content-type'] ?? ''
+  if (r.status >= 400 || !/^image\/(png|jpeg|gif|webp|x-icon|vnd\.microsoft\.icon|avif)/i.test(type)) return send(res, 415, { error: 'not an image' })
+  res.writeHead(200, { 'content-type': type, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'" })
+  res.end(r.body)
 }
 
 // ---- git / gh / linear ----
@@ -1583,6 +1641,10 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/events') return streamEvents(req, res)
       if (url.pathname.startsWith('/api/notifications')) return await inboxApi(req, res, url)
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)
+      if (url.pathname.startsWith('/api/unfurl') && req.method === 'GET') {
+        if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
+        return await (url.pathname === '/api/unfurl/image' ? unfurlImage(res, url) : unfurlApi(res, url)).catch((e) => send(res, 502, { error: e.message }))
+      }
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))

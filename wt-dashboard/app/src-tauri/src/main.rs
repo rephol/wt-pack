@@ -62,6 +62,65 @@ fn install_service() -> Result<(), String> {
 
 struct Sidecar(Mutex<Option<Child>>);
 
+/// In-app browser: ONE reused window ("browser") for links clicked in the dashboard. Isolated from the
+/// dashboard: no capability names it (so no IPC or plugin access), and it has its own website data store
+/// (separate cookies/sign-in from the dashboard AND from the system browser). Its toolbar is injected into
+/// each page; "Open in browser" navigates to wtd-open://…, which on_navigation hands to the system browser.
+const BROWSER_STORE: [u8; 16] = *b"wtdash-browser01";
+const TOOLBAR_JS: &str = r#"(() => {
+  if (window.top !== window || document.getElementById('__wtd_bar')) return;
+  const mount = () => {
+    if (document.getElementById('__wtd_bar') || !document.body) return;
+    const host = document.createElement('div'); host.id = '__wtd_bar';
+    host.style.cssText = 'position:fixed;top:0;left:0;right:0;height:36px;z-index:2147483647';
+    const root = host.attachShadow({ mode: 'closed' });
+    root.innerHTML = `<style>
+      .b{display:flex;gap:4px;align-items:center;height:36px;padding:0 8px;background:#1b1b1b;color:#ddd;font:13px system-ui;border-bottom:1px solid #333;box-sizing:border-box}
+      button{background:none;border:0;color:#ddd;font:15px system-ui;width:28px;height:28px;border-radius:6px;cursor:pointer}
+      button:hover{background:#333} .u{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.75;padding:0 6px}
+      .o{width:auto;padding:0 10px;font-size:12px;border:1px solid #444}</style>
+      <div class="b"><button title="Back">‹</button><button title="Forward">›</button><button title="Reload">↻</button>
+      <span class="u"></span><button class="o">Open in browser</button></div>`;
+    const [back, fwd, reload, , open] = root.querySelectorAll('.b > *');
+    root.querySelector('.u').textContent = location.href;
+    back.onclick = () => history.back(); fwd.onclick = () => history.forward(); reload.onclick = () => location.reload();
+    open.onclick = () => { location.href = 'wtd-open://open?u=' + encodeURIComponent(location.href) };
+    document.documentElement.appendChild(host);
+    document.documentElement.style.setProperty('margin-top', '36px', 'important');
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
+})();"#;
+fn open_browser(app: &AppHandle, raw: &str) {
+    let Ok(url) = tauri::Url::parse(raw) else { return };
+    if url.scheme() != "http" && url.scheme() != "https" { return }
+    if let Some(w) = app.get_webview_window("browser") {
+        let _ = w.navigate(url);
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let opener = app.clone();
+    let r = WebviewWindowBuilder::new(app, "browser", WebviewUrl::External(url))
+        .title("wt-dashboard — browser")
+        .inner_size(1100.0, 800.0)
+        .data_store_identifier(BROWSER_STORE)
+        .initialization_script(TOOLBAR_JS)
+        .on_navigation(move |u| {
+            if u.scheme() == "wtd-open" {
+                if let Some(target) = u.query_pairs().find(|(k, _)| k == "u").map(|(_, v)| v.to_string()) {
+                    if target.starts_with("http://") || target.starts_with("https://") {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = opener.opener().open_url(target, None::<&str>);
+                    }
+                }
+                return false;
+            }
+            matches!(u.scheme(), "http" | "https" | "about" | "blob" | "data")
+        })
+        .build();
+    if let Err(e) = r { log(&format!("browser window: {e}")) }
+}
+
 /// ~/Library/Logs/wt-dashboard/app.log — the only place a GUI app's diagnostics survive.
 fn log(msg: &str) {
     let dir = format!("{}/Library/Logs/wt-dashboard", std::env::var("HOME").unwrap_or_default());
@@ -555,6 +614,14 @@ fn main() {
                         control(&hh, a);
                     }
                 }
+            });
+            let hh = h.clone();
+            app.listen("browser", move |e| {
+                if EXITING.load(Ordering::Relaxed) { return }
+                let Some(u) = serde_json::from_str::<serde_json::Value>(e.payload()).ok()
+                    .and_then(|v| v.get("url").and_then(|u| u.as_str()).map(String::from)) else { return };
+                let hh = hh.clone();
+                std::thread::spawn(move || open_browser(&hh, &u));
             });
             let handle = h;
             std::thread::spawn(move || {

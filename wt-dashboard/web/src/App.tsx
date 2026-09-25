@@ -37,6 +37,7 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { useChatDensity } from './density'
+import { LinkPreviews } from './previews'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
@@ -1304,6 +1305,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                         return (
                           <>
                             {u.text && <ChatMessageBubble>{u.text}</ChatMessageBubble>}
+                            {u.text && <LinkPreviews text={u.text} />}
                             {imgs.length > 0 && <ChatMessageBubble variant="ghost"><ImageRow srcs={imgs} /></ChatMessageBubble>}
                           </>
                         )
@@ -1313,6 +1315,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         {r.m.text && <ChatMarkdown>{r.m.text}</ChatMarkdown>}
+                        {r.m.text && <LinkPreviews text={r.m.text} />}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
                         {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
                       </ChatMessageBubble>

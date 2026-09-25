@@ -37,6 +37,7 @@ import { ImageRow, useAttachments, uploadUrl, IMAGE_TYPES, MAX_IMAGES } from './
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { Link } from '@astryxdesign/core/Link'
 import { useChatDensity } from './density'
+import { LinkPreviews } from './previews'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -267,6 +268,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
                 </VStack>
               }>
               {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown>{m.text}</ChatMarkdown></ChatMessageBubble>}
+              {m.text && <LinkPreviews text={m.text} />}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
               {workingAfter.get(m.id)?.map((n) => <Text key={n} type="supporting" size="sm">{`@${n} is working…`}</Text>)}
             </ChatMessage>
