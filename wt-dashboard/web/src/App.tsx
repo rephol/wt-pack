@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { isUserSkip } from './pickerGuard.ts'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -1099,8 +1099,20 @@ function toRows(msgs: Msg[]): Row[] {
 }
 
 // One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
+// "Show message details" (conversation ⋯ menu): expands every meta line; remembered per browser.
+let showAllDetails = (() => { try { return localStorage.getItem('msg-details') === '1' } catch { return false } })()
+const detailSubs = new Set<() => void>()
+const subDetails = (f: () => void) => { detailSubs.add(f); return () => { detailSubs.delete(f) } }
+function setShowAllDetails(v: boolean) {
+  showAllDetails = v
+  try { localStorage.setItem('msg-details', v ? '1' : '0') } catch { /* private mode */ }
+  detailSubs.forEach((f) => f())
+}
 function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extraAttachments?: number; copyText?: string }) {
   const [abs, setAbs] = useState(false)
+  const all = useSyncExternalStore(subDetails, () => showAllDetails)
+  const [own, setOwn] = useState<boolean | null>(null) // per message; null follows the global toggle
+  const open = own ?? all
   const toast = useToast()
   if (!meta?.ts && !copyText) return null
   const parts: string[] = []
@@ -1114,18 +1126,19 @@ function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extra
     if (meta.ms) parts.push(fmtDur(meta.ms))
     if (meta.tools) parts.push(`${meta.tools} tool${meta.tools === 1 ? '' : 's'}`)
     if (meta.cost != null) parts.push(`~$${meta.cost < 0.01 ? meta.cost.toFixed(3) : meta.cost.toFixed(2)}`)
-    if (meta.stop) parts.push(meta.stop === 'max_tokens' ? 'hit max tokens' : meta.stop)
   }
+  const stop = meta?.kind === 'turn' && meta.stop ? (meta.stop === 'max_tokens' ? 'hit max tokens' : meta.stop) : null
   const when = meta?.ts ? new Date(meta.ts) : null
   const copy = () => navigator.clipboard.writeText(copyText!).then(() => toast({ body: 'Copied', type: 'info' }), (e) => toast({ body: `Copy failed: ${e}`, type: 'error' }))
   return (
-    <div data-msg-meta style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, height: 32, maxWidth: '100%', minWidth: 0 }}>
-      {/* One Text: time, separators and values share a font size and baseline. */}
-      <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>
-        {when && <span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)}>{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</span>}
-        {parts.length > 0 && `${when ? ' · ' : ''}${parts.join(' · ')}`}
-      </Text>
-      {copyText && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" size="sm" />} variant="ghost" size="sm" onClick={copy} /></span>}
+    <div data-msg-meta style={{ marginTop: 8, maxWidth: '100%', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28, minWidth: 0 }}>
+        {when && <Text type="supporting" size="sm"><span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)}>{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</span></Text>}
+        {stop && <Badge label={stop} variant="error" />}
+        {parts.length > 0 && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOwn(!open)} /></span>}
+        {copyText && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" size="sm" />} variant="ghost" size="sm" onClick={copy} /></span>}
+      </div>
+      {open && parts.length > 0 && <Text type="supporting" size="sm">{parts.join(' · ')}</Text>}
     </div>
   )
 }
@@ -1137,6 +1150,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
 }) {
   const [tab, setTab] = useState('conversation')
   const narrow = useNarrow()
+  useSyncExternalStore(subDetails, () => showAllDetails) // the ⋯ menu's details label
   const [draft, setDraft] = useState(() => takePrefill(agent.key))
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(agent.local ? null : 'Images only for local agents')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -1427,6 +1441,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
           {page && onAsPanel && <Button label="Open as panel" size="sm" variant="ghost" onClick={onAsPanel} />}
           <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
+            { label: showAllDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!showAllDetails) },
             agent.local
               ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
               : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
