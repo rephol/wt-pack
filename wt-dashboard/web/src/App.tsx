@@ -203,7 +203,7 @@ function ActivityRow({ agent, lastTool }: { agent: Agent; lastTool: string | nul
   const text = waiting ? 'Waiting for you' : act.data?.text ?? lastTool ?? 'Working…'
   const detail = waiting ? null : act.data?.detail ?? el
   return (
-    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px', minWidth: 0 }}>
+    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px', marginTop: 12, minWidth: 0 }}>
       {waiting ? <StatusDot variant="error" label="waiting for you" isPulsing /> : <Spinner size="md" shade="subtle" aria-label="working" />}
       <Text size="sm" type="supporting" maxLines={1} hasTruncateTooltip={false} style={{ minWidth: 0, flex: 1 }}>
         {detail && !waiting && act.data?.detail ? `${text} (${detail})` : text}
@@ -1066,7 +1066,8 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
 
 // ---------- drawer ----------
 // Consecutive tool rows → one ChatToolCalls group; a "result" row fills the preceding call's detail.
-type Row = { kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
+type Space = 'turn' | 'same' | 'tools'
+type Row = ({ kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }) & { space?: Space }
 function toRows(msgs: Msg[]): Row[] {
   const rows: Row[] = []
   const meta = deriveMeta(msgs)
@@ -1090,7 +1091,11 @@ function toRows(msgs: Msg[]): Row[] {
     const { calls, ms } = toolGroupMeta(g.raw)
     g.label = `${calls} tool call${calls === 1 ? '' : 's'}${ms ? ` · ${fmtDur(ms)}` : ''}`
   }
-  return rows.filter((r) => r.kind === 'msg' || r.calls.length)
+  const out = rows.filter((r) => r.kind === 'msg' || r.calls.length)
+  // Vertical rhythm: a sender change opens a turn (18px), same sender 10px, tool groups 8px.
+  const sender = (r: Row) => (r.kind === 'msg' && r.m.role === 'user' ? 'user' : 'agent')
+  out.forEach((r, i) => { r.space = r.kind === 'tools' || out[i - 1]?.kind === 'tools' ? 'tools' : i && sender(out[i - 1]) !== sender(r) ? 'turn' : 'same' })
+  return out
 }
 
 // One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
@@ -1114,14 +1119,13 @@ function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extra
   const when = meta?.ts ? new Date(meta.ts) : null
   const copy = () => navigator.clipboard.writeText(copyText!).then(() => toast({ body: 'Copied', type: 'info' }), (e) => toast({ body: `Copy failed: ${e}`, type: 'error' }))
   return (
-    <div data-msg-meta style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 20, maxWidth: '100%', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-      {when && (
-        <span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)} style={{ cursor: 'default' }}>
-          <Text type="supporting" size="sm">{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</Text>
-        </span>
-      )}
-      {parts.length > 0 && <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>{`· ${parts.join(' · ')}`}</Text>}
-      {copyText && <span data-copy style={{ marginLeft: 'auto', flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" />} variant="ghost" size="sm" onClick={copy} /></span>}
+    <div data-msg-meta style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, height: 32, maxWidth: '100%', minWidth: 0 }}>
+      {/* One Text: time, separators and values share a font size and baseline. */}
+      <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>
+        {when && <span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)}>{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</span>}
+        {parts.length > 0 && `${when ? ' · ' : ''}${parts.join(' · ')}`}
+      </Text>
+      {copyText && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" size="sm" />} variant="ghost" size="sm" onClick={copy} /></span>}
     </div>
   )
 }
@@ -1268,21 +1272,21 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
   }, [rows])
   const messageList = useMemo(() => (
-              <ChatMessageList density="compact" isStreaming={working}>
-                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
+              <ChatMessageList density="compact" isStreaming={working} data-agent-chat="">
+                <VirtualRows items={rows} gap={0} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
                   r.kind === 'tools' ? (
-                    <ChatMessage key={r.id} sender="assistant" metadata={<Text type="supporting" size="sm">{r.label}</Text>}>
+                    <ChatMessage key={r.id} sender="assistant" data-space={r.space} metadata={<Text type="supporting" size="sm">{r.label}</Text>}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         <ChatToolCalls calls={r.calls} />
                       </ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'question' ? (!r.m.answered && !r.m.cancelled ? null : // pending: the card below is the question
 
-                    <ChatMessage key={r.m.id} sender="assistant">
+                    <ChatMessage key={r.m.id} sender="assistant" data-space={r.space}>
                       <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
+                    <ChatMessage key={r.m.id} sender="user" data-space={r.space} metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
                       {(() => {
                         const u = splitUploads(r.m.text)
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
@@ -1295,7 +1299,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                       })()}
                     </ChatMessage>
                   ) : (
-                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
+                    <ChatMessage key={r.m.id} sender="assistant" data-space={r.space} metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         {r.m.text && <ChatMarkdown>{r.m.text}</ChatMarkdown>}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
