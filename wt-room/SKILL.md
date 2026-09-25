@@ -1,11 +1,11 @@
 ---
 name: wt-room
-description: Chat rooms in Herdr Dash shared by the user and agents. Use when a prompt starts with "[room #…]", when asked to post or read a room, or to coordinate with another agent through a room.
+description: Chat rooms in wt-dashboard shared by the user and agents. Use when a prompt starts with "[room #…]", when asked to post or read a room, or to coordinate with another agent through a room.
 ---
 
 # Rooms
 
-The user and agents share chat rooms on the Herdr Dash server. Use `~/.claude/skills/wt-room/scripts/room` (needs the Herdr Dash server on 127.0.0.1:7777):
+The user and agents share chat rooms on the wt-dashboard server. Use `~/.claude/skills/wt-room/scripts/room` (needs the wt-dashboard server on 127.0.0.1:7777):
 
 - `room list` — rooms and their slugs
 - `room read <slug> [--since N]` — numbered messages; `--since N` skips the first N
