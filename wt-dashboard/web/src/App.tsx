@@ -38,6 +38,7 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
+import { useStream, mergeAgentMsgs } from './streamStore'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
@@ -1069,6 +1070,16 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
 // ---------- drawer ----------
 // Consecutive tool rows → one ChatToolCalls group; a "result" row fills the preceding call's detail.
 type Row = { kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
+// The agent transcript stream, for streamStore: resumes from the byte offset in each event's id.
+function agentStreamSpec(base: string, key: string, session: string) {
+  return {
+    url: (cursor: string | null) => `${base}/stream${cursor ? `?since=${cursor}` : ''}`,
+    persistKey: `agent|${key}`, persistTag: session,
+    attach: (es: EventSource, apply: (fn: (items: Msg[]) => Msg[], cursor?: string | null) => void) => {
+      es.onmessage = (ev) => apply((prev) => mergeAgentMsgs(prev, JSON.parse(ev.data)), ev.lastEventId || undefined)
+    },
+  }
+}
 function toRows(msgs: Msg[]): Row[] {
   const rows: Row[] = []
   const meta = deriveMeta(msgs)
@@ -1197,9 +1208,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     send.mutate({ text }, { onSuccess: () => { if (busy) setQueued((q) => [...q, { id: crypto.randomUUID(), text }]) } })
   }
   const qc = useQueryClient()
-  const [msgs, setMsgs] = useState<Msg[]>([])
-  const [streamErr, setStreamErr] = useState(false)
-  // Keyed on the session id: /clear or a restart gives a new transcript, so reconnect.
+  // Keyed on the session id: /clear or a restart gives a new transcript, so a new cache entry.
   const live = agent.local && Boolean(agent.session)
   // Remote (or session-less) agents: pane-read timeline instead of the transcript stream.
   const pane = useQuery({
@@ -1208,26 +1217,10 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     enabled: !live,
     refetchInterval: agent.status === 'working' ? 5000 : false,
   })
-  useEffect(() => {
-    if (!live && pane.data) setMsgs(pane.data.turns.map((t, i) => ({ id: `pane:${i}`, role: t.role, text: t.text, ts: '' })))
-  }, [live, pane.data])
-  useEffect(() => {
-    setMsgs([])
-    if (!live) return
-    const es = new EventSource(`${agentUrl(agent)}/stream`)
-    es.onmessage = (ev) => {
-      const incoming: Msg[] = JSON.parse(ev.data)
-      setMsgs((prev) => {
-        const byId = new Map(prev.map((m) => [m.id, m]))
-        // A question's answer arrives as an update to the same id.
-        for (const m of incoming) byId.set(m.id, byId.has(m.id) && m.role === 'question' ? { ...byId.get(m.id)!, ...m, questions: byId.get(m.id)!.questions ?? m.questions } : byId.get(m.id) ?? m)
-        return [...byId.values()]
-      })
-      setStreamErr(false)
-    }
-    es.onerror = () => setStreamErr(true) // EventSource retries on its own
-    return () => es.close()
-  }, [agent.key, agent.session, live]) // eslint-disable-line react-hooks/exhaustive-deps
+  const stream = useStream<Msg>(live ? `agent|${agent.key}|${agent.session}` : null, () => agentStreamSpec(agentUrl(agent), agent.key, agent.session!))
+  const paneMsgs = useMemo(() => (pane.data?.turns ?? []).map((t, i): Msg => ({ id: `pane:${i}`, role: t.role, text: t.text, ts: '' })), [pane.data])
+  const msgs = live ? stream.items : paneMsgs
+  const streamErr = live && stream.error
   // Sent while the agent works: Claude Code takes it at its next step. Shown as "queued" until the
   // transcript has it (matched on its first line), or 15s after the agent is idle again.
   const [queued, setQueued] = useState<{ id: string; text: string }[]>([])

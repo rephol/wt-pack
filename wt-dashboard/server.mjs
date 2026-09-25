@@ -525,23 +525,42 @@ function foldQuestions(msgs) {
   }
   return out
 }
-async function streamTranscript(req, res, session) {
-  const file = session && (await findTranscript(session))
+export async function streamTranscript(req, res, session, url, fileOverride) {
+  const file = fileOverride ?? (session && (await findTranscript(session)))
   if (!file) return send(res, 404, { error: 'no transcript for this agent' })
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
-  const emit = (msgs) => msgs.length && res.write(`data: ${JSON.stringify(msgs)}\n\n`)
+  // Every data event carries `id: <byte offset read so far>`. A client that has messages up to an offset resumes
+  // with Last-Event-ID (EventSource's own reconnect) or ?since=<offset>, and gets only what came after it.
+  const emit = (msgs, off) => { if (msgs.length) res.write(`id: ${off}\ndata: ${JSON.stringify(msgs)}\n\n`) }
   res.write(`event: session\ndata: ${JSON.stringify(session)}\n\n`)
   // ponytail: backlog reads the whole file once; tail-read from the end if transcripts get huge.
   const all = await readFile(file, 'utf8')
   const nl = all.lastIndexOf('\n')
   let offset = Buffer.byteLength(all.slice(0, nl + 1)) // an unfinished last line is re-read on the next pull
   let partial = ''
-  // Last 200 user/assistant turns; tool rows between them ride along uncounted.
   const asks = new Set()
-  const backlog = foldQuestions(parseLines(all.slice(0, nl + 1), asks))
-  let start = backlog.length
-  for (let n = 0; start > 0 && n < 200; ) if (backlog[--start].role !== 'tool') n++
-  emit(backlog.slice(start))
+  const since = Number(req.headers['last-event-id'] ?? url?.searchParams.get('since'))
+  if (Number.isFinite(since) && since > 0 && since <= offset) {
+    // Resume: parse everything (question ids must be known), emit only lines that end past `since`.
+    let at = 0
+    const fresh = []
+    for (const line of all.slice(0, nl + 1).split('\n')) {
+      at += Buffer.byteLength(line) + 1
+      if (!line) continue
+      let e
+      try { e = JSON.parse(line) } catch { continue }
+      const msgs = normalizeEntry(e, asks)
+      if (at > since) fresh.push(...msgs)
+    }
+    if (fresh.length) emit(fresh, offset); else res.write(`id: ${offset}\n: resumed\n\n`)
+  } else {
+    // Last 200 user/assistant turns; tool rows between them ride along uncounted.
+    const backlog = foldQuestions(parseLines(all.slice(0, nl + 1), asks))
+    let start = backlog.length
+    for (let n = 0; start > 0 && n < 200; ) if (backlog[--start].role !== 'tool') n++
+    const first = backlog.slice(start)
+    if (first.length) emit(first, offset); else res.write(`id: ${offset}\n: empty\n\n`)
+  }
 
   let busy = false
   const pull = async () => {
@@ -559,7 +578,7 @@ async function streamTranscript(req, res, session) {
         const text = partial + buf.toString('utf8')
         const cut = text.lastIndexOf('\n')
         partial = text.slice(cut + 1) // incomplete trailing line waits for the next append
-        emit(parseLines(text.slice(0, cut + 1), asks))
+        emit(parseLines(text.slice(0, cut + 1), asks), offset - Buffer.byteLength(partial))
       }
     } catch {} finally { busy = false }
   }
@@ -1418,7 +1437,12 @@ async function roomsApi(req, res, url, parts) {
   if (!parts[3] && req.method === 'DELETE') { await userOnly(); await rooms.remove(slug); return send(res, 200, { ok: true }) }
   if (parts[3] === 'stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
-    res.write(`event: backlog\ndata: ${JSON.stringify(await rooms.messages(slug))}\n\n`)
+    // Resume: ?since=<message count the client holds> (or Last-Event-ID) sends the tail from there, re-sending
+    // the 50 before it so their delivery state catches up; `id:` is the room's message count.
+    const all = await rooms.messages(slug)
+    const since = Number(req.headers['last-event-id'] ?? url.searchParams.get('since'))
+    const from = Number.isFinite(since) && since > 0 && since <= all.length ? Math.max(0, since - 50) : 0
+    res.write(`event: backlog\nid: ${all.length}\ndata: ${JSON.stringify({ from, messages: all.slice(from) })}\n\n`)
     const set = rooms.subs.get(slug) ?? new Set()
     rooms.subs.set(slug, set.add(res))
     const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
@@ -1680,7 +1704,7 @@ const server = http.createServer(async (req, res) => {
         if (parts[4] === 'stream' && req.method === 'GET') {
           if (!m.local) return send(res, 404, { error: 'no transcript for remote agents; use the pane read' })
           const a = (await agents()).find((x) => x.local && x.id === pane)
-          return streamTranscript(req, res, a?.session)
+          return streamTranscript(req, res, a?.session, url)
         }
         // The live spinner line, for an open conversation: one visible-screen read per pane per second, shared.
         if (parts[4] === 'activity' && req.method === 'GET') {

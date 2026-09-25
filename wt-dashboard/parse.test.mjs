@@ -529,3 +529,35 @@ test('parseActivity: the spinner line above the input box, not a finished turn',
   assert.equal(parseActivity(`✻ Cooked for 1m 2s\n${box}`), null)
   assert.equal(parseActivity(`✻ Old line\nmore\nand more\nlast\n${box}`), null)
 })
+
+test('streamTranscript: ids are byte offsets; ?since= and Last-Event-ID resume with only newer lines', async () => {
+  const { streamTranscript } = await import('./server.mjs')
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { EventEmitter } = await import('node:events')
+  const f = join(mkdtempSync(join(tmpdir(), 'wtd-')), 't.jsonl')
+  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
+  writeFileSync(f, line('a', 'one') + line('b', 'two'))
+  const firstLen = Buffer.byteLength(line('a', 'one'))
+  const run = async (headers, qs) => {
+    const req = Object.assign(new EventEmitter(), { headers })
+    let out = ''
+    const res = { writeHead() {}, write(s) { out += s } }
+    await streamTranscript(req, res, 's', new URL(`http://x/${qs}`), f)
+    req.emit('close')
+    const ids = [...out.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]))
+    const texts = [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text))
+    return { ids, texts }
+  }
+  const full = await run({}, '')
+  assert.deepEqual(full.texts, ['one', 'two'])
+  const end = full.ids.at(-1)
+  assert.equal(end, Buffer.byteLength(line('a', 'one') + line('b', 'two')))
+  assert.deepEqual((await run({}, `?since=${firstLen}`)).texts, ['two'])
+  assert.deepEqual((await run({ 'last-event-id': String(firstLen) }, '?since=1')).texts, ['two']) // the header wins
+  const caught = await run({}, `?since=${end}`)
+  assert.deepEqual(caught.texts, [])
+  assert.deepEqual(caught.ids, [end])
+  assert.deepEqual((await run({}, `?since=${end + 999}`)).texts, ['one', 'two']) // a stale cursor (file rewritten) gets the full backlog
+})

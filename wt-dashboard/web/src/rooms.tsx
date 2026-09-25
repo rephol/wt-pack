@@ -38,6 +38,7 @@ import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { Link } from '@astryxdesign/core/Link'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
+import { useStream, mergeById } from './streamStore'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -142,6 +143,27 @@ function mentionSource(agents: RoomAgent[], profile: Profile): SearchSource<Sear
   }
 }
 
+// Room stream for streamStore. The cursor is the message count we hold; the server resends from 50 before it
+// (their delivery state catches up) and live events are merged by id, a re-sent message replacing ours.
+function roomStreamSpec(slug: string) {
+  return {
+    url: (_c: string | null, items: RoomMsg[]) => `/api/rooms/${encodeURIComponent(slug)}/stream${items.length ? `?since=${items.length}` : ''}`,
+    persistKey: `room|${slug}`, keep: Infinity,
+    attach: (es: EventSource, apply: (fn: (items: RoomMsg[]) => RoomMsg[], cursor?: string | null) => void) => {
+      const replace = (_o: RoomMsg, n: RoomMsg) => n
+      es.addEventListener('backlog', (e) => {
+        const b = JSON.parse((e as MessageEvent).data) as { from: number; messages: RoomMsg[] }
+        apply((xs) => (b.from === 0 ? b.messages : mergeById(xs, b.messages, replace)))
+      })
+      es.addEventListener('message', (e) => { const m = JSON.parse((e as MessageEvent).data) as RoomMsg; apply((xs) => mergeById(xs, [m], replace)) })
+      es.addEventListener('delivered', (e) => {
+        const d = JSON.parse((e as MessageEvent).data) as { id: string; to: string; dropped?: number }
+        apply((xs) => xs.map((x) => (x.id === d.id && !x.deliveredTo.includes(d.to)
+          ? { ...x, deliveredTo: [...x.deliveredTo, d.to], ...(d.dropped ? { undelivered: [...(x.undelivered ?? []), { to: d.to, n: d.dropped }] } : {}) } : x)))
+      })
+    },
+  }
+}
 function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; agents: RoomAgent[]; profile: Profile; onBack: () => void; onOpenAgent: (key: string) => void }) {
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
@@ -153,22 +175,10 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   })
   const qc = useQueryClient()
   const toast = useToast()
-  const [msgs, setMsgs] = useState<RoomMsg[]>([])
+  const msgs = useStream<RoomMsg>(`room|${room.slug}`, () => roomStreamSpec(room.slug)).items
   const [draft, setDraft] = useState('')
   const density = useChatDensity()
   const [confirm, setConfirm] = useState<string | null>(null)
-  useEffect(() => {
-    setMsgs([])
-    const es = new EventSource(`/api/rooms/${encodeURIComponent(room.slug)}/stream`)
-    es.addEventListener('backlog', (e) => setMsgs(JSON.parse((e as MessageEvent).data)))
-    es.addEventListener('message', (e) => { const m = JSON.parse((e as MessageEvent).data) as RoomMsg; setMsgs((xs) => [...xs.filter((x) => x.id !== m.id), m]) })
-    es.addEventListener('delivered', (e) => {
-      const d = JSON.parse((e as MessageEvent).data) as { id: string; to: string; dropped?: number }
-      setMsgs((xs) => xs.map((x) => (x.id === d.id && !x.deliveredTo.includes(d.to)
-        ? { ...x, deliveredTo: [...x.deliveredTo, d.to], ...(d.dropped ? { undelivered: [...(x.undelivered ?? []), { to: d.to, n: d.dropped }] } : {}) } : x)))
-    })
-    return () => es.close()
-  }, [room.slug])
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [sendErr, setSendErr] = useState<string | null>(null)
