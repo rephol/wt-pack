@@ -100,8 +100,15 @@ export function parsePane(text, raw = '') {
       ? lastAssistant.text.split('\n').filter((l) => l.trim()).at(-1).trim()
       : null
 
+  // Background work Claude Code reports after a turn ("· 1 shell still running", "· 2 background tasks"):
+  // the footer first, else the most recent turn-status line. Stop (Esc) does not end these.
+  const BG = /·\s*(\d+)\s+(?:shells?|background tasks?|bash(?:es)?|monitors?|(?:local |sub)?agents?)\b[^·\n]*/g
+  const statusLine = footer.match(BG) ? footer : body.findLast((l) => /^\s*[✻✳✶✽✢*]\s/.test(l)) ?? ''
+  const background = [...statusLine.matchAll(BG)].reduce((n, m) => n + Number(m[1]), 0)
+
   return {
     picker: parsePicker(text, raw),
+    background,
     recap,
     context: ctx ? { used: ctx[1], total: ctx[2], pct: Number(ctx[3]) } : null,
     cwd,
@@ -294,6 +301,7 @@ async function listAgents(m) {
       project: m.local ? await projectOf(cwd) : cwd ? basename(cwd) : null,
       recap: p.recap ?? null,
       context: p.context ?? null,
+      background: p.background ?? 0,
       asks: Boolean(pk) || (p.asks ?? false),
       question: pk ? (pk.review ? 'Review and submit your answers' : `${pk.tabs[pk.current]?.header ? pk.tabs[pk.current].header + ': ' : ''}${pk.question}`) : p.question ?? null,
       picker: pk,

@@ -42,7 +42,7 @@ import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList'
 import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
-import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, ChatToolCalls, type ChatToolCallItem, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
+import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, ChatSendButton, ChatToolCalls, type ChatToolCallItem, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
 import { TypeaheadItem } from '@astryxdesign/core/Typeahead'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -51,6 +51,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 // ---------- types (mirror server.mjs) ----------
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown'
 interface Agent {
+  background: number // shells/tasks still running after the turn (Stop does not end them)
   key: string
   id: string
   machine: string
@@ -875,6 +876,7 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
                             <StatusDot variant={needsYou(a) ? 'error' : AGENT_DOT[a.status]} label={a.status} isPulsing={a.status === 'working' || needsYou(a)} />
                             <Button label={a.name} variant={selected === a.key ? "secondary" : "ghost"} size="sm" onClick={(e) => { e.stopPropagation(); onOpen(a.key) }} />
                             {needsYou(a) && <Badge variant="error" label="Needs you" />}
+                            {a.background > 0 && <Badge label={`${a.background} background`} />}
                             <span onClick={(e) => e.stopPropagation()} style={{ marginInlineStart: 'auto' }}>
                               <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
                                 { label: 'Open', onClick: () => onOpen(a.key) },
@@ -985,7 +987,11 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
   const submit = (v: string) => {
     const paths = atts.filter((a) => a.path).map((a) => a.path!)
     if (!v.trim() && !paths.length) return
-    send.mutate({ text: [v.trim(), paths.join('\n')].filter(Boolean).join('\n\n') })
+    const text = [v.trim(), paths.join('\n')].filter(Boolean).join('\n\n')
+    // "working" can lag the 4s poll right after a send, so a send within 30s of the last one counts as mid-turn too.
+    const busy = agent.status === 'working' || Date.now() - lastSend.current < 30_000
+    lastSend.current = Date.now()
+    send.mutate({ text }, { onSuccess: () => { if (busy) setQueued((q) => [...q, { id: crypto.randomUUID(), text }]) } })
   }
   const qc = useQueryClient()
   const [msgs, setMsgs] = useState<Msg[]>([])
@@ -1019,6 +1025,21 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
     es.onerror = () => setStreamErr(true) // EventSource retries on its own
     return () => es.close()
   }, [agent.key, agent.session, live]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Sent while the agent works: Claude Code takes it at its next step. Shown as "queued" until the
+  // transcript has it (matched on its first line), or 15s after the agent is idle again.
+  const [queued, setQueued] = useState<{ id: string; text: string }[]>([])
+  const lastSend = useRef(0)
+  useEffect(() => {
+    if (!queued.length) return
+    const users = msgs.filter((m) => m.role === 'user').slice(-20).map((m) => m.text)
+    const left = queued.filter((q) => !users.some((t) => t.includes(q.text.split('\n')[0].slice(0, 60))))
+    if (left.length !== queued.length) setQueued(left)
+  }, [msgs]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (agent.status === 'working' || !queued.length) return
+    const t = setTimeout(() => setQueued([]), 15_000)
+    return () => clearTimeout(t)
+  }, [agent.status, queued.length])
   const rows = useMemo(() => toRows(msgs), [msgs])
 
   // Stop: Escape via the server's stale-checked /stop. "Stopping…" until the status leaves working (10s → toast).
@@ -1098,7 +1119,10 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
           <HStack gap={2} align="center" style={{ minWidth: 0, flex: 1 }}>
             <StatusDot variant={needsYou(agent) ? 'error' : AGENT_DOT[agent.status]} label={agent.status} isPulsing={agent.status === 'working'} />
             <VStack gap={0.5} style={{ minWidth: 0 }}>
-              <Text weight="semibold" maxLines={1}>{agent.name}</Text>
+              <HStack gap={1} align="center" style={{ minWidth: 0 }}>
+                <Text weight="semibold" maxLines={1}>{agent.name}</Text>
+                {agent.background > 0 && <Badge label={`${agent.background} background`} />}
+              </HStack>
               <Text type="supporting" size="sm" maxLines={1}>{narrow
                 ? `${agent.local ? '' : `${agent.machine} · `}${agent.status} · ${idleFor(agent)}`
                 : `${agent.machine} · ${agent.pool} · ${agent.status} for ${idleFor(agent)}`}</Text>
@@ -1145,8 +1169,7 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
               emptyState={<EmptyState isCompact title="No messages yet" />}
               composer={heldPicker ? null : (
                 <ChatComposer
-                  isStopShown={agent.status === 'working'}
-                  onStop={stop}
+                  sendButton={working ? <Tooltip content="Queue: Claude picks it up after its current step"><span><ChatSendButton /></span></Tooltip> : undefined}
                   value={draft}
                   onChange={setDraft}
                   onSubmit={submit}
@@ -1190,12 +1213,23 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
                         onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
                     </>}
                       {stopping && <Text type="supporting" size="sm">Stopping…</Text>}
+                      {working && !stopping && <IconButton label="Stop" icon={<Icon icon="stop" />} size="sm" variant="secondary" tooltip="Stop the current turn (Esc)" onClick={stop} />}
                       <IconButton label="Nudge" icon={<NudgeIcon />} size="sm" variant="ghost" tooltip='Nudge: send "continue"' isDisabled={send.isPending} onClick={() => send.mutate({ text: 'continue' })} />
                     </HStack>
                   }
                 />
               )}>
               {messageList}
+              {queued.length > 0 && (
+                <VStack gap={1} style={{ padding: '0 8px 8px', alignItems: 'flex-end' }}>
+                  {queued.map((q) => (
+                    <HStack key={q.id} gap={1} align="center" style={{ opacity: 0.7, maxWidth: '85%' }}>
+                      <Badge label="queued" />
+                      <Text size="sm" maxLines={2}>{q.text}</Text>
+                    </HStack>
+                  ))}
+                </VStack>
+              )}
             </ChatLayout>
             </div>
             {/* The question card sits BELOW the list (not in the sticky dock), so nothing can draw over it. */}

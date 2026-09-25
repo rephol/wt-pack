@@ -339,3 +339,11 @@ test('rooms: commands are delivered RAW and alone; attachments ride as paths for
   agents[0].status = 'working'; await rooms.flush(); agents[0].status = 'idle'; await rooms.flush()
   assert.ok((await rooms.messages('r')).some((m) => m.text === 'finished /wt-plan on loc'))
 })
+
+test('parsePane: background work from the last turn-status line (shells, tasks), 0 when none', () => {
+  const box = '─'.repeat(40)
+  const pane = (status) => `⏺ ok\n${status}\n\n${box}\n❯ \n${box}\n  cwd: /x\n`
+  assert.equal(parsePane(pane('✻ Cooked for 5s · done 7:08 PM · 1 shell still running')).background, 1)
+  assert.equal(parsePane(pane('✻ Cooked for 5s · 2 shells still running · 1 background task')).background, 3)
+  assert.equal(parsePane(pane('✻ Cooked for 5s · done 7:08 PM')).background, 0)
+})
