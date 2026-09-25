@@ -1109,6 +1109,48 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
       qc.invalidateQueries({ queryKey: ['overview'] })
     },
   })
+  // The list is built only when the transcript (or working state) changes, never per keystroke:
+  // the draft lives in this component, and re-rendering 200+ Markdown messages per key was the lag.
+  const working = agent.status === 'working'
+  const messageList = useMemo(() => (
+              <ChatMessageList density="compact" isStreaming={working}>
+                {rows.map((r) =>
+                  r.kind === 'tools' ? (
+                    <ChatMessage key={r.id} sender="assistant">
+                      <ChatMessageBubble variant="ghost" width="100%">
+                        <ChatToolCalls calls={r.calls} />
+                      </ChatMessageBubble>
+                    </ChatMessage>
+                  ) : r.m.role === 'question' ? (!r.m.answered && !r.m.cancelled ? null : // pending: the card below is the question
+
+                    <ChatMessage key={r.m.id} sender="assistant">
+                      <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
+                    </ChatMessage>
+                  ) : r.m.role === 'user' ? (
+                    <ChatMessage key={r.m.id} sender="user">
+                      {(() => {
+                        const u = splitUploads(r.m.text)
+                        const imgs = [...u.urls, ...(r.m.images ?? [])]
+                        return (
+                          <>
+                            {u.text && <ChatMessageBubble>{u.text}</ChatMessageBubble>}
+                            {imgs.length > 0 && <ChatMessageBubble variant="ghost"><ImageRow srcs={imgs} /></ChatMessageBubble>}
+                          </>
+                        )
+                      })()}
+                    </ChatMessage>
+                  ) : (
+                    <ChatMessage key={r.m.id} sender="assistant">
+                      <ChatMessageBubble variant="ghost" width="100%">
+                        {r.m.text && <Markdown density="compact">{r.m.text}</Markdown>}
+                        {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
+                        {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
+                      </ChatMessageBubble>
+                    </ChatMessage>
+                  ),
+                )}
+              </ChatMessageList>
+  ), [rows, working])
 
   return (
       <VStack gap={3} height="100%" padding={4} data-agent-panel="">
@@ -1212,43 +1254,7 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
                   }
                 />
               )}>
-              <ChatMessageList density="compact" isStreaming={agent.status === 'working'}>
-                {rows.map((r) =>
-                  r.kind === 'tools' ? (
-                    <ChatMessage key={r.id} sender="assistant">
-                      <ChatMessageBubble variant="ghost" width="100%">
-                        <ChatToolCalls calls={r.calls} />
-                      </ChatMessageBubble>
-                    </ChatMessage>
-                  ) : r.m.role === 'question' ? (!r.m.answered && !r.m.cancelled ? null : // pending: the card below is the question
-
-                    <ChatMessage key={r.m.id} sender="assistant">
-                      <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
-                    </ChatMessage>
-                  ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user">
-                      {(() => {
-                        const u = splitUploads(r.m.text)
-                        const imgs = [...u.urls, ...(r.m.images ?? [])]
-                        return (
-                          <>
-                            {u.text && <ChatMessageBubble>{u.text}</ChatMessageBubble>}
-                            {imgs.length > 0 && <ChatMessageBubble variant="ghost"><ImageRow srcs={imgs} /></ChatMessageBubble>}
-                          </>
-                        )
-                      })()}
-                    </ChatMessage>
-                  ) : (
-                    <ChatMessage key={r.m.id} sender="assistant">
-                      <ChatMessageBubble variant="ghost" width="100%">
-                        {r.m.text && <Markdown density="compact">{r.m.text}</Markdown>}
-                        {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
-                        {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
-                      </ChatMessageBubble>
-                    </ChatMessage>
-                  ),
-                )}
-              </ChatMessageList>
+              {messageList}
             </ChatLayout>
             </div>
             {/* The question card sits BELOW the list (not in the sticky dock), so nothing can draw over it. */}

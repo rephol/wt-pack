@@ -195,6 +195,35 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
       ))}
     </VStack>
   )
+  // Built only when messages/members change, never per keystroke (the draft lives in this component).
+  const messageList = useMemo(() => (
+        <ChatMessageList density="compact">
+          {msgs.map((m) => m.author.kind === 'system' ? (
+            <ChatMessage key={m.id} sender="system">
+              <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" /></Text>
+            </ChatMessage>
+          ) : (
+            <ChatMessage key={m.id} sender={m.author.kind === 'user' ? 'user' : 'assistant'}
+              avatar={m.author.kind === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="sm" /> : undefined}
+              name={m.author.kind === 'agent'
+                ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
+                : <Text size="sm" weight="medium">{profile.name}</Text>}
+              metadata={
+                <VStack gap={0}>
+                  <Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" />{m.deliveredTo.length ? ` · delivered to ${m.deliveredTo.join(', ')}` : ''}</Text>
+                  {(m.blocked ?? []).map((b) => <Text key={b.name} type="supporting" size="sm">{`@${b.name}: ${b.reason}`}</Text>)}
+                  {(m.queuedFor ?? m.mentions.filter((n) => n !== 'all' && n.toLowerCase() !== profile.handle.toLowerCase()))
+                    .filter((n) => !m.deliveredTo.includes(n) && !(m.blocked ?? []).some((b) => b.name === n)).map((n) =>
+                    <Text key={n} type="supporting" size="sm">{`@${n}: queued until the agent is idle`}</Text>)}
+                  {(m.notified ?? (m.author.kind === 'agent' && m.mentions.some((n) => n.toLowerCase() === profile.handle.toLowerCase()))) &&
+                    <Text type="supporting" size="sm">notified you</Text>}
+                </VStack>
+              }>
+              <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><Markdown density="compact">{m.text}</Markdown></ChatMessageBubble>
+            </ChatMessage>
+          ))}
+        </ChatMessageList>
+  ), [msgs, profile, agents]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>
@@ -281,32 +310,7 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
             input={<ChatComposerInput triggers={[mention]} placeholder={`Message #${room.slug}`} />} />
           </VStack>
         )}>
-        <ChatMessageList density="compact">
-          {msgs.map((m) => m.author.kind === 'system' ? (
-            <ChatMessage key={m.id} sender="system">
-              <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" /></Text>
-            </ChatMessage>
-          ) : (
-            <ChatMessage key={m.id} sender={m.author.kind === 'user' ? 'user' : 'assistant'}
-              avatar={m.author.kind === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="sm" /> : undefined}
-              name={m.author.kind === 'agent'
-                ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
-                : <Text size="sm" weight="medium">{profile.name}</Text>}
-              metadata={
-                <VStack gap={0}>
-                  <Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" />{m.deliveredTo.length ? ` · delivered to ${m.deliveredTo.join(', ')}` : ''}</Text>
-                  {(m.blocked ?? []).map((b) => <Text key={b.name} type="supporting" size="sm">{`@${b.name}: ${b.reason}`}</Text>)}
-                  {(m.queuedFor ?? m.mentions.filter((n) => n !== 'all' && n.toLowerCase() !== profile.handle.toLowerCase()))
-                    .filter((n) => !m.deliveredTo.includes(n) && !(m.blocked ?? []).some((b) => b.name === n)).map((n) =>
-                    <Text key={n} type="supporting" size="sm">{`@${n}: queued until the agent is idle`}</Text>)}
-                  {(m.notified ?? (m.author.kind === 'agent' && m.mentions.some((n) => n.toLowerCase() === profile.handle.toLowerCase()))) &&
-                    <Text type="supporting" size="sm">notified you</Text>}
-                </VStack>
-              }>
-              <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><Markdown density="compact">{m.text}</Markdown></ChatMessageBubble>
-            </ChatMessage>
-          ))}
-        </ChatMessageList>
+        {messageList}
       </ChatLayout>
       <AlertDialog isOpen={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)} title="Message everyone?"
         description={`@all delivers this to all ${room.members.length} members of #${room.slug}.`} actionLabel="Send to all" actionVariant="primary"
