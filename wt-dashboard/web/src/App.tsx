@@ -20,6 +20,7 @@ import { useDesktop } from './desktop'
 import { SettingsHost, openSettings } from './settings'
 import { InboxButton, InboxHost } from './inbox'
 import { RoomsPage, useRoomsList } from './rooms'
+import { composerEnter } from './keys'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
@@ -1214,6 +1215,7 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
                   input={<ChatComposerInput onKeyDown={(e: import('react').KeyboardEvent) => {
                     // Esc while the agent works = Stop. (A pending question replaces this composer, so its Esc stays Skip.)
                     if (e.key === 'Escape' && agent.status === 'working' && !heldPicker) { e.preventDefault(); stop() }
+                    composerEnter(e)
                   }} handleRef={inputRef} triggers={[slash]} onFiles={addFiles} placeholder={`Message ${agent.name}…`} isDisabled={send.isPending} />}
                   status={attErr ? { type: 'warning', message: attErr } : undefined}
                   headerActions={narrow ? undefined : <>

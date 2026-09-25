@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
+import { installEnterKeyHint } from './keys'
+installEnterKeyHint()
 
 // The server issues a fresh session cookie on each start (it gates every user action). When a POST comes back
 // 403 with x-herdr-session, reload the page once to pick the new cookie up — at most every 10s.

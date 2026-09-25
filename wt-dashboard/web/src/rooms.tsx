@@ -29,6 +29,7 @@ import { Divider } from '@astryxdesign/core/Divider'
 import { Icon } from '@astryxdesign/core/Icon'
 import { useToast } from '@astryxdesign/core/Toast'
 import { openInbox } from './inbox'
+import { composerEnter } from './keys'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -307,7 +308,7 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
           <VStack gap={1}>
           <Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text>
           <ChatComposer value={draft} onChange={setDraft} onSubmit={submit} isDisabled={post.isPending} density="compact"
-            input={<ChatComposerInput triggers={[mention]} placeholder={`Message #${room.slug}`} />} />
+            input={<ChatComposerInput triggers={[mention]} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
           </VStack>
         )}>
         {messageList}
