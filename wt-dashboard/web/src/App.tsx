@@ -34,6 +34,8 @@ import { Link } from '@astryxdesign/core/Link'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { ChatMarkdown } from './links'
+import { sortAgents, initialSort, activityOf, type AgentSort } from './agentSort'
+import { shortAgo } from './notifyGate'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
@@ -69,6 +71,7 @@ interface Agent {
   question: string | null
   lastPrompt: string | null
   session: string | null
+  lastActivity?: number
   picker?: Picker | null
   task: string | null
 }
@@ -811,7 +814,6 @@ const POOLS = [
   { key: 'other', title: 'Other' },
 ]
 const needsYou = (a: Agent) => a.asks && a.status !== 'working'
-const rank = (a: Agent) => (needsYou(a) ? 0 : ({ working: 1, blocked: 2, idle: 3, unknown: 3, done: 4 } as const)[a.status])
 const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
   all: () => true,
   busy: (a) => a.status === 'working' || a.status === 'blocked',
@@ -823,7 +825,31 @@ const shortPath = (p: string | null) => (p ? p.split('/').filter(Boolean).at(-1)
 function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects: boolean }; onOpen: (p: string) => void; selected: string | null }) {
   const [filter, setFilter] = useState('all')
   const [machine, setMachine] = useState('all')
+  const [sort, setSortState] = useState<AgentSort>(() => initialSort(location.search, (() => { try { return localStorage.getItem('agentSort') } catch { return null } })()))
+  const setSort = (v: AgentSort) => {
+    setSortState(v)
+    try { localStorage.setItem('agentSort', v) } catch { /* private mode */ }
+    const u = new URL(location.href); u.searchParams.set('sort', v); history.replaceState(history.state, '', u)
+  }
+  const [collapsed, setCollapsed] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('agentGroupsCollapsed') ?? '["other"]') } catch { return ['other'] } })
+  const toggleGroup = (k: string, open: boolean) => {
+    const next = open ? collapsed.filter((x) => x !== k) : [...new Set([...collapsed, k])]
+    setCollapsed(next)
+    try { localStorage.setItem('agentGroupsCollapsed', JSON.stringify(next)) } catch { /* private mode */ }
+  }
+  const phone = useNarrow('(max-width: 639px)')
   const taskOf = (a: Agent) => data.tasks.find((t) => t.id === a.task)
+  const sortHead = (label: string, v: AgentSort) => (
+    <button type="button" onClick={() => setSort(v)} aria-pressed={sort === v} style={{ all: 'unset', cursor: 'pointer', fontWeight: 600 }}>{`${label}${sort === v ? ' ▾' : ''}`}</button>
+  )
+  const menu = (a: Agent) => (
+    <span onClick={(e) => e.stopPropagation()}>
+      <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
+        { label: 'Open', onClick: () => onOpen(a.key) },
+        a.local ? { label: 'Remove agent…', onClick: () => openRemove(a) } : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
+      ]} />
+    </span>
+  )
   return (
     <VStack gap={6}>
       <MachinesStrip machines={data.machines} />
@@ -838,25 +864,51 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
         <SegmentedControlItem value="free" label="Free" />
         <SegmentedControlItem value="needs" label="Needs you" />
       </SegmentedControl>
+      <SegmentedControl label="Sort agents" value={sort} onChange={(v) => setSort(v as AgentSort)} size="sm">
+        <SegmentedControlItem value="attention" label="Attention" />
+        <SegmentedControlItem value="activity" label="Last activity" />
+        <SegmentedControlItem value="name" label="Name" />
+      </SegmentedControl>
       </HStack>
       {POOLS.map(({ key, title }) => {
         const pool = data.agents.filter((a) => a.pool === key)
-        const rows = pool
-          .filter((a) => AGENT_FILTERS[filter](a, taskOf(a)) && (machine === 'all' || a.machine === machine))
-          .sort((x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name))
+        const rows = sortAgents(pool.filter((a) => AGENT_FILTERS[filter](a, taskOf(a)) && (machine === 'all' || a.machine === machine)), sort)
         if (!pool.length) return null
         return (
-          <VStack key={key} gap={2}>
-            <Heading level={2}>{`${title} (${pool.length})`}</Heading>
+          <Collapsible key={key} isOpen={!collapsed.includes(key)} onOpenChange={(o) => toggleGroup(key, o)} chevronPosition="start"
+            trigger={<Heading level={2}>{`${title} (${pool.length})`}</Heading>}>
             {rows.length === 0 ? (
               <Text type="supporting">No agents match this filter.</Text>
+            ) : phone ? (
+              <VStack gap={0}>
+                {rows.map((a) => {
+                  const t = taskOf(a)
+                  const what = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap
+                  const line2 = [needsYou(a) ? 'needs you' : a.status, what, a.local ? null : a.machine, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
+                  return (
+                    <div key={a.key} role="button" tabIndex={0} onClick={() => onOpen(a.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(a.key)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', minWidth: 0, cursor: 'pointer', borderBottom: '1px solid var(--color-border-default, rgba(128,128,128,.2))', background: selected === a.key ? 'var(--color-background-secondary, rgba(128,128,128,.12))' : undefined }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <HStack gap={2} align="center">
+                          <StatusDot variant={needsYou(a) ? 'error' : AGENT_DOT[a.status]} label={a.status} isPulsing={a.status === 'working' || needsYou(a)} />
+                          <Text weight="medium" maxLines={1}>{a.name}</Text>
+                          <Text type="supporting" size="sm" style={{ marginInlineStart: 'auto', flexShrink: 0 }}>{shortAgo(new Date(activityOf(a)).toISOString())}</Text>
+                        </HStack>
+                        <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>{line2}</Text>
+                      </div>
+                      {menu(a)}
+                    </div>
+                  )
+                })}
+              </VStack>
             ) : (
               <Table density="compact" hasHover textOverflow="truncate">
                 <TableHeader>
                   <TableRow isHeaderRow>
-                    <TableHeaderCell style={{ width: 230, minWidth: 230, maxWidth: 230 }}>Agent</TableHeaderCell>
+                    <TableHeaderCell style={{ width: 230, minWidth: 230, maxWidth: 230 }}>{sortHead('Agent', 'name')}</TableHeaderCell>
                     <TableHeaderCell style={{ width: 130, minWidth: 130, maxWidth: 130 }}>Machine</TableHeaderCell>
-                    <TableHeaderCell style={{ width: 130, minWidth: 130, maxWidth: 130 }}>Status</TableHeaderCell>
+                    <TableHeaderCell style={{ width: 130, minWidth: 130, maxWidth: 130 }}>{sortHead('Status', 'attention')}</TableHeaderCell>
+                    <TableHeaderCell style={{ width: 80, minWidth: 80, maxWidth: 80 }}>{sortHead('Active', 'activity')}</TableHeaderCell>
                     {data.allProjects && <TableHeaderCell style={{ width: 120, minWidth: 120, maxWidth: 120 }}>Project</TableHeaderCell>}
                     <TableHeaderCell style={{ minWidth: 220 }}>Task</TableHeaderCell>
                     <TableHeaderCell style={{ width: 160, minWidth: 160, maxWidth: 160 }}>
@@ -879,12 +931,7 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
                             <Button label={a.name} variant={selected === a.key ? "secondary" : "ghost"} size="sm" onClick={(e) => { e.stopPropagation(); onOpen(a.key) }} />
                             {needsYou(a) && <Badge variant="error" label="Needs you" />}
                             {a.background > 0 && <Badge label={`${a.background} background`} />}
-                            <span onClick={(e) => e.stopPropagation()} style={{ marginInlineStart: 'auto' }}>
-                              <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
-                                { label: 'Open', onClick: () => onOpen(a.key) },
-                                a.local ? { label: 'Remove agent…', onClick: () => openRemove(a) } : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
-                              ]} />
-                            </span>
+                            <span style={{ marginInlineStart: 'auto' }}>{menu(a)}</span>
                           </HStack>
                         </TableCell>
                         <TableCell>
@@ -893,6 +940,7 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
                         <TableCell>
                           <Text color={color} maxLines={1}>{`${a.status} · ${idleFor(a)}`}</Text>
                         </TableCell>
+                        <TableCell><Text type="supporting" maxLines={1}>{shortAgo(new Date(activityOf(a)).toISOString())}</Text></TableCell>
                         {data.allProjects && (
                           <TableCell><Text type="supporting" maxLines={1}>{a.project ?? '—'}</Text></TableCell>
                         )}
@@ -919,7 +967,7 @@ function AgentsPage({ data, onOpen, selected }: { data: Overview & { allProjects
                 </TableBody>
               </Table>
             )}
-          </VStack>
+          </Collapsible>
         )
       })}
     </VStack>

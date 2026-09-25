@@ -301,6 +301,8 @@ async function listAgents(m) {
       pool: poolOf(name),
       status: a.agent_status,
       statusSince: since.get(k).at,
+      // The transcript's last write (local sessions); else when the status last changed.
+      lastActivity: (await transcriptMtime(session)) || since.get(k).at, // statusSince resets on a server restart
       cwd,
       // Remote: no git over SSH, so the cwd's basename stands in.
       project: m.local ? await projectOf(cwd) : cwd ? basename(cwd) : null,
@@ -367,6 +369,11 @@ async function findTranscript(id) {
     if (existsSync(f)) return transcriptPath.set(id, f), f
   }
   return null
+}
+
+async function transcriptMtime(id) {
+  const f = id && (await findTranscript(id).catch(() => null))
+  return (f && statSync(f, { throwIfNoEntry: false })?.mtimeMs) || 0
 }
 
 const NOISE = /^\s*<(local-command-caveat|local-command-stdout|task-notification|system-reminder|command-message)/
