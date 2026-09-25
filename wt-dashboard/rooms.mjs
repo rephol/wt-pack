@@ -13,7 +13,12 @@ export const DEFAULT_SETTINGS = {
   profile: { name: 'user', handle: 'user', avatar: null }, // how agents address the human (@handle)
   rateCount: 6, // agent posts…
   rateWindowMin: 10, // …per this many minutes
+  agentsCreateRooms: false, // agents may create rooms (`room create`)
 }
+
+// Agent-created rooms: at most 3 per agent per hour.
+export const AGENT_ROOMS_PER_HOUR = 3
+export const agentRoomAllowed = (times, now = Date.now()) => times.filter((t) => now - t < 3_600_000).length < AGENT_ROOMS_PER_HOUR
 
 // @name tokens that name a known agent (exact, case-insensitive), plus the special `all`.
 export function parseMentions(text, names) {
@@ -231,6 +236,28 @@ export class Rooms {
   }
   room(slug) { return this.index.find((r) => r.slug === slug) }
   async list() { await this.load(); return this.index }
+  // An agent's `room create`: the slug must already be a valid slug (what the UI would make of it); an active room
+  // with that slug is returned as is (idempotent), an archived one is a 409. The creator is the responder and a
+  // member; invitees become members only — nothing is delivered to them.
+  async createByAgent({ author, slug, title, invite = [], project = null, agentList, now = Date.now() }) {
+    await this.load()
+    if (!this.settings.agentsCreateRooms) throw Object.assign(new Error('agents cannot create rooms: the user has not turned on Settings › Rooms › Agents can create rooms'), { status: 403 })
+    const s = String(slug ?? '')
+    if (!s || slugify(s) !== s) throw Object.assign(new Error(`bad slug "${s}" (lowercase letters, digits and dashes, e.g. ${slugify(s) || 'release-plan'})`), { status: 400 })
+    const existing = this.room(s)
+    if (existing?.archived) throw Object.assign(new Error(`#${s} exists but is archived; ask the user to restore it`), { status: 409 })
+    if (existing) return { room: existing, existing: true }
+    this.agentRooms ??= new Map()
+    const times = this.agentRooms.get(author.name) ?? []
+    if (!agentRoomAllowed(times, now)) throw Object.assign(new Error(`rate limit: at most 3 rooms per agent per hour`), { status: 429 })
+    this.agentRooms.set(author.name, [...times.filter((t) => now - t < 3_600_000), now])
+    const known = new Map(agentList.map((a) => [a.name.toLowerCase(), a.name]))
+    const invited = [...new Set(invite.map((n) => known.get(String(n).replace(/^@/, '').toLowerCase())).filter((n) => n && n !== author.name))]
+    const r = await this.create({ title: String(title || s), project, slug: s, responder: author.key })
+    await this.update(s, { members: [...new Set([...r.members, author.name, ...invited])] })
+    await this.system(s, `${author.name} created this room${invited.length ? ` and invited ${invited.join(', ')}` : ''}.`)
+    return { room: this.room(s), existing: false, invited, unknown: invite.filter((n) => !known.has(String(n).replace(/^@/, '').toLowerCase())) }
+  }
   async create({ title, project = null, slug, responder = null }) {
     await this.load()
     let s = slugify(slug ?? title)

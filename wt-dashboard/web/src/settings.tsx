@@ -188,6 +188,8 @@ function RoomsSection() {
       <FormLayout>
         <Switch label="Allow agents to @mention other agents" description="Off: an agent's @mention of another agent is shown but not delivered."
           value={s.agentToAgent} onChange={(v) => set.mutate({ agentToAgent: v })} />
+        <Switch label="Agents can create rooms" description="Off: `room create` from an agent is refused. On: up to 3 rooms per agent per hour; you get an inbox notice with an Archive action. Agents can never archive or delete."
+          value={s.agentsCreateRooms} onChange={(v) => set.mutate({ agentsCreateRooms: v })} />
         {s.agentToAgent && (
           <Field label="Hops before a human reply" inputID="hops" description="Agent→agent deliveries in a row; then the room waits for you.">
             <NumberBox label="Hops" value={s.maxHops} onSave={(n) => set.mutate({ maxHops: n })} />

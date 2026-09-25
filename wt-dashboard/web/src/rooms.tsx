@@ -54,7 +54,7 @@ interface RoomMsg {
   attachments?: { path: string; type: string; size: number }[]; undelivered?: { to: string; n: number }[]
   command?: { text: string; target: string }; agentKey?: string
 }
-export interface RoomSettings { profile: Profile; agentToAgent: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
+export interface RoomSettings { profile: Profile; agentToAgent: boolean; agentsCreateRooms: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
 
 const dotOf = (a?: RoomAgent) => (!a ? 'neutral' : a.asks ? 'error' : a.status === 'working' ? 'accent' : a.status === 'done' ? 'success' : 'neutral') as 'neutral' | 'error' | 'accent' | 'success'
 export const api = async <T,>(url: string, init?: RequestInit): Promise<T> => {

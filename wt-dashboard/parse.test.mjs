@@ -180,7 +180,7 @@ test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-o
   assert.ok(R.ticketFacts(later).includes('plan committed'))
 })
 
-test('session gate: state-changing API calls need the page cookie; only an agent room post is exempt', async () => {
+test('session gate: state-changing API calls need the page cookie; only agent room posts and room create are exempt', async () => {
   const { needsSession, hasSession } = await import('./server.mjs')
   assert.equal(needsSession('GET', '/api/overview', {}), false)
   assert.equal(needsSession('POST', '/api/agents/m/p1', {}), true)
@@ -190,7 +190,9 @@ test('session gate: state-changing API calls need the page cookie; only an agent
   assert.equal(needsSession('POST', '/api/rooms/x/messages', {}), true)
   assert.equal(needsSession('POST', '/api/rooms/x/messages', { 'x-herdr-pane': 'w1:p1' }), false)
   assert.equal(needsSession('DELETE', '/api/rooms/x', { 'x-herdr-pane': 'w1:p1' }), true) // agents cannot delete
-  assert.equal(needsSession('POST', '/api/rooms', { 'x-herdr-pane': 'w1:p1' }), true)
+  assert.equal(needsSession('POST', '/api/rooms', { 'x-herdr-pane': 'w1:p1' }), false) // `room create`: pane identity + the agentsCreateRooms setting gate it
+  assert.equal(needsSession('POST', '/api/rooms', {}), true)
+  assert.equal(needsSession('PATCH', '/api/rooms/x', { 'x-herdr-pane': 'w1:p1' }), true) // agents cannot archive
   assert.equal(hasSession('a=1; hd_session=tok', 'tok'), true)
   assert.equal(hasSession('hd_session=nope', 'tok'), false)
   assert.equal(hasSession(undefined, 'tok'), false)
@@ -560,4 +562,34 @@ test('streamTranscript: ids are byte offsets; ?since= and Last-Event-ID resume w
   assert.deepEqual(caught.texts, [])
   assert.deepEqual(caught.ids, [end])
   assert.deepEqual((await run({}, `?since=${end + 999}`)).texts, ['one', 'two']) // a stale cursor (file rewritten) gets the full backlog
+})
+
+test('Rooms.createByAgent: off → 403; on → created with creator as responder; idempotent; archived 409; 3/hour; invites never deliver', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const list = [{ name: 'repo-planner-01', key: 'm/w:p1', local: true }, { name: 'repo-worker-02', key: 'm/w:p2', local: true }]
+  const prompts = []
+  const rooms = new Rooms({ dir: mkdtempSync(join(tmpdir(), 'wtd-rooms-')), agents: async () => list, prompt: async (...a) => prompts.push(a), log: () => {} })
+  const author = { kind: 'agent', name: 'repo-planner-01', key: 'm/w:p1' }
+  const make = (slug, extra = {}) => rooms.createByAgent({ author, slug, title: 'T', agentList: list, ...extra })
+  await assert.rejects(make('umk-1'), (e) => e.status === 403 && /Agents can create rooms/.test(e.message))
+  await rooms.setSettings({ agentsCreateRooms: true })
+  await assert.rejects(make('Bad Slug'), (e) => e.status === 400)
+  const a = await make('umk-1', { invite: ['@repo-worker-02', 'nobody'] })
+  assert.equal(a.existing, false)
+  assert.equal(a.room.responder, 'm/w:p1')
+  assert.deepEqual(a.room.members.sort(), ['repo-planner-01', 'repo-worker-02'])
+  assert.deepEqual(a.unknown, ['nobody'])
+  const msgs = await rooms.messages('umk-1')
+  assert.equal(msgs.length, 1)
+  assert.equal(msgs[0].author.kind, 'system')
+  assert.deepEqual(msgs[0].deliveredTo, [])
+  assert.equal(prompts.length, 0) // an invite delivers nothing
+  assert.equal((await make('umk-1')).existing, true) // idempotent, and not counted
+  await make('umk-2'); await make('umk-3')
+  await assert.rejects(make('umk-4'), (e) => e.status === 429)
+  await rooms.update('umk-2', { archived: true })
+  await assert.rejects(make('umk-2'), (e) => e.status === 409)
 })

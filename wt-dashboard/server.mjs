@@ -1379,6 +1379,7 @@ export const hasSession = (cookieHeader, token = SESSION) =>
 export function needsSession(method, path, headers) {
   if (method === 'GET' || method === 'HEAD' || !path.startsWith('/api/')) return false
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/rooms\/[^/]+\/messages$/.test(path)) return false // agent post
+  if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
   return true
 }
 
@@ -1483,7 +1484,16 @@ async function roomsApi(req, res, url, parts) {
         suggestions: ticketSuggestions(tasks, rooms.index.map((r) => r.slug), rooms.settings) })
     }
     if (req.method === 'POST') {
-      await userOnly()
+      const author = await roomAuthor(req)
+      if (author.kind === 'agent') {
+        const b = await json()
+        const list = await agents()
+        const me = list.find((a) => a.key === author.key)
+        const out = await rooms.createByAgent({ author, slug: b.slug, title: b.title, invite: Array.isArray(b.invite) ? b.invite : [], project: me?.tags?.project ?? me?.project ?? null, agentList: list.filter((a) => a.local) })
+        if (!out.existing) await inbox.add({ kind: 'room-created', key: `room-created|${out.room.slug}`, title: `${author.name} created #${out.room.slug}`, body: out.room.title, target: { room: out.room.slug, agent: author.key } })
+        return send(res, 200, out)
+      }
+      if (author.kind !== 'user') throw Object.assign(new Error('dashboard only'), { status: 403 })
       const b = await json()
       if (b.ticket) {
         const t = (await overview()).tasks.find((x) => x.id === b.ticket)

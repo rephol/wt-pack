@@ -24,7 +24,7 @@ import { Delayed, LoadError, Rows } from './skeletons'
 export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
 const LABEL: Record<Kind, string> = {
   question: 'Question', 'mention-user': '@you', 'needs-you': 'Needs you', 'room-suggestion': 'Suggestion',
-  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage',
+  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage', 'room-created': 'New room',
 }
 
 export function useInbox() {
@@ -64,7 +64,7 @@ const HOVER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and
 const tip = (t: string) => (HOVER ? t : undefined) // no hover tooltips on touch: they stick open after a tap
 const COLOR: Record<Kind, string> = {
   question: 'var(--hd-red)', 'mention-user': 'var(--hd-red)', 'needs-you': 'var(--hd-red)', 'room-suggestion': 'var(--hd-blue)',
-  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)', usage: 'var(--hd-amber)',
+  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)', usage: 'var(--hd-amber)', 'room-created': 'var(--hd-blue)',
 }
 const sv = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
 const I = {
@@ -81,7 +81,7 @@ const I = {
 }
 const ICON: Record<Kind, React.ReactNode> = {
   question: I.q, 'mention-user': I.at, 'needs-you': I.q, 'room-suggestion': I.bulb, 'agent-done': I.check,
-  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock,
+  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus,
 }
 
 function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void }) {
@@ -93,6 +93,11 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const post = (path: string) => (b: object) => api(`/api/notifications/${path}`, { method: 'POST', body: JSON.stringify(b) })
   const read = useMutation({ mutationFn: post('read'), onSuccess: refresh, onError: (e) => toast({ body: `Could not mark read: ${e}`, type: 'error' }) })
   const clear = useMutation({ mutationFn: post('clear'), onSuccess: refresh, onError: (e) => toast({ body: `Could not clear: ${e}`, type: 'error' }) })
+  const archiveRoom = useMutation({
+    mutationFn: async ({ slug, ids }: { slug: string; ids: string[] }) => { await api(`/api/rooms/${encodeURIComponent(slug)}`, { method: 'PATCH', body: JSON.stringify({ archived: true }) }); await post('clear')({ ids }) },
+    onSuccess: () => { refresh(); toast({ body: 'Room archived' }) },
+    onError: (e) => toast({ body: `Could not archive: ${e}`, type: 'error' }),
+  })
   const createRoom = useMutation({
     mutationFn: (ticket: string) => api<{ slug: string }>('/api/rooms', { method: 'POST', body: JSON.stringify({ ticket }) }),
     onSuccess: (r) => { refresh(); onClose(); location.hash = `rooms/${encodeURIComponent(r.slug)}` },
@@ -134,6 +139,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
         <span className="hd-acts">
           {it.kind === 'room-suggestion' && !it.resolvedAt && act('Create room', I.plus, () => createRoom.mutate(it.target.task!))}
           {it.kind === 'room-suggestion' && !it.resolvedAt && act('Dismiss suggestion', I.x, () => dismiss.mutate(it.target.task!))}
+          {it.kind === 'room-created' && it.target.room && act('Archive room', I.x, () => archiveRoom.mutate({ slug: it.target.room!, ids: it.ids }))}
           {it.anyUnread && act('Mark read', I.check, () => read.mutate({ ids: it.ids }))}
           {!(it.kind === 'room-suggestion' && !it.resolvedAt) && act('Clear', I.x, () => clear.mutate({ ids: it.ids }))}
         </span>
