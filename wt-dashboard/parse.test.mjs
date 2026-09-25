@@ -295,3 +295,47 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
   const third = new I.Inbox(box.file); await third.load()
   assert.equal(third.list().length, 0); assert.equal(third.items.length, 2) // kept in the jsonl, not shown
 })
+
+test('rooms: a "/" message is a command for exactly one agent (mention, else responder), never broadcast', async () => {
+  const R = await import('./rooms.mjs')
+  const ag = [{ key: 'k1', name: 'p1' }, { key: 'k2', name: 'p2' }]
+  const u = (text, mentions = []) => ({ author: { kind: 'user' }, text, mentions })
+  assert.equal(R.parseCommand(u('hello /not-a-command'), {}, ag, 'user'), null)
+  assert.deepEqual(R.parseCommand(u('@p2 /wt-plan UMK-1', ['p2']), { responder: 'k1' }, ag, 'user'), { text: '/wt-plan UMK-1', target: ag[1] })
+  assert.equal(R.parseCommand(u('/wt-plan UMK-1'), { responder: 'k1' }, ag, 'user').target, ag[0]) // responder
+  assert.equal(R.parseCommand(u('/wt-plan'), {}, ag, 'user').error, R.ONE_TARGET) // nobody
+  assert.equal(R.parseCommand(u('@p1 @p2 /x', ['p1', 'p2']), {}, ag, 'user').error, R.ONE_TARGET) // two
+  assert.equal(R.parseCommand(u('@all /x', ['all']), { responder: 'k1' }, ag, 'user').error, R.ONE_TARGET)
+  assert.equal(R.parseCommand({ author: { kind: 'agent' }, text: '/x', mentions: [] }, { responder: 'k1' }, ag, 'user'), null) // agents: plain text
+})
+
+test('rooms: commands are delivered RAW and alone; attachments ride as paths for local agents, as a note for remote', async () => {
+  const R = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp((await import('node:os')).tmpdir() + '/rooms-cmd-')
+  const agents = [{ key: 'L', name: 'loc', status: 'idle', local: true }, { key: 'X', name: 'rem', status: 'idle', local: false }]
+  const sent = []
+  const rooms = new R.Rooms({ dir, agents: async () => agents, prompt: async (a, t) => { sent.push([a.name, t]) }, log: () => {} })
+  await rooms.load()
+  await rooms.create({ title: 'r', responder: 'L' })
+  const user = { kind: 'user', name: 'me', handle: 'user' }
+  const img = [{ path: '/u/a.png', type: 'image/png', size: 1 }]
+  await rooms.post('r', { author: user, text: 'plain first' })
+  await rooms.post('r', { author: user, text: '/wt-plan UMK-1', attachments: img })
+  await rooms.flush() // the plain message goes first, alone (a command is never batched with it)
+  await rooms.flush() // then the command, raw, with the image path after its args
+  assert.equal(sent[0][1].startsWith('[room #r] 1 new message'), true)
+  assert.deepEqual(sent[1], ['loc', '/wt-plan UMK-1\n/u/a.png'])
+  const msgs = await rooms.messages('r')
+  assert.ok(msgs.some((m) => m.author.kind === 'system' && m.text === 'ran /wt-plan UMK-1 on loc'))
+  await assert.rejects(rooms.post('r', { author: user, text: '@loc @rem /x' }), /one agent/)
+  // Remote recipient: text + note, and the message records what was not delivered.
+  await rooms.post('r', { author: user, text: '@rem look', attachments: img })
+  await rooms.flush()
+  const last = sent.at(-1)
+  assert.equal(last[0], 'rem'); assert.match(last[1], /me: @rem look\n\(1 image not delivered — remote agent\)/); assert.doesNotMatch(last[1], /\/u\/a\.png/)
+  assert.deepEqual((await rooms.messages('r')).find((m) => m.text === '@rem look').undelivered, [{ to: 'rem', n: 1 }])
+  // "finished" once the agent was seen working and is idle again.
+  agents[0].status = 'working'; await rooms.flush(); agents[0].status = 'idle'; await rooms.flush()
+  assert.ok((await rooms.messages('r')).some((m) => m.text === 'finished /wt-plan on loc'))
+})

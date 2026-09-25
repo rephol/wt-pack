@@ -149,3 +149,44 @@ export function FileCards({ files, caption }: { files: SharedFile[]; caption?: s
     </VStack>
   )
 }
+
+// ---- composer attachments (agent panel and rooms): upload on add, send the stored paths ----
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+export const MAX_IMAGE = 10 << 20
+export const MAX_IMAGES = 5
+export interface Attachment { id: string; preview: string; name: string; path?: string; error?: string }
+export async function uploadImage(f: File): Promise<string> {
+  const r = await fetch('/api/uploads', { method: 'POST', headers: { 'content-type': f.type }, body: f })
+  const j = await r.json()
+  if (!r.ok) throw new Error(j.error ?? r.status)
+  return j.path
+}
+// An uploads path → its served URL (null for anything else).
+export const uploadUrl = (p: string) => {
+  const m = p.match(/(\d{4}-\d{2}-\d{2})\/([0-9a-f-]{36}\.(?:png|jpg|webp|gif))$/)
+  return m ? `/api/uploads/${m[1]}/${m[2]}` : null
+}
+// `blocked`: why nothing can be attached here (e.g. a remote agent), or null.
+export function useAttachments(blocked: string | null) {
+  const [atts, setAtts] = useState<Attachment[]>([])
+  const [attErr, setAttErr] = useState<string | null>(null)
+  const addFiles = (files: File[]) => {
+    setAttErr(null)
+    if (blocked) return setAttErr(blocked)
+    const room = MAX_IMAGES - atts.length
+    const ok = files.filter((f) => IMAGE_TYPES.includes(f.type) && f.size <= MAX_IMAGE)
+    if (ok.length < files.length) setAttErr('Only png/jpeg/webp/gif up to 10MB')
+    if (ok.length > room) setAttErr(`At most ${MAX_IMAGES} images per message`)
+    for (const f of ok.slice(0, Math.max(0, room))) {
+      const a: Attachment = { id: crypto.randomUUID(), preview: URL.createObjectURL(f), name: f.name }
+      setAtts((prev) => [...prev, a])
+      uploadImage(f).then(
+        (path) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, path } : x))),
+        (e) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, error: String(e.message ?? e) } : x))),
+      )
+    }
+  }
+  const removeAtt = (id: string) => setAtts((prev) => prev.filter((x) => (x.id === id ? (URL.revokeObjectURL(x.preview), false) : true)))
+  const clear = () => { atts.forEach((a) => URL.revokeObjectURL(a.preview)); setAtts([]); setAttErr(null) }
+  return { atts, attErr, addFiles, removeAtt, clear, uploading: atts.some((a) => !a.path && !a.error) }
+}

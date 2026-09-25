@@ -1,7 +1,7 @@
 // Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, type ChatComposerTrigger } from '@astryxdesign/core/Chat'
+import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger } from '@astryxdesign/core/Chat'
 import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Popover } from '@astryxdesign/core/Popover'
@@ -30,6 +30,10 @@ import { Icon } from '@astryxdesign/core/Icon'
 import { useToast } from '@astryxdesign/core/Toast'
 import { openInbox } from './inbox'
 import { composerEnter } from './keys'
+import { commandSource, type Command } from './commands'
+import { ImageRow, useAttachments, uploadUrl, IMAGE_TYPES, MAX_IMAGES } from './attachments'
+import { Thumbnail } from '@astryxdesign/core/Thumbnail'
+import { Link } from '@astryxdesign/core/Link'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -40,6 +44,8 @@ interface RoomMsg {
   author: { kind: 'user' | 'agent' | 'system'; name: string; machine?: string; avatar?: string | null }
   blocked?: { name: string; reason: string }[]
   queuedFor?: string[]; notified?: boolean
+  attachments?: { path: string; type: string; size: number }[]; undelivered?: { to: string; n: number }[]
+  command?: { text: string; target: string }; agentKey?: string
 }
 export interface RoomSettings { profile: Profile; agentToAgent: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
 
@@ -55,7 +61,7 @@ export function useRoomsList() {
   return useQuery({ queryKey: ['rooms'], queryFn: () => api<{ rooms: Room[]; settings: RoomSettings; suggestions: Suggestion[]; pending: Record<string, number> }>('/api/rooms'), refetchInterval: 10_000 })
 }
 
-export function RoomsPage({ slug, agents, onSelect }: { slug: string | null; agents: RoomAgent[]; onSelect: (slug: string | null) => void }) {
+export function RoomsPage({ slug, agents, onSelect, onOpenAgent }: { slug: string | null; agents: RoomAgent[]; onSelect: (slug: string | null) => void; onOpenAgent: (key: string) => void }) {
   const q = useRoomsList()
   const qc = useQueryClient()
   const toast = useToast()
@@ -72,7 +78,7 @@ export function RoomsPage({ slug, agents, onSelect }: { slug: string | null; age
     mutationFn: (s: string) => api(`/api/rooms/${s}`, { method: 'PATCH', body: JSON.stringify({ archived: false }) }),
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
   })
-  if (room && q.data) return <RoomView room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} />
+  if (room && q.data) return <RoomView room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} onOpenAgent={onOpenAgent} />
   const live = (q.data?.rooms ?? []).filter((r) => !r.archived)
   const archived = (q.data?.rooms ?? []).filter((r) => r.archived)
   return (
@@ -132,7 +138,7 @@ function mentionSource(agents: RoomAgent[], profile: Profile): SearchSource<Sear
   }
 }
 
-function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomAgent[]; profile: Profile; onBack: () => void }) {
+function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; agents: RoomAgent[]; profile: Profile; onBack: () => void; onOpenAgent: (key: string) => void }) {
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [typed, setTyped] = useState('')
@@ -152,16 +158,37 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
     es.addEventListener('backlog', (e) => setMsgs(JSON.parse((e as MessageEvent).data)))
     es.addEventListener('message', (e) => { const m = JSON.parse((e as MessageEvent).data) as RoomMsg; setMsgs((xs) => [...xs.filter((x) => x.id !== m.id), m]) })
     es.addEventListener('delivered', (e) => {
-      const d = JSON.parse((e as MessageEvent).data) as { id: string; to: string }
-      setMsgs((xs) => xs.map((x) => (x.id === d.id && !x.deliveredTo.includes(d.to) ? { ...x, deliveredTo: [...x.deliveredTo, d.to] } : x)))
+      const d = JSON.parse((e as MessageEvent).data) as { id: string; to: string; dropped?: number }
+      setMsgs((xs) => xs.map((x) => (x.id === d.id && !x.deliveredTo.includes(d.to)
+        ? { ...x, deliveredTo: [...x.deliveredTo, d.to], ...(d.dropped ? { undelivered: [...(x.undelivered ?? []), { to: d.to, n: d.dropped }] } : {}) } : x)))
     })
     return () => es.close()
   }, [room.slug])
+  const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [sendErr, setSendErr] = useState<string | null>(null)
   const post = useMutation({
-    mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST', body: JSON.stringify(b) }),
-    onSuccess: () => { setDraft(''); setConfirm(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
-    onError: (e) => toast({ body: `Could not post: ${e}`, type: 'error' }),
+    mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST',
+      body: JSON.stringify({ ...b, attachments: atts.filter((a) => a.path).map((a) => a.path) }) }),
+    onSuccess: () => { setDraft(''); setConfirm(null); clearAtts(); setSendErr(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
+    onError: (e) => { const m = e instanceof Error ? e.message : String(e); if (/one agent/.test(m)) setSendErr(m); else toast({ body: `Could not post: ${m}`, type: 'error' }) },
   })
+  // The / menu lists the commands of the agent a command would go to: the one @mentioned, else the responder.
+  const cmdTarget = (() => {
+    const named = agents.filter((a) => room.members.includes(a.name) && new RegExp(`(^|\\s)@${a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(draft))
+    return named.length === 1 ? named[0] : named.length ? null : agents.find((a) => a.key === room.responder) ?? null
+  })()
+  const cmds = useQuery({
+    queryKey: ['commands', cmdTarget?.key],
+    queryFn: () => api<Command[]>(`/api/agents/${encodeURIComponent(cmdTarget!.machine)}/${encodeURIComponent(cmdTarget!.key.slice(cmdTarget!.machine.length + 1))}/commands`),
+    enabled: Boolean(cmdTarget), staleTime: 60_000,
+  })
+  const slash = useMemo<ChatComposerTrigger>(() => ({
+    character: '/',
+    searchSource: commandSource(cmds.data ?? []),
+    renderItem: (item) => <TypeaheadItem item={item} description={(item.auxiliaryData as Command).description} group={(item.auxiliaryData as Command).source} />,
+    onSelect: (item) => ({ value: `/${item.label}`, label: `/${item.label}`, variant: 'blue' as const }),
+  }), [cmds.data])
   const patch = useMutation({
     mutationFn: (b: Partial<Room>) => api<Room>(`/api/rooms/${room.slug}`, { method: 'PATCH', body: JSON.stringify(b) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['rooms'] }),
@@ -178,7 +205,8 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
   }), [agents, profile])
   const submit = (v: string) => {
     const text = v.trim()
-    if (!text) return
+    if (!text && !atts.some((a) => a.path)) return
+    if (uploading) return setSendErr('Wait for the images to finish uploading')
     if (/(^|[^\w@])@all\b/i.test(text)) setConfirm(text)
     else post.mutate({ text })
   }
@@ -201,7 +229,8 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
         <ChatMessageList density="compact">
           {msgs.map((m) => m.author.kind === 'system' ? (
             <ChatMessage key={m.id} sender="system">
-              <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" /></Text>
+              <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" />
+                {m.agentKey && <>{' · '}<Link onClick={() => onOpenAgent(m.agentKey!)}>open agent</Link></>}</Text>
             </ChatMessage>
           ) : (
             <ChatMessage key={m.id} sender={m.author.kind === 'user' ? 'user' : 'assistant'}
@@ -212,6 +241,8 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
               metadata={
                 <VStack gap={0}>
                   <Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" />{m.deliveredTo.length ? ` · delivered to ${m.deliveredTo.join(', ')}` : ''}</Text>
+                  {m.command && <Text type="supporting" size="sm">{`command for ${m.command.target}`}</Text>}
+                  {(m.undelivered ?? []).map((u) => <Text key={u.to} type="supporting" size="sm">{`${u.to}: ${u.n} image${u.n === 1 ? '' : 's'} not delivered — remote agent`}</Text>)}
                   {(m.blocked ?? []).map((b) => <Text key={b.name} type="supporting" size="sm">{`@${b.name}: ${b.reason}`}</Text>)}
                   {(m.queuedFor ?? m.mentions.filter((n) => n !== 'all' && n.toLowerCase() !== profile.handle.toLowerCase()))
                     .filter((n) => !m.deliveredTo.includes(n) && !(m.blocked ?? []).some((b) => b.name === n)).map((n) =>
@@ -220,7 +251,8 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
                     <Text type="supporting" size="sm">notified you</Text>}
                 </VStack>
               }>
-              <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><Markdown density="compact">{m.text}</Markdown></ChatMessageBubble>
+              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><Markdown density="compact">{m.text}</Markdown></ChatMessageBubble>}
+              {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
             </ChatMessage>
           ))}
         </ChatMessageList>
@@ -307,8 +339,21 @@ function RoomView({ room, agents, profile, onBack }: { room: Room; agents: RoomA
         composer={room.archived ? null : (
           <VStack gap={1}>
           <Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text>
-          <ChatComposer value={draft} onChange={setDraft} onSubmit={submit} isDisabled={post.isPending} density="compact"
-            input={<ChatComposerInput triggers={[mention]} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
+          <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null) }} onSubmit={submit} isDisabled={post.isPending} density="compact"
+            status={sendErr ? { type: 'error', message: sendErr } : attErr ? { type: 'warning', message: attErr }
+              : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}
+            headerActions={<>
+              <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={atts.length >= MAX_IMAGES} onClick={() => fileRef.current?.click()} />
+              <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
+            </>}
+            drawer={atts.length ? (
+              <ChatComposerDrawer>
+                <HStack gap={2} wrap="wrap">
+                  {atts.map((a) => <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name} isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />)}
+                </HStack>
+              </ChatComposerDrawer>
+            ) : undefined}
+            input={<ChatComposerInput triggers={[mention, slash]} onFiles={addFiles} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
           </VStack>
         )}>
         {messageList}
@@ -331,3 +376,8 @@ function useNarrow(q = '(max-width: 639px)') {
   useEffect(() => { const m = matchMedia(q); const on = () => setN(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on) }, [q])
   return n
 }
+const ClipIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+  </svg>
+)

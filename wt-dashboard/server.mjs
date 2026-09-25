@@ -1161,7 +1161,39 @@ async function roomAuthor(req) {
   }
   throw Object.assign(new Error('post from the dashboard, or from an agent pane with bin/room'), { status: 403 })
 }
-const roomText = (msgs) => msgs.map((m, i) => `${i + 1}. [${m.ts.slice(11, 16)}] ${m.author.name}: ${m.text}`).join('\n') + '\n'
+// Room attachments: the user attaches files already uploaded (paths inside UPLOADS); an agent attaches
+// images from its own cwd or /tmp, which are validated by content and COPIED into uploads.
+const MAX_ROOM_ATTS = 5
+async function roomAttachments(author, b) {
+  const list = author.kind === 'user' ? b.attachments : b.attach
+  if (list === undefined) return []
+  if (!Array.isArray(list) || list.length > MAX_ROOM_ATTS || !list.every((p) => typeof p === 'string'))
+    throw Object.assign(new Error(`at most ${MAX_ROOM_ATTS} attachments, as paths`), { status: 400 })
+  const out = []
+  for (const p of list) {
+    let real
+    try { real = realpathSync(p) } catch { throw Object.assign(new Error(`no such file: ${p}`), { status: 400 }) }
+    if (!statSync(real).isFile() || statSync(real).size > MAX_UPLOAD) throw Object.assign(new Error(`${p}: not a file up to 10MB`), { status: 400 })
+    const buf = await readFile(real)
+    const type = Object.entries(IMG).find(([, v]) => v.ok(buf))
+    if (!type || buf.length > MAX_UPLOAD) throw Object.assign(new Error(`${p}: png, jpeg, webp or gif up to 10MB only`), { status: 400 })
+    if (author.kind === 'user') {
+      if (!real.startsWith(realpathSync(UPLOADS) + '/')) throw Object.assign(new Error('attach uploaded files only'), { status: 400 })
+      out.push({ path: real, type: type[0], size: buf.length })
+      continue
+    }
+    const a = (await agents()).find((x) => x.key === author.key)
+    const roots = [a?.cwd, '/tmp', '/private/tmp'].filter(Boolean).map((d) => { try { return realpathSync(d) } catch { return d } })
+    if (!roots.some((d) => real.startsWith(d + '/'))) throw Object.assign(new Error(`${p}: only images under your cwd or /tmp`), { status: 400 })
+    const day = new Date().toISOString().slice(0, 10)
+    await mkdir(join(UPLOADS, day), { recursive: true, mode: 0o700 })
+    const dest = join(UPLOADS, day, `${randomUUID()}.${type[1].ext}`)
+    await writeFile(dest, buf, { mode: 0o600 })
+    out.push({ path: dest, type: type[0], size: buf.length })
+  }
+  return out
+}
+const roomText = (msgs) => msgs.map((m, i) => `${i + 1}. [${m.ts.slice(11, 16)}] ${m.author.name}: ${m.text}${(m.attachments ?? []).map((a) => `\n   ${a.path}`).join('')}`).join('\n') + '\n'
 async function roomsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
   const userOnly = async () => { if ((await roomAuthor(req)).kind !== 'user') throw Object.assign(new Error('dashboard only'), { status: 403 }) }
@@ -1214,7 +1246,7 @@ async function roomsApi(req, res, url, parts) {
   if (parts[3] === 'messages' && req.method === 'POST') {
     const author = await roomAuthor(req)
     const b = await json()
-    return send(res, 200, await rooms.post(slug, { author, text: b.text, confirmAll: author.kind === 'user' && b.confirmAll === true }))
+    return send(res, 200, await rooms.post(slug, { author, text: b.text, confirmAll: author.kind === 'user' && b.confirmAll === true, attachments: await roomAttachments(author, b) }))
   }
   send(res, 404, { error: 'not found' })
 }

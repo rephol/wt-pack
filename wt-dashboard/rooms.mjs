@@ -89,10 +89,32 @@ export function rateOk(times, now, settings) {
   return times.filter((t) => now - t < win).length < settings.rateCount
 }
 
+// A user message whose text (minus @mentions) starts with "/" is a command for exactly ONE agent:
+// the single @mentioned agent, else the responder. Never broadcast; agents cannot send commands.
+// Returns null (not a command), {error}, or {text, target}.
+export const ONE_TARGET = 'A command goes to one agent: @mention it or set a responder'
+export function parseCommand(msg, room, agents, handle) {
+  if (msg.author.kind !== 'user') return null
+  const h = handle.toLowerCase()
+  const known = new Set([...agents.map((a) => a.name.toLowerCase()), 'all', h])
+  const text = msg.text.replace(/(^|\s)@([\w./:-]+)/g, (m, sp, n) => (known.has(n.replace(/[.:,;!?)]+$/, '').toLowerCase()) ? sp : m)).trim()
+  if (!text.startsWith('/')) return null
+  const named = msg.mentions.filter((n) => n !== 'all' && n.toLowerCase() !== h)
+  if (msg.mentions.includes('all') || named.length > 1) return { error: ONE_TARGET }
+  const target = named.length ? agents.find((a) => a.name === named[0]) : agents.find((a) => a.key === room.responder)
+  return target ? { text, target } : { error: ONE_TARGET }
+}
+// Image paths ride after the text, one per line — for a local agent only; a remote one cannot open them.
+export function withAttachments(text, atts, local) {
+  const n = atts?.length ?? 0
+  if (!n) return text
+  return local ? [text, ...atts.map((a) => a.path)].join('\n') : `${text}\n(${n} image${n === 1 ? '' : 's'} not delivered — remote agent)`
+}
+
 // One prompt per agent per flush, whatever is queued for it across rooms.
 export const BROADCAST_NOTE = "Reply only if this is addressed to you or concerns your work; otherwise do nothing (don't post)."
-export function batchPrompt(slug, msgs, broadcast = false) {
-  const lines = msgs.map((m) => `${m.author.name}: ${m.text}`)
+export function batchPrompt(slug, msgs, broadcast = false, local = true) {
+  const lines = msgs.map((m) => withAttachments(`${m.author.name}: ${m.text}`, m.attachments, local))
   return `[room #${slug}] ${msgs.length} new message${msgs.length === 1 ? '' : 's'}:\n${lines.join('\n')}\n` +
     (broadcast ? `${BROADCAST_NOTE}\n` : '') +
     `Reply with: ~/.claude/skills/wt-room/scripts/room post ${slug} "…" (mention @name to address someone)`
@@ -169,7 +191,8 @@ export class Rooms {
     this.settings = null
     this.msgs = new Map() // slug -> [message] (folded: deliveredTo filled in)
     this.subs = new Map() // slug -> Set(res)
-    this.queue = new Map() // agentKey -> [{slug, msg}]
+    this.queue = new Map() // agentKey -> [{slug, msg, broadcast, command}]
+    this.running = new Map() // agentKey -> {slug, cmd, at, seenWorking}: a room command in flight
     this.posts = new Map() // agentKey -> [ts] (rate limit)
     this.lock = Promise.resolve()
   }
@@ -246,7 +269,11 @@ export class Rooms {
       for (const l of lines) {
         try {
           const e = JSON.parse(l)
-          if (e.type === 'delivered') byId.get(e.id)?.deliveredTo.push(e.to)
+          if (e.type === 'delivered') {
+            const m = byId.get(e.id)
+            m?.deliveredTo.push(e.to)
+            if (m && e.dropped) m.undelivered = [...(m.undelivered ?? []), { to: e.to, n: e.dropped }]
+          }
           else { out.push(e); byId.set(e.id, e) }
         } catch { /* torn line */ }
       }
@@ -261,7 +288,7 @@ export class Rooms {
     for (const res of this.subs.get(slug) ?? []) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   }
   // Post a message. author: {kind, name, machine?, pane?, key?}. Returns the stored message.
-  async post(slug, { author, text, confirmAll = false }) {
+  async post(slug, { author, text, confirmAll = false, attachments = [] }) {
     await this.load()
     const room = this.room(slug)
     if (!room) throw Object.assign(new Error('unknown room'), { status: 404 })
@@ -277,7 +304,15 @@ export class Rooms {
     }
     const agents = (await this.agentsFn()).filter((a) => a.name)
     const msg = { id: randomUUID(), ts: new Date(now).toISOString(), author, text, mentions: parseMentions(text, [...agents.map((a) => a.name), this.settings.profile.handle]), deliveredTo: [] }
-    const plan = planDelivery({ msg, room, settings: this.settings, agents, confirmAll })
+    if (attachments.length) msg.attachments = attachments
+    const cmd = parseCommand(msg, room, agents, this.settings.profile.handle)
+    if (cmd?.error) throw Object.assign(new Error(cmd.error), { status: 400 })
+    if (cmd) msg.command = { text: cmd.text, target: cmd.target.name }
+    const plan = cmd
+      ? room.paused
+        ? { deliver: [], blocked: [{ name: cmd.target.name, reason: 'room paused' }], hops: 0, route: 'paused', broadcast: false }
+        : { deliver: [cmd.target.key], blocked: [], hops: 0, route: 'command', broadcast: false }
+      : planDelivery({ msg, room, settings: this.settings, agents, confirmAll })
     msg.blocked = plan.blocked
     msg.route = plan.route
     Object.assign(msg, mentionStatus(msg, plan, agents, this.settings.profile.handle))
@@ -292,7 +327,7 @@ export class Rooms {
     await this.add(slug, msg)
     for (const key of plan.deliver) {
       const q = this.queue.get(key) ?? []
-      q.push({ slug, msg, broadcast: plan.broadcast })
+      q.push({ slug, msg, broadcast: plan.broadcast, command: Boolean(cmd) })
       this.queue.set(key, q)
     }
     if (plan.pauseNote) await this.system(slug, plan.pauseNote)
@@ -303,35 +338,72 @@ export class Rooms {
     await this.append(slug, msg)
     this.emit(slug, 'message', msg)
   }
-  system(slug, text) {
-    return this.add(slug, { id: randomUUID(), ts: new Date().toISOString(), author: { kind: 'system', name: 'system' }, text, mentions: [], deliveredTo: [] })
+  system(slug, text, extra = {}) {
+    return this.add(slug, { id: randomUUID(), ts: new Date().toISOString(), author: { kind: 'system', name: 'system' }, text, mentions: [], deliveredTo: [], ...extra })
   }
-  // Deliver queued messages to agents that are between turns: one batched prompt per agent per room.
+  async markDelivered(slug, m, a) {
+    const dropped = !a.local && m.attachments?.length ? m.attachments.length : 0
+    m.deliveredTo.push(a.name)
+    if (dropped) m.undelivered = [...(m.undelivered ?? []), { to: a.name, n: dropped }]
+    await this.append(slug, { type: 'delivered', id: m.id, to: a.name, ts: new Date().toISOString(), ...(dropped ? { dropped } : {}) })
+    this.emit(slug, 'delivered', { id: m.id, to: a.name, dropped })
+  }
+  // A command run from a room: "finished" once its agent is between turns again (seen working, or 30s on).
+  async watchCommands(agents) {
+    for (const [key, r] of this.running) {
+      const a = agents.find((x) => x.key === key)
+      if (!a) { this.running.delete(key); continue }
+      if (a.status === 'working') r.seenWorking = true
+      else if (deliverable(a) && (r.seenWorking || Date.now() - r.at > 30_000)) {
+        this.running.delete(key)
+        if (this.room(r.slug)) await this.system(r.slug, `finished ${r.cmd} on ${a.name}`, { agentKey: a.key })
+      }
+    }
+  }
+  // Deliver queued messages to agents that are between turns: one prompt per agent per flush. A command
+  // goes alone and RAW (its own text is the prompt); plain messages are batched per room.
   async flush() {
-    if (!this.queue.size) return
+    if (!this.queue.size && !this.running.size) return
     const agents = await this.agentsFn()
+    await this.watchCommands(agents)
     for (const [key, items] of this.queue) {
       const a = agents.find((x) => x.key === key)
       if (!a) { this.queue.delete(key); continue }
-      if (!deliverable(a)) continue
-      this.queue.delete(key)
+      if (!deliverable(a) || this.running.has(key)) continue
+      const n = items[0].command ? 1 : Math.max(1, items.findIndex((it) => it.command) === -1 ? items.length : items.findIndex((it) => it.command))
+      const take = items.slice(0, n)
+      const rest = items.slice(n)
+      if (rest.length) this.queue.set(key, rest); else this.queue.delete(key)
+      const requeue = (its) => this.queue.set(key, [...its, ...(this.queue.get(key) ?? [])])
+      if (take[0].command) {
+        const { slug, msg } = take[0]
+        const room = this.room(slug)
+        if (!room || room.archived) continue
+        if (room.paused) { requeue(take); continue }
+        try {
+          await this.promptFn(a, withAttachments(msg.command.text, msg.attachments, a.local))
+          await this.markDelivered(slug, msg, a)
+          this.running.set(key, { slug, cmd: msg.command.text.split(/\s/)[0], at: Date.now(), seenWorking: false })
+          await this.system(slug, `ran ${msg.command.text} on ${a.name}`, { agentKey: a.key })
+        } catch (e) {
+          this.log(`room command to ${a.name} failed: ${e.message}`)
+          requeue(take)
+        }
+        continue
+      }
       const bySlug = new Map()
-      for (const it of items) bySlug.set(it.slug, [...(bySlug.get(it.slug) ?? []), it])
+      for (const it of take) bySlug.set(it.slug, [...(bySlug.get(it.slug) ?? []), it])
       for (const [slug, its] of bySlug) {
         const msgs = its.map((it) => it.msg)
         // The note applies only when every queued message reached this agent by broadcast.
         const broadcast = its.every((it) => it.broadcast)
         if (!this.room(slug) || this.room(slug).paused || this.room(slug).archived) continue
         try {
-          await this.promptFn(a, batchPrompt(slug, msgs, broadcast))
-          for (const m of msgs) {
-            m.deliveredTo.push(a.name)
-            await this.append(slug, { type: 'delivered', id: m.id, to: a.name, ts: new Date().toISOString() })
-            this.emit(slug, 'delivered', { id: m.id, to: a.name })
-          }
+          await this.promptFn(a, batchPrompt(slug, msgs, broadcast, a.local))
+          for (const m of msgs) await this.markDelivered(slug, m, a)
         } catch (e) {
           this.log(`room delivery to ${a.name} failed: ${e.message}`)
-          this.queue.set(key, [...(this.queue.get(key) ?? []), ...its])
+          requeue(its)
         }
       }
     }

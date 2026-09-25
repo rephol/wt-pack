@@ -14,13 +14,14 @@ import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '@astryxdesign/core/Table'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { ServerStatus } from './status'
-import { ImageRow, FileCards, type SharedFile } from './attachments'
+import { ImageRow, FileCards, useAttachments, IMAGE_TYPES, MAX_IMAGES, type SharedFile } from './attachments'
 import { useToast } from '@astryxdesign/core/Toast'
 import { useDesktop } from './desktop'
 import { SettingsHost, openSettings } from './settings'
 import { InboxButton, InboxHost } from './inbox'
 import { RoomsPage, useRoomsList } from './rooms'
 import { composerEnter } from './keys'
+import { commandSource, type Command } from './commands'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
@@ -42,7 +43,7 @@ import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, ChatToolCalls, type ChatToolCallItem, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
-import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
+import { TypeaheadItem } from '@astryxdesign/core/Typeahead'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
@@ -366,7 +367,7 @@ export default function App() {
         {data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
         {data && page === 'tasks' && <TaskBoard tasks={data.tasks} onOpen={open} selected={openPane} showProject={data.allProjects} suggested={suggested} />}
         {data && page === 'agents' && <AgentsPage data={data} onOpen={open} selected={openPane} />}
-        {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} /></div>}
+        {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
       </VStack>
       </LayoutContent>
         }
@@ -563,16 +564,6 @@ function TaskBoard({ tasks, onOpen, showProject, selected, suggested }: { tasks:
 }
 
 // ---------- images ----------
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-const MAX_IMAGE = 10 << 20
-const MAX_IMAGES = 5
-interface Attachment { id: string; preview: string; name: string; path?: string; error?: string }
-async function uploadImage(f: File): Promise<string> {
-  const r = await fetch('/api/uploads', { method: 'POST', headers: { 'content-type': f.type }, body: f })
-  const j = await r.json()
-  if (!r.ok) throw new Error(j.error ?? r.status)
-  return j.path
-}
 // Upload paths inside a user message → served thumbnails; the paths themselves are hidden.
 const UPLOAD_PATH = /\S*\/(?:wt-dashboard|herdr-dash)\/uploads\/(\d{4}-\d{2}-\d{2})\/([0-9a-f-]{36}\.(?:png|jpg|webp|gif))/g
 function splitUploads(text: string) {
@@ -580,38 +571,6 @@ function splitUploads(text: string) {
   return { text: text.replace(UPLOAD_PATH, '').trim(), urls }
 }
 // ---------- slash commands ----------
-interface Command { name: string; description: string; source: string }
-const SOURCE_ORDER = ['Project', 'Personal', 'Plugins', 'Built-in']
-// Fuzzy: every query char in order; contiguous/early hits in the name score higher; description is a weaker fallback.
-function fuzzy(q: string, s: string): number {
-  let i = 0, score = 0, last = -2
-  for (let j = 0; j < s.length && i < q.length; j++) {
-    if (s[j] === q[i]) { score += j === last + 1 ? 3 : 1; last = j; i++ }
-  }
-  return i === q.length ? score - s.length / 100 : -1
-}
-function commandSource(cmds: Command[]): SearchSource<SearchableItem> {
-  const items = cmds.map((c) => ({ id: c.name, label: c.name, auxiliaryData: { ...c, group: c.source } })) // auxiliaryData.group drives the menu headings
-  const bySource = (a: SearchableItem, b: SearchableItem) =>
-    SOURCE_ORDER.indexOf((a.auxiliaryData as Command).source) - SOURCE_ORDER.indexOf((b.auxiliaryData as Command).source)
-  return {
-    bootstrap: () => [...items].sort(bySource),
-    search: (query) => {
-      const q = query.toLowerCase().trim()
-      if (!q) return [...items].sort(bySource)
-      return items
-        .map((it) => {
-          const c = it.auxiliaryData as Command
-          const n = fuzzy(q, c.name.toLowerCase())
-          return { it, score: n >= 0 ? 100 + n : c.description.toLowerCase().includes(q) ? 1 : -1 }
-        })
-        .filter((x) => x.score >= 0)
-        .sort((a, b) => bySource(a.it, b.it) || b.score - a.score)
-        .slice(0, 50)
-        .map((x) => x.it)
-    },
-  }
-}
 
 // ---------- AskUserQuestion ----------
 const RECOMMENDED = /\s*\(Recommended\)\s*$/
@@ -986,8 +945,7 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
   const [tab, setTab] = useState('conversation')
   const narrow = useNarrow()
   const [draft, setDraft] = useState(() => takePrefill(agent.key))
-  const [atts, setAtts] = useState<Attachment[]>([])
-  const [attErr, setAttErr] = useState<string | null>(null)
+  const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(agent.local ? null : 'Images only for local agents')
   const fileRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<ChatComposerInputHandle>(null)
   const [heldPicker, bumpPicker] = useHeldPicker(agent)
@@ -1024,24 +982,6 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
     },
     onSelect: (item) => ({ value: `/${item.label}`, label: `/${item.label}`, variant: 'blue' as const }),
   }), [cmds.data])
-  const addFiles = (files: File[]) => {
-    setAttErr(null)
-    if (!agent.local) return setAttErr('Images only for local agents')
-    const room = MAX_IMAGES - atts.length
-    const ok = files.filter((f) => IMAGE_TYPES.includes(f.type) && f.size <= MAX_IMAGE)
-    if (ok.length < files.length) setAttErr('Only png/jpeg/webp/gif up to 10MB')
-    if (ok.length > room) setAttErr(`At most ${MAX_IMAGES} images per message`)
-    for (const f of ok.slice(0, Math.max(0, room))) {
-      const a: Attachment = { id: crypto.randomUUID(), preview: URL.createObjectURL(f), name: f.name }
-      setAtts((prev) => [...prev, a])
-      uploadImage(f).then(
-        (path) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, path } : x))),
-        (e) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, error: String(e.message ?? e) } : x))),
-      )
-    }
-  }
-  const removeAtt = (id: string) => setAtts((prev) => prev.filter((x) => (x.id === id ? (URL.revokeObjectURL(x.preview), false) : true)))
-  const uploading = atts.some((a) => !a.path && !a.error)
   const submit = (v: string) => {
     const paths = atts.filter((a) => a.path).map((a) => a.path!)
     if (!v.trim() && !paths.length) return
@@ -1104,8 +1044,7 @@ function AgentPanelBody({ agent, task, onCollapse, autoFocus }: { agent: Agent; 
     onSuccess: (_d, body) => {
       if (body.text && body.text !== 'continue') {
         setDraft('')
-        atts.forEach((a) => URL.revokeObjectURL(a.preview))
-        setAtts([])
+        clearAtts()
       }
       qc.invalidateQueries({ queryKey: ['overview'] })
     },
