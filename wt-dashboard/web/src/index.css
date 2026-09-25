@@ -55,12 +55,5 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 @media (hover: hover) { [data-msg-meta] [data-copy] { opacity: 0; transition: opacity .12s } article.astryx-chat-message:hover [data-msg-meta] [data-copy], [data-msg-meta] [data-copy]:focus-within { opacity: 1 } }
 [data-msg-meta] [data-copy] button { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; opacity: .7 }
 [data-msg-meta] [data-copy] svg { width: 16px; height: 16px }
-/* Conversation rhythm (padding, not margin, so the virtual list's measured row height includes it). */
-[data-agent-chat] { gap: 0 !important }
-[data-agent-chat] [data-space] { padding-top: 10px }
-[data-agent-chat] [data-space="turn"] { padding-top: 18px }
-[data-agent-chat] [data-space="tools"] { padding-top: 8px }
-[data-agent-chat] .astryx-chat-message p { margin: 0.6em 0 }
-[data-agent-chat] .astryx-chat-message :is(p, ul, ol):first-child { margin-top: 0 }
-[data-agent-chat] .astryx-chat-message :is(p, ul, ol):last-child { margin-bottom: 0 }
-[data-agent-chat] .astryx-chat-message li + li { margin-top: 0.35em }
+/* Tool-call group rows: a little air above and below (message spacing itself comes from the list's density). */
+[data-agent-chat] [data-tools] { padding-block: 4px }

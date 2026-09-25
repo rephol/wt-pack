@@ -22,6 +22,7 @@ import { ServerPanel } from './status'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
+import { useChatDensity, setChatDensity, type ChatDensity } from './density'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 
@@ -117,6 +118,7 @@ function ProfileSection() {
 }
 
 function ProfileForm({ profile, save, status, busy }: { profile: Profile; save: (p: Profile) => void; status: string; busy: boolean }) {
+  const density = useChatDensity()
   const toast = useToast()
   const [name, setName] = useState(profile.name)
   const [handle, setHandle] = useState(profile.handle)
@@ -135,6 +137,13 @@ function ProfileForm({ profile, save, status, busy }: { profile: Profile; save: 
     <VStack gap={4}>
       <SectionHead title="Profile" status={status} />
       <FormLayout>
+        <Field label="Chat density" inputID="chat-density" isGroupLabel description="Spacing in agent conversations and rooms. Remembered in this browser.">
+          <SegmentedControl label="Chat density" value={density} onChange={(v) => setChatDensity(v as ChatDensity)} size="sm">
+            <SegmentedControlItem value="compact" label="Compact" />
+            <SegmentedControlItem value="balanced" label="Balanced" />
+            <SegmentedControlItem value="spacious" label="Spacious" />
+          </SegmentedControl>
+        </Field>
         <Field label="Avatar" inputID="profile-avatar" description="png, jpeg, webp or gif">
           <HStack gap={3} align="center">
             <Avatar name={name} src={avatar ?? undefined} size="lg" />

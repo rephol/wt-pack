@@ -36,6 +36,7 @@ import { commandSource, type Command } from './commands'
 import { ImageRow, useAttachments, uploadUrl, IMAGE_TYPES, MAX_IMAGES } from './attachments'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { Link } from '@astryxdesign/core/Link'
+import { useChatDensity } from './density'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -153,6 +154,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   const toast = useToast()
   const [msgs, setMsgs] = useState<RoomMsg[]>([])
   const [draft, setDraft] = useState('')
+  const density = useChatDensity()
   const [confirm, setConfirm] = useState<string | null>(null)
   useEffect(() => {
     setMsgs([])
@@ -239,7 +241,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
     return out
   }, [msgs, room.members, byName])
   const messageList = useMemo(() => (
-        <ChatMessageList density="compact">
+        <ChatMessageList density={density}>
           <VirtualRows items={msgs} scrollRef={layoutRef} keyOf={(m) => m.id} render={(m) => m.author.kind === 'system' ? (
             <ChatMessage key={m.id} sender="system">
               <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" />
@@ -270,7 +272,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
             </ChatMessage>
           )} />
         </ChatMessageList>
-  ), [msgs, profile, agents, workingAfter]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [msgs, profile, agents, workingAfter, density]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>

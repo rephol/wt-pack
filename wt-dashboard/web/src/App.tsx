@@ -36,6 +36,7 @@ import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
+import { useChatDensity } from './density'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
@@ -1066,8 +1067,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
 
 // ---------- drawer ----------
 // Consecutive tool rows → one ChatToolCalls group; a "result" row fills the preceding call's detail.
-type Space = 'turn' | 'same' | 'tools'
-type Row = ({ kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }) & { space?: Space }
+type Row = { kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
 function toRows(msgs: Msg[]): Row[] {
   const rows: Row[] = []
   const meta = deriveMeta(msgs)
@@ -1091,11 +1091,7 @@ function toRows(msgs: Msg[]): Row[] {
     const { calls, ms } = toolGroupMeta(g.raw)
     g.label = `${calls} tool call${calls === 1 ? '' : 's'}${ms ? ` · ${fmtDur(ms)}` : ''}`
   }
-  const out = rows.filter((r) => r.kind === 'msg' || r.calls.length)
-  // Vertical rhythm: a sender change opens a turn (18px), same sender 10px, tool groups 8px.
-  const sender = (r: Row) => (r.kind === 'msg' && r.m.role === 'user' ? 'user' : 'agent')
-  out.forEach((r, i) => { r.space = r.kind === 'tools' || out[i - 1]?.kind === 'tools' ? 'tools' : i && sender(out[i - 1]) !== sender(r) ? 'turn' : 'same' })
-  return out
+  return rows.filter((r) => r.kind === 'msg' || r.calls.length)
 }
 
 // One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
@@ -1151,6 +1147,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const [tab, setTab] = useState('conversation')
   const narrow = useNarrow()
   useSyncExternalStore(subDetails, () => showAllDetails) // the ⋯ menu's details label
+  const density = useChatDensity()
   const [draft, setDraft] = useState(() => takePrefill(agent.key))
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(agent.local ? null : 'Images only for local agents')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -1286,21 +1283,21 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
   }, [rows])
   const messageList = useMemo(() => (
-              <ChatMessageList density="compact" isStreaming={working} data-agent-chat="">
-                <VirtualRows items={rows} gap={0} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
+              <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
+                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
                   r.kind === 'tools' ? (
-                    <ChatMessage key={r.id} sender="assistant" data-space={r.space} metadata={<Text type="supporting" size="sm">{r.label}</Text>}>
+                    <ChatMessage key={r.id} sender="assistant" data-tools="" metadata={<Text type="supporting" size="sm">{r.label}</Text>}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         <ChatToolCalls calls={r.calls} />
                       </ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'question' ? (!r.m.answered && !r.m.cancelled ? null : // pending: the card below is the question
 
-                    <ChatMessage key={r.m.id} sender="assistant" data-space={r.space}>
+                    <ChatMessage key={r.m.id} sender="assistant">
                       <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user" data-space={r.space} metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
+                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
                       {(() => {
                         const u = splitUploads(r.m.text)
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
@@ -1313,7 +1310,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                       })()}
                     </ChatMessage>
                   ) : (
-                    <ChatMessage key={r.m.id} sender="assistant" data-space={r.space} metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
+                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         {r.m.text && <ChatMarkdown>{r.m.text}</ChatMarkdown>}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
@@ -1322,7 +1319,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     </ChatMessage>
                   )} />
               </ChatMessageList>
-  ), [rows, working])
+  ), [rows, working, density])
 
   const page = mode === 'page'
   const summary = (

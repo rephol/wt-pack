@@ -3,6 +3,7 @@
 // webview ignores target=_blank. Long URLs wrap anywhere instead of overflowing the bubble.
 import { createElement, type ComponentType, type MouseEvent, type ReactNode } from 'react'
 import { Markdown } from '@astryxdesign/core/Markdown'
+import { useChatDensity, markdownDensity } from './density.ts'
 
 type Opener = { openUrl: (u: string) => Promise<void> }
 const opener = () => (globalThis as unknown as { __TAURI__?: { opener?: Opener } }).__TAURI__?.opener
@@ -20,6 +21,8 @@ export function linkClick(href: string, e?: MouseEvent<HTMLAnchorElement>, app =
   return false
 }
 
-export function ChatMarkdown({ children, density = 'compact' }: { children: string; density?: 'default' | 'compact' }): ReactNode {
+export function ChatMarkdown({ children, density }: { children: string; density?: 'default' | 'compact' }): ReactNode {
+  const chat = useChatDensity()
+  density ??= markdownDensity(chat)
   return createElement(Markdown as unknown as ComponentType<Record<string, unknown>>, { density, autolink: 'gfm', onLinkClick: (h: string, e: MouseEvent<HTMLAnchorElement>) => linkClick(h, e), style: { overflowWrap: 'anywhere' } }, children)
 }
