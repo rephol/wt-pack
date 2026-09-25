@@ -16,9 +16,10 @@ Manages the two agent pools — `<repo>-workers` and `<repo>-planners` — each 
 on demand.
 
 ```bash
-~/.claude/skills/wt-agents/scripts/agents.sh list [worker|planner]   # name, pane, status, cwd
+~/.claude/skills/wt-agents/scripts/agents.sh list [role] [--json]    # name, pane, status, cwd (--json: + pane tokens)
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn worker [cwd]      # starts in the worktree
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
+~/.claude/skills/wt-agents/scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
 ~/.claude/skills/wt-agents/scripts/agents.sh rm <name|pane> [--force]
 ```
 
@@ -72,3 +73,13 @@ waiting; only `working` is in flight.
 For a handoff, prefer reusing a free worker — `wt-plan`'s `handoff.sh --list` shows the ones sitting
 in the main checkout, and a worker parked inside a worktree is work already in flight. Spawn when
 there is none free, not by default: panes accumulate and nothing reaps them.
+
+## Roles and tags
+
+Any lowercase role name works (`reviewer`, `release`…): its pool is the `<repo>-<role>s` workspace
+(`$WT_AGENTS_WORKSPACE` overrides the label) and its agents are `<repo>-<role>-NN`. Every spawned
+agent gets herdr **pane tokens** under source `wt-dashboard`: `role`, `project`, `spawned_by`
+(`$WT_AGENTS_SPAWNED_BY`, default `wt-agents`) and `created` (YYYY-MM-DD). Tokens are display-only
+metadata: one merged map per pane (any source can overwrite a key), values cut at 80 characters,
+and they live in the running herdr server — wt-dashboard keeps its own copy and re-applies them.
+

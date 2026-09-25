@@ -1,13 +1,16 @@
 #!/bin/sh
 # Manage the named agent pools this pack hands work to.
 #
-#   agents.sh list [worker|planner]        # name, pane, status, cwd
-#   agents.sh spawn <worker|planner> [cwd] # -> prints "<name> <pane>"
+#   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
+#   agents.sh spawn <role> [cwd]           # -> prints "<name> <pane>"
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #
-# A pool is a herdr workspace, "<repo>-workers" / "<repo>-planners", created on
-# demand. Workers are spawned in <cwd> (a worktree, usually); planners in the
-# main checkout, because a planner's first job is to MAKE a worktree.
+# A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
+# created on demand; $WT_AGENTS_WORKSPACE overrides the label. Any role name works
+# ([a-z][a-z0-9-]*); workers are spawned in <cwd> (a worktree, usually), every other
+# role in the main checkout unless a cwd is given (a planner's first job is to MAKE a
+# worktree). Each new agent gets herdr pane tokens (source "wt-dashboard", display-
+# only): role, project, spawned_by ($WT_AGENTS_SPAWNED_BY, default wt-agents), created.
 #
 # Every agent is NAMED. `herdr agent start <NAME>` only names what it actually
 # starts — when it instead DETECTS a claude already running in the pane (the
@@ -45,31 +48,37 @@ sync_names() {  # <workspace-id>
 
 role_label() {  # <role> <repo>
   case "$1" in
-    worker)  echo "$2-workers" ;;
-    planner) echo "$2-planners" ;;
-    *) echo "unknown role: $1 (worker|planner)" >&2; exit 2 ;;
+    ''|*[!a-z0-9-]*|[!a-z]*) echo "bad role: $1 (lowercase letters, digits, dashes)" >&2; exit 2 ;;
   esac
+  echo "${WT_AGENTS_WORKSPACE:-$2-$1s}"
 }
 
 cmd=${1:-list}; shift 2>/dev/null || true
 
 case "$cmd" in
 list)
-  role=${1:-}
+  json=; role=
+  for a in "$@"; do case "$a" in --json) json=1 ;; *) role=$a ;; esac; done
   main=$(repo_root "$PWD"); repo=$(basename "$main")
   for r in ${role:-worker planner}; do
     ws=$(pool_ws "$(role_label "$r" "$repo")" "$main")
     sync_names "$ws"
-    herdr agent list | jq -r --arg ws "$ws" \
-      '.result.agents[] | select(.workspace_id == $ws) | [.name, .pane_id, .agent_status, .cwd] | @tsv'
+    if [ -n "$json" ]; then
+      # Tokens live on panes, not on the agent list.
+      herdr agent list | jq -c --arg ws "$ws" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
+        '.result.agents[] | select(.workspace_id == $ws) | {name, pane: .pane_id, status: .agent_status, cwd, tokens: ($panes[.pane_id] // {})}'
+    else
+      herdr agent list | jq -r --arg ws "$ws" \
+        '.result.agents[] | select(.workspace_id == $ws) | [.name, .pane_id, .agent_status, .cwd] | @tsv'
+    fi
   done
   ;;
 
 spawn)
-  role=${1:?role required: worker|planner}
+  role=${1:?role required, e.g. worker|planner}
   main=$(repo_root "$PWD"); repo=$(basename "$main")
-  # A planner makes its own worktree, so it starts in the main checkout.
-  case "$role" in worker) cwd=${2:-$PWD} ;; planner) cwd=${2:-$main} ;; esac
+  # A planner makes its own worktree, so it starts in the main checkout; so does any other role without a cwd.
+  case "$role" in worker) cwd=${2:-$PWD} ;; *) cwd=${2:-$main} ;; esac
   [ -d "$cwd" ] || { echo "no such directory: $cwd" >&2; exit 1; }
   # Absolutise: herdr resolves a relative --cwd against the DAEMON's directory,
   # not the caller's, so `spawn worker .` silently lands the agent outside the
@@ -107,6 +116,9 @@ spawn)
     sleep 3
   done
   herdr agent rename "$pane" "$label" >/dev/null 2>&1 || true
+  # Display-only tags for dashboards (best effort: an older herdr has no report-metadata).
+  herdr pane report-metadata "$pane" --source wt-dashboard --token "role=$role" --token "project=$repo" \
+    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" >/dev/null 2>&1 || true
   echo "$label $pane"
   ;;
 
