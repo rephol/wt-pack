@@ -36,6 +36,7 @@ import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
+import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
 import { PwaHost, InstallHint } from './pwa'
@@ -129,6 +130,7 @@ interface AskQ { question: string; header?: string; multiSelect?: boolean; optio
 interface Msg {
   id: string; role: 'user' | 'assistant' | 'tool' | 'question'; text: string; tool?: { name: string; summary: string }; images?: string[]; files?: SharedFile[]; caption?: string | null; ts: string
   questions?: AskQ[]; answered?: boolean; answers?: Record<string, string>; cancelled?: boolean
+  src?: string; meta?: Usage; toolUseId?: string; isError?: boolean
 }
 interface Picker {
   review: boolean
@@ -1064,21 +1066,64 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
 
 // ---------- drawer ----------
 // Consecutive tool rows → one ChatToolCalls group; a "result" row fills the preceding call's detail.
-type Row = { kind: 'msg'; m: Msg } | { kind: 'tools'; id: string; calls: ChatToolCallItem[] }
+type Row = { kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
 function toRows(msgs: Msg[]): Row[] {
   const rows: Row[] = []
+  const meta = deriveMeta(msgs)
   for (const m of msgs) {
-    if (m.role !== 'tool') { rows.push({ kind: 'msg', m }); continue } // user/assistant/question
+    if (m.role !== 'tool') { rows.push({ kind: 'msg', m, meta: meta.get(m.id) }); continue } // user/assistant/question
     let g = rows.at(-1)
-    if (g?.kind !== 'tools') rows.push((g = { kind: 'tools', id: m.id, calls: [] }))
+    if (g?.kind !== 'tools') rows.push((g = { kind: 'tools', id: m.id, calls: [], raw: [] }))
+    g.raw.push(m)
     const last = g.calls.at(-1)
     if (m.tool?.name === 'result' && last && !last.resultDetail) {
       last.resultDetail = <Text type="code" size="sm">{m.text || '(empty result)'}</Text>
+      if (m.isError) last.status = 'error'
     } else if (m.tool?.name !== 'result') {
-      g.calls.push({ key: m.id, name: m.tool?.name ?? 'tool', target: m.tool?.summary, status: 'complete' })
+      g.calls.push({ key: m.id, name: m.tool?.name ?? 'tool', target: m.tool?.summary, status: 'complete', data: m.toolUseId })
     }
   }
+  for (const g of rows) {
+    if (g.kind !== 'tools') continue
+    const d = callDurations(g.raw)
+    for (const c of g.calls) { const t = d.get(c.data as string); if (t != null) c.duration = fmtDur(t) }
+    const { calls, ms } = toolGroupMeta(g.raw)
+    g.label = `${calls} tool call${calls === 1 ? '' : 's'}${ms ? ` · ${fmtDur(ms)}` : ''}`
+  }
   return rows.filter((r) => r.kind === 'msg' || r.calls.length)
+}
+
+// One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
+function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extraAttachments?: number; copyText?: string }) {
+  const [abs, setAbs] = useState(false)
+  const toast = useToast()
+  if (!meta?.ts && !copyText) return null
+  const parts: string[] = []
+  if (meta?.kind === 'user') {
+    parts.push(meta.src === 'dashboard' ? 'you · dashboard · delivered' : meta.src ?? 'you')
+    const n = meta.attachments + extraAttachments
+    if (n) parts.push(`${n} attachment${n === 1 ? '' : 's'}`)
+  } else if (meta?.kind === 'turn') {
+    if (meta.model) parts.push(shortModel(meta.model)!)
+    if (meta.up || meta.down) parts.push(`↑${fmtTokens(meta.up)} ↓${fmtTokens(meta.down)}`)
+    if (meta.ms) parts.push(fmtDur(meta.ms))
+    if (meta.tools) parts.push(`${meta.tools} tool${meta.tools === 1 ? '' : 's'}`)
+    if (meta.cost != null) parts.push(`~$${meta.cost < 0.01 ? meta.cost.toFixed(3) : meta.cost.toFixed(2)}`)
+    if (meta.stop) parts.push(meta.stop === 'max_tokens' ? 'hit max tokens' : meta.stop)
+  }
+  const when = meta?.ts ? new Date(meta.ts) : null
+  const copy = () => navigator.clipboard.writeText(copyText!).then(() => toast({ body: 'Copied', type: 'info' }), (e) => toast({ body: `Copy failed: ${e}`, type: 'error' }))
+  return (
+    <div data-msg-meta style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 20, maxWidth: '100%', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+      {when && (
+        <span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)} style={{ cursor: 'default' }}>
+          <Text type="supporting" size="sm">{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</Text>
+        </span>
+      )}
+      {parts.length > 0 && <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>{`· ${parts.join(' · ')}`}</Text>}
+      {copyText && <span data-copy style={{ marginLeft: 'auto', flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" />} variant="ghost" size="sm" onClick={copy} /></span>}
+    </div>
+  )
 }
 
 // One conversation component for the side panel and the full page (#agents/<machine>/<pane>).
@@ -1226,7 +1271,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
               <ChatMessageList density="compact" isStreaming={working}>
                 <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
                   r.kind === 'tools' ? (
-                    <ChatMessage key={r.id} sender="assistant">
+                    <ChatMessage key={r.id} sender="assistant" metadata={<Text type="supporting" size="sm">{r.label}</Text>}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         <ChatToolCalls calls={r.calls} />
                       </ChatMessageBubble>
@@ -1237,7 +1282,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                       <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user">
+                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
                       {(() => {
                         const u = splitUploads(r.m.text)
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
@@ -1250,7 +1295,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                       })()}
                     </ChatMessage>
                   ) : (
-                    <ChatMessage key={r.m.id} sender="assistant">
+                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         {r.m.text && <ChatMarkdown>{r.m.text}</ChatMarkdown>}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}

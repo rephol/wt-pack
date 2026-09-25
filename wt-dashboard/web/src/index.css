@@ -50,3 +50,7 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 /* Quick switcher on a phone: tight 56px rows, 12px sides, headings that stay put while the list scrolls. */
 [data-switcher-phone] .astryx-command-palette-item { padding: 2px 12px; min-height: 48px; }
 [data-switcher-phone] .astryx-command-palette-group-heading { position: sticky; top: 0; z-index: 1; padding: 6px 12px; background: var(--color-background-surface, var(--color-background-page, Canvas)); }
+
+/* Message meta line: the copy button shows on hover (pointer) and stays visible on touch. */
+@media (hover: hover) { [data-msg-meta] [data-copy] { opacity: 0; transition: opacity .12s } article.astryx-chat-message:hover [data-msg-meta] [data-copy], [data-msg-meta] [data-copy]:focus-within { opacity: 1 } }
+[data-msg-meta] [data-copy] button { width: 22px; height: 22px; min-width: 0; min-height: 0; }

@@ -3,14 +3,14 @@
 import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs'
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
-import { UsageAgg, readLimits, PRICES } from './usage.mjs'
+import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -421,10 +421,13 @@ export function normalizeEntry(e, asks = new Set()) {
     if (e.type !== 'user' || NOISE.test(c)) return []
     const cmd = c.match(/<command-name>(.*?)<\/command-name>[\s\S]*?<command-args>([\s\S]*?)<\/command-args>/)
     const text = cmd ? `${cmd[1]} ${cmd[2]}`.trim() : c
-    return text.trim() ? [{ id: base, role: 'user', text, ts }] : []
+    return text.trim() ? [{ id: base, role: 'user', text, ts, src: sourceOf(c) }] : []
   }
   if (!Array.isArray(c)) return []
-  return c.flatMap((b, i) => {
+  const meta = e.type === 'assistant' ? assistantMeta(e) : undefined
+  const src = e.type === 'user' ? sourceOf(c.filter((b) => b.type === 'text').map((b) => b.text).join('\n')) : undefined
+  return c.flatMap((b, i) => rowsOf(b, i)).map((m) => (m.role === 'tool' ? m : Object.assign(m, meta ? { meta } : {}, src && m.role === 'user' ? { src } : {})))
+  function rowsOf(b, i) {
     const id = `${base}:${i}`
     if (b.type === 'text' && b.text?.trim() && !NOISE.test(b.text)) return [{ id, role: e.type, text: b.text, ts }]
     if (b.type === 'tool_use' && b.name === 'AskUserQuestion') {
@@ -442,17 +445,40 @@ export function normalizeEntry(e, asks = new Set()) {
       const files = b.input.files.filter((f) => typeof f === 'string').map((f) => ({ path: f, name: basename(f), size: allowFile(f) }))
       return [{ id: `f:${b.id}`, role: 'assistant', text: '', files, caption: b.input.caption ?? null, ts }]
     }
-    if (b.type === 'tool_use') return [{ id, role: 'tool', text: '', tool: { name: b.name, summary: toolSummary(b.input) }, ts }]
+    if (b.type === 'tool_use') return [{ id, role: 'tool', text: '', tool: { name: b.name, summary: toolSummary(b.input) }, ts, toolUseId: b.id, meta }]
     if (b.type === 'tool_result') {
       const t = typeof b.content === 'string' ? b.content : (b.content ?? []).map((x) => x.text ?? '').join('\n')
-      const row = { id, role: 'tool', text: clip(t, 600), tool: { name: 'result', summary: clip(t.replace(/\s+/g, ' '), 120) }, ts }
+      const row = { id, role: 'tool', text: clip(t, 600), tool: { name: 'result', summary: clip(t.replace(/\s+/g, ' '), 120) }, ts, toolUseId: b.tool_use_id, isError: Boolean(b.is_error) || undefined }
       // Images a tool returned (e.g. Read of a PNG) surface as their own assistant row, not inside the collapsed group.
       const imgs = Array.isArray(b.content) ? b.content.filter((x) => x.type === 'image' && x.source?.type === 'base64') : []
       return imgs.length ? [row, ...imgs.map((x, k) => imageMsg(x, `${id}:img${k}`, 'assistant', ts))] : [row]
     }
     if (b.type === 'image' && b.source?.type === 'base64') return [imageMsg(b, id, e.type, ts)]
     return [] // thinking, etc.
-  })
+  }
+}
+// Per assistant API message (one `mid` spans several JSONL entries, each repeating its usage; the client keeps the
+// last per mid). Tokens and a NOTIONAL cost (usage.mjs's list-price table; null for an unpriced model).
+function assistantMeta(e) {
+  const m = e.message ?? {}, u = m.usage ?? {}
+  const t = { in: u.input_tokens ?? 0, out: u.output_tokens ?? 0, cw: u.cache_creation_input_tokens ?? 0, cr: u.cache_read_input_tokens ?? 0 }
+  return { mid: m.id ?? e.uuid, model: m.model, ...t, cost: m.model ? costOf({ model: m.model, ...t }) : null,
+    stop: e.isApiErrorMessage ? 'error' : m.stop_reason === 'max_tokens' ? 'max_tokens' : m.stop_reason ?? null }
+}
+// Who typed a user turn: a room delivery, the dashboard (its sends are recorded by hash, never by text), else the
+// terminal. Sends from before the hash log existed read as "terminal".
+const SENT_FILE = join(DATA, 'sent-hashes.log')
+const sentHashes = new Set((() => { try { return readFileSync(SENT_FILE, 'utf8').split('\n').slice(-5000).filter(Boolean) } catch { return [] } })())
+const hashOf = (t) => createHash('sha256').update(String(t).trim()).digest('hex').slice(0, 24)
+export function recordSent(text) {
+  const h = hashOf(text)
+  if (sentHashes.has(h)) return
+  sentHashes.add(h)
+  appendFile(SENT_FILE, h + '\n').catch((e) => console.error('sent-hashes:', e.message))
+}
+function sourceOf(text) {
+  const room = String(text).match(/^\[room #([\w-]+)\]/)
+  return room ? `room #${room[1]}` : sentHashes.has(hashOf(text)) ? 'dashboard' : 'terminal'
 }
 // ponytail: inline data URL, capped at ~1.5MB base64; bigger ones become a placeholder.
 function imageMsg(b, id, role, ts) {
@@ -1655,7 +1681,7 @@ const server = http.createServer(async (req, res) => {
           if (Array.isArray(keys)) {
             if (!keys.length || !keys.every((k) => typeof k === 'string' && KEY.test(k))) return send(res, 400, { error: 'bad keys' })
             await herdrOn(m, 'agent', 'send-keys', pane, ...keys)
-          } else if (typeof text === 'string' && text.trim()) await herdrOn(m, 'agent', 'prompt', pane, text)
+          } else if (typeof text === 'string' && text.trim()) { recordSent(text); await herdrOn(m, 'agent', 'prompt', pane, text) }
           else return send(res, 400, { error: 'text or keys required' })
           store.delete('agents:local')
           if (!m.local) remote.get(m.label) && (remote.get(m.label).lastTry = 0)
