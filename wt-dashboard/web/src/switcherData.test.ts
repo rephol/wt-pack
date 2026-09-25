@@ -35,3 +35,8 @@ test('agentInitials: a configured role letter wins', () => {
   assert.equal(agentInitials('umkmall-orchestrator', 'O'), 'O')
   assert.equal(agentInitials('umkmall-planner-02', '?'), 'P2') // Other: falls back to the name
 })
+test('switcher: a handoff task label leads the subtitle and is searchable', () => {
+  const b = [ag('w-09', { recap: 'on it', tags: { task: 'UMK-1192 Tailwind v4' } })]
+  assert.equal(switcherItems(b, [], [])[0].auxiliaryData!.line, 'UMK-1192 Tailwind v4 · on it')
+  assert.deepEqual(switcherItems(b, [], [], 'tailwind').map((x) => x.label), ['w-09'])
+})

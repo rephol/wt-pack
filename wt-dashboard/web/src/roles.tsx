@@ -74,9 +74,9 @@ export function TagsDialog({ agent, mode, onClose }: { agent: AgentLite; mode: '
 }
 
 export function TagList({ tags }: { tags?: Record<string, string> }) {
-  const entries = Object.entries(tags ?? {})
+  const entries = Object.entries(tags ?? {}).filter(([k]) => !k.startsWith('handoff_')) // handoff: shown as a sentence above
   if (!entries.length) return <Text type="supporting">—</Text>
-  return <VStack gap={0}>{entries.map(([k, v]) => <Text key={k} size="sm"><span style={{ opacity: 0.6 }}>{k.replace('_', ' ')}</span>{` ${v}`}</Text>)}</VStack>
+  return <VStack gap={0}>{entries.map(([k, v]) => <Text key={k} size="sm"><span style={{ opacity: 0.6 }}>{k.replaceAll('_', ' ')}</span>{` ${v}`}</Text>)}</VStack>
 }
 
 // ---- Settings › Roles ----

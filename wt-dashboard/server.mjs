@@ -12,7 +12,7 @@ import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
-import { RoleStore, resolveRole, inferTags, tokenDiff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
+import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -313,6 +313,8 @@ async function syncTokens(agents) {
       roleStore.tags[a.name] = inferTags({ name: a.name, role: a.pool === 'other' ? undefined : a.pool, project: a.project ?? undefined, ticket: ticketOf(a.cwd) ?? undefined })
       backfilled = true
     }
+    const adopted = adoptHandoff(roleStore.tags[a.name], a.paneTokens)
+    if (adopted) { roleStore.tags[a.name] = adopted; backfilled = true }
     const { set, clear } = tokenDiff(a.paneTokens, roleStore.tags[a.name])
     if (!set.length && !clear.length) continue
     syncing.add(a.id)

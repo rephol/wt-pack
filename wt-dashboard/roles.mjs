@@ -13,7 +13,11 @@ export const DEFAULT_ROLES = [
     spawn: { start: 'worktree', workspace: '<repo>-workers', prompt: '/wt-work', projects: [] } },
 ]
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
-export const TAG_KEYS = ['role', 'project', 'ticket', 'branch', 'spawned_by', 'created']
+// MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
+// alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.
+export const MIRRORED_KEYS = ['role', 'project', 'ticket', 'branch', 'spawned_by', 'created', 'handoff_at']
+export const LIVE_KEYS = ['task', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane']
+export const TAG_KEYS = [...MIRRORED_KEYS, ...LIVE_KEYS]
 const ID = /^[a-z][a-z0-9-]{0,20}$/
 
 export function glob(pattern, s) {
@@ -64,13 +68,18 @@ export function inferTags({ name, role, project, ticket, branch, now = new Date(
 }
 export function clean(tags) {
   const out = {}
-  for (const k of TAG_KEYS) { const v = tags?.[k]; if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, 80) }
+  for (const k of MIRRORED_KEYS) { const v = tags?.[k]; if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, 80) }
   return out
+}
+// A handoff newer than the mirror (different handoff_at) wins: adopt its ticket. Returns the new mirror or null.
+export function adoptHandoff(want = {}, have = {}) {
+  if (!have.handoff_at || have.handoff_at === want.handoff_at) return null
+  return clean({ ...want, ...(have.ticket ? { ticket: have.ticket } : {}), handoff_at: have.handoff_at })
 }
 // What to send so the pane's tokens match `want` (only keys we own).
 export function tokenDiff(have = {}, want = {}) {
   const set = Object.entries(want).filter(([k, v]) => have[k] !== v)
-  const clear = TAG_KEYS.filter((k) => k in have && !(k in want))
+  const clear = MIRRORED_KEYS.filter((k) => k in have && !(k in want))
   return { set, clear }
 }
 

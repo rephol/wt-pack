@@ -981,7 +981,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 {rows.map((a) => {
                   const t = taskOf(a)
                   const what = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap
-                  const line2 = [needsYou(a) ? 'needs you' : a.status, what, a.local ? null : a.machine, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
+                  const line2 = [needsYou(a) ? 'needs you' : a.status, a.tags?.task ?? what, a.local ? null : a.machine, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
                   return (
                     <div key={a.key} role="button" tabIndex={0} onClick={() => onOpen(a.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(a.key)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', minWidth: 0, cursor: 'pointer', borderBottom: '1px solid var(--color-border-default, rgba(128,128,128,.2))', background: selected === a.key ? 'var(--color-background-secondary, rgba(128,128,128,.12))' : undefined }}>
@@ -1020,6 +1020,10 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                     const quiet = !needsYou(a) && (a.status === 'idle' || a.status === 'done') && !t
                     const color = quiet ? 'secondary' : 'primary'
                     const summary = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap ?? '—'
+                    // A handoff's --task label wins; its ticket stays a link when it is the linked task's.
+                    const label = a.tags?.task
+                    const linked = t?.url && (!label || label.startsWith(t.id)) ? t : null
+                    const text = label ? (linked ? label.slice(linked.id.length).trim() : label) : t?.url ? t.title : summary
                     return (
                       <TableRow key={a.key} onClick={() => onOpen(a.key)} aria-selected={selected === a.key}>
                         <TableCell>
@@ -1044,8 +1048,8 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                         <TableCell>
                           <Tooltip content={a.recap ?? summary}>
                             <HStack gap={1} align="center">
-                              {t?.url && <Link href={t.url} target="_blank">{t.id}</Link>}
-                              <Text color={color} maxLines={1} hasTruncateTooltip={false}>{t?.url ? t.title : summary}</Text>
+                              {linked && <Link href={linked.url ?? undefined} target="_blank">{linked.id}</Link>}
+                              <Text color={color} weight={label ? 'medium' : undefined} maxLines={1} hasTruncateTooltip={false}>{text}</Text>
                             </HStack>
                           </Tooltip>
                         </TableCell>
@@ -1335,6 +1339,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             <Text type="label">cwd</Text>
             <Text type="code">{agent.cwd}</Text>
             <Text type="label">Tags</Text>
+            {agent.tags?.handoff_from && <Text size="sm">{`Handed off from ${agent.tags.handoff_from}${agent.tags.handoff_from_pane ? ` (${agent.tags.handoff_from_pane})` : ''}`}</Text>}
+            {agent.tags?.handoff_to && <Text size="sm">{`Handed off to ${agent.tags.handoff_to}${agent.tags.handoff_to_pane ? ` (${agent.tags.handoff_to_pane})` : ''}`}</Text>}
             <TagList tags={agent.tags} />
             {agent.question && (
               <>
@@ -1439,6 +1445,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                 <Text weight="semibold" maxLines={1}>{agent.name}</Text>
                 {agent.background > 0 && <Badge label={`${agent.background} background`} />}
               </HStack>
+              {agent.tags?.task && <Text size="sm" weight="medium" maxLines={1}>{agent.tags.task}</Text>}
               <Text type="supporting" size="sm" maxLines={1}>{narrow
                 ? `${agent.local ? '' : `${agent.machine} · `}${needsYou(agent) ? 'needs you' : agent.status} · ${lastActive(agent)}`
                 : `${agent.local ? '' : `${agent.machine} · `}${agent.pool} · ${needsYou(agent) ? 'needs you' : agent.status} for ${idleFor(agent)} · active ${lastActive(agent)}`}</Text>

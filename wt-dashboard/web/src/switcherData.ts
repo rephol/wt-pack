@@ -7,6 +7,7 @@ export interface SwAgent {
   key: string; name: string; pool: string; machine: string; local: boolean
   status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown'; asks: boolean
   statusSince: number; lastActivity?: number; recap: string | null; question: string | null; task: string | null
+  tags?: Record<string, string> // tags.task: the handoff label, "UMK-1192 Tailwind v4…"
 }
 export interface SwRoom { slug: string; title: string; needsYou?: { agent: string; text: string }[] }
 export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }>
@@ -14,12 +15,12 @@ export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAge
 export const needsYou = (a: SwAgent) => a.asks && a.status !== 'working'
 const activity = (a: SwAgent) => a.lastActivity || a.statusSince
 // Never empty, so every row has the same two lines.
-export const subtitle = (a: SwAgent) => (needsYou(a) && a.question) || a.recap || `${a.status} · no recent summary`
+export const subtitle = (a: SwAgent) => (needsYou(a) && a.question) || [a.tags?.task, a.recap].filter(Boolean).join(' · ') || `${a.status} · no recent summary`
 
 // Best score across name (strong), ticket id and recap/question; -1 = no match.
 function score(q: string, a: SwAgent) {
   const name = fuzzy(q, a.name.toLowerCase())
-  const ticket = a.task && a.task.toLowerCase().includes(q) ? 50 : -1
+  const ticket = `${a.task ?? ''} ${a.tags?.task ?? ''}`.toLowerCase().includes(q) ? 50 : -1
   const text = `${a.recap ?? ''} ${a.question ?? ''}`.toLowerCase().includes(q) ? 1 : -1
   return Math.max(name >= 0 ? 100 + name : -1, ticket, text)
 }

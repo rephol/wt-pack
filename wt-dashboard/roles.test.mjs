@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_ROLES, glob, resolveRole, validateRoles, inferTags, tokenDiff, clean } from './roles.mjs'
+import { DEFAULT_ROLES, glob, resolveRole, validateRoles, inferTags, tokenDiff, clean, adoptHandoff } from './roles.mjs'
 
 test('glob', () => {
   assert.equal(glob('*-planners', 'umkmall-planners'), true)
@@ -38,4 +38,14 @@ test('tags: inference, cleaning, and the token diff sends only what changed', ()
   assert.deepEqual(tokenDiff({ role: 'worker', project: 'a', b: 'foreign' }, { role: 'planner', project: 'a' }), { set: [['role', 'planner']], clear: [] })
   assert.deepEqual(tokenDiff({ role: 'worker', ticket: 'UMK-1' }, { role: 'worker' }), { set: [], clear: ['ticket'] })
   assert.deepEqual(tokenDiff({}, { role: 'worker' }), { set: [['role', 'worker']], clear: [] }) // after a herdr restart: re-applied
+})
+
+test('tags: a newer handoff adopts its ticket into the mirror; live keys are never mirrored or cleared', () => {
+  const mirror = { role: 'worker', ticket: 'UMK-1' }
+  const pane = { role: 'worker', ticket: 'UMK-2', task: 'UMK-2 x', handoff_at: '100' }
+  const next = adoptHandoff(mirror, pane)
+  assert.deepEqual(next, { role: 'worker', ticket: 'UMK-2', handoff_at: '100' })
+  assert.equal(adoptHandoff(next, pane), null) // already adopted: a later PATCH of ticket sticks
+  assert.equal(adoptHandoff(mirror, { ticket: 'UMK-9' }), null) // no handoff: the mirror wins as before
+  assert.deepEqual(tokenDiff(pane, next), { set: [], clear: [] }) // task is not the mirror's to clear
 })
