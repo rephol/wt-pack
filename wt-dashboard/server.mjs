@@ -10,6 +10,7 @@ import { join, extname, normalize, basename, dirname, relative, isAbsolute } fro
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
+import { UsageAgg, readLimits, PRICES } from './usage.mjs'
 
 const PORT = Number(process.env.PORT ?? 7777)
 const REPO = process.env.UMKMALL_REPO ?? join(homedir(), 'Work', 'projects', 'umkmall')
@@ -823,8 +824,56 @@ const trayOfInbox = () => ({
 })
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
 inbox.subs.add((it) => broadcastEvent('notification', it))
+// ---- Claude usage (Overview) ----
+const USAGE_FILE = join(homedir(), '.cache', 'ccstatusline', 'usage.json')
+const usageAgg = new UsageAgg()
+let usageScan = null, usageScannedAt = 0
+// Transcripts are re-read at most every 20s, appended bytes only; the first pass covers the last 8 days.
+const scanUsage = () => {
+  if (!usageScan && Date.now() - usageScannedAt > 20_000)
+    usageScan = usageAgg.refresh(PROJECTS).catch((e) => console.error('usage:', e.message)).finally(() => { usageScan = null; usageScannedAt = Date.now() })
+  return usageScan
+}
+async function usageApi() {
+  await (usageScannedAt ? null : scanUsage()) // the first request waits for the first scan
+  scanUsage()
+  const ag = (await agents()).filter((a) => a.local && a.session)
+  const agentOf = new Map(ag.map((a) => [a.session, a.name]))
+  const proj = new Map()
+  for (const r of usageAgg.recs.values()) if (r.cwd && !proj.has(r.cwd)) proj.set(r.cwd, await projectOf(r.cwd))
+  const by = {
+    agent: (r) => agentOf.get(r.session) ?? `other (${proj.get(r.cwd) ?? '?'})`,
+    project: (r) => proj.get(r.cwd) ?? 'unknown',
+    model: (r) => r.model,
+  }
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0)
+  const range = (from) => Object.fromEntries(Object.entries(by).map(([k, f]) => [k, usageAgg.summary(from, f)]))
+  return {
+    limits: await readLimits(USAGE_FILE),
+    today: range(midnight.getTime()),
+    week: range(Date.now() - 7 * 86400_000),
+    priced: Object.keys(PRICES),
+    scannedAt: usageScannedAt ? new Date(usageScannedAt).toISOString() : null,
+  }
+}
+// Once per window per threshold: 80% and 95% of the 5-hour and weekly limits.
+async function usageAlerts() {
+  const l = await readLimits(USAGE_FILE)
+  if (!l || l.stale) return
+  for (const [name, pct, reset] of [['5-hour', l.session, l.sessionResetAt], ['Weekly', l.weekly, l.weeklyResetAt]]) {
+    for (const th of [95, 80]) {
+      if (pct == null || pct < th) continue
+      const key = `usage|${name}|${th}|${reset ?? ''}`
+      if (!inbox.items.some((it) => it.key === key))
+        await inbox.add({ kind: 'usage', key, title: `Claude ${name} usage at ${pct}%`, body: `Crossed ${th}%${reset ? ` · resets ${new Date(reset).toLocaleString()}` : ''}`, target: {} })
+      break // the higher threshold covers the lower one
+    }
+  }
+}
+
 async function tick() {
   try {
+    await usageAlerts().catch((e) => console.error('usage alerts:', e.message))
     const o = await overview()
     const snap = snapshot(o)
     const first = !lastSnap
@@ -1291,6 +1340,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'content-type': EXT_MIME[extname(f).slice(1)], 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' })
         return res.end(await readFile(f))
       }
+      if (url.pathname === '/api/usage' && req.method === 'GET') return send(res, 200, await usageApi())
       if (url.pathname === '/api/projects' && req.method === 'GET') return send(res, 200, await projectsApi())
       if (url.pathname === '/api/agents/spawn' && req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })

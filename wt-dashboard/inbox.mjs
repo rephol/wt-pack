@@ -5,7 +5,7 @@ import { readFile, appendFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server']
+export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage']
 export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion'])
 
 // A transition (from server.mjs transitions()) → an inbox item draft.

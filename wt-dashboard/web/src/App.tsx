@@ -22,6 +22,7 @@ import { InboxButton, InboxHost } from './inbox'
 import { RoomsPage, useRoomsList } from './rooms'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
+import { UsagePanel } from './usage'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
@@ -424,6 +425,7 @@ function OverviewPage({ data, onOpen, selected }: { data: Overview & { allProjec
   return (
     <VStack gap={6}>
       <MachinesStrip machines={data.machines} />
+      <UsagePanel />
       <Grid columns={{ minWidth: 160 }} gap={3}>
         <Kpi label="Needs you" value={c.needsYou} loud="red" />
         <Kpi label="Stalled" value={c.stalled} loud="orange" />

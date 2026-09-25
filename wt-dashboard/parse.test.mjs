@@ -347,3 +347,44 @@ test('parsePane: background work from the last turn-status line (shells, tasks),
   assert.equal(parsePane(pane('✻ Cooked for 5s · 2 shells still running · 1 background task')).background, 3)
   assert.equal(parsePane(pane('✻ Cooked for 5s · done 7:08 PM')).background, 0)
 })
+
+test('usage: dedupe by message id, incremental offsets, partial lines wait, bucketing and notional cost', async () => {
+  const U = await import('./usage.mjs')
+  const { mkdtemp, mkdir, writeFile, appendFile } = await import('node:fs/promises')
+  const root = await mkdtemp((await import('node:os')).tmpdir() + '/usage-')
+  await mkdir(root + '/proj')
+  const f = root + '/proj/s1.jsonl'
+  const now = Date.parse('2026-09-25T12:00:00Z')
+  const line = (id, ts, model, u) => JSON.stringify({ type: 'assistant', sessionId: 's1', cwd: '/r', timestamp: ts, message: { id, model, usage: u } }) + '\n'
+  const u1 = { input_tokens: 10, output_tokens: 100, cache_creation_input_tokens: 1000, cache_read_input_tokens: 10000 }
+  // the same message written twice (one line per content block) counts once
+  await writeFile(f, line('m1', '2026-09-25T10:00:00Z', 'claude-opus-5-5', u1) + line('m1', '2026-09-25T10:00:00Z', 'claude-opus-5-5', u1) + '{"type":"user"}\n')
+  const agg = new U.UsageAgg()
+  await agg.refresh(root, now)
+  let s = agg.summary(0, (r) => r.model)
+  assert.equal(s.tokens, 11110)
+  assert.equal(+s.cost.toFixed(6), +((10 * 4 + 100 * 20 + 1000 * 5 + 10000 * 0.2) / 1e6).toFixed(6))
+  // appended bytes only; a line without its newline yet is not read until it completes
+  const half = line('m2', '2026-09-20T10:00:00Z', 'claude-mystery-9', { input_tokens: 1, output_tokens: 1 })
+  await appendFile(f, half.slice(0, 20))
+  await agg.refresh(root, now)
+  assert.equal(agg.summary(0, (r) => r.model).tokens, 11110)
+  await appendFile(f, half.slice(20))
+  await agg.refresh(root, now)
+  s = agg.summary(0, (r) => r.model)
+  assert.equal(s.tokens, 11112); assert.equal(s.priced, false) // unknown model: tokens only
+  assert.deepEqual(s.groups.map((g) => g.key), ['claude-opus-5-5', 'claude-mystery-9'])
+  // bucketing by time: "today" excludes the older message
+  assert.equal(agg.summary(Date.parse('2026-09-25T00:00:00Z'), (r) => r.session).tokens, 11110)
+})
+
+test('usage: limits never expose tokenHash; missing fields are null; stale after 10 minutes', async () => {
+  const U = await import('./usage.mjs')
+  const { mkdtemp, writeFile, utimes } = await import('node:fs/promises')
+  const f = (await mkdtemp((await import('node:os')).tmpdir() + '/lim-')) + '/usage.json'
+  await writeFile(f, JSON.stringify({ sessionUsage: 21, weeklyUsage: 69, tokenHash: 'secret' }))
+  const old = new Date(Date.now() - 20 * 60_000); await utimes(f, old, old)
+  const l = await U.readLimits(f)
+  assert.equal(JSON.stringify(l).includes('secret'), false)
+  assert.equal(l.session, 21); assert.equal(l.sessionResetAt, null); assert.equal(l.stale, true)
+})
