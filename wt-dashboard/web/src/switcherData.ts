@@ -48,7 +48,10 @@ export function switcherItems(agents: SwAgent[], rooms: SwRoom[], recent: string
 }
 
 // planner-02 → P2, worker-05 → W5, orchestrator → O, code-reviewer/w5:p9 → CR, else the first letters of two words.
-export function agentInitials(name: string) {
+// With a role letter: that letter plus the agent's trailing number ("P3"); else from the name.
+export function agentInitials(name: string, letter?: string) {
+  const num = name.match(/-0*(\d+)$/)?.[1]
+  if (letter && letter !== '?') return letter + (num ?? '')
   const n = name.replace(/^umkmall-/i, '')
   const role = n.match(/^(planner|worker|orchestrator)(?:-0*(\d+))?$/i)
   if (role) return role[1][0].toUpperCase() + (role[2] ?? '')

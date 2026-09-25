@@ -13,6 +13,7 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { shortAgo } from './notifyGate'
 import { switcherItems, needsYou, agentInitials, type SwAgent, type SwItem, type SwRoom } from './switcherData'
 import { Delayed, Rows } from './skeletons'
+import { useRoles } from './roles'
 
 export type { SwAgent, SwRoom }
 const RECENT_KEY = 'recent-agents'
@@ -36,6 +37,7 @@ function useOtherDialogOpen(mine: boolean) {
 }
 
 function Row({ it, phone }: { it: SwItem; phone: boolean }) {
+  const { byId } = useRoles()
   const d = it.auxiliaryData!
   const a = d.kind === 'agent' ? d.agent : null
   // No question and no recap: a single-line row (the old "idle · no recent summary" line was noise); same height.
@@ -44,7 +46,7 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   return (
     <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 12, minHeight: phone ? 44 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
       <div style={{ position: 'relative', flex: `0 0 ${av}px`, width: av, height: av, borderRadius: av / 2, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
-        {a ? agentInitials(a.name) : '#'}
+        {a ? agentInitials(a.name, a.local ? byId(a.pool).letter : undefined) : '#'}
         <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
           <StatusDot variant={!a || needsYou(a) ? 'error' : DOT[a.status]} label={a ? (needsYou(a) ? 'needs you' : a.status) : 'waiting on you'} isPulsing={a?.status === 'working'} />
         </span>
@@ -56,7 +58,7 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
       {a && (
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Text type="supporting" size="sm">{shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())}</Text>
-          {!phone && <Badge label={a.local ? a.pool : a.machine} />}
+          {!phone && <Badge label={a.local ? byId(a.pool).name : a.machine} />}
         </div>
       )}
     </div>

@@ -29,3 +29,9 @@ test('agentInitials: role letter + number without leading zeros', () => {
   assert.equal(agentInitials('code-reviewer/w5:p9'), 'CR')
   assert.equal(agentInitials('Code-reviewer agent startup command'), 'CR')
 })
+
+test('agentInitials: a configured role letter wins', () => {
+  assert.equal(agentInitials('umkmall-reviewer-07', 'R'), 'R7')
+  assert.equal(agentInitials('umkmall-orchestrator', 'O'), 'O')
+  assert.equal(agentInitials('umkmall-planner-02', '?'), 'P2') // Other: falls back to the name
+})

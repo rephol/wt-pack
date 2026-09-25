@@ -22,13 +22,14 @@ import { ServerPanel } from './status'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
+import { RolesSection } from './roles'
 import { useChatDensity, setChatDensity, useLinkPreviews, setLinkPreviews, type ChatDensity } from './density'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
-export type Section = 'profile' | 'rooms' | 'notifications' | 'integrations' | 'terminals' | 'server' | 'about'
-const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
+export type Section = 'profile' | 'roles' | 'rooms' | 'notifications' | 'integrations' | 'terminals' | 'server' | 'about'
+const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['roles', 'Roles'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
 export const openSettings = (section: Section = 'profile') => dispatchEvent(new CustomEvent('open-settings', { detail: section }))
 
 const PHONE = '(max-width: 639px)'
@@ -80,6 +81,7 @@ function SectionBody({ section }: { section: Section }) {
   return (
     <>
           {section === 'profile' && <ProfileSection />}
+          {section === 'roles' && <RolesSection />}
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}

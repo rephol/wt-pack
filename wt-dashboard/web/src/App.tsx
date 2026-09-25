@@ -38,6 +38,7 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
+import { useRoles, plural, RoleBadge, TagsDialog, TagList, OTHER } from './roles'
 import { Delayed, LoadError, OverviewSkeleton, GroupedRows, Rows, ChatSkeleton } from './skeletons'
 import { useStream, mergeAgentMsgs } from './streamStore'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
@@ -73,6 +74,9 @@ interface Agent {
   local: boolean
   name: string
   pool: string
+  roleBy?: 'token' | 'workspace' | 'name' | 'none'
+  tags?: Record<string, string>
+  workspace?: string | null
   status: AgentStatus
   statusSince: number
   cwd: string
@@ -904,12 +908,6 @@ function MachinesStrip({ machines }: { machines: Machine[] }) {
 }
 
 // ---------- agents ----------
-const POOLS = [
-  { key: 'orchestrator', title: 'Orchestrator' },
-  { key: 'planner', title: 'Planners' },
-  { key: 'worker', title: 'Workers' },
-  { key: 'other', title: 'Other' },
-]
 const needsYou = (a: Agent) => a.asks && a.status !== 'working'
 const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
   all: () => true,
@@ -921,6 +919,7 @@ const shortPath = (p: string | null) => (p ? p.split('/').filter(Boolean).at(-1)
 
 function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & { allProjects: boolean }; onOpen: (p: string) => void; onOpenFull: (p: string) => void; selected: string | null }) {
   const [filter, setFilter] = useState('all')
+  const { roles } = useRoles()
   const [machine, setMachine] = useState('all')
   const [sort, setSortState] = useState<AgentSort>(() => initialSort(location.search, (() => { try { return localStorage.getItem('agentSort') } catch { return null } })()))
   const setSort = (v: AgentSort) => {
@@ -968,7 +967,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
         <SegmentedControlItem value="name" label="Name" />
       </SegmentedControl>
       </HStack>
-      {POOLS.map(({ key, title }) => {
+      {[...roles, OTHER].map((role) => { const key = role.id, title = plural(role)
         const pool = data.agents.filter((a) => a.pool === key)
         const rows = sortAgents(pool.filter((a) => AGENT_FILTERS[filter](a, taskOf(a)) && (machine === 'all' || a.machine === machine)), sort)
         if (!pool.length) return null
@@ -1164,6 +1163,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const [tab, setTab] = useState('conversation')
   const narrow = useNarrow()
   useSyncExternalStore(subDetails, () => showAllDetails) // the ⋯ menu's details label
+  const { byId } = useRoles()
+  const [tagsMode, setTagsMode] = useState<'role' | 'tags' | null>(null)
   const density = useChatDensity()
   const [draft, setDraft] = useState(() => takePrefill(agent.key))
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(agent.local ? null : 'Images only for local agents')
@@ -1333,6 +1334,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             {task?.plan && <Text type="code">{task.plan}</Text>}
             <Text type="label">cwd</Text>
             <Text type="code">{agent.cwd}</Text>
+            <Text type="label">Tags</Text>
+            <TagList tags={agent.tags} />
             {agent.question && (
               <>
                 <Text type="label">Waiting on</Text>
@@ -1425,8 +1428,10 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   )
   return (
       <VStack gap={3} height="100%" padding={page ? 0 : 4} data-agent-panel={page ? undefined : ''} data-agent-page={page ? '' : undefined}>
+        {tagsMode && <TagsDialog agent={agent} mode={tagsMode} onClose={() => setTagsMode(null)} />}
         <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
           <HStack gap={2} align="center" style={{ minWidth: 0, flex: 1 }}>
+            <RoleBadge role={byId(agent.pool)} />
             {page && <IconButton label="Back" icon={<BackIcon />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Back" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />}
             <StatusDot variant={needsYou(agent) ? 'error' : AGENT_DOT[agent.status]} label={agent.status} isPulsing={agent.status === 'working'} />
             <VStack gap={0.5} style={{ minWidth: 0 }}>
@@ -1444,6 +1449,10 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
           <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: showAllDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!showAllDetails) },
+            ...(agent.local ? [
+              { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
+              { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
+            ] : []),
             agent.local
               ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
               : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },

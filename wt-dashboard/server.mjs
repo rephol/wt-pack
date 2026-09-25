@@ -12,6 +12,7 @@ import { Rooms, ticketSuggestions } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
+import { RoleStore, resolveRole, inferTags, tokenDiff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -42,9 +43,9 @@ const PROJECT_BY_TEAM = { UMK: 'umkmall' }
 const REPO_PROJECT = basename(REPO)
 
 // execFile, never a shell: prompt text goes through as one argv entry.
-const run = (cmd, args, cwd, timeout = 20_000) =>
+const run = (cmd, args, cwd, timeout = 20_000, extraEnv) =>
   new Promise((resolve, reject) =>
-    execFile(cmd, args, { cwd, maxBuffer: 32 << 20, timeout }, (err, out, stderr) =>
+    execFile(cmd, args, { cwd, maxBuffer: 32 << 20, timeout, ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}) }, (err, out, stderr) =>
       err ? reject(new Error(stderr || err.message)) : resolve(out)),
   )
 const herdr = (...args) => run('herdr', args)
@@ -292,12 +293,44 @@ const readPane = (m, pane, lines) =>
 // ---- agents ----
 const since = new Map() // machine|pane → { status, at }
 const parsed = new Map() // machine|pane → { p, seq, at }: last parse, reused until the pane changes
-const poolOf = (name) => (/planner/i.test(name) ? 'planner' : /worker/i.test(name) ? 'worker' : /orchestrator/i.test(name) ? 'orchestrator' : 'other')
+const roleStore = new RoleStore(DATA)
+await roleStore.load()
+// Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
+async function paneMeta(m) {
+  if (!m.local) return { ws: new Map(), tokens: new Map() }
+  return cached('paneMeta', 3000, async () => {
+    const [w, p] = await Promise.all([herdr('workspace', 'list'), herdr('pane', 'list')])
+    return {
+      ws: new Map(JSON.parse(w).result.workspaces.map((x) => [x.workspace_id, x.label])),
+      tokens: new Map(JSON.parse(p).result.panes.map((x) => [x.pane_id, x.tokens ?? {}])),
+    }
+  })
+}
+// Keep each local agent's pane tokens equal to data/agent-tags.json (backfilling an agent seen for the first
+// time from inference). Only when they differ, so a herdr restart re-applies them and a steady state costs nothing.
+const syncing = new Set()
+async function syncTokens(agents) {
+  let backfilled = false
+  for (const a of agents) {
+    if (!a.local || syncing.has(a.id)) continue
+    if (!roleStore.tags[a.name]) {
+      roleStore.tags[a.name] = inferTags({ name: a.name, role: a.pool === 'other' ? undefined : a.pool, project: a.project ?? undefined, ticket: ticketOf(a.cwd) ?? undefined })
+      backfilled = true
+    }
+    const { set, clear } = tokenDiff(a.paneTokens, roleStore.tags[a.name])
+    if (!set.length && !clear.length) continue
+    syncing.add(a.id)
+    herdr('pane', 'report-metadata', a.id, '--source', 'wt-dashboard', ...set.flatMap(([k, v]) => ['--token', `${k}=${v}`]), ...clear.flatMap((k) => ['--clear-token', k]))
+      .then(() => store.delete('paneMeta'), (e) => console.error('tokens:', a.name, e.message)).finally(() => syncing.delete(a.id))
+  }
+  if (backfilled) await roleStore.saveTags().catch((e) => console.error('agent-tags:', e.message))
+}
 const GENERIC = /^(claude code|claude)?$/i
 
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
 async function listAgents(m) {
   const { result } = JSON.parse(await herdrOn(m, 'agent', 'list'))
+  const meta = await paneMeta(m).catch(() => ({ ws: new Map(), tokens: new Map() }))
   const readEvery = m.local ? 15_000 : 30_000
   const out = []
   for (const a of result.agents) {
@@ -326,7 +359,13 @@ async function listAgents(m) {
       machine: m.label,
       local: m.local,
       name,
-      pool: poolOf(name),
+      ...(() => {
+        const toks = meta.tokens.get(a.pane_id) ?? {}
+        const own = Object.fromEntries(Object.entries(toks).filter(([k]) => TAG_KEYS.includes(k)))
+        const tags = { ...own, ...(m.local ? roleStore.tags[name] : {}) }
+        const role = resolveRole(roleStore.roles, { token: tags.role, workspace: meta.ws.get(a.workspace_id), name })
+        return { pool: role.id, roleBy: role.by, tags, paneTokens: own, workspace: meta.ws.get(a.workspace_id) ?? null }
+      })(),
       status: a.agent_status,
       statusSince: since.get(k).at,
       // The transcript's last write (local sessions); else when the status last changed.
@@ -344,6 +383,7 @@ async function listAgents(m) {
       session,
     })
   }
+  if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
   return out
 }
 
@@ -588,6 +628,28 @@ export async function streamTranscript(req, res, session, url, fileOverride) {
   req.on('close', () => (w.close(), clearInterval(poll), clearInterval(beat)))
 }
 
+// ---- roles (Settings › Roles) ----
+async function rolesApi(req, res) {
+  const inUse = {}
+  for (const a of (await agents().catch(() => []))) inUse[a.pool] = (inUse[a.pool] ?? 0) + 1
+  if (req.method === 'GET') return send(res, 200, { roles: roleStore.roles, inUse })
+  if (req.method !== 'PUT') return send(res, 405, { error: 'GET or PUT' })
+  const b = JSON.parse((await body(req)) || '{}')
+  const next = new Set((b.roles ?? []).map((r) => r?.id))
+  // A role agents use cannot vanish silently: the caller names where its agents go (reassign: {old: new}).
+  const reassign = b.reassign ?? {}
+  const orphaned = roleStore.roles.filter((r) => !next.has(r.id) && inUse[r.id] && !reassign[r.id])
+  if (orphaned.length) return send(res, 409, { error: `in use: ${orphaned.map((r) => `${r.name} (${inUse[r.id]})`).join(', ')}`, needs: 'reassign', roles: orphaned.map((r) => r.id) })
+  await roleStore.saveRoles(b.roles)
+  for (const [from, to] of Object.entries(reassign)) {
+    if (!next.has(to) && to !== 'other') continue
+    for (const [name, t] of Object.entries(roleStore.tags)) if (t.role === from) roleStore.tags[name] = cleanTags({ ...t, role: to })
+  }
+  await roleStore.saveTags()
+  store.delete('agents:local'); store.delete('overview')
+  return send(res, 200, { roles: roleStore.roles })
+}
+
 // ---- link previews (unfurl.mjs has the SSRF guards) ----
 // 24h cache in memory and on disk (data/unfurl-cache.json, 500 entries). Images are proxied only for URLs an
 // unfurl produced, never an arbitrary URL the client names.
@@ -678,19 +740,24 @@ async function projectsApi() {
   })))
 }
 async function spawnAgent(b) {
-  if (!['planner', 'worker'].includes(b.kind)) throw Object.assign(new Error('kind must be planner or worker'), { status: 400 })
+  const role = roleStore.roles.find((r) => r.id === b.kind && r.spawn)
+  if (!role) throw Object.assign(new Error('unknown role, or it cannot be spawned (Settings › Roles)'), { status: 400 })
   const root = (await projectRoots()).get(b.project)
   if (!root) throw Object.assign(new Error('unknown project'), { status: 400 })
-  const args = ['spawn', b.kind]
-  if (b.kind === 'worker') {
-    // Never a free path: only one of this project's own worktrees.
-    const wt = (await linkedWorktrees(root)).find((w) => w.path === b.cwd)
+  if (role.spawn.projects.length && !role.spawn.projects.includes(b.project)) throw Object.assign(new Error(`${role.name} is not allowed in ${b.project}`), { status: 400 })
+  const args = ['spawn', role.id]
+  // Never a free path: the main checkout, or one of this project's own worktrees.
+  const wts = role.spawn.start === 'main' ? [] : await linkedWorktrees(root)
+  if (role.spawn.start === 'worktree' || (role.spawn.start === 'choose' && b.cwd && b.cwd !== root)) {
+    const wt = wts.find((w) => w.path === b.cwd)
     if (!wt) throw Object.assign(new Error('cwd must be one of the project\'s worktrees'), { status: 400 })
     args.push(wt.path)
-  }
-  const out = await run(AGENTS_SH, args, root, 120_000)
+  } else args.push(root)
+  const label = role.spawn.workspace.replace(/<repo>/g, basename(root)).replace(/<role>/g, role.id)
+  const out = await run(AGENTS_SH, args, root, 120_000, { WT_AGENTS_WORKSPACE: label, WT_AGENTS_SPAWNED_BY: 'dashboard' })
   const [name, pane] = out.trim().split('\n').pop().split(' ')
   if (!name || !PANE.test(pane ?? '')) throw new Error(`unexpected agents.sh output: ${out.trim().slice(0, 200)}`)
+  await roleStore.setTags(name, { role: role.id, project: b.project, ticket: ticketOf(b.cwd ?? '') ?? undefined, spawned_by: 'dashboard', created: new Date().toISOString().slice(0, 10) })
   store.delete('agents:local'); store.delete('overview'); store.delete('projectRoots')
   const machine = (await machines()).find((m) => m.local)?.label
   let prompted = false
@@ -913,6 +980,7 @@ async function overview() {
     return {
       at: new Date().toISOString(),
       linearEnabled: Boolean(cfg.get('LINEAR_API_KEY')),
+      roles: roleStore.roles,
       agents: ag.map((a) => ({ ...a, task: taskOf.get(a.key) ?? null })),
       machines: await track('machines', machineSummaries(ag).then((ms) => {
         SOURCES.machines.online = ms.filter((m) => m.status === 'online').length
@@ -1671,6 +1739,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -1734,6 +1803,19 @@ const server = http.createServer(async (req, res) => {
           store.delete('agents:local')
           store.delete('overview')
           return send(res, 200, { ok: true })
+        }
+        if (parts[4] === 'tags' && req.method === 'PATCH') {
+          if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
+          const a = (await agents()).find((x) => x.machine === m.label && x.id === pane && x.local)
+          if (!a) return send(res, 404, { error: 'unknown local agent' })
+          const b = JSON.parse(await body(req))
+          if (b.role && b.role !== 'other' && !roleStore.roles.some((r) => r.id === b.role)) return send(res, 400, { error: 'unknown role' })
+          const next = { ...(roleStore.tags[a.name] ?? {}) }
+          for (const k of ['role', 'ticket', 'branch', 'project']) if (k in b) next[k] = b[k]
+          await roleStore.setTags(a.name, next)
+          await syncTokens([{ ...a, paneTokens: a.paneTokens ?? {} }])
+          store.delete('agents:local'); store.delete('overview')
+          return send(res, 200, { tags: roleStore.tags[a.name] })
         }
         if (parts[4] === 'commands' && req.method === 'GET') {
           const a = (await agents()).find((x) => x.machine === m.label && x.id === pane)

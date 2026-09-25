@@ -17,10 +17,10 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
+import { useRoles } from './roles'
 
 interface Project { name: string; root: string; worktrees: { path: string; branch: string | null; ticket: string | null; agents: string[] }[] }
-export interface SpawnAgentLite { key: string; id: string; machine: string; local: boolean; name: string; status: string; cwd: string; project: string | null; asks: boolean }
-type Kind = 'planner' | 'worker'
+export interface SpawnAgentLite { key: string; id: string; machine: string; local: boolean; name: string; pool: string; status: string; cwd: string; project: string | null; asks: boolean }
 
 export const openSpawn = () => dispatchEvent(new CustomEvent('open-spawn'))
 export const openRemove = (a: SpawnAgentLite) => dispatchEvent(new CustomEvent('open-remove', { detail: a }))
@@ -47,22 +47,28 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const phone = usePhone()
   const qc = useQueryClient()
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api<Project[]>('/api/projects') })
-  const [kind, setKind] = useState<Kind>('planner')
+  const { roles: allRoles } = useRoles()
+  const roles = allRoles.filter((r) => r.spawn)
+  const [kindSel, setKind] = useState<string>('')
+  const kind = kindSel || roles[0]?.id || 'planner'
+  const role = roles.find((r) => r.id === kind)
+  const start = role?.spawn?.start ?? 'main'
   const [project, setProject] = useState<string>('')
   const [cwd, setCwd] = useState('')
   const [prompt, setPrompt] = useState('')
   const list = projects.data ?? []
   const proj = list.find((p) => p.name === (project || (defaultProject !== 'all' ? defaultProject : ''))) ?? list[0]
   const spawn = useMutation({
-    mutationFn: () => api<{ key: string; name: string; prompted: boolean }>('/api/agents/spawn', { method: 'POST', body: JSON.stringify({ kind, project: proj?.name, cwd: kind === 'worker' ? cwd : undefined, prompt: prompt.trim() || undefined }) }),
+    mutationFn: () => api<{ key: string; name: string; prompted: boolean }>('/api/agents/spawn', { method: 'POST', body: JSON.stringify({ kind, project: proj?.name, cwd: start === 'main' ? undefined : cwd || undefined, prompt: prompt.trim() || undefined }) }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['overview'] }); onClose(); onOpenAgent(r.key) },
   })
   // Reuse before spawning: a free agent of this kind (idle/done, no question; a planner sitting in the main checkout).
-  const free = proj && agents.find((a) => a.local && a.project === proj.name && a.name.includes(`-${kind}-`) && !a.asks
-    && (a.status === 'idle' || a.status === 'done') && (kind === 'worker' || a.cwd === proj.root))
+  const free = proj && agents.find((a) => a.local && a.project === proj.name && !a.asks
+    && (a.status === 'idle' || a.status === 'done') && a.pool === kind && (start !== 'main' || a.cwd === proj.root))
   const reuse = () => { if (!free) return; setPrefill(free.key, prompt); onClose(); onOpenAgent(free.key) }
   const worktrees = proj?.worktrees ?? []
-  const canSubmit = Boolean(proj) && (kind === 'planner' || worktrees.some((w) => w.path === cwd)) && !spawn.isPending
+  const allowed = !role?.spawn?.projects.length || role.spawn.projects.includes(proj?.name ?? '')
+  const canSubmit = Boolean(proj) && Boolean(role) && allowed && (start !== 'worktree' || worktrees.some((w) => w.path === cwd)) && !spawn.isPending
   return (
     <Dialog isOpen onOpenChange={(o) => !o && !spawn.isPending && onClose()} {...(phone ? { variant: 'fullscreen' as const } : { width: 520 })} padding={0}>
       <div style={{ display: 'flex', flexDirection: 'column', maxHeight: phone ? '100dvh' : '85dvh', height: phone ? '100dvh' : undefined }}>
@@ -73,29 +79,28 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
         <ScrollableArea label="New agent" style={{ flex: 1, minHeight: 0, padding: '8px 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
           <VStack gap={4}>
             <VStack gap={1}>
-              <SegmentedControl label="Kind" value={kind} onChange={(v) => setKind(v as Kind)}>
-                <SegmentedControlItem value="planner" label="Planner" />
-                <SegmentedControlItem value="worker" label="Worker" />
+              <SegmentedControl label="Role" value={kind} onChange={(v) => { setKind(v); setPrompt(roles.find((r) => r.id === v)?.spawn?.prompt ?? '') }}>
+                {roles.map((r) => <SegmentedControlItem key={r.id} value={r.id} label={r.name} />)}
               </SegmentedControl>
-              <Text type="supporting" size="sm">{kind === 'planner' ? 'Starts in the main checkout and creates a worktree for its ticket.' : 'Starts inside an existing worktree and builds there.'}</Text>
+              <Text type="supporting" size="sm">{start === 'main' ? 'Starts in the main checkout.' : start === 'worktree' ? 'Starts inside an existing worktree.' : 'Starts in the main checkout, or a worktree you choose.'}{allowed ? '' : ` Not allowed in ${proj?.name}.`}</Text>
             </VStack>
             <Selector label="Project" width="100%" value={proj?.name ?? ''} isLoading={projects.isLoading}
               options={list.map((p) => ({ value: p.name, label: p.name, description: short(p.root) }))} onChange={(v) => { setProject(v); setCwd('') }} />
-            {kind === 'worker' && (
+            {start !== 'main' && (
               <Selector label="Worktree" width="100%" value={cwd} placeholder={worktrees.length ? 'Choose a worktree' : 'No worktrees in this project'}
                 isDisabled={!worktrees.length}
                 options={worktrees.map((w) => ({ value: w.path, label: w.ticket ? `${w.ticket} · ${w.branch ?? short(w.path)}` : w.branch ?? short(w.path),
                   description: w.agents.length ? `occupied by ${w.agents.join(', ')}` : short(w.path) }))}
                 onChange={setCwd} />
             )}
-            <TextArea label="First prompt (optional)" value={prompt} onChange={setPrompt} placeholder={kind === 'planner' ? '/wt-plan UMK-1177' : '/wt-work'} rows={3} />
+            <TextArea label="First prompt (optional)" value={prompt} onChange={setPrompt} placeholder={role?.spawn?.prompt || 'Optional'} rows={3} />
             {free && (
               <Banner status="info" title={`${free.name} is free — use it instead?`} description="Panes pile up and nothing reaps them; reuse a free agent when you can."
                 endContent={<Button label={`Use ${free.name}`} size="sm" variant="secondary" onClick={reuse} />} />
             )}
             {spawn.isError && <Banner status="error" title="Could not start the agent" description={String(spawn.error)} />}
             {spawn.isPending && <Text type="supporting">{prompt.trim() ? 'Starting… then waiting until it is ready for the prompt (up to a minute).' : 'Starting…'}</Text>}
-            <Button label={spawn.isPending ? 'Starting…' : `Start ${kind}`} variant="primary" width="100%" isLoading={spawn.isPending} isDisabled={!canSubmit} onClick={() => spawn.mutate()} />
+            <Button label={spawn.isPending ? 'Starting…' : `Start ${role?.name.toLowerCase() ?? kind}`} variant="primary" width="100%" isLoading={spawn.isPending} isDisabled={!canSubmit} onClick={() => spawn.mutate()} />
           </VStack>
         </ScrollableArea>
       </div>
