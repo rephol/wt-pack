@@ -126,13 +126,9 @@ export function parsePane(text, raw = '') {
   const lastUser = out.findLast((t) => t.role === 'user')
   const tail = body.slice(-25).join('\n')
   const choicePrompt = /❯\s*1\.|Do you want to|\(y\/n\)|\[Y\/n\]/i.test(tail)
-  const lastIsAssistant = out.at(-1)?.role === 'assistant'
-  const endsWithQuestion = lastIsAssistant && /\?\s*$/.test(lastAssistant.text)
-  const question = choicePrompt
-    ? tail.split('\n').filter((l) => l.trim()).slice(-6).join('\n').trim()
-    : endsWithQuestion
-      ? lastAssistant.text.split('\n').filter((l) => l.trim()).at(-1).trim()
-      : null
+  // ponytail: only a prompt on screen blocks the agent. A reply ending in "?" is just `done` — treating it as
+  // needs-you left a red dot nothing could clear except sending another message.
+  const question = choicePrompt ? tail.split('\n').filter((l) => l.trim()).slice(-6).join('\n').trim() : null
 
   // Background work Claude Code reports after a turn ("· 1 shell still running", "· 2 background tasks"):
   // the footer first, else the most recent turn-status line. Stop (Esc) does not end these.

@@ -1035,7 +1035,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                           <Text color={color} maxLines={1}>{a.local ? `${a.machine} (local)` : a.machine}</Text>
                         </TableCell>
                         <TableCell>
-                          <Text color={color} maxLines={1}>{`${a.status} · ${idleFor(a)}`}</Text>
+                          <Text color={color} maxLines={1}>{`${needsYou(a) ? 'needs you' : a.status} · ${idleFor(a)}`}</Text>
                         </TableCell>
                         <TableCell><Text type="supporting" maxLines={1}>{shortAgo(new Date(activityOf(a)).toISOString())}</Text></TableCell>
                         {data.allProjects && (
@@ -1440,8 +1440,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                 {agent.background > 0 && <Badge label={`${agent.background} background`} />}
               </HStack>
               <Text type="supporting" size="sm" maxLines={1}>{narrow
-                ? `${agent.local ? '' : `${agent.machine} · `}${agent.status} · ${lastActive(agent)}`
-                : `${agent.local ? '' : `${agent.machine} · `}${agent.pool} · ${agent.status} for ${idleFor(agent)} · active ${lastActive(agent)}`}</Text>
+                ? `${agent.local ? '' : `${agent.machine} · `}${needsYou(agent) ? 'needs you' : agent.status} · ${lastActive(agent)}`
+                : `${agent.local ? '' : `${agent.machine} · `}${agent.pool} · ${needsYou(agent) ? 'needs you' : agent.status} for ${idleFor(agent)} · active ${lastActive(agent)}`}</Text>
             </VStack>
           </HStack>
           <HStack gap={0} style={{ flexShrink: 0 }}>

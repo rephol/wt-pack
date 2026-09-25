@@ -22,8 +22,8 @@ test('parsePane', () => {
   assert.equal(p.recap, 'Fixing the bug. Next, decide whether to open a PR.')
   assert.deepEqual(p.context, { used: '383k', total: '1M', pct: 38 })
   assert.equal(p.cwd, '/tmp/wt/umk-12')
-  assert.equal(p.asks, true)
-  assert.equal(p.question, 'Should I open a PR?')
+  assert.equal(p.asks, false) // a reply ending in '?' is done, not blocked
+  assert.equal(p.question, null)
   assert.deepEqual(p.turns.map((t) => t.role), ['user', 'assistant'])
   assert.equal(p.lastPrompt, 'fix the bug')
 })
