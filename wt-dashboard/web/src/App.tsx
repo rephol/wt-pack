@@ -36,6 +36,7 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { ChatMarkdown } from './links'
 import { sortAgents, initialSort, activityOf, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
+import { QuickSwitcher, rememberRecent } from './switcher'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
@@ -298,8 +299,10 @@ export default function App() {
   }
   const open = (key: string) => {
     if (key.startsWith('room:')) { location.hash = `rooms/${encodeURIComponent(key.slice(5).split(':')[0])}`; return }
-    setOpenPane(key); setCollapsed(false)
+    setOpenPane(key); setCollapsed(false); rememberRecent(key)
   }
+  // The quick-switcher button stays off the agent panel (open, desktop) and a room's composer.
+  const fabHidden = (page === 'rooms' && !!roomSlug) || (!!openAgent && !narrow && !collapsed)
   useDesktop(collapsed ? null : openPane, open)
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
@@ -347,7 +350,7 @@ export default function App() {
         height="fill"
         content={
       <LayoutContent>
-      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' ? { height: '100%', minHeight: 0 } : undefined}>
+      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
         {!(page === 'rooms' && roomSlug) && <HStack justify="between" align="center" wrap="wrap" gap={3}>
           <Heading level={1}>{page[0].toUpperCase() + page.slice(1)}</Heading>
           <HStack gap={3} align="center">
@@ -406,6 +409,8 @@ export default function App() {
       <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
+      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} phone={phone} hidden={fabHidden}
+        onOpenAgent={open} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
   )
 }
