@@ -228,6 +228,16 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   )
   const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
   // Built only when messages/members change, never per keystroke (the draft lives in this component).
+  // Working members, each under the last message that was delivered to them.
+  const workingAfter = useMemo(() => {
+    const out = new Map<string, string[]>()
+    for (const n of room.members) {
+      if (byName.get(n)?.status !== 'working') continue
+      const m = msgs.findLast((x) => x.deliveredTo.includes(n))
+      if (m) out.set(m.id, [...(out.get(m.id) ?? []), n])
+    }
+    return out
+  }, [msgs, room.members, byName])
   const messageList = useMemo(() => (
         <ChatMessageList density="compact">
           <VirtualRows items={msgs} scrollRef={layoutRef} keyOf={(m) => m.id} render={(m) => m.author.kind === 'system' ? (
@@ -256,10 +266,11 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               }>
               {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
+              {workingAfter.get(m.id)?.map((n) => <Text key={n} type="supporting" size="sm">{`@${n} is working…`}</Text>)}
             </ChatMessage>
           )} />
         </ChatMessageList>
-  ), [msgs, profile, agents]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [msgs, profile, agents, workingAfter]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>

@@ -7,6 +7,9 @@ import { BottomSheet } from '@astryxdesign/core/BottomSheet'
 import { Text } from '@astryxdesign/core/Text'
 import { Badge } from '@astryxdesign/core/Badge'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { Icon } from '@astryxdesign/core/Icon'
+import { HStack } from '@astryxdesign/core/HStack'
 import { shortAgo } from './notifyGate'
 import { switcherItems, needsYou, agentInitials, type SwAgent, type SwItem, type SwRoom } from './switcherData'
 
@@ -34,9 +37,12 @@ function useOtherDialogOpen(mine: boolean) {
 function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   const d = it.auxiliaryData!
   const a = d.kind === 'agent' ? d.agent : null
+  // No question and no recap: a single-line row (the old "idle · no recent summary" line was noise); same height.
+  const line = a && !a.recap && !(needsYou(a) && a.question) ? null : d.line
+  const av = phone ? 32 : 28
   return (
-    <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: 12, height: phone ? 56 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
-      <div style={{ position: 'relative', flex: '0 0 28px', width: 28, height: 28, borderRadius: 14, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
+    <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 12, minHeight: phone ? 44 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
+      <div style={{ position: 'relative', flex: `0 0 ${av}px`, width: av, height: av, borderRadius: av / 2, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
         {a ? agentInitials(a.name) : '#'}
         <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
           <StatusDot variant={!a || needsYou(a) ? 'error' : DOT[a.status]} label={a ? (needsYou(a) ? 'needs you' : a.status) : 'waiting on you'} isPulsing={a?.status === 'working'} />
@@ -44,7 +50,7 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <Text weight="medium" maxLines={1} hasTruncateTooltip={false}>{it.label}</Text>
-        <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>{d.line}</Text>
+        {line && <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>{line}</Text>}
       </div>
       {a && (
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -96,7 +102,7 @@ export function QuickSwitcher({ agents, rooms, phone, hidden, onOpenAgent, onOpe
   const palette = (inline: boolean) => (
     <CommandPalette<SwItem> isOpen={open} onOpenChange={setOpen} searchSource={source} label="Agent conversations"
       value="" onValueChange={pick} renderItem={(it) => <Row it={it} phone={phone} />}
-      footer={phone ? null : <div style={{ padding: '8px 12px' }}><Text type="supporting" size="sm">↑↓ navigate · ↩ open · ⌘↩ full page · esc close</Text></div>}
+      footer={phone ? false : <div style={{ padding: '8px 12px' }}><Text type="supporting" size="sm">↑↓ navigate · ↩ open · ⌘↩ full page · esc close</Text></div>}
       emptySearchText="No agent or room matches" emptyBootstrapText="No agents yet"
       isInline={inline} width={inline ? '100%' : 640} maxHeight={inline ? '100%' : 'min(560px, 80vh)'} />
   )
@@ -118,8 +124,13 @@ export function QuickSwitcher({ agents, rooms, phone, hidden, onOpenAgent, onOpe
         )}
       </button>
       {phone
-        ? <BottomSheet label="Agent conversations" isOpen={open} onOpenChange={setOpen} height="full">
-            <div data-switcher style={{ height: '100%', paddingTop: 12, display: 'flex', flexDirection: 'column', minHeight: 0 }}>{open && palette(true)}</div>
+        ? <BottomSheet label="Agent conversations" isOpen={open} onOpenChange={setOpen} height="85dvh">
+            <div data-switcher data-switcher-phone style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}>
+              <HStack justify="end" style={{ flexShrink: 0, marginTop: -4 }}>
+                <IconButton label="Close" icon={<Icon icon="close" />} variant="ghost" onClick={() => setOpen(false)} style={{ minWidth: 44, minHeight: 44 }} />
+              </HStack>
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{open && palette(true)}</div>
+            </div>
           </BottomSheet>
         : <div data-switcher>{palette(false)}</div>}
     </>

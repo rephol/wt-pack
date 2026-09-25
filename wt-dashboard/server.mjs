@@ -68,6 +68,23 @@ function cached(key, ttl, fn) {
 
 // ---- pane parsing ----
 const RULE = /^\s*─{10,}/
+// Claude Code's live spinner line, just above the input box: "✻ Synthesizing… (10s · ↓ 391 tokens)",
+// "✻ Calling PostHog…", "✻ Waiting for 1 background agent to finish". A finished turn leaves "✻ Cooked for 1m 2s"
+// there too, which is not activity. Only the last few lines above the box count, so an old line never does.
+export function parseActivity(text) {
+  const lines = stripAnsi(text).split('\n')
+  const rules = lines.map((l, i) => (RULE.test(l) ? i : -1)).filter((i) => i >= 0)
+  const cut = rules.length >= 2 ? rules[rules.length - 2] : rules.length ? rules[0] : lines.length
+  const near = lines.slice(0, cut).filter((l) => l.trim()).slice(-3)
+  for (const l of near.reverse()) {
+    const m = l.match(/^\s*[✻✢✳✶✽✺·*]\s+(\S.*?)\s*$/)
+    if (!m || /^\w+ for (\d+[hms]\s*)+$/.test(m[1])) continue // "Cooked for 1m 2s": a finished turn
+    const d = m[1].match(/^(.*?)\s*\(([^()]*)\)\s*$/)
+    return { text: (d ? d[1] : m[1]).trim(), detail: d ? d[2].trim() : null }
+  }
+  return null
+}
+
 export function parsePane(text, raw = '') {
   const lines = text.split('\n')
   // Footer = from the rule opening the input box downward. Two rules wrap the ❯ input box.
@@ -1177,7 +1194,7 @@ const LOCAL = {
 }
 const PANE = /^[\w.:-]+$/
 const KEY = /^[\w+-]{1,20}$/
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' }
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png' }
 
 // ---- user session: only the dashboard page may act as the user ----
 // A random token per server start, handed to the page as an HttpOnly SameSite=Strict cookie when it loads
@@ -1576,6 +1593,11 @@ const server = http.createServer(async (req, res) => {
           if (!m.local) return send(res, 404, { error: 'no transcript for remote agents; use the pane read' })
           const a = (await agents()).find((x) => x.local && x.id === pane)
           return streamTranscript(req, res, a?.session)
+        }
+        // The live spinner line, for an open conversation: one visible-screen read per pane per second, shared.
+        if (parts[4] === 'activity' && req.method === 'GET') {
+          const text = await cached(`activity:${m.label}|${pane}`, 1000, () => herdrOn(m, 'pane', 'read', pane, '--source', 'visible')).catch(() => '')
+          return send(res, 200, parseActivity(text))
         }
         if (parts[4] === 'answer' && req.method === 'POST') {
           if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })

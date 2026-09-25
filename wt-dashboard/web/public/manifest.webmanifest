@@ -1,0 +1,20 @@
+{
+  "name": "wt-dashboard",
+  "short_name": "wt-dash",
+  "description": "Control room for herdr-managed Claude Code agents",
+  "start_url": "./#overview",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1b1b1b",
+  "theme_color": "#1b1b1b",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Needs you", "url": "./#overview?inbox=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Agents", "url": "./#agents", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Rooms", "url": "./#rooms", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ]
+}

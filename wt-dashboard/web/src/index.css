@@ -46,3 +46,7 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 *:hover { scrollbar-color: var(--color-border-emphasized, rgba(128, 128, 128, .5)) transparent; }
 @media (hover: none) { * { scrollbar-color: auto; } }
+
+/* Quick switcher on a phone: tight 56px rows, 12px sides, headings that stay put while the list scrolls. */
+[data-switcher-phone] .astryx-command-palette-item { padding: 2px 12px; min-height: 48px; }
+[data-switcher-phone] .astryx-command-palette-group-heading { position: sticky; top: 0; z-index: 1; padding: 6px 12px; background: var(--color-background-surface, var(--color-background-page, Canvas)); }

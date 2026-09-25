@@ -21,6 +21,7 @@ import { api, type Profile, type RoomSettings } from './rooms'
 import { ServerPanel } from './status'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
+import { InstallRow } from './pwa'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 
@@ -239,6 +240,7 @@ function AboutSection() {
       <Heading level={3}>About</Heading>
       <Text>wt-dashboard — a local control room for herdr-managed Claude Code agents.</Text>
       <Text type="supporting">{isDesktop ? 'Desktop app (Tauri).' : 'Browser.'} Server details are under Server.</Text>
+      <InstallRow />
       <Text weight="semibold">Shortcuts</Text>
       {rows.map(([k, d]) => <HStack key={k} gap={3}><Text weight="medium" style={{ minWidth: 48 }}>{k}</Text><Text type="supporting">{d}</Text></HStack>)}
     </VStack>

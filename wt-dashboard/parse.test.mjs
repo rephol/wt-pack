@@ -519,3 +519,13 @@ test('terminals: off by default; tailnet needs its own switch; audit is appended
   await t.log({ pane: 'wS:p1', action: 'input', text: 'echo hi⏎' })
   assert.equal((await t.tail())[0].text, 'echo hi⏎')
 })
+
+import { parseActivity } from './server.mjs'
+test('parseActivity: the spinner line above the input box, not a finished turn', () => {
+  const box = `${'─'.repeat(20)}\n❯ \n${'─'.repeat(20)}\n  cwd: /x`
+  assert.deepEqual(parseActivity(`⏺ doing\n\n✻ Synthesizing… (10s · ↓ 391 tokens)\n${box}`), { text: 'Synthesizing…', detail: '10s · ↓ 391 tokens' })
+  assert.deepEqual(parseActivity(`\x1b[38;5;2m✢\x1b[0m Calling PostHog…\n${box}`), { text: 'Calling PostHog…', detail: null })
+  assert.deepEqual(parseActivity(`✻ Waiting for 1 background agent to finish\n${box}`), { text: 'Waiting for 1 background agent to finish', detail: null })
+  assert.equal(parseActivity(`✻ Cooked for 1m 2s\n${box}`), null)
+  assert.equal(parseActivity(`✻ Old line\nmore\nand more\nlast\n${box}`), null)
+})

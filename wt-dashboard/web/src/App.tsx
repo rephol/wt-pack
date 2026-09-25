@@ -34,9 +34,12 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { Link } from '@astryxdesign/core/Link'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
+import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
+import { PwaHost, InstallHint } from './pwa'
+import { openInbox } from './inbox'
 import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
@@ -179,6 +182,36 @@ const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="n
 // The right panel (agent or terminal): its handle is on the panel's LEFT edge, so dragging left must widen it
 // (isReversed); double-click puts it back to this width.
 const PANEL_DEFAULT = 480
+// Pinned above the composer while the agent works: Claude Code's own spinner line from the pane ("✻ Synthesizing…
+// (10s · ↓ 391 tokens)"), else the newest tool call, else "Working…"; "Waiting for you" while a question is open.
+function ActivityRow({ agent, lastTool }: { agent: Agent; lastTool: string | null }) {
+  const working = agent.status === 'working'
+  const waiting = needsYou(agent)
+  const act = useQuery({
+    queryKey: ['activity', agent.key],
+    queryFn: () => getJSON<{ text: string; detail: string | null } | null>(`${agentUrl(agent)}/activity`),
+    enabled: working,
+    refetchInterval: working ? 1500 : false,
+  })
+  const [, tick] = useState(0)
+  useEffect(() => { if (!working) return; const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [working])
+  if (!working && !waiting) return null
+  const elapsed = Math.max(0, Math.round((Date.now() - agent.statusSince) / 1000))
+  const el = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
+  const text = waiting ? 'Waiting for you' : act.data?.text ?? lastTool ?? 'Working…'
+  const detail = waiting ? null : act.data?.detail ?? el
+  return (
+    <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 12px', minWidth: 0 }}>
+      {waiting ? <StatusDot variant="error" label="waiting for you" isPulsing /> : <Spinner size="md" shade="subtle" aria-label="working" />}
+      <Text size="sm" type="supporting" maxLines={1} hasTruncateTooltip={false} style={{ minWidth: 0, flex: 1 }}>
+        {detail && !waiting && act.data?.detail ? `${text} (${detail})` : text}
+      </Text>
+      {agent.background > 0 && <Badge label={`${agent.background} bg`} />}
+      {!waiting && <Text size="sm" type="supporting" style={{ flexShrink: 0 }}>{el}</Text>}
+    </div>
+  )
+}
+
 const idleFor = (a: Agent) => {
   const m = Math.floor((Date.now() - a.statusSince) / 60_000)
   return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
@@ -425,6 +458,7 @@ export default function App() {
             endContent={<Button label="Dismiss" size="sm" variant="ghost" onClick={hideLinear} />} />
         )}
 
+        {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
         {!fullKey && data && page === 'tasks' && <TaskBoard tasks={data.tasks} onOpen={open} selected={openPane} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
@@ -456,6 +490,7 @@ export default function App() {
       <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
+      <PwaHost openInbox={() => openInbox()} />
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} phone={phone} hidden={fabHidden}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
@@ -1181,6 +1216,12 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   // the draft lives in this component, and re-rendering 200+ Markdown messages per key was the lag.
   const working = agent.status === 'working'
   const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
+  // The newest tool call in the transcript: the activity row's fallback when the pane shows no spinner line.
+  const lastTool = useMemo(() => {
+    const c = rows.findLast((r) => r.kind === 'tools')
+    const call = c?.kind === 'tools' ? c.calls.at(-1) : undefined
+    return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
+  }, [rows])
   const messageList = useMemo(() => (
               <ChatMessageList density="compact" isStreaming={working}>
                 <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
@@ -1247,7 +1288,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             <div ref={chatBox} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <ChatLayout ref={layoutRef}
               emptyState={<EmptyState isCompact title="No messages yet" />}
-              composer={heldPicker ? null : (
+              composer={heldPicker ? null : (<VStack gap={1}>
                 <ChatComposer
                   sendButton={working ? <Tooltip content="Queue: Claude picks it up after its current step"><span><ChatSendButton /></span></Tooltip> : undefined}
                   value={draft}
@@ -1298,8 +1339,9 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     </HStack>
                   }
                 />
-              )}>
+              </VStack>)}>
               {messageList}
+              <ActivityRow agent={agent} lastTool={lastTool} />
               {queued.length > 0 && (
                 <VStack gap={1} style={{ padding: '0 8px 8px', alignItems: 'flex-end' }}>
                   {queued.map((q) => (
