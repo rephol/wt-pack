@@ -81,6 +81,16 @@ work that is not in it, and a PR whose diff includes someone else's.
 
 Override when the ticket belongs somewhere else: `WT_BASE=origin/preview scripts/worktree.sh <branch>`.
 
+**Label your own pane with the task** (herdr tokens the dashboard shows as "task · state"; a new plan
+overwrites both; silent outside herdr):
+
+```
+~/.claude/skills/wt-shared/scripts/task-state.sh own "<TICKET> <title>"        # task_state = planning
+```
+
+The label then follows the work without you: wt-handoff sets `handed to <worker>`, the worker's `wt-ship`
+sets `done (PR #N)` (or `wt-work` sets `blocked: …`), and `wt-finish` clears it.
+
 Enter it with `EnterWorktree` by `path`. The harness did not create it, so it owns it only loosely: `keep`
 works, `remove` is refused, and if the entry never registered, leaving is a no-op and the directory is just a
 directory. That is fine — `wt-finish` deletes it with plain git for the same reason.
