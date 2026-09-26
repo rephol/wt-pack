@@ -184,6 +184,10 @@ finish() {  # <first output line> <target pane>
   line=$1; shift
   tag "$@"
   [ -n "$from_pane" ] && tag "$from_pane" --token "handoff_to=${to_name:-$to}" --token "handoff_to_pane=$to"
+  # A planner handing its plan over: its task label moves on to "handed to <worker>".
+  if [ -n "$from_pane" ] && [ "$(herdr pane get "$from_pane" 2>/dev/null | jq -r '.result.pane.tokens.role // empty')" = planner ]; then
+    tag "$from_pane" --token "task_state=handed to ${to_name:-$to}"
+  fi
   echo "$line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
   echo "reach: herdr agent prompt $to \"...\""
