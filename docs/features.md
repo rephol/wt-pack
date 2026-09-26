@@ -152,7 +152,7 @@ Chat rooms shared by you and agents.
 ## Inbox
 
 - Kinds include questions, mentions of you, room suggestions, memory proposals, agent done/stalled, CI
-  failed, server and usage notices.
+  failed, server, usage and watchdog notices.
 - **Needs you** = unresolved **and** actionable (needs-you, question, mention-user, room-suggestion,
   memory-proposal), regardless of read state; pinned at the top. Items resolve themselves when the condition
   clears.
@@ -218,6 +218,15 @@ Terminals, Usage, Observability, Server, About.
   - Hourly (first 60s after start) plus **Run now** and a routine action. Defaults: delete unreferenced
     uploads after **30** days, drop resolved inbox items after **14** days, rotate logs at **5** MB keeping
     **2**, clear stale agent caches after **7** days (each 1–3650).
+- **Watchdog** (Settings › Observability): every 60s (first run 90s after start), deterministic checks, each
+  with an on/off switch and a threshold — server restarts in the last hour (**3**), room message undelivered
+  (**15** min), Ready card not dispatched with Dispatch on (**10** min, held cards excluded), Backlog card
+  untriaged with Auto on (**30** min), Planning/Building card held by a gone or stalled agent (**10** min), herdr
+  unreachable (**2** min), free disk (**5** GB), wt.db size (**200** MB), server errors in 10 min (**20**), Jev
+  failure rate over the last hour (**30**%, at least 5 calls). A finding opens once per condition as a
+  `watchdog` Inbox item (native notification only for restarts, herdr and disk) and resolves itself when the
+  condition clears. **Investigate** hands a finding to a worker (or **Ask auditor**) through wt-handoff, framed as
+  data, to diagnose and file a ticket — only when clicked.
 - **Server**: state, pid, uptime, build time, per-source status; **Restart server** (or **Install as
   service** when not managed).
 - **About**: what the dashboard is, keyboard shortcuts, install.
@@ -261,6 +270,9 @@ Eval: `node skills/wt-shared/scripts/jev-eval.mjs <feature>`.
   notifications; links open in an in-app browser window. An app-managed server that dies is restarted up to
   3 times in 5 min. Log: `~/Library/Logs/wt-dashboard/app.log`.
 - **Service**: launchd `id.local.wtdashboard.server` (`npm run service:install|restart|status|uninstall`).
+  `service:install` also installs the **watchdog probe** `id.local.wtdashboard.watchdog`: every 2 min it curls
+  `/api/health` and shows a macOS notification when the server stops answering (and once when it is back).
+  `node scripts/service.mjs probe` installs only the probe; `./setup` adds it to an existing service.
 - **PWA**: in a browser on a secure origin, **Install app** (iOS: Share → Add to Home Screen); an update banner
   shows when a new build lands. The service worker never caches `/api`.
 - **Tailscale**: the server listens on loopback only; expose it with `tailscale serve` and add the hostname to

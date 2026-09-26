@@ -26,6 +26,7 @@ import { useToast } from '@astryxdesign/core/Toast'
 import { api, type Profile, type RoomSettings } from './rooms'
 import { ServerPanel } from './status'
 import { HousekeepingSection } from './housekeeping'
+import { WatchdogSection } from './watchdog'
 import { BoardHistorySection, RoutinesHistorySection } from './routines'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
@@ -57,7 +58,7 @@ const GROUPS: { label: string; panels: Panel[] }[] = [
     { id: 'integrations', label: 'Integrations', description: 'API keys, projects, hosts and Jev judgments.' },
     { id: 'terminals', label: 'Terminals', description: 'Shells on this machine, mirrored into the dashboard.' },
     { id: 'usage', label: 'Usage', description: 'Claude usage by agent, project and model.' },
-    { id: 'observability', label: 'Observability', description: 'Jev calls, outcomes, the server log and housekeeping.' },
+    { id: 'observability', label: 'Observability', description: 'Jev calls, outcomes, the server log, housekeeping and the watchdog.' },
     { id: 'server', label: 'Server', description: 'The dashboard server and its data sources.' },
     { id: 'about', label: 'About', description: 'What this is, keyboard shortcuts and install.' },
   ] },
@@ -179,7 +180,7 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
-          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><RoutinesHistorySection {...scope} /><BoardHistorySection /><HousekeepingSection /></VStack>}
+          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><RoutinesHistorySection {...scope} /><BoardHistorySection /><HousekeepingSection /><WatchdogSection /></VStack>}
           {section === 'usage' && <UsageBreakdown />}
           {section === 'terminals' && <TerminalsSection />}
           {section === 'server' && <VStack gap={6}><SettingsCard title="Status"><div className="hd-set-row"><ServerPanel /></div></SettingsCard></VStack>}
@@ -323,7 +324,7 @@ function NotificationsSection() {
   const GROUPS: [string, [Kind, string][]][] = [
     ['Needs you', [['question', 'An agent asks a question'], ['mention-user', 'An agent @mentions you in a room'], ['memory-proposal', 'An agent proposes a global preference']]],
     ['Agents', [['agent-done', 'Agent done'], ['agent-stalled', 'Agent stalled'], ['ci-failed', 'PR CI failing'], ['room-suggestion', 'Room suggestions for tickets'], ['memory', 'An agent remembers a preference']]],
-    ['System', [['server', 'Server events'], ['usage', 'Claude usage at 80% / 95%']]],
+    ['System', [['server', 'Server events'], ['watchdog', 'Watchdog findings'], ['usage', 'Claude usage at 80% / 95%']]],
   ]
   const cell = { width: 52, display: 'flex', justifyContent: 'center' } as const
   const head = <HStack gap={0}><div style={cell}><Text type="supporting" size="sm">Inbox</Text></div><div style={cell}><Text type="supporting" size="sm">Native</Text></div></HStack>
