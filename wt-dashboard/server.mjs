@@ -376,7 +376,18 @@ async function syncTokens(agents) {
   }
   if (backfilled) await roleStore.saveTags().catch((e) => console.error('agent-tags:', e.message))
 }
-const GENERIC = /^(claude code|claude)?$/i
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+// Remote agents rarely carry a herdr name and their title is a session topic, so derive <machine>-<cwd>-<pane>.
+export function remoteName(label, cwd, paneId) {
+  const head = slug(label), tail = slug(String(paneId).split(':').pop()) || 'p'
+  const mid = slug(String(cwd ?? '').split('/').filter(Boolean).pop() ?? '') || 'agent'
+  const room = 32 - head.length - tail.length - 2 // truncate the cwd part first so machine and pane stay distinct
+  return room > 0 ? `${head}-${mid.slice(0, room).replace(/-$/, '')}-${tail}` : `${head.slice(0, 32 - tail.length - 1)}-${tail}`
+}
+export function agentName(m, a, cwd) {
+  if (m.local) return a.name ?? a.terminal_title_stripped ?? a.pane_id
+  return a.name || remoteName(m.label, cwd, a.pane_id)
+}
 
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
 async function listAgents(m) {
@@ -386,8 +397,6 @@ async function listAgents(m) {
   const out = []
   for (const a of result.agents) {
     const k = `${m.label}|${a.pane_id}`
-    let name = a.name ?? a.terminal_title_stripped ?? a.pane_id
-    if (!m.local && (GENERIC.test(name.trim()) || name === a.pane_id)) name = `${m.label}/${a.pane_id}`
     const prev = since.get(k)
     if (!prev || prev.status !== a.agent_status) since.set(k, { status: a.agent_status, at: Date.now() })
     const seen = parsed.get(k)
@@ -401,6 +410,7 @@ async function listAgents(m) {
     }
     const p = parsed.get(k)?.p ?? {}
     const cwd = p.cwd ?? a.foreground_cwd ?? a.cwd
+    const name = agentName(m, a, cwd)
     const session = m.local && a.agent_session?.kind === 'id' ? a.agent_session.value : null
     // An AskUserQuestion picker on screen beats the reply-ends-with-? heuristic (kept for permission prompts).
     const pk = p.picker ?? null
