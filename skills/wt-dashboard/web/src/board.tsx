@@ -39,7 +39,7 @@ const MIN_PRIORITY_OPTIONS = [1, 2, 3, 4].map((p) => ({ value: String(p), label:
 const tUrl = (id: string) => `/api/tickets/${encodeURIComponent(id)}`
 
 type Dot = 'neutral' | 'accent' | 'warning' | 'success' | 'error'
-const COLUMN_META: Record<Column, { variant: Dot; tooltip: string; empty: string }> = {
+export const COLUMN_META: Record<Column, { variant: Dot; tooltip: string; empty: string }> = {
   backlog: { variant: 'neutral', tooltip: 'Proposals. Not scheduled until moved to Ready.', empty: 'Filed tickets appear here.' },
   ready: { variant: 'accent', tooltip: 'Do this next: orchestrators only schedule Ready tickets.', empty: 'Move a ticket here to schedule it.' },
   planning: { variant: 'accent', tooltip: 'Claimed; a planner is writing the plan.', empty: 'Tickets being planned appear here.' },
