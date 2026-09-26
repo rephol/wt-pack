@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COLUMNS, group, moveTicket, type Ticket } from './boardData.ts'
+import { COLUMNS, group, jevChip, moveTicket, type Ticket } from './boardData.ts'
 
 const t = (id: string, column: Ticket['column'], priority?: number): Ticket => ({ id, title: id, column, priority })
 
@@ -23,4 +23,13 @@ test('moveTicket: moves one card, leaves the input untouched; no-op for same col
   assert.equal(b.tickets[0].column, 'backlog')
   assert.equal(moveTicket(b, 'WP-1', 'backlog'), b)
   assert.equal(moveTicket(b, 'WP-9', 'ready'), b)
+})
+
+test('jevChip: shown for applied fields or duplicates, not for an owner hint alone', () => {
+  const t = { id: 'WP-1', title: 'x', column: 'backlog' as const }
+  const jev = { at: '', applied: {}, owner: 'worker' as const, dupes: [] as string[] }
+  assert.equal(jevChip(t), false)
+  assert.equal(jevChip({ ...t, jev }), false)
+  assert.equal(jevChip({ ...t, jev: { ...jev, dupes: ['WP-2'] } }), true)
+  assert.equal(jevChip({ ...t, jev: { ...jev, applied: { type: { from: 'feature', to: 'bug' } } } }), true)
 })

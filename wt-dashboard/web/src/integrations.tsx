@@ -191,6 +191,7 @@ export const JEV: [string, string][] = [
   ['MEMORY_DUP', 'wt-memory remember flags near-duplicates and conflicts with existing memories.'],
   ['MEMORY_SUGGEST', 'Suggests wt-memory remember when a prompt states a standing preference. Adds up to 1.5s per prompt.'],
   ['BABYSIT_TRIAGE', 'wt-babysit classifies review comments as must-fix, question, nit or no action.'],
+  ['TICKET_TRIAGE', 'Suggests type, size, priority and planner vs worker for new tickets (only fields left empty) and flags likely duplicates.'],
   ['INBOX_RANK', 'Scores new inbox items by urgency and sorts groups by it. One call per item, off by default.'],
 ]
 export function JevSwitch({ it, put, description }: { it: Item | undefined; put: (k: string, v: unknown) => Promise<boolean>; description: string }) {

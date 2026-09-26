@@ -27,7 +27,7 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { api } from './rooms'
-import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, group, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
+import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, group, jevChip, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
 const tUrl = (id: string) => `/api/tickets/${encodeURIComponent(id)}`
@@ -217,6 +217,7 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
           {t.priority ? <PriorityBadge p={t.priority} /> : null}
           {t.type && <Badge label={t.type} variant="neutral" />}
           {t.size && <Badge label={t.size} variant="neutral" />}
+          {jevChip(t) && <Badge label="Jev" variant="info" />}
         </HStack>
         <MoreMenu label={`Actions for ${t.id}`} size="sm"
           items={COLUMNS.filter((c) => c !== t.column).map((c) => ({ label: `Move to ${columnLabel(c)}`, onClick: () => onMove(t.id, c) }))} />
@@ -296,6 +297,7 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
 
   // ponytail: unset type/size are omitted (the API rejects null), so they cannot be cleared once set.
   const patch = useMutation({ mutationFn: (body: object) => send<Ticket>(tUrl(ticket!.id), 'PATCH', body), onSuccess: () => { done(); setEditing(false) } })
+  const undo = useMutation({ mutationFn: (field: string) => send<Ticket>(`${tUrl(ticket!.id)}/jev-undo`, 'POST', { field }), onSuccess: done })
   const create = useMutation({
     mutationFn: () => send<Ticket>('/api/tickets', 'POST', {
       project, column: 'backlog', title: draft.title.trim(), body: draft.body, priority: Number(draft.priority),
@@ -429,6 +431,18 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
         {ticket.created && <MetadataListItem label="Created"><Timestamp value={ticket.created} format="date" type="body" color="primary" /></MetadataListItem>}
         {ticket.updated && <MetadataListItem label="Updated"><Timestamp value={ticket.updated} format="relative" type="body" color="primary" /></MetadataListItem>}
         {!!ticket.labels?.length && <MetadataListItem label="Labels"><HStack gap={1} wrap="wrap">{ticket.labels.map((l) => <Badge key={l} label={l} variant="neutral" />)}</HStack></MetadataListItem>}
+        {ticket.jev && (jevChip(ticket) || ticket.jev.owner) && <MetadataListItem label="Jev">
+          <VStack gap={1}>
+            {Object.entries(ticket.jev.applied).map(([f, a]) => (
+              <HStack key={f} gap={2} vAlign="center">
+                <Text type="body">Jev suggested {f} {f === 'priority' ? PRIORITY[Number(a.to)] : String(a.to)}</Text>
+                <Button label="Undo" variant="ghost" size="sm" isLoading={undo.isPending && undo.variables === f} onClick={() => undo.mutate(f)} />
+              </HStack>
+            ))}
+            {ticket.jev.owner && <Text type="body" color="secondary">{ticket.jev.owner === 'planner' ? 'Jev: needs a plan' : 'Jev: worker-ready'}</Text>}
+            {ticket.jev.dupes.map((d) => <Link key={d} href="#" onClick={(e: React.MouseEvent) => { e.preventDefault(); onCreated(d) }}>Possible duplicate of {d}</Link>)}
+          </VStack>
+        </MetadataListItem>}
         {!!ticket.links?.length && <MetadataListItem label="Links"><VStack gap={1}>{ticket.links.map((l) => <Link key={l} href={l} target="_blank">{l}</Link>)}</VStack></MetadataListItem>}
       </MetadataList>
     </VStack>
