@@ -8,8 +8,8 @@ installEnterKeyHint()
 installChipTriggerFix()
 registerPwa()
 
-// The server issues a fresh session cookie on each start (it gates every user action). When a POST comes back
-// 403 with x-herdr-session, reload the page once to pick the new cookie up — at most every 10s.
+// The session cookie survives server restarts (persisted token). If a POST still comes back 403 with
+// x-herdr-session (token file deleted), reload once to pick the new cookie up — at most every 10s; drafts survive (draft.ts).
 const realFetch = window.fetch.bind(window)
 window.fetch = async (...args: Parameters<typeof fetch>) => {
   const r = await realFetch(...args)

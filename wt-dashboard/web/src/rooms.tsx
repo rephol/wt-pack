@@ -1,5 +1,6 @@
 // Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
 import { roomInProject } from './switcherData'
+import { useDraft } from './draft'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -205,7 +206,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   const roomStream = useStream<RoomMsg>(`room|${room.slug}`, () => roomStreamSpec(room.slug))
   const msgs = roomStream.items
   const syncing = !roomStream.synced && !msgs.length
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useDraft(`room:${room.slug}`, () => '')
   const density = useChatDensity()
   const [confirm, setConfirm] = useState<string | null>(null)
   const { atts, attErr, addFiles: addAtts, removeAtt, clear: clearAtts, uploading } = useAttachments(null)

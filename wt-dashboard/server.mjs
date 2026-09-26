@@ -4,7 +4,7 @@ import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
-import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs'
+import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1672,11 +1672,18 @@ const KEY = /^[\w+-]{1,20}$/
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png' }
 
 // ---- user session: only the dashboard page may act as the user ----
-// A random token per server start, handed to the page as an HttpOnly SameSite=Strict cookie when it loads
+// A random token, kept in DATA_ROOT/session (0600) so a server restart keeps the page's cookie valid (WP-23:
+// a fresh token per start 403'd every open page and forced a reload). Handed to the page as an HttpOnly SameSite=Strict cookie when it loads
 // index.html. Every state-changing /api call needs it, except an agent's own room post (x-herdr-pane).
 // ponytail: this stops cross-site requests and agents that simply curl the API; a local process that fetches
 // index.html itself can still read the cookie — real isolation would need a per-user OS boundary.
-const SESSION = randomUUID()
+const SESSION = (() => {
+  const f = join(DATA_ROOT, 'session')
+  try { const t = readFileSync(f, 'utf8').trim(); if (/^[\w-]{32,}$/.test(t)) return t } catch { /* first start */ }
+  const t = randomUUID()
+  try { mkdirSync(DATA_ROOT, { recursive: true }); writeFileSync(f, t, { mode: 0o600 }) } catch (e) { console.error('session file', e) }
+  return t
+})()
 const SESSION_COOKIE = `hd_session=${SESSION}; HttpOnly; SameSite=Strict; Path=/`
 export const hasSession = (cookieHeader, token = SESSION) =>
   (cookieHeader ?? '').split(';').some((c) => c.trim() === `hd_session=${token}`)

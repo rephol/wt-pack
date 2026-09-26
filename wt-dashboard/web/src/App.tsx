@@ -26,6 +26,7 @@ import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
 import { tileCounts } from './overviewData'
+import { useDraft } from './draft'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
@@ -1225,7 +1226,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const { byId } = useRoles()
   const [tagsMode, setTagsMode] = useState<'role' | 'tags' | null>(null)
   const density = useChatDensity()
-  const [draft, setDraft] = useState(() => takePrefill(agent.key))
+  const [draft, setDraft] = useDraft(`agent:${agent.key}`, () => takePrefill(agent.key))
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(agent.local ? null : 'Images only for local agents')
   const fileRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<ChatComposerInputHandle>(null)

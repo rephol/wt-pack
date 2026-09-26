@@ -30,7 +30,7 @@ export function useDesktop(openKey: string | null, open: (key: string) => void) 
     let build: number | null = null
     es.addEventListener('build', (m) => {
       const b = JSON.parse((m as MessageEvent).data) as number
-      if (build !== null && b !== build) location.reload()
+      if (build !== null && b !== build) dispatchEvent(new Event('hd-update')) // PwaHost: toast, or reload while hidden
       build = b
     })
     es.addEventListener('notification', (m) => {

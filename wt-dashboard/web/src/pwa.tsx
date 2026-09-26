@@ -38,11 +38,23 @@ export function PwaHost({ openInbox }: { openInbox: () => void }) {
   const toast = useToast()
   useEffect(() => {
     if (location.hash === '#inbox') { history.replaceState(null, '', '#overview'); dispatchEvent(new HashChangeEvent('hashchange')); openInbox() }
-    if (isApp || !('serviceWorker' in navigator)) return
-    const had = Boolean(navigator.serviceWorker.controller)
-    const on = () => { if (had) toast({ body: 'Update available — reload to use the new version', type: 'info' }) }
-    navigator.serviceWorker.addEventListener('controllerchange', on)
-    return () => navigator.serviceWorker.removeEventListener('controllerchange', on)
+    // A new web build (desktop: /api/events build id; browser: new service worker) never reloads under the user:
+    // it applies itself when the window is hidden (drafts are kept in sessionStorage), else offers a toast.
+    let pending = false
+    const hidden = () => { if (pending && document.hidden) location.reload() }
+    const update = () => {
+      if (pending) return
+      pending = true
+      if (document.hidden) return location.reload()
+      toast({ body: 'Update available', type: 'info', isAutoHide: false, uniqueID: 'hd-update', endContent: <Button label="Reload" size="sm" onClick={() => location.reload()} /> })
+    }
+    document.addEventListener('visibilitychange', hidden)
+    addEventListener('hd-update', update)
+    const sw = !isApp && 'serviceWorker' in navigator ? navigator.serviceWorker : null
+    const had = Boolean(sw?.controller)
+    const on = () => { if (had) update() }
+    sw?.addEventListener('controllerchange', on)
+    return () => { document.removeEventListener('visibilitychange', hidden); removeEventListener('hd-update', update); sw?.removeEventListener('controllerchange', on) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return null
 }
