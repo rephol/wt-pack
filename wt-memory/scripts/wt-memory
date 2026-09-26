@@ -4,7 +4,7 @@
 //   wt-memory context [--role R] [--project P] [--cwd D]   # merged markdown: global → role → project
 //   wt-memory hash    [same flags]                         # short content hash of that output
 //   wt-memory path    [global | role R | project P]        # the store dir, or one file's path
-//   wt-memory remember "<note>" [--scope role|project|global] [--role R] [--project P]
+//   wt-memory remember "<note>" [--scope role|project|global] [--role R] [--project P] [--strict]
 //   wt-memory forget <id> · accept <id> · reject <id> · list [--scope S] [--json]
 //
 // Store: $WT_MEMORY_HOME or ~/.config/wt-memory → global.md, roles/<role-id>.md, projects/<repo>.md.
@@ -59,6 +59,7 @@ function flags(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (/^--(role|project|cwd|scope)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
     else if (argv[i] === '--json') o.json = true
+    else if (argv[i] === '--strict') o.strict = true
     else o._.push(argv[i])
   }
   return o
@@ -101,7 +102,25 @@ function append(f, e) {
 // Near-identical: same words ignoring case and punctuation, in the target file (any line) or pending.
 const dup = (f, text, extra = []) => [...read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')), ...extra].some((l) => norm(l) === norm(text))
 
-function remember(o) {
+// Jev near-duplicate / conflict check (WT_JEV_MEMORY_DUP, default on): prints what it found; --strict refuses.
+// Any failure (no pack, no key, timeout) → no check, as before.
+async function jevDup(text, existing, strict) {
+  if (!existing.length) return
+  const { memoryDup, loadTypesafe } = await import('./jev-memory.mjs')
+  const ts = await loadTypesafe()
+  if (!ts?.enabled('memory_dup', true)) return
+  const list = existing.slice(-40)
+  const state = { note: text, existing: list }
+  const a = await ts.judge('memory_dup', state, memoryDup.questions(state), { pick: (x) => memoryDup.decide(x).some((c) => c !== 'unrelated') })
+  if (!a) return
+  const cls = memoryDup.decide(a)
+  const hits = (c) => list.filter((_, i) => cls[i] === c)
+  for (const e of hits('duplicate')) console.log(`similar to: ${e}`)
+  for (const e of hits('conflicts')) console.log(`conflicts with: ${e}`)
+  if (strict && (hits('duplicate').length || hits('conflicts').length)) throw new Error('remember: refused (--strict): similar or conflicting entry exists')
+}
+
+async function remember(o) {
   const text = o._.join(' ').replace(/\s+/g, ' ').trim()
   if (!text) throw new Error('remember: a note is required')
   if (text.includes('<!--') || text.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
@@ -112,6 +131,9 @@ function remember(o) {
   if (scope !== 'global' && !name) throw new Error(`remember: no ${scope} inferable; pass --${scope}`)
   const f = file(scope, name)
   const e = { id: randomBytes(3).toString('hex'), by: author().replace(/\s+/g, '_'), at: today(), text }
+  const lines = (g) => read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')).filter((l) => l.trim()).concat(g)
+  // Before either exact-dup branch, so global (proposed) and scoped remembers both get it.
+  if (!dup(f, text, scope === 'global' ? pending().map((p) => p.text) : [])) await jevDup(text, lines(scope === 'global' ? pending().map((p) => p.text) : []), o.strict)
   if (scope === 'global') {
     if (dup(f, text, pending().map((p) => p.text))) return console.log('already remembered (global)')
     atomic(join(PENDING, `${e.id}.json`), JSON.stringify(e, null, 2) + '\n')
@@ -151,7 +173,7 @@ function accept(id) {
   } else if (['remember', 'forget', 'accept', 'reject', 'list'].includes(cmd)) {
     try {
       const o = flags(rest)
-      if (cmd === 'remember') remember(o)
+      if (cmd === 'remember') await remember(o)
       else if (cmd === 'forget' || cmd === 'reject') forget(o._[0])
       else if (cmd === 'accept') accept(o._[0])
       else {
