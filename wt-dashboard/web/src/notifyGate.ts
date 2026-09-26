@@ -4,6 +4,7 @@ export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion'
 export type Kind = (typeof KINDS)[number]
 export interface InboxItem {
   id: string; ts: string; kind: Kind; key: string; title: string; body: string; read: boolean; resolvedAt: string | null; quiet?: boolean
+  urgency?: number // 0-3 from Jev (WT_JEV_INBOX_RANK); absent sorts as 1
   target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null; memory?: string }
 }
 export type KindPrefs = Record<Kind, boolean>
@@ -48,7 +49,8 @@ export function shortAgo(ts: string, now = Date.now()) {
 }
 
 // Inbox auto-grouping (after collapseRepeats): rows from the same agent, room, task or memory store become one
-// expandable group, in order of their newest row. A group of one stays a plain row.
+// expandable group, in order of their newest row. A group of one stays a plain row. Groups then sort by their
+// most urgent row (Jev urgency, absent = 1) — a stable sort, so with no urgencies the order is unchanged.
 export type Source = 'agent' | 'room' | 'task' | 'memory' | 'other'
 export interface InboxGroup { key: string; source: Source; label: string; rows: InboxRow[]; ids: string[]; unread: number }
 export function groupOf(it: InboxItem): { key: string; source: Source; label: string } {
@@ -67,5 +69,6 @@ export function groupInbox(rows: InboxRow[]): InboxGroup[] {
     if (!g) { g = { ...g0, rows: [], ids: [], unread: 0 }; at.set(g0.key, g); out.push(g) }
     g.rows.push(r); g.ids.push(...r.ids); if (r.anyUnread) g.unread++
   }
-  return out
+  const top = (g: InboxGroup) => Math.max(...g.rows.map((r) => r.urgency ?? 1))
+  return out.map((g) => [top(g), g] as const).sort((a, b) => b[0] - a[0]).map(([, g]) => g)
 }

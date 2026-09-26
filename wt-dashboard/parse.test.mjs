@@ -846,3 +846,11 @@ test('deriveTasks: Jev stall class — stuck/looping stalled, finished not, wait
   assert.equal(st('working', undefined), 'building')
   assert.equal(deriveTasks({ agents: [a('idle', 'waiting_on_user')], worktrees: [], prs: [], issues: [] })[0].question, 'waiting on your call')
 })
+
+import { inboxRank } from './inbox.mjs'
+test('inbox rank: score → urgency 0-3; no answer → none (sorts as FYI)', () => {
+  assert.equal(inboxRank.decide({ urgency: { score: 2.45 } }), 2)
+  assert.equal(inboxRank.decide({ urgency: { score: 3.6 } }), 3)
+  assert.equal(inboxRank.decide(null), null)
+  assert.deepEqual(Object.keys(inboxRank.state({ kind: 'question', title: 't', body: 'b', target: {}, id: 'x' })), ['kind', 'title', 'body'])
+})

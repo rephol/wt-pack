@@ -33,6 +33,15 @@ export function toResolve(items, needs, suggested, proposals = null) {
   )).map((it) => it.id)
 }
 
+// WT_JEV_INBOX_RANK: one score per new item, stored as `urgency` 0-3 (noise, FYI, needs attention soon, blocking).
+export const inboxRank = {
+  questions: () => ({ urgency: { type: 'score', instructions: 'How urgent is this dashboard notification for the developer who runs these coding agents?',
+    criteria: ['noise: nothing to do and nothing worth knowing', 'FYI: worth knowing, no action needed', 'needs attention soon: the user should act within the hour', 'blocking: an agent or the work is stopped until the user acts'] } }),
+  // Jev's score answer: {score: expected level 0-3, probabilities, confidence}.
+  decide: (a) => (typeof a?.urgency?.score === 'number' ? Math.max(0, Math.min(3, Math.round(a.urgency.score))) : null),
+  state: (it) => ({ kind: it.kind, title: it.title, body: it.body }),
+}
+
 export class Inbox {
   constructor(file) { Object.assign(this, { file, items: null, subs: new Set() }) }
   async load() {

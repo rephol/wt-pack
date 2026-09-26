@@ -9,7 +9,7 @@ import { homedir, hostname, tmpdir } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
-import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
+import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
@@ -1256,6 +1256,15 @@ const trayOfInbox = () => ({
 })
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
 inbox.subs.add((it) => broadcastEvent('notification', it))
+// Scored once, async, after it is stored; the web reads `urgency` on its next list fetch (no re-broadcast: that
+// would notify twice). No answer → no urgency, which sorts as FYI.
+inbox.subs.add((it) => {
+  if (!jevOn('INBOX_RANK')) return
+  const s = inboxRank.state(it)
+  jevAsk('INBOX_RANK', s, inboxRank.questions(), (x) => (inboxRank.decide(x) ?? 0) >= 2)
+    .then((a) => { const u = inboxRank.decide(a); if (u != null) return inbox.patch([it.id], { urgency: u }) })
+    .catch((e) => console.error('inbox rank:', e.message))
+})
 // ---- Claude usage (Overview) ----
 const USAGE_FILE = join(homedir(), '.cache', 'ccstatusline', 'usage.json')
 const usageAgg = new UsageAgg()
