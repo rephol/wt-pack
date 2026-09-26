@@ -21,20 +21,36 @@ export function mergeIds(subject, key) {
   return [...out]
 }
 
-// room: the project's room slug, when one exists (WP-74) — the result goes there as well as back to the sender.
-export function dispatchPrompt(t, role, room = null) {
-  const report = room ? `When done, post a one-line result in #${room} with \`room post ${room} "…"\`, and still reply to the sender.\n` : ''
-  if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.\n` + report
+// report (WP-75): { room, orch } from the board's 'Report to' — where the one-line result goes. A dispatched agent has
+// no sender (handoff runs with HERDR_PANE_ID blank), so the orchestrator is named with its pane.
+export function reportLine(report) {
+  const parts = [
+    report?.room && `post a one-line result in #${report.room} with \`room post ${report.room} "…"\``,
+    report?.orch && `send a one-line result to ${report.orch.name} with \`herdr agent prompt ${report.orch.pane} "…"\``,
+  ].filter(Boolean)
+  return parts.length ? `When done, ${parts.join(' and ')}.\n` : ''
+}
+// Settings → { room, orch }. reportRoom null = the room named after the project, '' = none, else that slug — only a
+// live (not archived) room; the orchestrator must be LOCAL (a remote pane id means nothing on this machine).
+export function resolveReport(project, { reportRoom = null, reportOrch = true } = {}, room = () => null, agents = []) {
+  const slug = reportRoom === null ? project : reportRoom
+  const r = slug ? room(slug) : null
+  const o = reportOrch ? agents.find((x) => x.local && x.pool === 'orchestrator' && x.project === project) : null
+  return { room: r && !r.archived ? r.slug : null, orch: o ? { name: o.name, pane: o.id } : null }
+}
+export function dispatchPrompt(t, role, report = null) {
+  const line = reportLine(report)
+  if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.\n` + line
   const branch = `${t.id.toLowerCase()}-<short-slug>`
   return `Implement ${t.id} — ${t.title} (\`wt-ticket show ${t.id}\`).\n\n` +
     `Create a worktree on a new branch ${branch} from main, use wt-work, then wt-ship (review). ` +
     `Merge to main (no draft PR; merge commit "Merge branch '${branch}'") and push. ` +
-    `Rebase on main and resolve conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`.\n` + report
+    `Rebase on main and resolve conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`.\n` + line
 }
 
 export class Dispatch {
   // deps: { agents(), host(), handoff(args, prompt, cwd) → stdout, repoOf(project) → path|null, git(repo, ...args) → stdout,
-  //   roomOf(project) → room slug|null, maxWorking() → n, pending() → routine spawns in flight, ticketOf(agent) → ticket id|null }
+  //   reportOf(project) → { room: slug|null, orch: {name, pane}|null }, maxWorking() → n, pending() → routine spawns in flight, ticketOf(agent) → ticket id|null }
   constructor({ tickets, deps, log = console.error }) {
     Object.assign(this, { tickets, deps, log, ticking: false, state: new Map(), gone: new Map(), fetched: new Map() })
   }
@@ -124,7 +140,7 @@ export class Dispatch {
     if (!claimed) return
     const role = roleFor(next)
     try {
-      const out = await this.deps.handoff(['--role', role, '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role, (await this.deps.roomOf?.(project)) ?? null), repo)
+      const out = await this.deps.handoff(['--role', role, '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
       const [first = '', second = ''] = out.trim().split('\n')
       const f = first.split(' ')
       const pane = f[0] === 'reused' ? f[1] : f[0] === 'created' ? f[2] : null

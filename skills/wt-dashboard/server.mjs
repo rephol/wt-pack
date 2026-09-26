@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
-import { Dispatch, runHandoff } from './dispatch.mjs'
+import { Dispatch, runHandoff, resolveReport } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
@@ -1771,10 +1771,11 @@ async function ticketsApi(req, res, url, parts) {
     if (jevOn('TICKET_TRIAGE')) triage(project, t, empty)
     return
   }
-  // Board settings and 'Run now' (WP-39/46/52): PUT /api/tickets/board {project, auto?, minPriority?, dispatch?, stallMin?}; POST /api/tickets/board/run {project}.
+  // Board settings and 'Run now' (WP-39/46/52/75): PUT /api/tickets/board {project, auto?, minPriority?, dispatch?, stallMin?, reportRoom?, reportOrch?}; POST /api/tickets/board/run {project}.
   if (parts[2] === 'board') {
     const bool = (v) => typeof v === 'boolean' ? v : undefined
-    if (req.method === 'PUT' && parts.length === 3) return send(res, 200, await tickets.setSettings(b.project, { auto: bool(b.auto), minPriority: b.minPriority, dispatch: bool(b.dispatch), stallMin: b.stallMin }))
+    if (req.method === 'PUT' && parts.length === 3) return send(res, 200, await tickets.setSettings(b.project, { auto: bool(b.auto), minPriority: b.minPriority, dispatch: bool(b.dispatch), stallMin: b.stallMin,
+      reportRoom: 'reportRoom' in b ? b.reportRoom : undefined, reportOrch: bool(b.reportOrch) })) // reportRoom passes null through
     if (req.method === 'POST' && parts[3] === 'run') {
       const r = await runBoard(b.project)
       if (r.skipped) return send(res, 409, { error: r.skipped })
@@ -2415,7 +2416,8 @@ const dispatcher = new Dispatch({
     pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
     // The project's room is the one named after it (WP-74); archived rooms don't count.
-    roomOf: async (project) => { await rooms.list(); const r = rooms.room(project); return r && !r.archived ? r.slug : null },
+    // WP-75: where the dispatched agent reports (dispatch.mjs resolveReport).
+    reportOf: async (project) => { await rooms.list(); return resolveReport(project, await tickets.settings(project), (s) => rooms.room(s), await agents().catch(() => [])) },
     git: (repo, ...args) => git(repo, ...args),
     ticketOf: tagTicket,
     handoff: async (args, prompt, cwd) => {

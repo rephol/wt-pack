@@ -85,7 +85,7 @@ const legacy = async (files) => {
 test('import: legacy board keeps ids, next and history; files move to pre-sqlite-*; no re-import', async () => {
   const dir = await legacy({ 'wt-pack.json': JSON.stringify(board) })
   const t = new Tickets({ dir, log: () => {} })
-  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', auto: false, minPriority: 2, dispatch: false, stallMin: 45, tickets: board.tickets })
+  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', auto: false, minPriority: 2, dispatch: false, stallMin: 45, reportRoom: null, reportOrch: true, tickets: board.tickets })
   assert.equal((await t.create('wt-pack', { title: 'after' }, user)).id, 'WPK-8')
   const [backup] = (await readdir(dir)).filter((f) => f.startsWith('pre-sqlite-'))
   assert.deepEqual(JSON.parse(await readFile(join(dir, backup, 'tickets', 'wt-pack.json'), 'utf8')), board)
@@ -142,7 +142,7 @@ test('needsSession: pane exempts ticket POST/PATCH only', async () => {
 test('list never creates a board', async () => {
   const dir = await tmp()
   const t = new Tickets({ dir })
-  assert.deepEqual(await t.list('typo-proj'), { key: null, auto: false, minPriority: 2, dispatch: false, stallMin: 45, tickets: [] })
+  assert.deepEqual(await t.list('typo-proj'), { key: null, auto: false, minPriority: 2, dispatch: false, stallMin: 45, reportRoom: null, reportOrch: true, tickets: [] })
   assert.deepEqual(await t.keys(), {})
 })
 
@@ -240,9 +240,10 @@ test('list: an unknown column is a 400, not an empty list', async () => {
 test('board settings: minPriority defaults to High, partial updates, validated (WP-46)', async () => {
   const t = new Tickets({ dir: await tmp() })
   await t.create('wt-pack', { title: 'A' }, user)
-  assert.deepEqual(await t.settings('wt-pack'), { auto: false, minPriority: 2, dispatch: false, stallMin: 45 })
-  assert.deepEqual(await t.setSettings('wt-pack', { auto: true }), { auto: true, minPriority: 2, dispatch: false, stallMin: 45 })
-  assert.deepEqual(await t.setSettings('wt-pack', { minPriority: 3, dispatch: false, stallMin: 45 }), { auto: true, minPriority: 3, dispatch: false, stallMin: 45 }) // auto untouched
+  const rep = { reportRoom: null, reportOrch: true }
+  assert.deepEqual(await t.settings('wt-pack'), { auto: false, minPriority: 2, dispatch: false, stallMin: 45, ...rep })
+  assert.deepEqual(await t.setSettings('wt-pack', { auto: true }), { auto: true, minPriority: 2, dispatch: false, stallMin: 45, ...rep })
+  assert.deepEqual(await t.setSettings('wt-pack', { minPriority: 3, dispatch: false, stallMin: 45 }), { auto: true, minPriority: 3, dispatch: false, stallMin: 45, ...rep }) // auto untouched
   await assert.rejects(t.setSettings('wt-pack', { minPriority: 5 }), (e) => e.status === 400)
   await assert.rejects(t.setSettings('nope', { minPriority: 3 }), (e) => e.status === 404)
 })
@@ -259,7 +260,7 @@ test('moving back to Backlog clears the assignee (WP-49)', async () => {
 test('dispatch settings: default off, stallMin validated', async () => {
   const t = new Tickets({ dir: await tmp() })
   await t.create('wt-pack', { title: 'x' }, user)
-  assert.deepEqual(await t.settings('wt-pack'), { auto: false, minPriority: 2, dispatch: false, stallMin: 45 })
+  assert.deepEqual(await t.settings('wt-pack'), { auto: false, minPriority: 2, dispatch: false, stallMin: 45, reportRoom: null, reportOrch: true })
   assert.equal((await t.setSettings('wt-pack', { dispatch: true, stallMin: 30 })).dispatch, true)
   assert.equal((await t.settings('wt-pack')).stallMin, 30)
   await assert.rejects(t.setSettings('wt-pack', { stallMin: 0 }), /stallMin/)
@@ -294,4 +295,17 @@ test('dispatch cleared only on a move into Ready or Backlog', async () => {
   await t.setDispatch(a.id, { state: 'held', at: 'x', fails: 3 })
   assert.equal((await t.patch(a.id, { column: 'ready' }, user)).dispatch.state, 'held') // Ready → Ready: no-op
   assert.equal((await t.patch(a.id, { column: 'backlog' }, user)).dispatch, undefined)
+})
+
+test('board settings: Report to — defaults, slug, none, back to null, validated (WP-75)', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  await t.create('wt-pack', { title: 'A' }, user)
+  const pick = async (b) => { const s = await t.setSettings('wt-pack', b); return [s.reportRoom, s.reportOrch] }
+  assert.deepEqual(await pick({}), [null, true])
+  assert.deepEqual(await pick({ reportRoom: 'ops', reportOrch: false }), ['ops', false])
+  assert.deepEqual(await pick({ reportRoom: '' }), ['', false])
+  assert.deepEqual(await pick({ reportRoom: 'none' }), ['none', false]) // a room slugged 'none' stays selectable
+  assert.deepEqual(await pick({ reportRoom: null }), [null, false])
+  await assert.rejects(t.setSettings('wt-pack', { reportRoom: 'x'.repeat(65) }), (e) => e.status === 400)
+  await assert.rejects(t.setSettings('wt-pack', { reportRoom: 5 }), (e) => e.status === 400)
 })
