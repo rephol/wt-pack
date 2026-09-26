@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -1056,4 +1056,10 @@ test('watchdog probe: notifies once on down, once on back up (WP-70)', () => {
   run('file:///etc/hosts'); run('file:///etc/hosts')
   assert.equal(said().length, 2)
   assert.match(said()[1], /server is back/)
+})
+
+test('sourceIssue: a failed overview source becomes a hint, not a 500 (WP-79)', () => {
+  assert.match(sourceIssue('herdr', 'Command failed: herdr agent list\n{"error":"server_not_running"}'), /herdr server not running — run herdr/)
+  assert.match(sourceIssue('git', 'fatal: not a git repository (or any of the parent directories): .git'), /not a git checkout/)
+  assert.match(sourceIssue('git', 'spawn git ENOENT'), /^git: spawn git ENOENT/)
 })

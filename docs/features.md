@@ -14,6 +14,8 @@ Routines · Terminals**, then **Inbox**, **Settings** and the server health dot 
   reached main, board cards done), **Machine** (RAM and memory pressure, worker slots), **Health** (herdr,
   git, gh, Linear, machines, Jev errors in the last 24h), the 3 most recent rooms, and Usage.
 - Header: **New agent** and **Refresh**.
+- A source that fails (herdr not running, the repo not a git checkout) shows a warning banner with the fix
+  and leaves its cards empty; the rest of the page still loads (also on Tasks and Agents).
 
 ## Tasks
 
