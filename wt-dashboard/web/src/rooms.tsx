@@ -98,7 +98,7 @@ export function RoomsPage({ slug, project = 'all', agents, onSelect, onOpenAgent
   return (
     <VStack gap={4} isScrollable style={{ flex: 1, minHeight: 0 }}>
       {q.isError && <Banner status="error" title="Could not load rooms" description={String(q.error)} />}
-      <HStack gap={2} align="end">
+      <HStack gap={2} align="end" wrap="wrap">
         <TextInput label="New room" placeholder="e.g. Release coordination" value={title} onChange={setTitle} />
         <DropdownMenu button={{ label: `Responder: ${responder?.name ?? 'none'}`, variant: 'ghost' }} items={[
           { label: 'None', onClick: () => setResponder(null) },
