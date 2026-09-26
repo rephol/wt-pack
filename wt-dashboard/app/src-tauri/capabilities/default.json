@@ -5,7 +5,8 @@
   ],
   "remote": {
     "urls": [
-      "http://127.0.0.1:7777/*"
+      "http://127.0.0.1:7777/*",
+      "http://wt-dashboard.localhost:7777/*"
     ]
   },
   "permissions": [
@@ -19,6 +20,9 @@
       "allow": [
         {
           "url": "http://127.0.0.1:7777/api/files*"
+        },
+        {
+          "url": "http://wt-dashboard.localhost:7777/api/files*"
         }
       ]
     },

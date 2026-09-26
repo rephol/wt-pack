@@ -21,7 +21,8 @@ static EXITING: AtomicBool = AtomicBool::new(false);
 use tauri_plugin_notification::NotificationExt;
 
 const ADDR: &str = "127.0.0.1:7777";
-const URL: &str = "http://127.0.0.1:7777/";
+// wt-dashboard.localhost, not 127.0.0.1: Activity Monitor names the WebKit web process after the page's site.
+const URL: &str = "http://wt-dashboard.localhost:7777/";
 const HOTKEY: &str = "alt+cmd+h"; // ⌥⌘H toggles the window
 /// `npm run service:install` makes the server a LaunchAgent; then the app never spawns or stops it.
 const SERVICE: &str = "id.local.wtdashboard.server";
