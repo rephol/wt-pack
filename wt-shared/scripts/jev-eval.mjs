@@ -16,6 +16,7 @@ const pack = join(here, '..', '..')
 export const EVALUATORS = {
   room_resolve: 'wt-dashboard/rooms.mjs#roomResolve',
   needs_you: 'wt-dashboard/server.mjs#needsYouJudge',
+  stall: 'wt-dashboard/server.mjs#stallJudge',
 }
 
 const feature = process.argv[2]

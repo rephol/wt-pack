@@ -1,0 +1,14 @@
+[
+  {"state": {"pane": "⏺ All units done. Merged to main, pushed, worktree retired, reported to the orchestrator.\n\n✻ Cooked for 12m"}, "expect": "finished"},
+  {"state": {"pane": "⏺ Bash(npm test)\n  ⎿  Error: Cannot find module 'react'\n⏺ The test run fails because web/node_modules is missing. I can't continue without it.\n\n✻ Worked for 3m"}, "expect": "stuck"},
+  {"state": {"pane": "⏺ Bash(npm run build)\n  ⎿  error TS2345 in inbox.tsx:88\n⏺ Update(inbox.tsx)\n⏺ Bash(npm run build)\n  ⎿  error TS2345 in inbox.tsx:88\n⏺ Update(inbox.tsx)\n⏺ Bash(npm run build)\n  ⎿  error TS2345 in inbox.tsx:88\n⏺ Update(inbox.tsx)"}, "expect": "looping"},
+  {"state": {"pane": "⏺ The plan needs a decision: keep polling at 4s, or switch to herdr events? Which do you prefer?\n\n✻ Worked for 1m"}, "expect": "waiting_on_user"},
+  {"state": {"pane": "⏺ PR #212 is merge-ready: CI green, 2 approvals, all threads resolved. Done babysitting.\n\n✻ Baked for 40m"}, "expect": "finished"},
+  {"state": {"pane": "⏺ Bash(gh pr view 212)\n  ⎿  error: HTTP 401: Bad credentials\n⏺ gh is not authenticated, so I can't read the PR. Stopping here.\n\n✻ Worked for 20s"}, "expect": "stuck"},
+  {"state": {"pane": "⏺ Read(server.mjs)\n⏺ Read(server.mjs)\n⏺ Read(server.mjs)\n⏺ Read(server.mjs)\n⏺ Read(server.mjs)\n⏺ Read(server.mjs)\n⏺ Read(server.mjs)"}, "expect": "looping"},
+  {"state": {"pane": "⏺ I need the Figma file URL for the new inbox design before I can start. Can you share it?\n\n✻ Worked for 15s"}, "expect": "waiting_on_user"},
+  {"state": {"pane": "⏺ Handed off UMK-521 to umkmall-worker-03 with the plan. My part is complete.\n\n✻ Cooked for 8m"}, "expect": "finished"},
+  {"state": {"pane": "⏺ Bash(git push)\n  ⎿  ! [rejected] main -> main (fetch first)\n⏺ Bash(git push)\n  ⎿  ! [rejected] main -> main (fetch first)\n⏺ Bash(git push)\n  ⎿  ! [rejected] main -> main (fetch first)"}, "expect": "looping"},
+  {"state": {"pane": "⏺ Should I delete the stale worktrees for UMK-400..UMK-410, or keep them? They have unpushed commits.\n\n✻ Worked for 30s"}, "expect": "waiting_on_user"},
+  {"state": {"pane": "⏺ Bash(npm run service:restart)\n  ⎿  launchctl: service id.local.wtdashboard.server not found\n⏺ The service isn't installed on this machine and I don't have a way to install it from here.\n\n✻ Worked for 2m"}, "expect": "stuck"}
+]
