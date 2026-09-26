@@ -252,8 +252,7 @@ Each item has to be shown by a command whose output appears in the transcript:
 - Live throwaway run, with its output pasted: `wt-ticket show <ID>` shows the history lines
   `ready → building` plus `dispatched to <name>`, and after `wt-agents rm <name>`, `building → ready` plus
   `returned: <name> is gone`.
-- `grep -rn "Routines" …` is not needed. Instead, `curl /api/routines` (with the session) lists no dispatch
-  row, and screenshots at 1440 and 390 show the Dispatch switch, the status line and Board history.
+- `sqlite3 … "SELECT count(*) FROM routines WHERE name LIKE '%ispatch%'"` prints 0, and screenshots at 1440 and 390 show the Dispatch switch, the status line and Board history.
 - `grep -n "dispatch" CLAUDE.md wt-ticket/SKILL.md` shows the new rule lines.
 
 ## Risks and deferred
