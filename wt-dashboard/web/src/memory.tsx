@@ -82,13 +82,18 @@ function Entries({ entries }: { entries: Entry[] }) {
   )
 }
 
-function Editor({ path, label, initial }: { path: string; label: string; initial: string }) {
+// Agent entries (lines with a `<!-- wtm:… -->` trailer) are listed above, so the editor hides them and puts them back on save.
+const AGENT_LINE = /<!-- wtm:/
+function Editor({ path, label, initial: raw }: { path: string; label: string; initial: string }) {
   const qc = useQueryClient()
   const toast = useToast()
+  const lines = raw.split('\n')
+  const initial = lines.filter((l) => !AGENT_LINE.test(l)).join('\n').trim()
+  const agentLines = lines.filter((l) => AGENT_LINE.test(l)).join('\n')
   const [text, setText] = useState(initial)
   useEffect(() => setText(initial), [initial])
   const save = useMutation({
-    mutationFn: () => api(`/api/memory/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body: JSON.stringify({ text }) }),
+    mutationFn: () => api(`/api/memory/${path.split('/').map(encodeURIComponent).join('/')}`, { method: 'PUT', body: JSON.stringify({ text: [text.trim(), agentLines].filter(Boolean).join('\n') }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['memory'] }); toast({ body: `Saved ${label}`, type: 'info' }) },
     onError: (e) => toast({ body: `Could not save: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
