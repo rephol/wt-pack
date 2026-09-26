@@ -44,6 +44,9 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 - A card shows id, priority, type, size, a Jev chip, a dispatch badge, title, two lines of body, last edit
   and @assignee. Columns are a fixed 280px and scroll sideways; on a phone (< 768px) one column shows at a
   time with a column picker.
+- Search: the header field (`/` focuses it, Esc clears) filters cards live by id, title, body, labels and
+  comment/move notes; every word must match. It shows "N matches", survives reload as `?q=` in the URL, and
+  on a phone opens from the ⌕ button. CLI: `wt-ticket search <text> [--column c]`.
 
 ### Jev triage
 
@@ -331,7 +334,7 @@ Talks to the dashboard at `$HERDR_DASH_URL` (default `http://127.0.0.1:7777`); p
 current repo; `--json` on any command. Exit 0 ok, 1 API error / server down, 2 usage.
 
 - `new "<title>" [--type] [--size] [--priority 0-4] [--label]… [--link]… [--body] [--column] [--project]`
-- `list [--column c] [--mine] [--project p]` · `show <ID>` · `move <ID> <col> [--note]` ·
+- `list [--column c] [--mine] [--project p]` · `search <text> [--column c] [--project p]` · `show <ID>` · `move <ID> <col> [--note]` ·
   `comment <ID> "text"`
 - `claim <ID> [--force]` (refused if another agent holds it or it is mid-dispatch) ·
   `assign <ID> <agent|me|none>`
