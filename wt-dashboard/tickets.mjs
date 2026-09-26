@@ -185,8 +185,9 @@ export class Tickets {
         applied[k] = { from: t[k], to: d[k] }
         t[k] = d[k]
       }
-      if (d.owner === 'planner' && !edited.has('labels') && !t.labels.includes('needs-plan')) { // Dispatch routes it to a planner
-        applied.labels = { from: t.labels, to: [...t.labels, 'needs-plan'] }
+      const labels = t.labels ?? []
+      if (d.owner === 'planner' && !edited.has('labels') && !labels.includes('needs-plan')) { // Dispatch routes it to a planner
+        applied.labels = { from: labels, to: [...labels, 'needs-plan'] }
         t.labels = applied.labels.to
       }
       t.jev = { at, applied: { ...t.jev?.applied, ...applied }, owner: d.owner ?? null, dupes: d.dupes ?? [] }
