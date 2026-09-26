@@ -91,6 +91,7 @@ export class Tickets {
   // A read never creates a board (a typo'd project must not take a key); the first create does.
   async list(project, column) {
     if (!PROJECT.test(project ?? '')) throw err(400, 'project required')
+    if (column && !COLUMNS.includes(column)) throw err(400, `column: ${COLUMNS.join('|')}`)
     const key = this.db.prepare('SELECT key FROM boards WHERE project = ?').get(project)?.key ?? null
     const tickets = this.db.prepare('SELECT json FROM tickets WHERE project = ? ORDER BY seq').all(project).map((r) => JSON.parse(r.json))
     return { key, auto: await this.auto(project), tickets: column ? tickets.filter((t) => t.column === column) : tickets }

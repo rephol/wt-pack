@@ -209,3 +209,8 @@ test('setAuto never creates a board', async () => {
   await assert.rejects(t.setAuto('typo-proj', true), (e) => e.status === 404)
   assert.deepEqual(await t.keys(), {})
 })
+
+test('list: an unknown column is a 400, not an empty list', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  await assert.rejects(t.list('wt-pack', 'nope'), (e) => e.status === 400 && /column: backlog\|ready/.test(e.message))
+})
