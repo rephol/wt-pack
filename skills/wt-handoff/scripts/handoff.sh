@@ -18,11 +18,11 @@
 # "drop this thread", not as amnesia.
 #
 # --mcp a,b is passed to `agents.sh spawn` when a new worker is created (servers from
-# wt-agents/mcp/catalog.json); a reused worker keeps the MCP set it started with.
+# skills/wt-agents/mcp/catalog.json); a reused worker keeps the MCP set it started with.
 # Without --mcp (and without --pane), Jev picks them from the prompt (jev-mcp.mjs: one yes/no per
 # catalog server, kept at >= 0.7, 2s timeout, any failure = no picks). A free worker is reused only if
 # it already has every pick; otherwise a new one is spawned with them. WT_HANDOFF_JEV=off skips Jev;
-# so does full MCP mode (the default: wt-shared/scripts/mcp-mode.sh), where every worker has every server.
+# so does full MCP mode (the default: skills/wt-shared/scripts/mcp-mode.sh), where every worker has every server.
 # --dry-run prints the target and the picks, and sends, tags and spawns nothing.
 #
 # Routing (auto mode, no --role): with WT_JEV_ROUTE on (default; env or the dashboard's Settings switch), Jev

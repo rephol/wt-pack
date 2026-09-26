@@ -19,14 +19,14 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. `--no-goal` sends a plain prompt instead of `/goal`
-  (why a goal, and its one-line / 4000-character rules: `wt-plan/references/handoff.md`).
+  (why a goal, and its one-line / 4000-character rules: `~/.claude/skills/wt-plan/references/handoff.md`).
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
   `target <name> <pane> — <task>` and `reach: herdr agent prompt <pane> "..."`. Non-zero exit = nothing was
   sent; print the prompt for a human instead.
 
 ## Task label and awareness
 
-- `--mcp a,b` adds MCP servers from `wt-agents/mcp/catalog.json` when the handoff SPAWNS a worker (see
+- `--mcp a,b` adds MCP servers from `~/.claude/skills/wt-agents/mcp/catalog.json` when the handoff SPAWNS a worker (see
   wt-agents "Lean MCP"). A reused worker keeps the set it started with, so pair it with `--new` when the
   task needs a server the pool's workers lack.
 - Jev's picks only run in lean MCP mode (dashboard Settings switch, or `WT_AGENTS_MCP=lean`); in the default
