@@ -13,7 +13,7 @@ import { Switch } from '@astryxdesign/core/Switch'
 import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { TextArea } from '@astryxdesign/core/TextArea'
-import { TimeInput } from '@astryxdesign/core/TimeInput'
+import { TimeInput, type ISOTimeString } from '@astryxdesign/core/TimeInput'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api, useRoomsList } from './rooms'
@@ -120,7 +120,7 @@ const opt = (v: string, label = v) => ({ value: v, label })
 // Next 3 runs from the server's own parser, so the preview cannot disagree with the scheduler.
 function SchedulePreview({ schedule }: { schedule: string }) {
   const q = useQuery({ queryKey: ['routine-preview', schedule], queryFn: () => api<{ next: number[] }>(`/api/routines/preview?schedule=${encodeURIComponent(schedule)}`), retry: false, enabled: !!schedule })
-  if (q.isError) return <Text type="supporting" size="sm" color="error">{errText(q.error)}</Text>
+  if (q.isError) return <Text type="supporting" size="sm">Invalid: {errText(q.error)}</Text>
   return <Text type="supporting" size="sm">{q.data ? `Next: ${q.data.next.map(when).join(' · ')}` : ' '}</Text>
 }
 
@@ -166,7 +166,7 @@ function RoutineDialog({ routine, phone, project, projects, agents, onClose }: {
           <HStack gap={2} wrap="wrap" align="end">
             <Selector label="Schedule" width={phone ? '100%' : 200} value={d.preset} options={PRESETS} onChange={set('preset')} />
             {d.preset === 'weekly' && <Selector label="Day" width={160} value={d.dow} options={DAYS} onChange={set('dow')} />}
-            {(d.preset === 'daily' || d.preset === 'weekly') && <TimeInput label="At" width={130} value={d.time} onChange={(v) => v && set('time')(v)} />}
+            {(d.preset === 'daily' || d.preset === 'weekly') && <TimeInput label="At" width={130} value={d.time as ISOTimeString} onChange={(v) => v && set('time')(v)} />}
           </HStack>
           {d.preset === 'custom' && <TextInput label="Cron" value={d.cron} onChange={set('cron')} placeholder="0 2 * * *"
             description="m h dom mon dow in local time, or every <N>m|h|d" />}
