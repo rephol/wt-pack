@@ -4,6 +4,7 @@
 #   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
 #   agents.sh spawn <role> [cwd] [--mcp a,b] # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json
 #   agents.sh rm <name|pane> [--force]     # closes the tab
+#   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #
 # A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
 # created on demand; $WT_AGENTS_WORKSPACE overrides the label. Any role name works
@@ -77,7 +78,7 @@ list)
   done
   ;;
 
-spawn)
+spawn|mcp-args)
   # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
   extra=; n=$#
   while [ "$n" -gt 0 ]; do
@@ -102,6 +103,7 @@ spawn)
   # handoff candidate filter can never see it again.
   cwd=$(cd "$cwd" && pwd)
 
+  [ "$cmd" = mcp-args ] || {
   ws=$(pool_ws "$(role_label "$role" "$repo")" "$main")
   sync_names "$ws"
 
@@ -112,12 +114,15 @@ spawn)
   next=$(herdr agent list | jq -r '.result.agents[].name // empty' \
     | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
   label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
+  }
+  [ "$cmd" = mcp-args ] && label=args-$$
 
   # Lean MCP: only the servers in mcp/<role>.json (--strict-mcp-config also drops plugin and claude.ai
   # servers — context-mode, claude-mem, railway, plan… — each a node process per session).
-  # WT_AGENTS_MCP=full, or a role without a file, keeps the full set (still adding any --mcp picks).
+  # Only in lean mode (dashboard Settings switch, or WT_AGENTS_MCP=lean; default full). Full mode, or a role
+  # without a file, keeps the full set (still adding any --mcp picks).
   mcp_file=; strict=; files=
-  if [ "${WT_AGENTS_MCP:-}" != full ] && [ -f "$dir/$role.json" ]; then
+  if [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh")" = lean ] && [ -f "$dir/$role.json" ]; then
     strict=--strict-mcp-config; files=$dir/$role.json
     top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
     for f in "$top/.mcp.json" "$main/.mcp.json"; do [ -f "$f" ] && { files="$files
@@ -136,6 +141,10 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
     # Later files win on a name clash: role < repo < --mcp.
     printf '%s\n' "$files" | sed '/^$/d' | tr '\n' '\0' | xargs -0 jq -s '{mcpServers: (map(.mcpServers // {}) | add)}' > "$mcp_file"
     rm -f "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
+  fi
+  if [ "$cmd" = mcp-args ]; then
+    [ -n "$mcp_file" ] && { echo ${strict:+$strict }--mcp-config; jq -c '.mcpServers | keys' "$mcp_file"; rm -f "$mcp_file"; }
+    exit 0
   fi
 
   # A path claude has never seen opens the first-run trust dialog and blocks,
