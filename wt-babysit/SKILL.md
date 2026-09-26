@@ -41,6 +41,12 @@ re-processes a growing context — so these two rules outrank any prose below th
 Resolve the PR from the argument, or from the current branch's head. No PR → say so and stop; this skill does
 not open one.
 
+Label your pane so the dashboard's Tasks page shows the watch and keeps its Babysit button off:
+
+```
+~/.claude/skills/wt-shared/scripts/task-state.sh state "babysitting PR #<N>"
+```
+
 **Read the draft flag first; it decides what there is to watch.** A draft and a ready PR are two different
 jobs, and conflating them produces the one report this skill must never produce.
 
@@ -139,6 +145,9 @@ never a second opinion from the same model. That log is the only thing that move
 
 A residual you could not clear **blocks "ready"** and does not stop the run on its own — keep working the
 streams that are still moving. Stopping the whole watch on one stuck check is the primary failure mode here.
+
+On every stop, move the label on: `task-state.sh state "merge-ready PR #<N>"` for looks-ready or merged,
+otherwise `task-state.sh state "babysit stopped: <reason, a few words>"`.
 
 ## 4. Report
 
