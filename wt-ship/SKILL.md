@@ -53,6 +53,8 @@ sizes itself from the last one.
 
 Confirm first that the work is actually finished: the plan's Definition of Done met, the tree clean, the
 tests the change owns run. **Work that does not meet it is a blocker to report, not a scope to expand.**
+If the change is user-visible and the repo keeps a feature reference (e.g. `docs/features.md`), that file
+is updated in the same change — a missing update is unfinished work, not a follow-up.
 
 ## 1–4. Run them in order
 

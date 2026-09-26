@@ -6,6 +6,8 @@ simplify → review → ship → babysit → compound.
 Each directory is one skill. `wt-shared/` is not a skill — it holds the scripts
 the others invoke by path.
 
+What every feature does, where it lives and its defaults: [docs/features.md](docs/features.md).
+
 ## Install
 
 The repo is private, so log in to GitHub first (`gh auth login`), then:
