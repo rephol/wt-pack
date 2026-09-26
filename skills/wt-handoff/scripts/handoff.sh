@@ -178,12 +178,16 @@ from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
 Handed off by ${from_name:-$from_pane} (pane $from_pane). To reach it: herdr agent prompt $from_pane \"...\""
 
 # The task label starts with the ticket when there is one, and is cut to herdr's 80 characters here.
-# A ticket is UMK-N (Linear) or <KEY>-N for a local board key (wt-ticket keys; empty when the server is down).
+# A ticket is <TEAM>-N for a Linear team in WT_LINEAR_TEAMS (~/.config/wt-dashboard/env) or <KEY>-N for a local
+# board key (wt-ticket keys; empty when the server is down).
 T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+teams=$(sed -n 's/^[[:space:]]*WT_LINEAR_TEAMS=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tail -1 | tr -d '"' | tr ',' '\n' \
+  | sed 's/=.*//; s/[[:space:]]//g' | grep -E '^[A-Za-z][A-Za-z0-9]*$' | tr '\n' '|' || true)
 keys=$( [ -x "$T" ] && "$T" keys 2>/dev/null | tr '\n' '|' || true)
 ticket=$(printf '%s\n%s\n' "$task" "$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)" \
-  | grep -oiE "(^|[^a-z])(umk${keys:+|${keys%|}})-[0-9]+" | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]' || true)
-local_ticket=$ticket; case "$ticket" in UMK-*) local_ticket= ;; esac
+  | { all="$teams$keys"; [ -n "$all" ] && grep -oiE "(^|[^a-z])(${all%|})-[0-9]+" || true; } | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+# A Linear ticket has no local card to move.
+local_ticket=$ticket; case "|$(printf '%s' "$teams" | tr '[:lower:]' '[:upper:]')" in *"|${ticket%%-*}|"*) local_ticket= ;; esac
 case "$(printf '%s' "$task" | tr '[:lower:]' '[:upper:]')" in
   "$ticket"*) ;;
   *) task=$(printf '%s %s' "$ticket" "$task" | sed 's/^ *//; s/ *$//') ;;
