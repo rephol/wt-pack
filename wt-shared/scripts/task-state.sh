@@ -38,7 +38,10 @@ case "${1:-}" in
     ptask=$(tok "$theirs" task)
     [ -n "$ptask" ] || exit 0
     task=$(tok "$mine" task)
-    ticket=$(printf '%s\n%s\n' "$(tok "$mine" ticket)" "$task" | grep -oiE 'umk-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
+    # UMK-N or a local board key (wt-ticket keys; empty when the server is down).
+    T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+    keys=$( [ -x "$T" ] && "$T" keys 2>/dev/null | tr '\n' '|' || true)
+    ticket=$(printf '%s\n%s\n' "$(tok "$mine" ticket)" "$task" | grep -oiE "(^|[^a-z])(umk${keys:+|${keys%|}})-[0-9]+" | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]')
     if [ -n "$ticket" ]; then
       case "$(printf '%s' "$ptask" | tr '[:lower:]' '[:upper:]')" in "$ticket"*) ;; *) exit 0 ;; esac
     else
