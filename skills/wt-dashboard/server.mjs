@@ -1779,15 +1779,16 @@ async function runBoard(project) {
   return { queued: backlog.length, done }
 }
 // WP-93 ticket id chips: board key → project, and the Linear team keys + workspace url key (null until known: no API key / fetch failed).
-let linearOrg = null
+let linearOrg = null, linearOrgFailed = 0 // a failed lookup is not retried for 5 min
 async function linearOrgKey() {
   const key = cfg.get('LINEAR_API_KEY')
-  if (linearOrg || !key || !TEAM_KEYS.length) return linearOrg
+  if (linearOrg || !key || !TEAM_KEYS.length || Date.now() - linearOrgFailed < 300_000) return linearOrg
   try {
     const r = await fetch('https://api.linear.app/graphql', { method: 'POST', headers: { 'content-type': 'application/json', authorization: key },
       body: JSON.stringify({ query: '{ organization { urlKey } }' }), signal: AbortSignal.timeout(5000) })
     linearOrg = (await r.json()).data?.organization?.urlKey ?? null
-  } catch (e) { console.error('linear org:', e.message) }
+    if (!linearOrg) linearOrgFailed = Date.now()
+  } catch (e) { linearOrgFailed = Date.now(); console.error('linear org:', e.message) }
   return linearOrg
 }
 async function ticketsApi(req, res, url, parts) {
