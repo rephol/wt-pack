@@ -118,12 +118,14 @@ export function withAttachments(text, atts, local) {
 
 // One prompt per agent per flush, whatever is queued for it across rooms.
 export const BROADCAST_NOTE = "Reply only if this is addressed to you or concerns your work; otherwise do nothing (don't post)."
+export const ACK_NOTE = 'If the work takes more than a quick answer, first post a one-line ack ("On it: …"), then post the result when done.'
 export const replySnippet = (text) => { const l = String(text ?? '').trim().split('\n')[0]; return l.length > 80 ? `${l.slice(0, 79)}…` : l }
 export function batchPrompt(slug, msgs, broadcast = false, local = true) {
   const lines = msgs.map((m) => withAttachments(`${m.author.name}${m.replyTo ? ` (replying to ${m.replyTo.name}: "${m.replyTo.text}")` : ''}: ${m.text}`, m.attachments, local))
   return `[room #${slug}] ${msgs.length} new message${msgs.length === 1 ? '' : 's'}:\n${lines.join('\n')}\n` +
     (broadcast ? `${BROADCAST_NOTE}\n` : '') +
-    `Reply with: ~/.claude/skills/wt-room/scripts/room post ${slug} "…" (mention @name to address someone)`
+    `Reply with: ~/.claude/skills/wt-room/scripts/room post ${slug} "…" (mention @name to address someone)\n` +
+    `${ACK_NOTE}`
 }
 
 // An agent may be prompted only between turns, never while it asks something.

@@ -166,6 +166,7 @@ test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-o
   assert.equal(R.deliverable({ status: 'working' }), false)
   assert.equal(R.deliverable({ status: 'idle', asks: true }), false)
   assert.match(R.batchPrompt('x', [{ author: { name: 'you' }, text: 'hi' }]), /^\[room #x\] 1 new message:\nyou: hi\nReply with: ~\/\.claude\/skills\/wt-room\/scripts\/room post x/)
+  assert.match(R.batchPrompt('x', [{ author: { name: 'you' }, text: 'hi' }]), /\nIf the work takes more than a quick answer, first post a one-line ack/)
   // ticket rooms: suggest mode lists active tickets without a room, minus dismissed; off/auto list none
   const task = { id: 'UMK-1177', title: 'OTP hang', state: 'planning', agent: { name: 'umkmall-planner-02' }, worktree: '/w', plan: null, pr: null }
   const sug = R.ticketSuggestions([task, { ...task, id: 'agent:x', adHoc: true }], [], S)
