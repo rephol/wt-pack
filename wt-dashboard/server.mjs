@@ -14,6 +14,7 @@ import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { readCalls, healthSummary } from './jevlog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -1102,10 +1103,13 @@ export function jevState({ health, models, hasKey }) {
 }
 const jevGet = (path, key) => fetch(`https://api.typesafe.ai${path}`, { headers: key ? { authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(4000) })
   .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }), () => null)
-const jev = () => cached('jev', 60_000, async () => {
-  const key = cfg.get('TYPESAFE_API_KEY')
-  const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
-  return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
+const jev = async () => ({
+  ...(await cached('jev', 60_000, async () => {
+    const key = cfg.get('TYPESAFE_API_KEY')
+    const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
+    return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
+  })),
+  calls: healthSummary(await readCalls()),
 })
 
 async function health() {

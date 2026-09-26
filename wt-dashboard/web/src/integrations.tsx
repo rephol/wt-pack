@@ -54,6 +54,11 @@ export function IntegrationsSection() {
       <HostsEditor it={by.WT_DASHBOARD_ALLOWED_HOSTS} loopback={q.data.loopback} put={put} />
       <RepoEditor it={by.WT_DASHBOARD_REPO} app={q.data.app} put={put} />
       <LeanMcp it={by.WT_AGENTS_MCP} put={put} />
+      <VStack gap={3}>
+        <Heading level={4}>Jev judgments</Heading>
+        <Text type="supporting" size="sm">Each replaces a heuristic with a Jev judgment and falls back to the heuristic when Jev is off, slow (&gt;2s), keyless or erroring. Calls and outcomes: Settings › Observability.</Text>
+        {JEV.map(([k, d]) => <JevSwitch key={k} it={by[`WT_JEV_${k}`]} put={put} description={d} />)}
+      </VStack>
     </VStack>
   )
 }
@@ -167,6 +172,27 @@ function LeanMcp({ it, put }: { it: Item; put: (k: string, v: unknown) => Promis
     <VStack gap={2}>
       <Switch label="Lean MCP for new agents" value={it.value === 'lean'} isDisabled={it.overridden} onChange={(on: boolean) => put(it.key, on ? 'lean' : 'full')}
         description="On: new agents start only their role's MCP servers (plus Jev's picks at handoff), saving a node process and memory per server per agent. Off: the full normal set." />
+      <Source it={it} />
+    </VStack>
+  )
+}
+
+// WT_JEV_<FEATURE>: on | off; the default comes from the server (config.mjs), shown as source "default".
+export const JEV: [string, string][] = [
+  ['ROOM_RESOLVE', 'Clears a room\'s needs-you when an agent\'s reply actually answered you, even without a "?".'],
+  ['NEEDS_YOU', 'Asks whether an idle pane is waiting on you. Runs per changed pane tail, so off by default.'],
+  ['STALL', 'Tells a stalled agent from one that finished, is looping or waits on you. Poll-driven, off by default.'],
+  ['ROUTE', 'wt-handoff sends requests that need a plan to a planner instead of a worker.'],
+  ['MEMORY_DUP', 'wt-memory remember flags near-duplicates and conflicts with existing memories.'],
+  ['MEMORY_SUGGEST', 'Suggests wt-memory remember when a prompt states a standing preference. Adds up to 1.5s per prompt.'],
+  ['BABYSIT_TRIAGE', 'wt-babysit classifies review comments as must-fix, question, nit or no action.'],
+  ['INBOX_RANK', 'Scores new inbox items by urgency and sorts groups by it. One call per item, off by default.'],
+]
+export function JevSwitch({ it, put, description }: { it: Item | undefined; put: (k: string, v: unknown) => Promise<boolean>; description: string }) {
+  if (!it || 'set' in it) return null
+  return (
+    <VStack gap={2}>
+      <Switch label={it.label} value={it.value === 'on'} isDisabled={it.overridden} onChange={(on: boolean) => put(it.key, on ? 'on' : 'off')} description={description} />
       <Source it={it} />
     </VStack>
   )

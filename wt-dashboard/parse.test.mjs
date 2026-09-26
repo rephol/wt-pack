@@ -711,3 +711,22 @@ test('config: WT_AGENTS_MCP is full|lean only, written to the env file', async (
   assert.match(rfs(f, 'utf8'), /^WT_AGENTS_MCP=lean$/m)
   await assert.rejects(cfg.setValue('WT_AGENTS_MCP', 'x'), (e) => e.status === 400)
 })
+
+test('config: WT_JEV_* switches are on|off with per-feature defaults', async () => {
+  const { cfg, f } = tmpCfg(''); await cfg.load()
+  assert.equal(cfg.get('WT_JEV_ROOM_RESOLVE'), 'on')
+  assert.equal(cfg.get('WT_JEV_NEEDS_YOU'), 'off')
+  assert.equal(cfg.source('WT_JEV_NEEDS_YOU'), 'default')
+  await cfg.setValue('WT_JEV_ROOM_RESOLVE', 'off')
+  assert.match(rfs(f, 'utf8'), /^WT_JEV_ROOM_RESOLVE=off$/m)
+  assert.equal(cfg.get('WT_JEV_ROOM_RESOLVE'), 'off')
+  await assert.rejects(cfg.setValue('WT_JEV_STALL', 'yes'), (e) => e.status === 400)
+  assert.equal(cfg.publicState().filter((i) => i.key.startsWith('WT_JEV_')).length, 9)
+})
+
+import { healthSummary } from './jevlog.mjs'
+test('jevlog: health summary counts the last 24h and its errors', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z')
+  const calls = [{ ts: '2026-09-26T11:00:00Z', err: null }, { ts: '2026-09-26T10:00:00Z', err: 'timeout' }, { ts: '2026-09-24T10:00:00Z', err: 'timeout' }]
+  assert.deepEqual(healthSummary(calls, now), { today: 2, errors: 1 })
+})
