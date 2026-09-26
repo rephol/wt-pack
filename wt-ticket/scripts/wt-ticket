@@ -10,10 +10,11 @@
 #   wt-ticket assign <ID> <agent|me|none>
 #   wt-ticket keys                                  (known board keys, one per line)
 #   --json on any command prints the raw API body. Columns: backlog ready planning building review done blocked.
+#   Priority is Linear's scale: 0 none (default), 1 urgent, 2 high, 3 medium, 4 low.
 # Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
-usage() { sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 json=0; args=()
 for a in "$@"; do [ "$a" = --json ] && json=1 || args+=("$a"); done
 set -- "${args[@]+"${args[@]}"}"
