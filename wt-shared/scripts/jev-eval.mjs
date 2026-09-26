@@ -15,6 +15,7 @@ const pack = join(here, '..', '..')
 // Each feature unit adds its line.
 export const EVALUATORS = {
   room_resolve: 'wt-dashboard/rooms.mjs#roomResolve',
+  needs_you: 'wt-dashboard/server.mjs#needsYouJudge',
 }
 
 const feature = process.argv[2]
@@ -41,3 +42,4 @@ for (const [i, c] of cases.entries()) {
 ms.sort((a, b) => a - b)
 const q = (f) => ms[Math.min(ms.length - 1, Math.floor(f * ms.length))]
 console.log(JSON.stringify({ feature, n: cases.length, accuracy: +(right / Math.max(1, cases.length - failed)).toFixed(2), failed, p50ms: q(0.5), p95ms: q(0.95), wrong }))
+process.exit(0) // an evaluator module may hold timers (server.mjs)
