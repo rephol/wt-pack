@@ -94,7 +94,7 @@ export class Tickets {
     this.boards.set(project, b)
   }
   async projects() {
-    return (await readdir(this.dir).catch(() => [])).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5))
+    return (await readdir(this.dir).catch(() => [])).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).filter((p) => PROJECT.test(p))
   }
   // { project: key } for every board on disk.
   async keys() {
@@ -120,8 +120,10 @@ export class Tickets {
       return b
     })
   }
+  // A read never creates a board (a typo'd project must not take a key); the first create does.
   async list(project, column) {
-    const b = await this.board(project)
+    if (!PROJECT.test(project ?? '')) throw err(400, 'project required')
+    const b = await this.read(project) ?? { key: null, tickets: [] }
     return { key: b.key, tickets: column ? b.tickets.filter((t) => t.column === column) : b.tickets }
   }
   async get(id) {

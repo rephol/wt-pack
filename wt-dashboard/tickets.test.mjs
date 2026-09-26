@@ -91,3 +91,10 @@ test('needsSession: pane exempts ticket POST/PATCH only', async () => {
   assert.equal(needsSession('PATCH', '/api/tickets/WP-1', {}), true)
   assert.equal(needsSession('DELETE', '/api/tickets/WP-1', pane), true)
 })
+
+test('list never creates a board', async () => {
+  const dir = await tmp()
+  const t = new Tickets({ dir })
+  assert.deepEqual(await t.list('typo-proj'), { key: null, tickets: [] })
+  assert.deepEqual(await t.keys(), {})
+})

@@ -1685,7 +1685,7 @@ async function ticketsApi(req, res, url, parts) {
   // Every mutation names its author first: the user (session) or a verified local agent pane.
   const author = await roomAuthor(req)
   const b = await json()
-  const me = () => { if (author.kind !== 'agent') throw Object.assign(new Error("'me' is an agent"), { status: 400 }); return { name: author.name, pane: author.pane } }
+  const me = () => { if (author.kind !== 'agent') throw Object.assign(new Error("'me' needs an agent pane (x-herdr-pane)"), { status: 400 }); return { name: author.name, pane: author.pane } }
   if (req.method === 'POST' && parts.length === 2) {
     const project = b.project ?? (author.kind === 'agent' ? (await agents()).find((a) => a.key === author.key)?.project : null)
     return send(res, 200, await tickets.create(project, b, author))
@@ -1696,7 +1696,7 @@ async function ticketsApi(req, res, url, parts) {
     if (b.assignee === 'me') assignee = me()
     else if (b.assignee === null || b.assignee === 'none') assignee = null
     else if (typeof b.assignee === 'string') {
-      const a = (await agents()).find((x) => x.name === b.assignee)
+      const a = (await agents()).find((x) => x.local && x.name === b.assignee)
       if (!a) return send(res, 400, { error: `unknown agent ${b.assignee}` })
       assignee = { name: a.name, pane: a.id }
     }
