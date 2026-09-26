@@ -458,8 +458,8 @@ export default function App() {
                 Updated <Timestamp value={data.at} format="relative" isLive />
               </Text>
             )}
-            {(page === 'agents' || page === 'overview') && <Button label="New agent" size="sm" variant="primary" onClick={openSpawn} />}
-            <Button label="Refresh" size="sm" onClick={() => q.refetch()} />
+            {(page === 'agents' || page === 'overview') && <IconButton label="New agent" tooltip="New agent" icon={<PlusIcon />} size="sm" variant="primary" onClick={openSpawn} />}
+            <IconButton label="Refresh" tooltip="Refresh" icon={<RefreshIcon />} size="sm" variant="ghost" onClick={() => q.refetch()} />
           </HStack>
         </HStack>}
 
@@ -1557,5 +1557,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
 
 const svg = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
 const ClipIcon = () => <svg {...svg}><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></svg>
+const PlusIcon = () => <svg {...svg}><path d="M12 5v14M5 12h14" /></svg>
+const RefreshIcon = () => <svg {...svg}><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5" /></svg>
 const NudgeIcon = () => <svg {...svg}><path d="m6 17 5-5-5-5M13 17l5-5-5-5" /></svg>
 const GearIcon = () => <svg {...svg}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
