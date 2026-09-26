@@ -163,7 +163,7 @@ Chat rooms shared by you and agents.
 - **Attachments**: png, jpeg, webp, gif; ≤ 10MB each, ≤ 5 per message. Remote agents receive a note instead
   of the images.
 - **Image preview** (rooms and agent chat): tap an image to open it. Pinch, trackpad pinch or the wheel zooms the image
-  (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x; it resets on the next image and on
+  (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x, keys `+` `-` `0` and arrows; it resets on the next image and on
   close. The page itself never zooms while the preview is open (WP-94).
 - **Link previews**: fetched by the server (private hosts blocked, 3 redirects, 5s, 1MB);
   toggle in Settings › General.
