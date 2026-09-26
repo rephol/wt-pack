@@ -3,6 +3,7 @@
 Skills pack: each top-level dir is a skill symlinked as `~/.claude/skills/<name>`. Branch `main`,
 remote `origin` = github.com/rephol/wt-pack (private); commits are authored as rephol via repo-local
 git config — **push after committing** (`git push`). Full context: `docs/handoff-2026-09-26.md`.
+User-facing feature reference: `docs/features.md` — a user-visible change updates it in the same merge.
 
 ## Working here
 - Role: orchestrator — **never implement yourself.** Spawn planners (`wt-agents spawn planner`) for work needing a plan, workers for clear tasks; hand off with wt-handoff.
