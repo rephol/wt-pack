@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { ReactNode } from 'react'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { isUserSkip } from './pickerGuard.ts'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -38,7 +39,7 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
-import { useRoles, plural, RoleBadge, TagsDialog, TagList, OTHER } from './roles'
+import { useRoles, plural, RoleBadge, TagsDialog, OTHER } from './roles'
 import { Delayed, LoadError, OverviewSkeleton, GroupedRows, Rows, ChatSkeleton } from './skeletons'
 import { useStream, mergeAgentMsgs } from './streamStore'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, contextUsage, type Meta, type Usage } from './turns'
@@ -118,6 +119,8 @@ interface Task extends Record<string, unknown> {
   pr: PR | null
   updatedAt: string | null
   adHoc: boolean
+  worktree?: string | null
+  linearState?: string | null
 }
 interface Overview {
   at: string
@@ -603,6 +606,99 @@ function OverviewPage({ data, onOpen, selected }: { data: Overview & { allProjec
         <Heading level={2}>Task board</Heading>
         <TaskBoard tasks={data.tasks} onOpen={onOpen} selected={selected} showProject={data.allProjects} />
       </VStack>
+    </VStack>
+  )
+}
+
+// ---------- agent summary ----------
+// What the agent is on (ticket, state, who handed it over), where the work lives, what it did last; the
+// raw pane tokens fold away under Details. Only what the server already knows — rows without data vanish.
+const TOKEN_LABEL: Record<string, string> = { created: 'Created', project: 'Project', role: 'Role', spawned_by: 'Spawned by', branch: 'Branch', handoff_at: 'Handed off' }
+const SHOWN = new Set(['task', 'task_state', 'ticket', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane'])
+function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: 12, alignItems: 'baseline' }}>
+      <Text size="sm" type="supporting">{label}</Text>
+      <div style={{ minWidth: 0 }}>{children}</div>
+    </div>
+  )
+}
+function SummarySection({ title, children }: { title: string; children: ReactNode }) {
+  return <VStack gap={2}><Text size="sm" weight="semibold">{title}</Text>{children}</VStack>
+}
+function AgentLink({ machine, name, pane }: { machine: string; name?: string; pane?: string }) {
+  if (!name) return null
+  return pane ? <Link href={`#${agentHash(`${machine}/${pane}`)}`}>{`@${name}`}</Link> : <Text size="sm" weight="medium">{`@${name}`}</Text>
+}
+function AgentSummary({ agent, task }: { agent: Agent; task: Task | null }) {
+  const t = agent.tags ?? {}
+  const ticket = task && !task.adHoc ? task.id : (t.ticket ?? t.task?.match(/^[A-Z]+-\d+/i)?.[0] ?? null)
+  const title = task && !task.adHoc && task.title !== task.id ? task.title : t.task && ticket && t.task.startsWith(ticket) ? t.task.slice(ticket.length).trim() : t.task ?? null
+  const state = task && !task.adHoc ? STATE[task.state] : null
+  const from = t.handoff_from, to = t.handoff_to
+  const workdir = task?.worktree ?? agent.cwd
+  const plan = task?.plan && task.worktree && task.plan.startsWith(task.worktree) ? task.plan.slice(task.worktree.length + 1) : task?.plan
+  const details = Object.entries(t).filter(([k]) => !SHOWN.has(k))
+  return (
+    <VStack gap={5} isScrollable style={{ paddingTop: 4 }}>
+      {agent.question && <Card variant="red"><VStack gap={1}><Text size="sm" weight="semibold">Waiting on you</Text><Text>{agent.question}</Text></VStack></Card>}
+
+      <VStack gap={2}>
+        {ticket ? (
+          <HStack gap={2} align="center" wrap="wrap">
+            {task?.url ? <Link href={task.url} target="_blank"><Text weight="semibold">{ticket}</Text></Link> : <Text weight="semibold">{ticket}</Text>}
+            {task?.linearState && <Badge label={task.linearState} />}
+          </HStack>
+        ) : <Text weight="semibold">Ad-hoc work</Text>}
+        {title && <Text maxLines={3}>{title}</Text>}
+        {(state || t.task_state) && (
+          <HStack gap={2} align="center" wrap="wrap">
+            {state && <HStack gap={1} align="center"><StatusDot variant={state.dot} label={state.label} /><Text size="sm">{state.label}</Text></HStack>}
+            {state && t.task_state && <Text size="sm" type="supporting">·</Text>}
+            {t.task_state && <Text size="sm" type="supporting">{t.task_state}</Text>}
+          </HStack>
+        )}
+        {(from || to) && (
+          <HStack gap={1} align="center" wrap="wrap">
+            {from && <><AgentLink machine={agent.machine} name={from} pane={t.handoff_from_pane} /><Text size="sm" type="supporting">→</Text></>}
+            <Text size="sm" weight="medium">{agent.name}</Text>
+            {to && <><Text size="sm" type="supporting">→</Text><AgentLink machine={agent.machine} name={to} pane={t.handoff_to_pane} /></>}
+          </HStack>
+        )}
+      </VStack>
+
+      <SummarySection title="Work">
+        {task?.branch && <SummaryRow label="Branch"><Text size="sm" type="code" maxLines={1}>{task.branch}</Text></SummaryRow>}
+        <SummaryRow label={task?.worktree ? 'Worktree' : 'Folder'}>
+          <Tooltip content={workdir}><Text size="sm" maxLines={1}>{shortPath(workdir) ?? workdir}</Text></Tooltip>
+        </SummaryRow>
+        {plan && <SummaryRow label="Plan"><Text size="sm" type="code" maxLines={2}>{plan}</Text></SummaryRow>}
+        {task?.pr && <SummaryRow label="PR"><PrCell pr={task.pr} /></SummaryRow>}
+      </SummarySection>
+
+      {(agent.recap || agent.context) && (
+        <SummarySection title="Activity">
+          {agent.recap && <Text size="sm">{agent.recap}</Text>}
+          {agent.context && (
+            <SummaryRow label="Context">
+              <VStack gap={1}>
+                <Text size="sm">{`${agent.context.pct}% · ${agent.context.used} / ${agent.context.total}`}</Text>
+                <ProgressBar label={`Context ${agent.context.pct}%`} isLabelHidden value={agent.context.pct}
+                  variant={agent.context.pct >= 80 ? 'error' : agent.context.pct >= 60 ? 'warning' : 'accent'} />
+              </VStack>
+            </SummaryRow>
+          )}
+        </SummarySection>
+      )}
+
+      {details.length > 0 && (
+        <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<Text size="sm" weight="semibold">Details</Text>}>
+          <VStack gap={1} style={{ paddingTop: 8 }}>
+            {details.map(([k, v]) => <SummaryRow key={k} label={TOKEN_LABEL[k] ?? k.replaceAll('_', ' ')}><Text size="sm">{k === 'handoff_at' && /^\d+$/.test(v) ? new Date(Number(v) * 1000).toLocaleString() : v}</Text></SummaryRow>)}
+            <SummaryRow label="Pane"><Text size="sm" type="code">{agent.id}</Text></SummaryRow>
+          </VStack>
+        </Collapsible>
+      )}
     </VStack>
   )
 }
@@ -1426,27 +1522,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   ), [rows, working, density, noneYet])
 
   const page = mode === 'page'
-  const summary = (
-          <VStack gap={3} isScrollable>
-            <Text type="label">Recap</Text>
-            <Text>{agent.recap ?? '—'}</Text>
-            <Text type="label">Task</Text>
-            <Text>{task ? `${task.adHoc ? 'ad-hoc' : task.id} · ${STATE[task.state].label} · ${task.title}` : 'No task'}</Text>
-            {task?.plan && <Text type="code">{task.plan}</Text>}
-            <Text type="label">cwd</Text>
-            <Text type="code">{agent.cwd}</Text>
-            <Text type="label">Tags</Text>
-            {agent.tags?.handoff_from && <Text size="sm">{`Handed off from ${agent.tags.handoff_from}${agent.tags.handoff_from_pane ? ` (${agent.tags.handoff_from_pane})` : ''}`}</Text>}
-            {agent.tags?.handoff_to && <Text size="sm">{`Handed off to ${agent.tags.handoff_to}${agent.tags.handoff_to_pane ? ` (${agent.tags.handoff_to_pane})` : ''}`}</Text>}
-            <TagList tags={agent.tags} />
-            {agent.question && (
-              <>
-                <Text type="label">Waiting on</Text>
-                <Card variant="red"><Text>{agent.question}</Text></Card>
-              </>
-            )}
-          </VStack>
-  )
+  const summary = <AgentSummary agent={agent} task={task} />
   const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
             {!live && <Text type="supporting" size="sm">{agent.local ? 'no transcript · pane view' : 'remote · pane view'}</Text>}

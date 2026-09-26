@@ -1,7 +1,7 @@
 // Run: node --test
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parsePane , snapshot, transitions, jevState } from './server.mjs'
+import { parsePane , snapshot, transitions, jevState, deriveTasks } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -647,4 +647,12 @@ test('jevState: health up/down/unreachable; key none/ok/invalid; model names fro
   assert.equal(jevState({ health: ok, models: null, hasKey: true }).key, 'unknown')
   assert.deepEqual(jevState({ health: ok, models: { status: 200, body: { models: [{ id: 'jev-latest' }, 'jev-mini'] } }, hasKey: true }),
     { state: 'up', key: 'ok', models: ['jev-latest', 'jev-mini'] })
+})
+
+test('deriveTasks: a worker in the main checkout joins its ticket through its ticket/task tokens, not ad-hoc', () => {
+  const a = { key: 'm/p1', id: 'p1', name: 'w-02', machine: 'm', local: true, pool: 'worker', status: 'working', statusSince: Date.now(),
+    cwd: '/nowhere/main', tags: { task: 'UMK-1186 Admin variants' }, asks: false, project: 'umkmall', recap: null, lastPrompt: null }
+  const t = deriveTasks({ agents: [a], worktrees: [], prs: [], issues: [] })
+  assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc, x.agent?.name]), [['UMK-1186', 'building', false, 'w-02']])
+  assert.equal(deriveTasks({ agents: [{ ...a, tags: {} }], worktrees: [], prs: [], issues: [] })[0].adHoc, true)
 })

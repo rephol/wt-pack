@@ -936,12 +936,15 @@ async function linear() {
 // ---- task model ----
 const inside = (cwd, dir) => cwd && (cwd === dir || cwd.startsWith(dir + '/'))
 
+// The ticket an agent's tokens name: `ticket`, else the UMK id a handoff's `task` label starts with.
+const tagTicket = (a) => (a.local && (a.tags?.ticket || a.tags?.task?.match(/^[A-Z]+-\d+/i)?.[0])?.toUpperCase()) || null
 export function deriveTasks({ agents, worktrees, prs, issues }) {
   const now = Date.now()
   const ids = new Set([
     ...(issues ?? []).map((i) => i.identifier),
     ...worktrees.map((w) => w.ticket).filter(Boolean),
     ...prs.map((p) => p.ticket).filter(Boolean),
+    ...agents.map(tagTicket).filter(Boolean),
   ])
   const linked = new Set()
   const tasks = []
@@ -949,7 +952,9 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     const issue = issues?.find((i) => i.identifier === id)
     const wt = worktrees.find((w) => w.ticket === id && w.path !== REPO)
     const pr = prs.filter((p) => p.ticket === id).sort((a, b) => (a.state === 'OPEN' ? -1 : b.state === 'OPEN' ? 1 : 0))[0]
-    const ag = wt ? agents.filter((a) => a.local && inside(a.cwd, wt.path)) : []
+    // In the ticket's worktree, or tagged with the ticket by wt-agents/wt-handoff (a worker can sit in the
+    // main checkout: its cwd alone made it an ad-hoc task that contradicted its own ticket).
+    const ag = agents.filter((a) => a.local && ((wt && inside(a.cwd, wt.path)) || (tagTicket(a) === id && !worktrees.some((w) => w.path !== REPO && inside(a.cwd, w.path)))))
     ag.forEach((a) => linked.add(a.key))
     const asker = ag.find((a) => (a.status === 'idle' || a.status === 'blocked') && a.asks)
     const idleLong = ag.find((a) => a.status === 'idle' && now - a.statusSince > STALL_MS)
