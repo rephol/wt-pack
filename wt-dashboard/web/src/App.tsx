@@ -1475,7 +1475,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     <Tooltip content={`Context window: ${t}`}><div style={{ width: 96 }}>
                       <ProgressBar label={`Context window ${t}`} isLabelHidden value={ctx.pct} variant={ctx.pct >= 80 ? 'error' : ctx.pct >= 60 ? 'warning' : 'accent'} />
                     </div></Tooltip>) })()}
-                  headerActions={narrow ? undefined : <>
+                  headerActions={<>
                       <IconButton label="Skills & commands" icon={<span aria-hidden style={{ fontWeight: 600 }}>/</span>} size="sm" variant="ghost" tooltip="Skills & commands (/)"
                         onClick={() => { inputRef.current?.focus(); inputRef.current?.insertText('/') }} />
                       <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={!agent.local || atts.length >= MAX_IMAGES}
@@ -1498,15 +1498,6 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                   density="compact"
                   sendActions={
                     <HStack gap={1}>
-                      {narrow && <>
-                      <IconButton label="Skills & commands" icon={<span aria-hidden style={{ fontWeight: 600 }}>/</span>} size="sm" variant="ghost" tooltip="Skills & commands (/)"
-                        onClick={() => { inputRef.current?.focus(); inputRef.current?.insertText('/') }} />
-                      <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={!agent.local || atts.length >= MAX_IMAGES}
-                        tooltip={agent.local ? 'Attach png/jpeg/webp/gif (or paste / drop)' : 'Images only for local agents'}
-                        onClick={() => fileRef.current?.click()} />
-                      <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden
-                        onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
-                    </>}
                       {stopping && <Text type="supporting" size="sm">Stopping…</Text>}
                       {working && !stopping && <IconButton label="Stop" icon={<Icon icon="stop" />} size="sm" variant="secondary" tooltip="Stop the current turn (Esc)" onClick={stop} />}
                       <IconButton label="Nudge" icon={<NudgeIcon />} size="sm" variant="ghost" tooltip='Nudge: send "continue"' isDisabled={send.isPending} onClick={() => send.mutate({ text: 'continue' })} />
