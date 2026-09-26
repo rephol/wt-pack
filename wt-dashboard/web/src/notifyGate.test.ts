@@ -28,3 +28,20 @@ test('collapseRepeats: repeated done events fold into one row with a count; acti
   assert.equal(shortAgo(new Date(0).toISOString(), 30_000), 'now')
   assert.equal(shortAgo(new Date(0).toISOString(), 600_000), '10m')
 })
+
+test('groupInbox: by agent / room / task / memory, first-seen order, singles stay one-row groups', async () => {
+  const { groupInbox } = await import('./notifyGate.ts')
+  const r = (id: string, kind: Kind, title: string, target: InboxItem['target'], read = false) =>
+    ({ id, ts: '2026-09-26T00:00:00Z', kind, key: id, title, body: '', read, resolvedAt: null, target, ids: [id], count: 1, anyUnread: !read })
+  const g = groupInbox([
+    r('1', 'agent-done', 'w-02 (p) is done', { agent: 'm/p2' }),
+    r('2', 'memory', 'w-02 remembered', { agent: 'm/p2', memory: 'x' }),
+    r('3', 'agent-stalled', 'w-02 (p) stalled', { agent: 'm/p2' }, true),
+    r('4', 'room-created', 'New room', { room: 'wt-pack' }),
+    r('5', 'ci-failed', 'CI failed', { task: 'UMK-1', pr: '#3' }),
+    r('6', 'agent-done', 'w-01 (p) is done', { agent: 'm/p1' }),
+  ])
+  assert.deepEqual(g.map((x) => [x.key, x.label, x.rows.map((y) => y.id), x.unread]), [
+    ['agent:m/p2', 'w-02', ['1', '3'], 1], ['memory', 'Memory', ['2'], 1], ['room:wt-pack', '#wt-pack', ['4'], 1], ['task:UMK-1', 'UMK-1', ['5'], 1], ['agent:m/p1', 'w-01', ['6'], 1],
+  ])
+})

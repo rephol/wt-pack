@@ -15,7 +15,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { useToast } from '@astryxdesign/core/Toast'
-import { ACTIONABLE_KINDS, collapseRepeats, shortAgo, type InboxItem, type InboxRow, type Kind } from './notifyGate'
+import { ACTIONABLE_KINDS, collapseRepeats, groupInbox, shortAgo, type InboxGroup, type InboxItem, type InboxRow, type Kind } from './notifyGate'
 import { loadPrefs } from './desktop'
 import { api } from './rooms'
 import { Delayed, LoadError, Rows } from './skeletons'
@@ -89,6 +89,8 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const toast = useToast()
   const { items, loaded, error, retry } = useInbox()
   const [confirmAll, setConfirmAll] = useState(false)
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const toggle = (k: string) => setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['inbox'] }); qc.invalidateQueries({ queryKey: ['rooms'] }) }
   const post = (path: string) => (b: object) => api(`/api/notifications/${path}`, { method: 'POST', body: JSON.stringify(b) })
   const read = useMutation({ mutationFn: post('read'), onSuccess: refresh, onError: (e) => toast({ body: `Could not mark read: ${e}`, type: 'error' }) })
@@ -116,7 +118,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const shown = items.filter((it) => filter === 'all' || it.kind === filter)
   const isPinned = (it: InboxItem) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)
   const pinned = collapseRepeats(shown.filter(isPinned))
-  const recent = collapseRepeats(shown.filter((it) => !isPinned(it))).slice(0, 150)
+  const recent = groupInbox(collapseRepeats(shown.filter((it) => !isPinned(it))).slice(0, 150))
   const go = (it: InboxRow) => {
     if (it.anyUnread) read.mutate({ ids: it.ids })
     if ((it.kind === 'room-suggestion' || it.kind === 'memory-proposal') && !it.resolvedAt) return
@@ -128,8 +130,8 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const act = (label: string, icon: React.ReactNode, f: () => void) => (
     <IconButton label={label} tooltip={tip(label)} icon={icon} size="sm" variant="ghost" onClick={(e: React.MouseEvent) => { e.stopPropagation(); f() }} />
   )
-  const row = (it: InboxRow) => (
-    <div key={it.id} className="hd-inbox-row" role="button" tabIndex={0} onClick={() => go(it)} onKeyDown={(e) => e.key === 'Enter' && go(it)}
+  const row = (it: InboxRow, inGroup = false) => (
+    <div key={it.id} className={`hd-inbox-row${inGroup ? ' hd-in-group' : ''}`} role="button" tabIndex={0} onClick={() => go(it)} onKeyDown={(e) => e.key === 'Enter' && go(it)}
       aria-label={`${LABEL[it.kind]}: ${it.title}${it.count > 1 ? `, ${it.count} times` : ''}${it.anyUnread ? ', unread' : ''}`}>
       <span className="hd-kind" style={{ color: COLOR[it.kind] }}>{ICON[it.kind]}</span>
       <span className="hd-main">
@@ -155,6 +157,35 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
       </span>
     </div>
   )
+  // Several rows from one agent/room/task/memory: one header row that expands; its actions cover every row.
+  const group = (g: InboxGroup) => {
+    if (g.rows.length === 1) return row(g.rows[0])
+    const isOpen = open.has(g.key)
+    const latest = g.rows[0]
+    const n = g.rows.reduce((a, r) => a + r.count, 0)
+    return (
+      <div key={g.key}>
+        <div className="hd-inbox-row hd-group" role="button" tabIndex={0} aria-expanded={isOpen} onClick={() => toggle(g.key)} onKeyDown={(e) => e.key === 'Enter' && toggle(g.key)}
+          aria-label={`${g.label}: ${n} updates${g.unread ? `, ${g.unread} unread` : ''}`}>
+          <span className="hd-kind hd-chev" data-open={isOpen} aria-hidden><svg {...sv}><path d="m9 18 6-6-6-6" /></svg></span>
+          <span className="hd-main">
+            <span className={`hd-title${g.unread ? ' unread' : ''}`}>
+              {g.unread > 0 && <span className="hd-dot" />}<span className="hd-trunc">{g.label}</span><span className="hd-count">{`${n} updates`}</span>
+            </span>
+            <span className="hd-body hd-trunc">latest: {latest.title}</span>
+          </span>
+          <span className="hd-side">
+            <span className="hd-time">{shortAgo(latest.ts)}</span>
+            <span className="hd-acts">
+              {g.unread > 0 && act('Mark all read', I.checkAll, () => read.mutate({ ids: g.ids }))}
+              {act('Clear all', I.x, () => clear.mutate({ ids: g.ids }))}
+            </span>
+          </span>
+        </div>
+        {isOpen && g.rows.map((r) => row(r, true))}
+      </div>
+    )
+  }
   return (
     <Dialog isOpen onOpenChange={(o) => !o && onClose()} width={420} maxHeight="100dvh" padding={0} position={{ top: 0, end: 0 }}>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', minWidth: 0 }}>
@@ -186,9 +217,9 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
           {!loaded && (error ? <LoadError what="the inbox" error={error} retry={retry} /> : <Delayed><Rows n={6} avatar={24} lines={2} height={60} /></Delayed>)}
           {loaded && !shown.length && <EmptyState isCompact title="Nothing here" description="Questions, @mentions and agent updates land here." />}
           {pinned.length > 0 && <div className="hd-sub">Needs you</div>}
-          {pinned.map(row)}
+          {pinned.map((r) => row(r))}
           {recent.length > 0 && <div className="hd-sub">Recent</div>}
-          {recent.map(row)}
+          {recent.map(group)}
         </div>
       </div>
       <AlertDialog isOpen={confirmAll} onOpenChange={setConfirmAll} title="Clear the whole inbox?"

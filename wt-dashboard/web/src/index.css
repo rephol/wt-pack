@@ -82,3 +82,9 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
   .hd-tq-side { justify-content: flex-end; flex-wrap: nowrap; }
   .hd-tq-wide { grid-column: 1 / -1; }
 }
+
+/* Inbox groups: a chevron header; its rows indent under it. */
+.hd-chev svg { transition: transform .15s ease; }
+.hd-chev[data-open="true"] svg { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .hd-chev svg { transition: none; } }
+.hd-in-group { padding-left: 28px; background: rgba(128,128,128,.04); }

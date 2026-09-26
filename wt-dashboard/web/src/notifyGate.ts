@@ -46,3 +46,26 @@ export function shortAgo(ts: string, now = Date.now()) {
   const s = Math.max(0, (now - Date.parse(ts)) / 1000)
   return s < 45 ? 'now' : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`
 }
+
+// Inbox auto-grouping (after collapseRepeats): rows from the same agent, room, task or memory store become one
+// expandable group, in order of their newest row. A group of one stays a plain row.
+export type Source = 'agent' | 'room' | 'task' | 'memory' | 'other'
+export interface InboxGroup { key: string; source: Source; label: string; rows: InboxRow[]; ids: string[]; unread: number }
+export function groupOf(it: InboxItem): { key: string; source: Source; label: string } {
+  if (it.kind === 'memory' || it.kind === 'memory-proposal') return { key: 'memory', source: 'memory', label: 'Memory' }
+  if (it.target.room) return { key: `room:${it.target.room}`, source: 'room', label: `#${it.target.room}` }
+  if (it.target.agent) return { key: `agent:${it.target.agent}`, source: 'agent', label: it.title.split(' ')[0] || it.target.agent }
+  if (it.target.task || it.target.pr) { const t = it.target.task ?? it.target.pr!; return { key: `task:${t}`, source: 'task', label: t } }
+  return { key: `kind:${it.kind}`, source: 'other', label: it.kind === 'server' ? 'Server' : it.kind === 'usage' ? 'Usage' : it.kind }
+}
+export function groupInbox(rows: InboxRow[]): InboxGroup[] {
+  const out: InboxGroup[] = []
+  const at = new Map<string, InboxGroup>()
+  for (const r of rows) {
+    const g0 = groupOf(r)
+    let g = at.get(g0.key)
+    if (!g) { g = { ...g0, rows: [], ids: [], unread: 0 }; at.set(g0.key, g); out.push(g) }
+    g.rows.push(r); g.ids.push(...r.ids); if (r.anyUnread) g.unread++
+  }
+  return out
+}
