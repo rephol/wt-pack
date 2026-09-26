@@ -8,6 +8,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { Selector } from '@astryxdesign/core/Selector'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
@@ -77,7 +78,10 @@ function Entries({ entries }: { entries: Entry[] }) {
       </>))}
       <Text weight="semibold" size="sm">Remembered by agents</Text>
       {!saved.length && <Text type="supporting" size="sm">None yet. Agents add entries with wt-memory remember.</Text>}
-      {saved.map((e) => row(e, <Button label="Remove" size="sm" variant="destructive" onClick={() => op.mutate({ id: e.id, op: 'forget' })} />))}
+      {/* The list grows with every remember: it scrolls in its own box so the scope tabs and editors below stay close (WP-91). */}
+      {saved.length > 0 && <ScrollableArea label="Remembered by agents" style={{ maxHeight: 'min(360px, 45dvh)' }}>
+        <VStack gap={2}>{saved.map((e) => row(e, <Button label="Remove" size="sm" variant="destructive" onClick={() => op.mutate({ id: e.id, op: 'forget' })} />))}</VStack>
+      </ScrollableArea>}
     </VStack>
   )
 }
