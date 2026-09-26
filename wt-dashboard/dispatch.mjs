@@ -50,7 +50,9 @@ export class Dispatch {
   }
   status(project) { const s = this.st(project); return { last: s.last, waiting: s.waiting, inflight: this.inflight(project) } }
 
-  // Finish step 6 in one conditional write: only a card still claimed by us and unassigned moves.
+  // Finish step 6 in one conditional write. handoff.sh's own wt-ticket move/assign fails from here (no pane: the
+  // server rejects an empty x-herdr-pane), so the card is still unassigned; if that auth ever changes, this no-ops.
+  // Only a card still claimed by us and unassigned moves.
   async #sent(id, role, agent, now = Date.now()) {
     let moved = false
     const t = await this.tickets.mutate(id, (t, at) => {
@@ -105,8 +107,9 @@ export class Dispatch {
       .sort((a, b) => prio(a) - prio(b))[0] // stable: seq order within a priority
     if (!next) { s.waiting = null; return }
     if (!ags) { s.waiting = 'agents unavailable'; return }
-    const working = ags.filter((a) => a.status === 'working').length
-    const why = await guard({ working, pending: this.inflight() + (this.deps.pending?.() ?? 0), max: this.deps.maxWorking(), host: this.deps.host })
+    const w = ags.filter((a) => a.status === 'working')
+    const working = w.length
+    const why = await guard({ working, pending: this.inflight() + (this.deps.pending?.(new Set(w.map((a) => a.id))) ?? 0), max: this.deps.maxWorking(), host: this.deps.host })
     if (why) { s.waiting = why; return }
     const repo = await this.deps.repoOf(project)
     if (!repo) { s.waiting = `no checkout for ${project}`; return }
@@ -193,13 +196,16 @@ export class Dispatch {
     }
     const k = `reconcile:${project}`
     const last = this.db.prepare('SELECT v FROM routine_settings WHERE k = ?').get(k)?.v
-    const log = (range) => this.deps.git(repo, 'log', '--merges', '--first-parent', '--since=7.days', '--format=%H%x09%s', range)
+    const log = (range) => this.deps.git(repo, 'log', '--merges', '--first-parent', '--since=7.days', '--format=%H%x09%ct%x09%s', range)
     const out = await (last ? log(`${last}..origin/main`).catch(() => log('origin/main')) : log('origin/main'))
     const lines = out.split('\n').filter(Boolean).map((l) => l.split('\t'))
     const head = (await this.deps.git(repo, 'rev-parse', 'origin/main')).trim()
-    for (const [sha, subject = ''] of lines.reverse()) for (const id of mergeIds(subject, key)) {
+    for (const [sha, ct, subject = ''] of lines.reverse()) for (const id of mergeIds(subject, key)) {
       const t = cards.find((c) => c.id === id)
       if (!t || (t.column !== 'building' && t.column !== 'review')) continue
+      // A merge older than the card's latest move is an earlier round (a reopened card), not this one.
+      const moved = t.history?.findLast((h) => h.kind === 'move')?.at
+      if (moved && Number(ct) * 1000 < Date.parse(moved)) continue
       await this.tickets.patch(id, { column: 'done', note: `merged in ${sha.slice(0, 7)}` }, { name: 'dispatch' })
       t.column = 'done'
       this.event(project, 'done', id, `merged in ${sha.slice(0, 7)}`, now)

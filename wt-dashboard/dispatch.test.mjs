@@ -142,7 +142,7 @@ test('merge-subject parser table', () => {
 })
 
 test('reconcile: a merged card in review goes to done; ready with a matching merge is untouched', async () => {
-  const { tickets, d } = await setup({ merges: "abcdef1234\tMerge branch 'wp-1-x'\nbbbbbbb999\tMerge branch 'wp-2'\n" })
+  const { tickets, d } = await setup({ merges: `abcdef1234\t${Math.floor(Date.now() / 1000) + 60}\tMerge branch 'wp-1-x'\nbbbbbbb999\t${Math.floor(Date.now() / 1000) + 60}\tMerge branch 'wp-2'\n` })
   await tickets.setSettings('wt-pack', { dispatch: false })
   const r = await tickets.create('wt-pack', { title: 'rev', column: 'review' }, user)
   const q = await tickets.create('wt-pack', { title: 'rdy', column: 'ready' }, user)
@@ -199,4 +199,22 @@ test('runHandoff: prompt on stdin, HERDR_PANE_ID blanked, 120 s timeout', async 
   const out = await (await import('./dispatch.mjs')).runHandoff(execFile, '/h.sh')(['--role', 'worker'], 'hi', '/repo')
   assert.equal(out, 'reused w1:p1\n')
   assert.deepEqual([seen.bin, seen.opts.cwd, seen.opts.env.HERDR_PANE_ID, seen.opts.timeout, seen.prompt], ['/h.sh', '/repo', '', 120_000, 'hi'])
+})
+
+test('reconcile: a merge older than the card latest move (reopened) is ignored', async () => {
+  const { tickets, d } = await setup({ merges: `abcdef1234\t${Math.floor(Date.now() / 1000) - 86400}\tMerge branch 'wp-1-x'\n` })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const r = await tickets.create('wt-pack', { title: 'reopened', column: 'done' }, user)
+  await tickets.patch(r.id, { column: 'building' }, user)
+  await d.tick()
+  assert.equal((await tickets.get(r.id)).column, 'building')
+})
+
+test('dispatchRetry clears failed/held, refuses a claim in flight or a sent card', async () => {
+  const { tickets } = await setup()
+  const t = await ready(tickets, 'a')
+  await tickets.dispatchClaim(t.id)
+  await assert.rejects(tickets.dispatchRetry(t.id), /dispatching/)
+  await tickets.setDispatch(t.id, { state: 'held', fails: 3 })
+  assert.equal((await tickets.dispatchRetry(t.id)).dispatch, undefined)
 })

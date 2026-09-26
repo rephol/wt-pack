@@ -1795,7 +1795,7 @@ async function ticketsApi(req, res, url, parts) {
   }
   if (req.method === 'POST' && parts[3] === 'comments') return send(res, 200, await tickets.comment(id, b.text, author))
   if (req.method === 'POST' && parts[3] === 'jev-undo') return send(res, 200, await tickets.jevUndo(id, b.field, author))
-  if (req.method === 'POST' && parts[3] === 'dispatch-retry') return send(res, 200, await tickets.setDispatch(id, null))
+  if (req.method === 'POST' && parts[3] === 'dispatch-retry') return send(res, 200, await tickets.dispatchRetry(id))
   if (req.method === 'POST' && parts[3] === 'claim') return send(res, 200, await tickets.claim(id, me(), b.force === true))
   send(res, 404, { error: 'not found' })
 }
@@ -2388,7 +2388,7 @@ const dispatcher = new Dispatch({
     agents: () => agents(),
     host: () => host(),
     maxWorking: () => routines.settings().maxWorking,
-    pending: () => routines.pendingSpawns(),
+    pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
     git: (repo, ...args) => git(repo, ...args),
     ticketOf: tagTicket,
