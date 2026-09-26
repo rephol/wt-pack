@@ -52,7 +52,6 @@ export function IntegrationsSection() {
   if (!q.data) return q.isError ? <LoadError what="integrations" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={5} /></Delayed>
   return (
     <VStack gap={5}>
-      <Heading level={3}>Integrations & environment</Heading>
       <Text type="supporting" size="sm">Precedence: server env var › Keychain (secrets) › ~/.config/wt-dashboard/env › default.</Text>
       <SecretKey it={by.LINEAR_API_KEY} put={put} del={() => save.mutate({ key: 'LINEAR_API_KEY', del: true })} placeholder="lin_api_…" testable />
       <SecretKey it={by.TYPESAFE_API_KEY} put={put} del={() => save.mutate({ key: 'TYPESAFE_API_KEY', del: true })} placeholder="TypeSafe key (console.typesafe.ai/keys)" />

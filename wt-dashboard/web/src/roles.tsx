@@ -103,7 +103,6 @@ export function RolesSection() {
   const add = () => setDraft([...roles, { id: `role${roles.length + 1}`, name: 'New role', color: 'teal', letter: 'N', match: { workspace: '', name: '' }, spawn: { start: 'main', workspace: '<repo>-<role>s', prompt: '', projects: [] } }])
   return (
     <VStack gap={4}>
-      <Heading level={3}>Roles</Heading>
       <Text type="supporting" size="sm">An agent&apos;s role: its <code>role</code> tag first, then the first role whose workspace pattern matches, then name pattern, else Other. Order matters; * is a wildcard.</Text>
       {roles.map((r, i) => (
         <VStack key={i} gap={2} style={{ padding: 12, border: '1px solid var(--color-border-default, #3334)', borderRadius: 8 }}>

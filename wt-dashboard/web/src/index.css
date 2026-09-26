@@ -90,3 +90,21 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-in-group { padding-left: 28px; background: rgba(128,128,128,.04); }
 .hd-group[aria-expanded="true"] .hd-acts { opacity: 1; } /* an open group's actions stay visible (hover-only rows are pointer:fine only) */
 .hd-filter > * { width: max-content; min-width: 100%; } /* the tab bar scrolls sideways instead of clipping its last tab */
+
+/* Settings (settingsRows.tsx, after Astryx's settings-dialog template): rows stack together at one panel width. */
+.hd-set-panel { container: settings-panel / inline-size; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.hd-set-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hd-set-rows { list-style: none; margin: 0; padding: 0; }
+.hd-set-rows > li + li { border-top: 1px solid var(--color-border-subtle, rgba(128,128,128,.16)); }
+.hd-set-row { display: flex; flex-direction: column; gap: 8px; padding: 16px; min-width: 0; }
+.hd-set-line { display: flex; align-items: center; gap: 12px; }
+.hd-set-text { flex: 1 1 0; min-width: 0; max-width: 420px; margin-inline-end: auto; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.hd-set-control { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+@container settings-panel (max-width: 480px) {
+  .hd-set-line { flex-direction: column; align-items: stretch; gap: 8px; }
+  .hd-set-text { max-width: none; }
+  .hd-set-control { flex-wrap: wrap; }
+}
+.hd-set-nav { flex-shrink: 0; }
+.hd-set-list { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.hd-set-list:hover, .hd-set-list:focus-visible { background: rgba(128,128,128,.10); outline: none; }
