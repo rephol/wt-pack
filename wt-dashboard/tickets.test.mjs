@@ -27,7 +27,8 @@ test('create: sequential ids, history, board file', async () => {
   assert.equal(a.history[0].author, 'Rep')
   const file = JSON.parse(await readFile(join(dir, 'tickets', 'wt-pack.json'), 'utf8'))
   assert.equal(file.next, 3)
-  assert.equal(ticketRow(a), 'WP-1 [backlog] (bug,P0) First')
+  assert.equal(ticketRow(a), 'WP-1 [backlog] (bug) First') // priority 0 = none
+  assert.equal(ticketRow({ ...a, priority: 2 }), 'WP-1 [backlog] (bug,P2) First')
   assert.deepEqual(await t.keys(), { 'wt-pack': 'WP' })
   assert.equal((await t.get('wp-2')).title, 'Second')
 })

@@ -205,7 +205,7 @@ export class Tickets {
   }
 }
 
-// `WP-12 [ready] (bug,M,P2) title @assignee`
-export const ticketRow = (t) => `${t.id} [${t.column}] (${[t.type, t.size, `P${t.priority}`].filter(Boolean).join(',')}) ${t.title}${t.assignee ? ` @${t.assignee.name}` : ''}`
+// `WP-12 [ready] (bug,M,P2) title @assignee`; priority is Linear's scale, 0 = none (omitted), 1 urgent … 4 low.
+export const ticketRow = (t) => `${t.id} [${t.column}] (${[t.type, t.size, t.priority && `P${t.priority}`].filter(Boolean).join(',')}) ${t.title}${t.assignee ? ` @${t.assignee.name}` : ''}`
 export const ticketText = (t) => [ticketRow(t), ...(t.links.length ? [t.links.join(' ')] : []), '', t.body, '',
   ...t.history.map((h) => `[${h.at.slice(0, 16).replace('T', ' ')}] ${h.author} ${h.kind}${h.from !== undefined || h.to !== undefined ? ` ${h.from ?? '—'} → ${h.to ?? '—'}` : ''}${h.text ? `: ${h.text}` : ''}`)].join('\n') + '\n'
