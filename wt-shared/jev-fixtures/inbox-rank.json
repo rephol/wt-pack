@@ -1,0 +1,14 @@
+[
+  {"state": {"kind": "question", "title": "umkmall-worker-03 (umkmall) asks you", "body": "Migration needs a decision: back up the orders table first, or rely on the nightly snapshot? I've stopped until you answer."}, "expect": 3},
+  {"state": {"kind": "agent-done", "title": "umkmall-worker-02 (umkmall) is done", "body": "Merged UMK-521, pushed, worktree retired."}, "expect": 1},
+  {"state": {"kind": "server", "title": "Server started (launchd)", "body": "pid 4242"}, "expect": 0},
+  {"state": {"kind": "ci-failed", "title": "PR 212 · CI failing", "body": "e2e checkout.spec timed out on main's release PR"}, "expect": 2},
+  {"state": {"kind": "mention-user", "title": "wt-pack-worker-01 mentioned you", "body": "@user I need the Railway token to continue — everything else is blocked on it"}, "expect": 3},
+  {"state": {"kind": "room-created", "title": "umkmall-planner-02 created #umk-600", "body": "UMK-600 Admin variants"}, "expect": 0},
+  {"state": {"kind": "agent-stalled", "title": "umkmall-worker-05 (umkmall) looks stalled", "body": "idle for 25 minutes after a failing build"}, "expect": 2},
+  {"state": {"kind": "usage", "title": "Claude weekly usage at 90%", "body": "Crossed 90% · resets Mon 09:00"}, "expect": 2},
+  {"state": {"kind": "memory", "title": "wt-pack-worker-01 remembered (project wt-pack)", "body": "Browser checks use agent-browser first"}, "expect": 1},
+  {"state": {"kind": "agent-done", "title": "umkmall-planner-04 (umkmall) is done", "body": "Plan committed for UMK-610 and handed to a worker."}, "expect": 1},
+  {"state": {"kind": "question", "title": "umkmall-worker-06 (umkmall) asks you", "body": "Do you want to allow this command? rm -rf node_modules (y/n)"}, "expect": 3},
+  {"state": {"kind": "server", "title": "Server restarted 3 times in 5 minutes", "body": "launchd restarts it after a crash. Crashes: ~/Library/Logs/wt-dashboard/server.log"}, "expect": 2}
+]
