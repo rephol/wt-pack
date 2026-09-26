@@ -13,17 +13,22 @@ import { Switch } from '@astryxdesign/core/Switch'
 import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { TextArea } from '@astryxdesign/core/TextArea'
+import { TimeInput } from '@astryxdesign/core/TimeInput'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { useToast } from '@astryxdesign/core/Toast'
-import { api } from './rooms'
+import { api, useRoomsList } from './rooms'
+import type { Role } from './roles'
+import { fromSchedule, toSchedule } from './routineForm'
 import { SettingsCard, SettingsRow } from './settingsRows'
 import { inProject, routineProject } from './switcherData'
 
 type Scope = { project: string; agents: { name: string; project?: string | null }[] }
 
-type Target =
+type Deliver = { to: 'self' | 'none' } | { to: 'room'; room: string }
+type Target = { deliver?: Deliver } & (
   | { kind: 'prompt'; agent?: string; role?: string; project?: string; text: string }
   | { kind: 'spawn'; role: string; project: string; prompt: string }
-  | { kind: 'action'; action: 'jev-run' | 'housekeeping'; project?: string }
+  | { kind: 'action'; action: 'jev-run' | 'housekeeping'; project?: string })
 type Last = { status: string; reason: string | null; started: number; ended: number | null }
 type Routine = { id: string; name: string; schedule: string; target: Target; timeout_min: number; enabled: boolean; next_run: number; last: Last | null }
 type Run = { id: number; routine_id: string; name: string | null; started: number; ended: number | null; status: string; reason: string | null; agent: string | null }
@@ -35,6 +40,7 @@ export const targetText = (t: Target) =>
   t.kind === 'action' ? (t.action === 'jev-run' ? `Jev Run now · ${t.project}` : 'Housekeeping')
   : t.kind === 'spawn' ? `spawn ${t.role} in ${t.project}`
   : `prompt ${t.agent ?? `${t.role} in ${t.project}`}`
+const deliverText = (d?: Deliver) => (d?.to === 'room' ? ` → #${d.room}` : d?.to === 'self' ? ' → Inbox' : '')
 const lastText = (l: Last | null) => (l ? `${l.status}${l.reason ? ` (${l.reason})` : ''} · ${when(l.started)}` : 'never run')
 
 function useRoutineMutations() {
@@ -57,7 +63,7 @@ function useRoutineMutations() {
   }
 }
 
-export function RoutinesPage({ phone, project, agents }: { phone: boolean } & Scope) {
+export function RoutinesPage({ phone, project, agents, projects }: { phone: boolean; projects: string[] } & Scope) {
   const q = useQuery({ queryKey: ['routines'], queryFn: () => api<List>('/api/routines'), refetchInterval: 15_000 })
   const m = useRoutineMutations()
   const [editing, setEditing] = useState<Routine | 'new' | null>(null)
@@ -82,11 +88,11 @@ export function RoutinesPage({ phone, project, agents }: { phone: boolean } & Sc
           </HStack>
           // Phone: the controls go under the text, which otherwise gets squeezed to one word per line.
           return <SettingsRow key={r.id} title={r.name}
-            description={<>{r.schedule} · {targetText(r.target)}<br />{r.enabled ? `next ${when(r.next_run)}` : 'paused'} · last: {lastText(r.last)}</>}
+            description={<>{r.schedule} · {targetText(r.target)}{deliverText(r.target.deliver)}<br />{r.enabled ? `next ${when(r.next_run)}` : 'paused'} · last: {lastText(r.last)}</>}
             control={phone ? undefined : controls} detail={phone ? controls : undefined} />
         })}
       </SettingsCard>
-      {editing && <RoutineDialog routine={editing === 'new' ? null : editing} phone={phone} project={project} onClose={() => setEditing(null)} />}
+      {editing && <RoutineDialog routine={editing === 'new' ? null : editing} phone={phone} project={project} projects={projects} agents={agents} onClose={() => setEditing(null)} />}
       {deleting && (
         <Dialog isOpen onOpenChange={(o: boolean) => !o && setDeleting(null)} width={400}>
           <VStack gap={3}>
@@ -103,39 +109,79 @@ export function RoutinesPage({ phone, project, agents }: { phone: boolean } & Sc
   )
 }
 
-const KIND_OPTIONS = [{ value: 'prompt', label: 'Prompt an agent' }, { value: 'spawn', label: 'Spawn an agent, remove it after' }, { value: 'action', label: 'Local action' }]
-const ACTION_OPTIONS = [{ value: 'jev-run', label: 'Jev Run now (board)' }, { value: 'housekeeping', label: 'Housekeeping' }]
+const KIND_ITEMS = [['prompt', 'Prompt agent'], ['spawn', 'Spawn agent'], ['action', 'Local action']]
+const ACTION_OPTIONS = [{ value: 'jev-run', label: 'Jev Run now (board triage)' }, { value: 'housekeeping', label: 'Housekeeping' }]
+const PRESETS = [{ value: 'every 15m', label: 'Every 15 minutes' }, { value: 'every 30m', label: 'Every 30 minutes' }, { value: 'every 1h', label: 'Every hour' },
+  { value: 'daily', label: 'Daily at…' }, { value: 'weekly', label: 'Weekly on…' }, { value: 'custom', label: 'Custom cron' }]
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((label, i) => ({ value: String(i), label }))
+const TIMEOUTS = [15, 30, 60, 120, 240, 480]
+const opt = (v: string, label = v) => ({ value: v, label })
 
-function RoutineDialog({ routine, phone, project, onClose }: { routine: Routine | null; phone: boolean; project: string; onClose: () => void }) {
+// Next 3 runs from the server's own parser, so the preview cannot disagree with the scheduler.
+function SchedulePreview({ schedule }: { schedule: string }) {
+  const q = useQuery({ queryKey: ['routine-preview', schedule], queryFn: () => api<{ next: number[] }>(`/api/routines/preview?schedule=${encodeURIComponent(schedule)}`), retry: false, enabled: !!schedule })
+  if (q.isError) return <Text type="supporting" size="sm" color="error">{errText(q.error)}</Text>
+  return <Text type="supporting" size="sm">{q.data ? `Next: ${q.data.next.map(when).join(' · ')}` : ' '}</Text>
+}
+
+function RoutineDialog({ routine, phone, project, projects, agents, onClose }: { routine: Routine | null; phone: boolean; project: string; projects: string[]; agents: Scope['agents']; onClose: () => void }) {
   const t = routine?.target
   const [d, setD] = useState({
-    name: routine?.name ?? '', schedule: routine?.schedule ?? 'every 1h', timeout: String(routine?.timeout_min ?? 60),
+    name: routine?.name ?? '', ...fromSchedule(routine?.schedule ?? 'every 1h'), timeout: String(routine?.timeout_min ?? 60),
     kind: t?.kind ?? 'prompt', agent: t?.kind === 'prompt' ? t.agent ?? '' : '',
-    role: t && t.kind !== 'action' ? t.role ?? '' : 'orchestrator', project: t?.project ?? (project === 'all' ? 'wt-pack' : project),
+    role: t && t.kind !== 'action' ? t.role ?? 'orchestrator' : 'orchestrator', project: t?.project ?? (project === 'all' ? projects[0] ?? 'wt-pack' : project),
     text: t?.kind === 'prompt' ? t.text : t?.kind === 'spawn' ? t.prompt : '', action: t?.kind === 'action' ? t.action : 'jev-run',
+    deliver: t?.deliver?.to ?? (t?.kind === 'action' ? 'none' : 'self'), room: t?.deliver?.to === 'room' ? t.deliver.room : '',
   })
   const [error, setError] = useState('')
   const { save } = useRoutineMutations()
+  const roles = useQuery({ queryKey: ['roles'], queryFn: () => api<{ roles: Role[] }>('/api/roles'), staleTime: 30_000 }).data?.roles ?? []
+  const rooms = (useRoomsList().data?.rooms ?? []).filter((x) => !x.archived)
   const set = (k: keyof typeof d) => (v: string) => setD((x) => ({ ...x, [k]: v }))
-  const target = d.kind === 'action' ? { kind: 'action', action: d.action, project: d.project }
-    : d.kind === 'spawn' ? { kind: 'spawn', role: d.role, project: d.project, prompt: d.text }
-    : d.agent ? { kind: 'prompt', agent: d.agent, text: d.text } : { kind: 'prompt', role: d.role, project: d.project, text: d.text }
-  const submit = () => save.mutate({ id: routine?.id, body: { name: d.name, schedule: d.schedule, timeout_min: Number(d.timeout), target } },
+  const schedule = toSchedule(d)
+  // Keep a saved value selectable even when it is no longer offered (agent gone, role not spawnable, odd timeout).
+  const keep = (list: { value: string; label: string }[], v: string) => (v && !list.some((o) => o.value === v) ? [...list, opt(v)] : list)
+  const roleOpts = keep(roles.filter((r) => d.kind !== 'spawn' || r.spawn).map((r) => opt(r.id, r.name)), d.role)
+  const agentOpts = keep([opt('', 'Any idle agent of a role'), ...agents.map((a) => opt(a.name, a.project ? `${a.name} · ${a.project}` : a.name))], d.agent)
+  const projectOpts = keep(projects.map((p) => opt(p)), d.project)
+  const roomOpts = keep(rooms.map((x) => opt(x.slug, `#${x.slug}`)), d.room)
+  const timeoutOpts = keep(TIMEOUTS.map((m) => opt(String(m), m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? 's' : ''}`)), d.timeout)
+  const deliver = d.deliver === 'room' ? { to: 'room', room: d.room } : { to: d.deliver }
+  const target = d.kind === 'action' ? { kind: 'action', action: d.action, project: d.project, deliver }
+    : d.kind === 'spawn' ? { kind: 'spawn', role: d.role, project: d.project, prompt: d.text, deliver }
+    : d.agent ? { kind: 'prompt', agent: d.agent, text: d.text, deliver } : { kind: 'prompt', role: d.role, project: d.project, text: d.text, deliver }
+  const submit = () => save.mutate({ id: routine?.id, body: { name: d.name, schedule, timeout_min: Number(d.timeout), target } },
     { onSuccess: onClose, onError: (e) => setError(errText(e)) })
+  const seg = (label: string, k: 'kind' | 'deliver', items: string[][]) => (
+    <SegmentedControl label={label} value={d[k]} onChange={set(k)} layout={phone ? 'fill' : undefined}>
+      {items.map(([v, l]) => <SegmentedControlItem key={v} value={v} label={l} />)}
+    </SegmentedControl>
+  )
   return (
-    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={phone ? undefined : 520} variant={phone ? 'fullscreen' : undefined}>
+    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={phone ? undefined : 560} variant={phone ? 'fullscreen' : undefined}>
       <VStack gap={3}>
         <Heading level={3}>{routine ? `Edit ${routine.name}` : 'New routine'}</Heading>
         <TextInput label="Name" value={d.name} onChange={set('name')} />
-        <TextInput label="Schedule" value={d.schedule} onChange={set('schedule')} placeholder="every 30m · 0 2 * * *"
-          description="every <N>m|h|d, or cron m h dom mon dow in local time" />
-        <Selector label="Target" width="100%" value={d.kind} options={KIND_OPTIONS} onChange={set('kind')} />
+        <VStack gap={1}>
+          <HStack gap={2} wrap="wrap" align="end">
+            <Selector label="Schedule" width={phone ? '100%' : 200} value={d.preset} options={PRESETS} onChange={set('preset')} />
+            {d.preset === 'weekly' && <Selector label="Day" width={160} value={d.dow} options={DAYS} onChange={set('dow')} />}
+            {(d.preset === 'daily' || d.preset === 'weekly') && <TimeInput label="At" width={130} value={d.time} onChange={(v) => v && set('time')(v)} />}
+          </HStack>
+          {d.preset === 'custom' && <TextInput label="Cron" value={d.cron} onChange={set('cron')} placeholder="0 2 * * *"
+            description="m h dom mon dow in local time, or every <N>m|h|d" />}
+          <SchedulePreview schedule={schedule} />
+        </VStack>
+        {seg('Target', 'kind', KIND_ITEMS)}
         {d.kind === 'action' && <Selector label="Action" width="100%" value={d.action} options={ACTION_OPTIONS} onChange={set('action')} />}
-        {d.kind === 'prompt' && <TextInput label="Agent name (optional)" value={d.agent} onChange={set('agent')} description="Blank: the idle agent of this role in the project" />}
-        {(d.kind === 'spawn' || (d.kind === 'prompt' && !d.agent)) && <TextInput label="Role" value={d.role} onChange={set('role')} placeholder="orchestrator" />}
-        {(d.kind !== 'action' ? d.kind === 'spawn' || !d.agent : d.action === 'jev-run') && <TextInput label="Project" value={d.project} onChange={set('project')} />}
+        {d.kind === 'prompt' && <Selector label="Agent" width="100%" value={d.agent} options={agentOpts} onChange={set('agent')} hasSearch />}
+        {(d.kind === 'spawn' || (d.kind === 'prompt' && !d.agent)) && <Selector label="Role" width="100%" value={d.role} options={roleOpts} onChange={set('role')} />}
+        {(d.kind !== 'action' ? d.kind === 'spawn' || !d.agent : d.action === 'jev-run') && <Selector label="Project" width="100%" value={d.project} options={projectOpts} onChange={set('project')} />}
         {d.kind !== 'action' && <TextArea label={d.kind === 'spawn' ? 'First prompt' : 'Prompt'} value={d.text} onChange={set('text')} rows={4} />}
-        <TextInput label="Timeout (minutes)" width={160} value={d.timeout} onChange={set('timeout')} />
+        {seg('Deliver result to', 'deliver', [['self', 'Inbox'], ['room', 'Room'], ['none', 'None']])}
+        {d.deliver === 'room' && <Selector label="Room" width="100%" value={d.room} options={roomOpts} onChange={set('room')} hasSearch placeholder="Pick a room" />}
+        <Text type="supporting" size="sm">One message per run with its status. Failures always go to the Inbox.</Text>
+        <Selector label="Timeout" width={phone ? '100%' : 200} value={d.timeout} options={timeoutOpts} onChange={set('timeout')} />
         {error && <Banner status="error" title={error} />}
         <HStack justify="end" gap={2}>
           <Button label="Cancel" variant="ghost" onClick={onClose} />

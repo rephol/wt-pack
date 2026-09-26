@@ -51,8 +51,20 @@ const KINDS = ['prompt', 'spawn', 'action']
 export const ACTIONS = ['jev-run', 'housekeeping']
 const str = (v, max) => typeof v === 'string' && v.trim() && v.length <= max
 
+// Where a run's result goes (WP-54): the Inbox (self), a room, or nowhere. Failures always reach the Inbox too.
+// Unset (routines saved before WP-54) defaults by kind: actions none, agent work self.
+export function cleanDeliver(d, kind) {
+  if (d == null) return { to: kind === 'action' ? 'none' : 'self' }
+  if (d.to === 'room') { if (!str(d.room, 64)) throw err(400, 'deliver.room required'); return { to: 'room', room: d.room } }
+  if (d.to !== 'self' && d.to !== 'none') throw err(400, 'deliver.to: self|room|none')
+  return { to: d.to }
+}
+
 export function cleanTarget(t) {
   if (!t || !KINDS.includes(t.kind)) throw err(400, `target.kind: ${KINDS.join('|')}`)
+  return { ...cleanKind(t), deliver: cleanDeliver(t.deliver, t.kind) }
+}
+function cleanKind(t) {
   if (t.kind === 'prompt') {
     if (!str(t.text, 4000)) throw err(400, 'target.text required')
     if (str(t.agent, 64)) return { kind: 'prompt', agent: t.agent, text: t.text }
@@ -68,7 +80,18 @@ export function cleanTarget(t) {
   return t.action === 'jev-run' ? { kind: 'action', action: t.action, project: t.project } : { kind: 'action', action: t.action }
 }
 
-const row = (r) => r && { ...r, target: JSON.parse(r.target), enabled: !!r.enabled }
+const row = (r) => {
+  if (!r) return r
+  const target = JSON.parse(r.target)
+  return { ...r, target: { ...target, deliver: cleanDeliver(target.deliver, target.kind) }, enabled: !!r.enabled }
+}
+
+// The next n slots, for the form's schedule preview. Throws (400) like parseSchedule.
+export function preview(schedule, n = 3, after = new Date()) {
+  const s = parseSchedule(schedule), out = []
+  for (let t = after; out.length < n; out.push(t)) t = nextRun(s, t)
+  return out
+}
 
 // Shared by Routines and board Dispatch (WP-52): one cap over both, then memory. working null = no cap check (actions).
 export async function guard({ working, pending = 0, max, host }) {
@@ -80,6 +103,7 @@ const DAY = 86_400_000
 
 export class Routines {
   // deps: { agents, host, prompt(agent, text), spawn({kind, project, prompt}), remove(pane, {force}), actions: {name: (target) => result},
+  //   notify?({key, title, body, error}) — an Inbox item, post?(room, text) — a room message (WP-54 delivery),
   //   pending?() — other pending starts sharing the cap (board dispatches in flight) }
   constructor({ dir, db, deps = {}, log = console.error, pollMs = 15_000 }) {
     Object.assign(this, { file: dir && join(dir, 'wt.db'), _db: db, deps, log, pollMs, ticking: false, inflight: new Set(), busy: new Set() })
@@ -207,13 +231,26 @@ export class Routines {
         if (a.status === 'working') return skip('agent busy')
         this.db.prepare('UPDATE routine_runs SET agent = ? WHERE id = ?').run(a.name, runId)
       }
-    } catch (e) { this.#close(runId, 'failed', e.message); return get() }
+    } catch (e) { this.#close(runId, 'failed', e.message); await this.#report(r, runId); return get() }
     const job = this.#run(r, runId, now, a).catch((e) => this.#close(runId, 'failed', String(e?.message ?? e).slice(0, 500)))
+      .then(() => this.#report(r, runId))
     this.inflight.add(job)
     job.finally(() => this.inflight.delete(job))
     return get()
   }
   idle() { return Promise.all([...this.inflight]) } // tests
+
+  // One message per finished run to its delivery target; a failure or timeout always makes an Inbox item. Skips are not reported.
+  async #report(r, runId) {
+    const u = this.db.prepare('SELECT status, reason FROM routine_runs WHERE id = ?').get(runId)
+    if (!u || u.status === 'skipped' || u.status === 'running') return
+    const d = r.target.deliver ?? cleanDeliver(null, r.target.kind), bad = u.status !== 'ok'
+    const text = `${r.name}: ${u.status}${u.reason ? ` — ${u.reason}` : ''}`
+    try {
+      if (bad || d.to === 'self') await this.deps.notify?.({ key: `routine|${runId}`, title: `Routine ${r.name} ${u.status}`, body: u.reason ?? '', error: bad })
+      if (d.to === 'room') await this.deps.post?.(d.room, text)
+    } catch (e) { this.log(`routines: deliver ${r.id}: ${e.message}`) }
+  }
 
   async #run(r, runId, started, a) {
     const t = r.target, ms = r.timeout_min * 60_000

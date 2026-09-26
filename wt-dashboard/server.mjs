@@ -10,7 +10,7 @@ import { join, extname, normalize, basename, dirname, relative, isAbsolute } fro
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
-import { Routines } from './routines.mjs'
+import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
@@ -2379,6 +2379,13 @@ const routines = new Routines({
       'jev-run': async (t) => { const r = await runBoard(t.project); if (r.skipped) return r; await r.done; return { summary: `triaged ${r.queued}` } },
     },
     pending: () => dispatcher.inflight(), // board cards claimed, not yet handed off
+    // Run delivery (WP-54): self → an Inbox item, room → a system message there.
+    notify: ({ key, title, body }) => inbox.add({ kind: 'server', key, title, body, target: {} }),
+    post: async (slug, text) => {
+      await rooms.load()
+      if (!rooms.room(slug)) throw new Error(`room #${slug} is gone`)
+      await rooms.system(slug, text)
+    },
   },
 })
 // ---- board Dispatch + reconcile (dispatch.mjs, WP-52): not a routine, shares its cap and memory guard ----
@@ -2407,14 +2414,22 @@ async function routinesApi(req, res, url, parts) {
     if (!roleStore.roles.find((r) => r.id === t.role && r.spawn)) throw Object.assign(new Error('unknown role, or it cannot be spawned (Settings › Roles)'), { status: 400 })
     if (!(await projectRoots()).has(t.project)) throw Object.assign(new Error('unknown project'), { status: 400 })
   }
+  const checkRoom = async () => {
+    const d = b.target?.deliver
+    if (d?.to !== 'room') return
+    await rooms.load()
+    if (!rooms.room(d.room)) throw Object.assign(new Error(`unknown room #${d.room}`), { status: 400 })
+  }
+  const check = async () => { await checkSpawn(); await checkRoom() }
   const [, , id, sub] = parts
   if (!id) {
     if (req.method === 'GET') return send(res, 200, { routines: routines.list(), settings: routines.settings() })
-    if (req.method === 'POST') { await checkSpawn(); return send(res, 200, routines.create(b)) }
-  } else if (id === 'runs' && req.method === 'GET') return send(res, 200, routines.runs(url.searchParams.get('limit')))
+    if (req.method === 'POST') { await check(); return send(res, 200, routines.create(b)) }
+  } else if (id === 'preview' && req.method === 'GET') return send(res, 200, { next: schedulePreview(url.searchParams.get('schedule')).map(Number) })
+  else if (id === 'runs' && req.method === 'GET') return send(res, 200, routines.runs(url.searchParams.get('limit')))
   else if (id === 'settings' && req.method === 'PUT') return send(res, 200, routines.setSettings(b))
   else if (sub === 'run' && req.method === 'POST') return send(res, 200, await routines.runNow(id))
-  else if (!sub && req.method === 'PUT') { await checkSpawn(); return send(res, 200, routines.update(id, b)) }
+  else if (!sub && req.method === 'PUT') { await check(); return send(res, 200, routines.update(id, b)) }
   else if (!sub && req.method === 'DELETE') return send(res, 200, routines.delete(id))
   return send(res, 405, { error: 'method not allowed' })
 }
