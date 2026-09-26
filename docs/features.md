@@ -2,7 +2,7 @@
 
 What each feature does, where it lives, its settings and defaults, its limits and the skills behind it.
 Written from the code; when you change a user-visible behaviour, update this file in the same merge.
-Deeper operator detail (service, data layout, rollback) is in `wt-dashboard/README.md`.
+Deeper operator detail (service, data layout, rollback) is in `skills/wt-dashboard/README.md`.
 
 The dashboard runs at `http://127.0.0.1:7777`. Side navigation: **Overview · Tasks · Board · Agents · Rooms ·
 Routines · Terminals**, then **Inbox**, **Settings** and the server health dot at the bottom.
@@ -248,7 +248,7 @@ threshold override `WT_JEV_<FEATURE>_MIN`.
 | `WT_JEV_MEMORY_SUGGEST` | off | Suggests `wt-memory remember` when a prompt states a standing preference (≤ 1.5s per prompt) |
 | `WT_JEV_LOG_SNIPPETS` | off | Keeps input snippets in the Jev log |
 
-Eval: `node wt-shared/scripts/jev-eval.mjs <feature>`.
+Eval: `node skills/wt-shared/scripts/jev-eval.mjs <feature>`.
 
 ## Mac app, PWA and Tailscale
 

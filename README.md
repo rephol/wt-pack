@@ -3,7 +3,7 @@
 A worktree-based coding loop as Claude Code skills: research → plan → work →
 simplify → review → ship → babysit → compound.
 
-Each directory is one skill. `wt-shared/` is not a skill — it holds the scripts
+Each directory under `skills/` is one skill. `skills/wt-shared/` is not a skill — it holds the scripts
 the others invoke by path.
 
 What every feature does, where it lives and its defaults: [docs/features.md](docs/features.md).
@@ -28,7 +28,7 @@ without launchd, Keychain or the Tauri app (doctor lists what to do by hand).
 
 ## The optional judgment layer
 
-`wt-shared/scripts/wt-judge.mjs` turns decisions the pack otherwise eyeballs
+`skills/wt-shared/scripts/wt-judge.mjs` turns decisions the pack otherwise eyeballs
 into typed, logged judgments via the TypeSafe System One API. **It is optional
 and unconfigured is the normal case**: every caller treats exit 3 (no
 `TYPESAFE_API_KEY`) as "do what the pack always did", never as an error.
