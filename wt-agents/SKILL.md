@@ -19,6 +19,7 @@ on demand.
 ~/.claude/skills/wt-agents/scripts/agents.sh list [role] [--json]    # name, pane, status, cwd (--json: + pane tokens)
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
+~/.claude/skills/wt-agents/scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
 ~/.claude/skills/wt-agents/scripts/agents.sh rm <name|pane> [--force]
 ```
@@ -69,7 +70,7 @@ the second agent never starts.
 
 When on, `spawn` starts claude with `--strict-mcp-config` and one merged `--mcp-config`, built per agent in
 `~/.cache/wt-agents/mcp-<name>.json` (removed by `rm`). Later sources win on a name clash:
-1. **Role** `mcp/<role>.json`: worker = wt-memory; planner = wt-memory + context7 (remote HTTP).
+1. **Role** `mcp/<role>.json`: worker = wt-memory; planner and auditor = wt-memory + context7 (remote HTTP).
 2. **Repo**: the committed `.mcp.json` at the root of the agent's cwd, else the main checkout's.
 3. **Task**: `--mcp a,b` picks from `mcp/catalog.json` (figma, context7, railway); an unknown name fails
    before any tab is made. claude.ai connectors (Linear, Supabase, Drive…) can't be passed this way, so

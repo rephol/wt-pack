@@ -30,3 +30,8 @@ test('spawn args: full = no MCP flags (picks only add); lean = strict role set',
   assert.equal(args('WT_AGENTS_MCP=lean\n'), '--strict-mcp-config --mcp-config\n["wt-memory"]')
   assert.equal(args('WT_AGENTS_MCP=lean\n', ['--mcp', 'context7']), '--strict-mcp-config --mcp-config\n["context7","wt-memory"]')
 })
+
+test('auditor: lean set is wt-memory + context7', () => {
+  writeFileSync(envFile, 'WT_AGENTS_MCP=lean\n')
+  assert.equal(run(join(here, 'agents.sh'), ['mcp-args', 'auditor', '.']), '--strict-mcp-config --mcp-config\n["context7","wt-memory"]')
+})
