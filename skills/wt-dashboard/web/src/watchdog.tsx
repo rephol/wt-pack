@@ -15,6 +15,7 @@ import { SettingsCard, SettingsRow } from './settingsRows'
 
 type Check = { id: string; label: string; unit: string; threshold: number; severe?: boolean }
 type Finding = { check: string; key: string; severity: 'severe' | 'warn'; title: string; body: string; since: string; resolvedAt?: string }
+type Draft = Record<string, { on: boolean; threshold: string }>
 type State = { checks: Check[]; settings: Record<string, { on: boolean; threshold: number }>; open: Record<string, Finding>; resolved: Finding[]; lastRun: string | null }
 
 const when = (iso: string) => new Date(iso).toLocaleString()
@@ -24,11 +25,12 @@ export function WatchdogSection() {
   const qc = useQueryClient()
   const toast = useToast()
   const q = useQuery({ queryKey: ['watchdog'], queryFn: () => api<State>('/api/watchdog'), refetchInterval: 30_000 })
-  const [draft, setDraft] = useState<State['settings']>({})
-  useEffect(() => { if (q.data) setDraft(q.data.settings) }, [q.data?.settings]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Thresholds stay text while typed: an empty or non-numeric field blocks Save instead of saving 0.
+  const [draft, setDraft] = useState<Draft>({})
+  useEffect(() => { if (q.data) setDraft(Object.fromEntries(Object.entries(q.data.settings).map(([k, v]) => [k, { on: v.on, threshold: String(v.threshold) }]))) }, [q.data?.settings]) // eslint-disable-line react-hooks/exhaustive-deps
   const done = () => qc.invalidateQueries({ queryKey: ['watchdog'] })
   const save = useMutation({
-    mutationFn: () => api('/api/watchdog', { method: 'PUT', body: JSON.stringify(draft) }),
+    mutationFn: () => api('/api/watchdog', { method: 'PUT', body: JSON.stringify(Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, { on: v.on, threshold: Number(v.threshold) }]))) }),
     onSuccess: () => { done(); toast({ body: 'Saved' }) },
     onError: (e) => toast({ body: `Could not save: ${err(e)}`, type: 'error' }),
   })
@@ -41,8 +43,9 @@ export function WatchdogSection() {
   if (!q.data) return null
   const { checks, settings, open, resolved, lastRun } = q.data
   const findings = Object.values(open)
-  const dirty = JSON.stringify(draft) !== JSON.stringify(settings)
-  const set = (id: string, patch: Partial<{ on: boolean; threshold: number }>) => setDraft((d) => ({ ...d, [id]: { ...d[id], ...patch } }))
+  const valid = Object.values(draft).every((v) => v.threshold.trim() !== '' && Number.isFinite(Number(v.threshold)) && Number(v.threshold) >= 0)
+  const dirty = Object.entries(draft).some(([k, v]) => v.on !== settings[k]?.on || Number(v.threshold) !== settings[k]?.threshold || v.threshold.trim() === '')
+  const set = (id: string, patch: Partial<Draft[string]>) => setDraft((d) => ({ ...d, [id]: { ...d[id], ...patch } }))
   return (
     <VStack gap={3}>
       <SettingsCard title="Watchdog">
@@ -58,19 +61,19 @@ export function WatchdogSection() {
       </SettingsCard>
       <SettingsCard title="Watchdog checks">
         {checks.map((c) => {
-          const v = draft[c.id] ?? settings[c.id]
+          const v = draft[c.id] ?? { on: settings[c.id].on, threshold: String(settings[c.id].threshold) }
           return (
             <SettingsRow key={c.id} title={`${c.label}${c.severe ? ' · notifies' : ''}`} description={`Threshold in ${c.unit} (default ${c.threshold})`}
               control={<HStack gap={2} vAlign="center">
-                <TextInput label={`${c.label} threshold`} isLabelHidden size="sm" width={72} value={String(v.threshold)} isDisabled={!v.on}
-                  onChange={(t: string) => set(c.id, { threshold: Number(t) })} />
+                <TextInput label={`${c.label} threshold`} isLabelHidden size="sm" width={72} value={v.threshold} isDisabled={!v.on}
+                  onChange={(t: string) => set(c.id, { threshold: t })} />
                 <Switch label={`${c.label} on`} isLabelHidden value={v.on} onChange={(on: boolean) => set(c.id, { on })} />
               </HStack>} />
           )
         })}
       </SettingsCard>
       <HStack gap={2}>
-        <Button label="Save" size="sm" variant="primary" isDisabled={!dirty} isLoading={save.isPending} onClick={() => save.mutate()} />
+        <Button label="Save" size="sm" variant="primary" isDisabled={!dirty || !valid} isLoading={save.isPending} onClick={() => save.mutate()} />
         <Button label="Run now" size="sm" isLoading={run.isPending} onClick={() => run.mutate()} />
       </HStack>
       {resolved.length > 0 && <Text size="sm" type="supporting">Recently resolved: {resolved.slice(0, 5).map((f) => `${f.title} (${when(f.resolvedAt ?? f.since)})`).join(' · ')}</Text>}

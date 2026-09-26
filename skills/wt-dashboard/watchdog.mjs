@@ -109,10 +109,9 @@ export function diffFindings(open = {}, findings, now = Date.now()) {
   return { open: next, opened, resolved }
 }
 
-// recordStart (server.mjs): keep an hour of starts for the `restarts` check; the 5-min slice feeds restartBurst.
+// recordStart (server.mjs): keep an hour of starts for the `restarts` check (restartBurst takes its own 5 min).
 export function keepStarts(starts, now = Date.now()) {
-  const hour = starts.filter((t) => now - t < 60 * MIN)
-  return { hour, burst: hour.filter((t) => now - t < 5 * MIN) }
+  return { hour: starts.filter((t) => now - t < 60 * MIN) }
 }
 
 // What the Inbox gets for one diff: an item per opened finding (native pop only when severe), and the keys whose

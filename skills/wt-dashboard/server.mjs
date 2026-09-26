@@ -2510,7 +2510,9 @@ async function watchdogSnapshot() {
     jev: await readCalls().catch(() => null),
   }
 }
-async function runWatchdog() {
+let wdRunning = null // the 60s timer and Run now share one run, so a finding never opens twice
+function runWatchdog() { return (wdRunning ??= runWatchdogOnce().finally(() => { wdRunning = null })) }
+async function runWatchdogOnce() {
   await wdLoaded
   const d = diffFindings(wd.open, wdEvaluate(await watchdogSnapshot(), wd.settings))
   const ops = inboxOps(d)
@@ -2541,7 +2543,14 @@ async function watchdogApi(req, res, sub) {
     if (!['worker', 'auditor'].includes(role)) return send(res, 400, { error: 'role: worker|auditor' })
     const root = packRoot()
     if (!root) return send(res, 409, { error: 'wt-pack checkout not found (~/.claude/skills/wt-handoff)' })
-    const out = await runHandoff(execFile, HANDOFF_SH)(['--role', role, '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
+    // handoff.sh --role takes worker|planner only; an auditor is a free auditor agent's pane.
+    let target = ['--role', 'worker']
+    if (role === 'auditor') {
+      const a = (await agents()).find((x) => x.local && x.pool === 'auditor' && (x.status === 'idle' || x.status === 'done') && !x.question)
+      if (!a) return send(res, 409, { error: 'no free auditor agent — spawn one (wt-agents spawn auditor) or use Investigate' })
+      target = ['--pane', a.id]
+    }
+    const out = await runHandoff(execFile, HANDOFF_SH)([...target, '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
     store.delete('agents:local')
     return send(res, 200, { ok: true, message: out.trim().split('\n')[0] })
   }

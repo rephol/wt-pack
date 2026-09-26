@@ -104,7 +104,7 @@ function status() {
   const out = launchctl('print', `${DOMAIN}/${LABEL}`)
   const pick = (k) => out.match(new RegExp(`^\\s*${k} = (.+)$`, 'm'))?.[1]
   console.log(`${LABEL}: ${pick('state') ?? '?'}, pid ${pick('pid') ?? '-'}, runs ${pick('runs') ?? '?'}, last exit ${pick('last exit code') ?? '-'}\n  log ${LOG}`)
-  // Second line on purpose: ./setup reads only the first (`head -1`), and this one never says ': running'.
+  // Second line on purpose: ./setup's doctor reads the first line and svc() counts ': running'; this one never says it.
   console.log(`watchdog probe: ${loaded(PROBE_LABEL) ? 'loaded (every 2 min)' : existsSync(PROBE_PLIST) ? 'installed, not loaded' : 'not installed'}`)
 }
 

@@ -86,9 +86,8 @@ test('dispatch: a held card is not "waiting"', () => {
   assert.deepEqual(checks({ boards: [{ project: 'p', dispatch: true, tickets }] }), [])
 })
 
-test('keepStarts: an hour kept, 5 minutes for the burst', () => {
-  const k = keepStarts([now - 2 * 3600e3, now - 30 * 60e3, now - 60e3], now)
-  assert.deepEqual([k.hour.length, k.burst.length], [2, 1])
+test('keepStarts: an hour kept', () => {
+  assert.deepEqual(keepStarts([now - 2 * 3600e3, now - 30 * 60e3, now - 60e3], now).hour, [now - 30 * 60e3, now - 60e3])
 })
 
 test('inboxOps: one item per opened finding, quiet unless severe; resolved keys', () => {
