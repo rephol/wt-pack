@@ -4,7 +4,7 @@ Skills pack: each top-level dir is a skill symlinked as `~/.claude/skills/<name>
 **no remote** (ask before creating one). Full context: `docs/handoff-2026-09-26.md`.
 
 ## Working here
-- Role: orchestrator. Small fixes directly; larger ones to background subagents or wt-pack planners/workers.
+- Role: orchestrator — **never implement yourself.** Spawn planners (`wt-agents spawn planner`) for work needing a plan, workers for clear tasks; hand off with wt-handoff.
   Verify, commit, report concisely.
 - **One commit per skill touched.** Commit only your own paths (`git commit <paths>`), never `-a`.
 - Keep every CLI backward compatible. Extending skills for dashboard needs is allowed.
