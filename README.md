@@ -115,7 +115,8 @@ herdr                                                           # the herdr serv
 npm --prefix ~/Work/projects/wt-pack/skills/wt-dashboard start  # the dashboard, instead of launchd
 ```
 
-`test/docker/` runs this install in a clean `node:22` container.
+`test/docker/` runs this install in a clean `node:22` container. To keep it running on a server, see
+**[Running on a Linux VM](docs/vm.md)**: a systemd unit, and access over Tailscale or an SSH tunnel.
 
 ## Skills
 
