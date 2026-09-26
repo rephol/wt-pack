@@ -171,10 +171,16 @@ export function ticketSuggestions(tasks, roomSlugs, settings) {
 
 // An agent @mentioning the user marks the room as needing them (one entry per agent, latest text);
 // any message from the user clears it.
-export function nextNeedsYou(current, msg, handle) {
+// An agent's later post replaces or clears its own entry: a post without @user, or an answer to the user's own
+// latest message (prev) that asks nothing, is a report, not a question.
+// ponytail: "asks nothing" = no '?'; a question phrased without one stays unflagged until something better is needed.
+export function nextNeedsYou(current, msg, handle, prev = null) {
   if (msg.author.kind === 'user') return []
-  if (msg.author.kind !== 'agent' || !msg.mentions.some((m) => m.toLowerCase() === handle.toLowerCase())) return current
-  return [...current.filter((n) => n.agent !== msg.author.name), { agent: msg.author.name, text: msg.text.slice(0, 300), ts: msg.ts, id: msg.id }]
+  if (msg.author.kind !== 'agent') return current
+  const rest = current.filter((n) => n.agent !== msg.author.name)
+  if (!msg.mentions.some((m) => m.toLowerCase() === handle.toLowerCase())) return rest
+  if (prev?.author.kind === 'user' && !msg.text.includes('?')) return rest
+  return [...rest, { agent: msg.author.name, text: msg.text.slice(0, 300), ts: msg.ts, id: msg.id }]
 }
 
 // Write-then-rename, so a crash mid-write never leaves a truncated index or settings file.
@@ -353,7 +359,8 @@ export class Rooms {
     msg.route = plan.route
     Object.assign(msg, mentionStatus(msg, plan, agents, this.settings.profile.handle))
     room.hops = plan.hops
-    room.needsYou = nextNeedsYou(room.needsYou ?? [], msg, this.settings.profile.handle)
+    const prev = (await this.messages(slug)).findLast((m) => m.author.kind !== 'system')
+    room.needsYou = nextNeedsYou(room.needsYou ?? [], msg, this.settings.profile.handle, prev)
     // Everyone who speaks or is addressed becomes a member.
     const mem = new Set(room.members)
     if (author.kind === 'agent') mem.add(author.name)

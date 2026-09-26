@@ -206,7 +206,13 @@ test('rooms: @user from an agent needs you until the user replies; the handle is
   assert.deepEqual(n.map((x) => [x.agent, x.text]), [['a', '@user which one?']])
   n = R.nextNeedsYou(n, { ...fromA, text: '@USER again', id: '2', mentions: ['USER'] }, 'user')
   assert.equal(n.length, 1) // one entry per agent, latest text
-  assert.deepEqual(R.nextNeedsYou(n, { author: { kind: 'agent', name: 'b' }, mentions: [] }, 'user'), n) // FYI without @user: unchanged
+  assert.deepEqual(R.nextNeedsYou(n, { author: { kind: 'agent', name: 'b' }, mentions: [] }, 'user'), n) // another agent's FYI: unchanged
+  assert.deepEqual(R.nextNeedsYou(n, { author: { kind: 'agent', name: 'a' }, mentions: [] }, 'user'), []) // a posts again without @user: resolved
+  const user = { author: { kind: 'user' } }
+  const report = { author: { kind: 'agent', name: 'a' }, text: '@user Stopped.', ts: 't3', id: '3', mentions: ['user'] }
+  assert.deepEqual(R.nextNeedsYou(n, report, 'user', user), []) // answers the user's request, asks nothing: resolved
+  assert.equal(R.nextNeedsYou([], { ...report, text: '@user stop web too?' }, 'user', user).length, 1) // asks back: needs you
+  assert.equal(R.nextNeedsYou([], report, 'user', fromA).length, 1) // unprompted @user: needs you
   assert.deepEqual(R.nextNeedsYou(n, { author: { kind: 'user', name: 'me' }, mentions: [] }, 'user'), []) // user replied
   const S = { ...R.DEFAULT_SETTINGS }
   assert.deepEqual(R.parseMentions('hey @user and @a', ['a', S.profile.handle]), ['user', 'a'])
