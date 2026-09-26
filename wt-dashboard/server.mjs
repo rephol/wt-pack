@@ -1942,7 +1942,12 @@ async function roomsApi(req, res, url, parts) {
   if (parts[2] === 'dismiss' && req.method === 'POST') {
     await userOnly()
     const { ticket } = await json()
-    return send(res, 200, await rooms.setSettings({ dismissedTickets: [...new Set([...rooms.settings.dismissedTickets, String(ticket)])] }))
+    const settings = await rooms.setSettings({ dismissedTickets: [...new Set([...rooms.settings.dismissedTickets, String(ticket)])] })
+    // The suggestion's inbox row goes too, not only future suggestions (WP-57).
+    await inbox.load()
+    const ids = inbox.items.filter((it) => it.kind === 'room-suggestion' && it.target?.task === String(ticket) && !it.clearedAt).map((it) => it.id)
+    await inbox.resolve(ids); await inbox.clear({ ids })
+    return send(res, 200, settings)
   }
   const slug = parts[2]
   if (!rooms.room(slug)) return send(res, 404, { error: 'unknown room' })
