@@ -19,6 +19,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api, type Profile, type RoomSettings } from './rooms'
 import { ServerPanel } from './status'
+import { HousekeepingSection } from './housekeeping'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
@@ -88,7 +89,7 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
           {section === 'terminals' && <TerminalsSection />}
-          {section === 'server' && <ServerPanel />}
+          {section === 'server' && <VStack gap={6}><ServerPanel /><HousekeepingSection /></VStack>}
           {section === 'about' && <AboutSection />}
     </>
   )

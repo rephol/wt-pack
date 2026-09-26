@@ -1,7 +1,7 @@
 // Notifications inbox: one feed at <data root>/data/notifications.jsonl, the single source for the in-app
 // inbox, native notifications and the tray count. Items are appended; later {type:'update'} lines mark them
 // read or resolved. Pure pieces (kind mapping, actionable, resolution) are exported for parse.test.mjs.
-import { readFile, appendFile, mkdir } from 'node:fs/promises'
+import { readFile, appendFile, mkdir, writeFile, rename } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -34,7 +34,9 @@ export function toResolve(items, needs, suggested, proposals = null) {
 }
 
 export class Inbox {
-  constructor(file) { Object.assign(this, { file, items: null, subs: new Set() }) }
+  constructor(file) { Object.assign(this, { file, items: null, subs: new Set(), q: Promise.resolve() }) }
+  // File writes run one at a time, so compact()'s rewrite never races an append.
+  write(fn) { const r = this.q.then(fn); this.q = r.catch(() => {}); return r }
   async load() {
     if (this.items) return
     await mkdir(dirname(this.file), { recursive: true })
@@ -56,7 +58,7 @@ export class Inbox {
     if (this.items.some((it) => it.key === draft.key && ((ACTIONABLE.has(draft.kind) && !it.resolvedAt) || now - Date.parse(it.ts) < 60_000))) return null
     const it = { id: randomUUID(), ts: new Date(now).toISOString(), read: false, resolvedAt: null, ...draft }
     this.items.push(it)
-    await appendFile(this.file, JSON.stringify(it) + '\n')
+    await this.write(() => appendFile(this.file, JSON.stringify(it) + '\n'))
     for (const f of this.subs) f(it)
     return it
   }
@@ -65,8 +67,26 @@ export class Inbox {
     const set = new Set(ids)
     const hit = this.items.filter((it) => set.has(it.id))
     for (const it of hit) Object.assign(it, patch)
-    if (hit.length) await appendFile(this.file, hit.map((it) => JSON.stringify({ type: 'update', id: it.id, patch })).join('\n') + '\n')
+    if (hit.length) await this.write(() => appendFile(this.file, hit.map((it) => JSON.stringify({ type: 'update', id: it.id, patch })).join('\n') + '\n'))
     return hit.length
+  }
+  // Drop items matching `drop` and rewrite the jsonl as one folded line per item. Returns {dropped, bytes freed}.
+  async compact(drop, { dryRun = false, guard = async () => {} } = {}) {
+    await this.load()
+    return this.write(async () => {
+      const before = Buffer.byteLength(await readFile(this.file, 'utf8').catch(() => ''))
+      const keep = this.items.filter((it) => !drop(it))
+      const text = keep.map((it) => JSON.stringify(it) + '\n').join('')
+      const dropped = this.items.length - keep.length
+      if (!dropped) return { dropped: 0, bytes: 0 }
+      if (!dryRun) {
+        await guard(this.file)
+        await writeFile(this.file + '.tmp', text)
+        await rename(this.file + '.tmp', this.file)
+        this.items = keep
+      }
+      return { dropped, bytes: Math.max(0, before - Buffer.byteLength(text)) }
+    })
   }
   resolve(ids) { return ids.length ? this.patch(ids, { resolvedAt: new Date().toISOString() }) : 0 }
   // Cleared items stay in the jsonl (an update line) but are never listed or counted.

@@ -14,6 +14,7 @@ import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -1917,6 +1918,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -2055,6 +2057,47 @@ const server = http.createServer(async (req, res) => {
       send(res, 500, { error: String(e.message ?? e) })
     }
   })
+// ---- housekeeping (Settings › Server): hourly, and once a minute after start ----
+const HK_FILE = join(DATA, 'housekeeping.json')
+const LOGS = join(homedir(), 'Library', 'Logs', 'wt-dashboard')
+const CACHE = join(homedir(), '.cache')
+let hk = { settings: { ...HK_DEFAULTS }, lastRun: null }
+const hkLoaded = readFile(HK_FILE, 'utf8').then((t) => { const j = JSON.parse(t); hk = { settings: cleanSettings(j.settings), lastRun: j.lastRun ?? null } }, () => {})
+async function runHousekeeping(dryRun = false) {
+  await hkLoaded
+  const local = await agents().then((l) => l.filter((a) => a.local), () => null)
+  const sum = await housekeep({
+    roots: [DATA_ROOT, LOGS, join(CACHE, 'wt-memory'), join(CACHE, 'wt-agents')],
+    uploads: UPLOADS,
+    rooms: rooms.index.map((r) => ({ file: join(DATA, 'rooms', `${r.slug}.jsonl`), archived: r.archived })),
+    extraRefs: await readFile(join(DATA, 'settings.json'), 'utf8').catch(() => ''),
+    inbox,
+    rotate: [
+      { file: join(DATA, 'terminal-audit.jsonl'), mode: 'rename' },
+      { file: SENT_FILE, mode: 'rename' },
+      // launchd (server.log) and the app (app.log) hold these open: copy + truncate.
+      { file: join(LOGS, 'server.log'), mode: 'copytruncate' },
+      { file: join(LOGS, 'app.log'), mode: 'copytruncate' },
+    ],
+    memCache: join(CACHE, 'wt-memory'), agentsCache: join(CACHE, 'wt-agents'),
+    live: local && { sessions: new Set(local.map((a) => a.session).filter(Boolean)), names: new Set(local.map((a) => a.name).filter(Boolean)) },
+    settings: hk.settings, dryRun,
+  })
+  if (!dryRun) { hk.lastRun = { ...sum, actions: sum.actions.slice(0, 50) }; await writeFile(HK_FILE, JSON.stringify(hk, null, 2)) }
+  if (sum.errors.length) console.error('housekeeping:', sum.errors.join('; '))
+  return sum
+}
+async function housekeepingApi(req, res, sub) {
+  await hkLoaded
+  if (req.method === 'GET' && !sub) { const m = process.memoryUsage(); return send(res, 200, { ...hk, defaults: HK_DEFAULTS, memory: { rss: m.rss, heapUsed: m.heapUsed, heapTotal: m.heapTotal } }) }
+  if (req.method === 'PUT' && !sub) {
+    hk.settings = cleanSettings(JSON.parse((await body(req)) || '{}'))
+    await writeFile(HK_FILE, JSON.stringify(hk, null, 2))
+    return send(res, 200, hk)
+  }
+  if (req.method === 'POST' && sub === 'run') return send(res, 200, await runHousekeeping(new URL(req.url, 'http://x').searchParams.get('dryRun') === '1'))
+  return send(res, 405, { error: 'GET, PUT or POST run' })
+}
 async function recordStart() {
   const f = join(DATA, 'server-starts.json')
   const prev = await readFile(f, 'utf8').then(JSON.parse, () => [])
@@ -2080,6 +2123,9 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     setInterval(roomsLoop, 4000)
     setInterval(tick, 4000)
     setTimeout(tick, 500)
+    const hkRun = () => runHousekeeping().catch((e) => console.error('housekeeping:', e.message))
+    setTimeout(hkRun, 60_000)
+    setInterval(hkRun, 3_600_000)
     recordStart().catch((e) => console.error('starts:', e.message))
     inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${MANAGED_BY === 'app' ? 'app-managed' : MANAGED_BY})`, body: `pid ${process.pid}`, target: {}, quiet: true })
   }))
