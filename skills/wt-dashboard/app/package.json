@@ -1,5 +1,6 @@
 {
   "name": "wt-dashboard-app",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "sidecar": "sh scripts/build-sidecar.sh",
