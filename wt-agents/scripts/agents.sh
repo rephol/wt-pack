@@ -120,7 +120,13 @@ spawn)
   # Two names, two layers: `agent start <NAME>` names the agent to HERDR, while
   # `claude --name` sets the session's own display name. Setting only the first
   # leaves the session itself unnamed wherever claude lists its own sessions.
-  while ! herdr agent start "$label" --kind claude --pane "$pane" -- --name "$label" >/dev/null 2>&1; do
+  # Lean MCP: only the servers in mcp/<role>.json (--strict-mcp-config also drops plugin and claude.ai
+  # servers — context-mode, claude-mem, railway, plan… — each a node process per session).
+  # WT_AGENTS_MCP=full, or a role without a file, starts claude with everything as before.
+  mcp=$(cd "$(dirname "$0")/.." && pwd)/mcp/$role.json
+  set -- --name "$label"
+  [ "${WT_AGENTS_MCP:-}" != full ] && [ -f "$mcp" ] && set -- "$@" --strict-mcp-config --mcp-config "$mcp"
+  while ! herdr agent start "$label" --kind claude --pane "$pane" -- "$@" >/dev/null 2>&1; do
     n=$((n + 1))
     [ "$n" -ge 3 ] && { echo "claude did not come up in $label (pane $pane)" >&2; exit 1; }
     sleep 3

@@ -60,6 +60,14 @@ Names are global to herdr, not per workspace, so numbering is taken from existin
 every pool and carries the repo: two repos both numbering from 1 collide with `agent_name_taken` and
 the second agent never starts.
 
+## Lean MCP
+
+`spawn` starts claude with `--strict-mcp-config --mcp-config mcp/<role>.json`: a worker gets wt-memory
+only, a planner wt-memory + context7 (remote HTTP, no local process). Strict mode drops every other MCP
+server, including plugin-provided ones (context-mode, claude-mem) and claude.ai connectors, so a spawned
+agent runs 1 MCP node process instead of 3-4. Plugins' hooks and skills still load. A role without a file,
+or `WT_AGENTS_MCP=full`, starts with the full set as before.
+
 ## Removing
 
 `rm` closes the tab. It **refuses a `working` agent** unless given `--force` — a turn in flight dies
