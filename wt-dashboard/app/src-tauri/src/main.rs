@@ -18,6 +18,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Set once the app starts exiting: native handlers must not touch tray/menus/windows being torn down.
 static EXITING: AtomicBool = AtomicBool::new(false);
+/// The main window was opened on the error page (a data: URL). Tracked here because WebviewWindow::url() panics
+/// inside wry (url_from_webview unwraps WKWebView.URL) while the webview has not committed a URL yet (WP-45).
+static ON_ERROR_PAGE: AtomicBool = AtomicBool::new(false);
 use tauri_plugin_notification::NotificationExt;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -341,7 +344,7 @@ fn update_state(app: &AppHandle) {
     }
     if s != Srv::Down {
         if let Some(w) = app.get_webview_window("main") {
-            if w.url().map(|u| u.scheme() == "data").unwrap_or(false) {
+            if ON_ERROR_PAGE.swap(false, Ordering::Relaxed) {
                 let _ = w.navigate(URL.parse().unwrap());
             }
         }
@@ -639,7 +642,7 @@ fn main() {
                     }
                     match r {
                         Ok(()) => WebviewUrl::External(URL.parse().unwrap()),
-                        Err(e) => error_page(&e),
+                        Err(e) => { ON_ERROR_PAGE.store(true, Ordering::Relaxed); error_page(&e) }
                     }
                 };
                 update_state(&handle);
