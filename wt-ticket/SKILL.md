@@ -34,3 +34,9 @@ Pipeline integrations call it as `$T … || true`: a board failure never blocks 
 **Schedule only tickets in Ready.** The user moves a card to Ready to say "do this next"; Backlog is a proposal,
 not an instruction. Take one with `$T claim <ID>` before planning it (`wt-plan <ID>`), so two orchestrators never
 pick the same card. Do not move cards into Ready yourself.
+
+**Dispatch boards** (WP-52; the Board's Dispatch switch, off by default): the dashboard server hands each unassigned
+Ready card to a free agent itself (L → planner, else worker) and moves it. Skip cards carrying a `dispatch` field
+(Dispatching…, sent, failed, held); act only on exceptions — a held card (retry from its menu), a stalled flag, a
+blocked card. The dispatcher's reconcile is the one automated mover into Ready: it returns a dispatched card whose
+agent is gone, with the note `returned: <name> is gone`.
