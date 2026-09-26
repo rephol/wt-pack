@@ -243,6 +243,15 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
     }
     setReplyTo(null)
   }
+  // The @ button types an @ at the caret (after a space when needed), which opens the mention menu.
+  const startMention = () => {
+    const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+    if (!el) return
+    const sel = getSelection()
+    if (!el.contains(sel?.anchorNode ?? null)) { el.focus(); sel?.selectAllChildren(el); sel?.collapseToEnd() }
+    const before = sel?.anchorNode?.textContent?.slice(0, sel.anchorOffset) ?? ''
+    document.execCommand('insertText', false, before && !/\s$/.test(before) ? ' @' : '@')
+  }
   const jumpTo = useCallback((id: string) => {
     setJump({ key: id })
     const flash = () => document.getElementById(`rm-${id}`)?.parentElement?.animate([{ background: 'var(--color-background-muted, rgba(127,127,127,.25))' }, { background: 'transparent' }], 1200)
@@ -434,18 +443,19 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}
             footerActions={<div style={{ display: 'grid', width: '100%', minWidth: 0, flex: 1 }}>{/* grid: the footer sizes to content; this lets the hint ellipsize */}<Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text></div>}
             headerActions={<>
+              <IconButton label="Mention someone" icon={<AtIcon />} size="sm" variant="ghost" onClick={startMention} />
               <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={atts.length >= MAX_IMAGES} onClick={() => fileRef.current?.click()} />
               <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
             </>}
-            drawer={atts.length || replyTo ? (
+            headerContext={replyTo && <HStack gap={1} align="center" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', width: '100%', minWidth: 0 }}>{/* grid: the header sizes to content, so a long quote would push the x off-screen */}
+              <Text type="supporting" size="sm" maxLines={1}>{`↪ ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text>
+              <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={cancelReply} />
+            </HStack>}
+            drawer={atts.length ? (
               <ChatComposerDrawer>
-                {replyTo && <HStack gap={1} align="center" style={{ width: 0, flex: '1 1 100%' }}>{/* width 0: the drawer sizes to content, so a long quote would push the x off-screen */}
-                  <div style={{ flex: 1, minWidth: 0 }}><Text type="supporting" size="sm" maxLines={1}>{`↪ Replying to ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text></div>
-                  <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={cancelReply} />
-                </HStack>}
-                {atts.length > 0 && <HStack gap={2} wrap="wrap">
+                <HStack gap={2} wrap="wrap">
                   {atts.map((a) => <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name} isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />)}
-                </HStack>}
+                </HStack>
               </ChatComposerDrawer>
             ) : undefined}
             input={<ChatComposerInput handleRef={inputRef} triggers={[mention, slash]} onFiles={addFiles} onKeyDown={(e) => { if (e.key === 'Escape' && replyTo && !e.defaultPrevented) { e.preventDefault(); cancelReply() } else composerEnter(e) }} placeholder={`Message #${room.slug}`} />} />
@@ -488,6 +498,11 @@ function useNarrow(q = '(max-width: 639px)') {
 const ReplyIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M9 17 4 12l5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+  </svg>
+)
+const AtIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
   </svg>
 )
 const ClipIcon = () => (
