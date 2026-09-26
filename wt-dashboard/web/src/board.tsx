@@ -219,7 +219,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
         content={
           <LayoutContent padding={0}>
             {move.error && <Banner status="error" title={`Move failed: ${move.error.message}`} />}
-            <HStack gap={phone ? 0 : 4} className={phone ? 'hd-kb-cols hd-kb-cols-phone' : 'hd-kb-cols'}>
+            <HStack gap={phone ? 0 : 4} className={phone ? 'hd-kb-cols hd-kb-cols-phone' : drag ? 'hd-kb-cols hd-kb-dragging' : 'hd-kb-cols'}>
               {shown.map((c) => (
                 <BoardColumn key={c} c={c} count={cols[c].length}
                   contentRef={(el) => { if (el) columnEls.current.set(c, el); else columnEls.current.delete(c) }}>
@@ -307,12 +307,12 @@ function BoardCard({ t, draggable, cardRef, onPointerDown, onOpen, onMove }: {
 function BoardColumn({ c, count, contentRef, children }: { c: Column; count: number; contentRef: (el: HTMLDivElement | null) => void; children: ReactNode }) {
   const meta = COLUMN_META[c]
   return (
-    <Card variant="muted" padding={0} className="hd-kb-col">
+    <Card variant="muted" padding={0} className={count ? 'hd-kb-col' : 'hd-kb-col hd-kb-col-empty'}>
       <Layout
         height="fill"
         header={
           <LayoutHeader hasDivider padding={3}>
-            <HStack hAlign="between" vAlign="center">
+            <HStack hAlign="between" vAlign="center" className="hd-kb-colhead">
               <HStack gap={2} vAlign="center">
                 <StatusDot variant={meta.variant} label={`${columnLabel(c)} status`} />
                 <Tooltip content={meta.tooltip}><Heading level={4}>{columnLabel(c)}</Heading></Tooltip>
