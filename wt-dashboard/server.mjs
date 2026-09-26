@@ -8,7 +8,7 @@ import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync,
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
+import { Rooms, ticketSuggestions, roomResolve, agentMayDelete } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
@@ -1924,7 +1924,11 @@ async function roomsApi(req, res, url, parts) {
   const slug = parts[2]
   if (!rooms.room(slug)) return send(res, 404, { error: 'unknown room' })
   if (!parts[3] && req.method === 'PATCH') { await userOnly(); return send(res, 200, await rooms.update(slug, await json())) }
-  if (!parts[3] && req.method === 'DELETE') { await userOnly(); await rooms.remove(slug); return send(res, 200, { ok: true }) }
+  if (!parts[3] && req.method === 'DELETE') {
+    const who = await roomAuthor(req)
+    if (who.kind !== 'user' && !agentMayDelete(rooms.room(slug), who)) return send(res, 403, { error: 'agents can delete only a tmp-* room they created' })
+    await rooms.remove(slug); return send(res, 200, { ok: true })
+  }
   if (parts[3] === 'stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
     // Resume: ?since=<message count the client holds> (or Last-Event-ID) sends the tail from there, re-sending

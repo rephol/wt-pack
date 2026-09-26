@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS = {
 export const AGENT_ROOMS_PER_HOUR = 3
 // Queued mentions older than this are not re-sent after a server restart (they are marked undelivered).
 export const RESTORE_MS = 3_600_000
+// An agent may delete only a throwaway room it created itself: slug `tmp-…`, it is the responder (WP-42).
+export const agentMayDelete = (room, author) => Boolean(room?.slug?.startsWith('tmp-') && [author.key, author.name].includes(room.responder))
 export const agentRoomAllowed = (times, now = Date.now()) => times.filter((t) => now - t < 3_600_000).length < AGENT_ROOMS_PER_HOUR
 
 // Quoted or code text is an example, not an address: code blocks/spans and '…', "…", ‘…’, “…” are

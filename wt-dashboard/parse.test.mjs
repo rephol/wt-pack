@@ -1007,3 +1007,12 @@ test('deriveTasks: a local ticket with no live signal takes its board column (WP
   const t = deriveTasks({ agents: [], worktrees: [], prs: [], issues: [li('WP-1', 'building'), li('WP-2', 'planning'), li('WP-3', 'review'), li('WP-4', 'ready'), li('WP-5', 'backlog')] })
   assert.deepEqual(t.map((x) => [x.id, x.state]), [['WP-1', 'building'], ['WP-2', 'planning'], ['WP-3', 'queued'], ['WP-4', 'up_next']])
 })
+
+test('agentMayDelete: only a tmp-* room the agent created (WP-42)', async () => {
+  const { agentMayDelete } = await import('./rooms.mjs')
+  const me = { key: 'm/w:p1', name: 'w-01' }
+  assert.equal(agentMayDelete({ slug: 'tmp-wp-42-w-01', responder: 'm/w:p1' }, me), true)
+  assert.equal(agentMayDelete({ slug: 'tmp-wp-42-x', responder: 'm/w:p9' }, me), false)
+  assert.equal(agentMayDelete({ slug: 'wt-pack', responder: 'm/w:p1' }, me), false)
+  assert.equal(agentMayDelete(null, me), false)
+})
