@@ -24,6 +24,11 @@ A room message that reaches you arrives as a prompt starting with `[room #<slug>
 Answer with `room post <slug> "…"`, not in your own conversation. After posting, end the turn with NO text —
 not even "posted": the user reads the room, and anything written in your session only spends your context.
 
+When the work takes more than a quick answer, **acknowledge first**: one room post saying what you understood
+and what you'll do ("On it: …", "Looking into …"), then do the work, then post the result. The room shows
+"was notified" / "is replying…" rows, and an ack beside them is what tells the user you took it. A quick answer
+needs no ack: just post it.
+
 A user message starting with `/` is a **command** for one agent: it arrives as your prompt exactly as typed
 (no `[room #…]` wrapper) and runs in your session. When a command you received from a room finishes, post a
 one-paragraph outcome to that room — the room shows "ran /… on you" and nothing else tells the user how it went.
