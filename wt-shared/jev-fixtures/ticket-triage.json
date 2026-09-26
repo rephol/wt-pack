@@ -1,0 +1,202 @@
+[
+ {
+  "state": {
+   "title": "agent-browser screenshot hangs on wt-dashboard pages",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Kanban: corrupt board file restarts ids at 1 (apply the plan's quarantine rule)",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Kanban: boardKeys empty until the first /api/overview call",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Kanban: test pane-verification ordering for wt-ticket writes",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "debt"
+ },
+ {
+  "state": {
+   "title": "Kanban: no-op PATCH bumps the updated timestamp",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Decide where Housekeeping controls live (Settings › Server vs Observability)",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "wt-ticket not on PATH on this machine (re-run ./setup to link it)",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "gap"
+ },
+ {
+  "state": {
+   "title": "Rooms at 390px: New room Create button clipped",
+   "body": "Evidence: #rooms at 390×844 — input + 'Responder: none' + Create on one row; button right edge >392px. Screenshot /tmp/audit/s3-rooms-390.png (attached in #wt-pack audit #1).\nImpact: can't create a room from a phone without sideways scroll.",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Overview 'In review' count disagrees with Tasks",
+   "body": "Evidence: Overview In review tile = 3 (4 a minute later) vs Tasks 'In review (1)' on Mine and Everyone. Screenshots s1-overview / s2-tasks in #wt-pack audit #1.\nImpact: headline tile links to a page showing a different number.",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Inbox badge 58 vs 1 item that needs you",
+   "body": "Evidence: badge 58; inbox Needs you = 1 (room suggestion); rest are 'X is done ×24', 'Server started ×5', memory updates. Overview Needs you tile = 0 at the same time. Screenshot s4-inbox in #wt-pack audit #1.\nImpact: badge always red, real questions get missed; three different needs-you counts. Needs a decision on what counts toward the badge.",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "Overview 'Today': 5 merged · 0 shipped vs Tasks 'Recently shipped (13)'",
+   "body": "Evidence: Overview Today tile 'PRs 3 opened · 5 merged · 0 shipped' vs Tasks 'Recently shipped (13)'. Screenshots s1/s2 in #wt-pack audit #1.\nImpact: reads as a bug; pick one meaning of shipped.",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "Remote agents show pane ids / prompt text as names",
+   "body": "Evidence: sidebar lists 'code-reviewer/w5:p8', 'code-reviewer/w5:p9', 'Code-reviewer agent startup command railway' (herdr-box machine).\nImpact: remote agents unaddressable by name; wt-agents naming only covers local spawns.",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Agents echo @-mention of themselves in rooms (duplicate delivery)",
+   "body": "CONFIRMED. Evidence: #wt-pack msgs 223, 228, 234 — wt-pack-worker-02 posts '@wt-pack-worker-02 heads-up: already on main' (self-mention, 3×).\nImpact: extra turn + room noise per task. Fix: room delivery ignores a sender's self-mention.",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Overview Agents tile truncates project name 'umkmall…' at 1440",
+   "body": "Evidence: Overview Agents tile third row 'umkmall...' at 1440×900 with free width. Screenshot s1-overview.\nImpact: can't tell which project it is.",
+   "candidates": []
+  },
+  "expect": "debt"
+ },
+ {
+  "state": {
+   "title": "Machine tile 'workers 0/2' unclear with 8+ workers listed",
+   "body": "Evidence: Overview Machine 'workers 0/2' while sidebar lists umkmall-worker-01..06 and wt-pack-worker-01..03.\nImpact: unclear what the cap counts; needs a label/tooltip.",
+   "candidates": []
+  },
+  "expect": "gap"
+ },
+ {
+  "state": {
+   "title": "Rebuild the Board on Astryx's kanban-board template (+ work-item-detail for the card drawer)",
+   "body": "Templates: web/node_modules/@astryxdesign/cli/assets/templates/pages/kanban-board and work-item-detail. The current board (46bd517) was built without them. Keep the API/CLI; web only. Desktop DnD + 390px.",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "Board gets its own sidebar nav item",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "wt-ticket: new tickets default to P0 — default should be a neutral priority (e.g. P2)",
+   "body": "",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Board: 7 columns don't fit even at 2000px — fixed ~510px columns force a horizontal scrollbar; Building/Review/Done off-screen",
+   "body": "Screenshot: /Users/octeumkm/.local/share/wt-dashboard/uploads/2026-09-26/b0d738d0-c61d-4766-b2f2-ca0b6d8fe465.png. Columns should size to fit the viewport (min ~260px, flexible), with horizontal scroll only when truly needed (e.g. < 7×260); consider collapsing empty columns (Backlog 0, Blocked) to a narrow rail. Also check card priority badges: P0 shows no badge while P2 shows 'High' and P3 'Medium' — confirm the priority scale (Linear-style 0=none,1=urgent,2=high,3=medium,4=low?) and make the CLI/API/UI agree.",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "Sidebar shows a stray remote row 'Code-reviewer agent startup command railway' that isn't in /api/overview .agents",
+   "body": "Found by wt-pack-worker-03 after WP-12. Find which source feeds that sidebar row (another query/terminals/remote list) and apply the WP-12 naming or drop it.",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "Move dashboard storage (tickets, rooms, notifications) to SQLite via built-in node:sqlite",
+   "body": "User approved in #wt-pack. One small store module; migrate existing JSON/JSONL on first start (keep a backup); single writer = server; no new deps (node:sqlite, suppress/handle the experimental warning; require node >=22.13 in setup); housekeeping/rotation adapted; setup doctor checks node:sqlite. Plan first.",
+   "candidates": []
+  },
+  "expect": "debt"
+ },
+ {
+  "state": {
+   "title": "Jev on the board: triage + dedupe new tickets",
+   "body": "User request in #wt-pack. On ticket create (UI, CLI, auditor): Jev suggests type, size, priority and owner (planner vs worker, reuse the handoff routing question), and flags likely duplicates of open tickets; suggestions applied only when the field was left empty, shown as 'Jev suggested' with one-click undo; duplicates shown as a link, never auto-merged. Optional: 'Suggest next' orders Ready by value/size. Shared Jev client (fail-open, 2s), own Settings switch, calls logged to Observability, eval fixtures from WP-1..21.",
+   "candidates": []
+  },
+  "expect": "feature"
+ },
+ {
+  "state": {
+   "title": "No full page reload on server/app updates",
+   "body": "User in #wt-pack. Two forced reloads today: (1) web/src/main.tsx reloads on 403 + x-herdr-session — a server restart invalidates the session (check whether the cookie/session secret is regenerated per start; persist it so a restart keeps sessions); (2) web/src/desktop.tsx reloads the Mac app on every new web build id. Replace (2) with an 'Update available · Reload' toast (auto-apply only when the tab is hidden/idle and no composer draft); after a server restart just reconnect SSE + refetch queries. Also keep composer drafts, open panel and scroll across any reload (URL hash + sessionStorage). Verify: restart service while typing a draft → no reload, draft kept.",
+   "candidates": []
+  },
+  "expect": "ux"
+ },
+ {
+  "state": {
+   "title": "Mac app sidecar build broken on main since e19086c: top-level await roleStore.load() in server.mjs can't bundle as CJS",
+   "body": "Found by wt-pack-worker-02. npm --prefix app run sidecar fails. Move the await into the startup function (no TLA) and add the sidecar build to tests/CI-equivalent (./setup doctor or npm test) so it can't regress.",
+   "candidates": []
+  },
+  "expect": "bug"
+ },
+ {
+  "state": {
+   "title": "SQLite import: a legacy board with a bad shape blocks ticket import; an unreadable board with no recoverable key is dropped",
+   "body": "WP-21 follow-up from wt-pack-worker-02's review. None live; make import skip+quarantine per board and report, never block or silently drop.",
+   "candidates": []
+  },
+  "expect": "bug"
+ }
+]

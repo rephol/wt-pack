@@ -22,6 +22,7 @@ export const EVALUATORS = {
   memory_suggest: 'wt-memory/scripts/jev-memory.mjs#memorySuggest',
   triage: 'wt-shared/scripts/jev-triage.mjs#triageClass',
   inbox_rank: 'wt-dashboard/inbox.mjs#inboxRank',
+  ticket_triage: 'wt-dashboard/ticketJev.mjs#ticketType',
 }
 
 const feature = process.argv[2]
