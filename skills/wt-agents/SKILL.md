@@ -65,7 +65,7 @@ the second agent never starts.
 
 **Off by default.** On when the dashboard's Settings › Integrations switch "Lean MCP for new agents" is on
 (`WT_AGENTS_MCP=lean` in `~/.config/wt-dashboard/env`); the env var `WT_AGENTS_MCP=full|lean` overrides it
-(`wt-shared/scripts/mcp-mode.sh` resolves it). Off, agents start with claude's full set plus any `--mcp` picks.
+(`~/.claude/skills/wt-shared/scripts/mcp-mode.sh` resolves it). Off, agents start with claude's full set plus any `--mcp` picks.
 `agents.sh mcp-args <role> [cwd] [--mcp a,b]` prints the MCP args a spawn would use.
 
 When on, `spawn` starts claude with `--strict-mcp-config` and one merged `--mcp-config`, built per agent in

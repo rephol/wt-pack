@@ -1,4 +1,4 @@
-// Run: node --test wt-agents/scripts/mcp.test.mjs — MCP mode (full|lean) and the spawn args it gives.
+// Run: node --test skills/wt-agents/scripts/mcp.test.mjs — MCP mode (full|lean) and the spawn args it gives.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
