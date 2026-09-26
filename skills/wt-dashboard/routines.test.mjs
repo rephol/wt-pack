@@ -66,12 +66,8 @@ test('bad expressions throw 400', () => {
   assert.throws(() => nextRun('0 0 31 2 *'), /never fires/)
 })
 
-test('seeds: five, all disabled, after migration', () => {
-  const { r } = setup()
-  const l = r.list()
-  assert.equal(l.length, 5)
-  assert.ok(l.every((x) => x.enabled === false))
-  assert.deepEqual(l.map((x) => x.schedule), ['0 2 * * *', '0 8 * * *', 'every 30m', 'every 1h', '0 9 * * 1'])
+test('no seeds: a new install starts with no routines (WP-92)', () => {
+  assert.deepEqual(setup().r.list(), [])
 })
 
 test('catch-up: next_run 5h in the past → exactly one run, next_run > now', async () => {
@@ -206,10 +202,9 @@ test('Run now leaves next_run alone; enabling resets it from now', async () => {
   const x = r.create(HK)
   await r.runNow(x.id); await r.idle()
   assert.equal(r.get(x.id).next_run, x.next_run)
-  const seed = r.get('seed-babysit')
-  assert.equal(seed.next_run, 0)
-  const now = Date.now()
-  assert.equal(r.update('seed-babysit', { enabled: true }, now).next_run, now + 30 * 60_000)
+  r.update(x.id, { enabled: false })
+  const now = Date.now() + 3_600_000
+  assert.equal(r.update(x.id, { enabled: true }, now).next_run, now + 30 * 60_000)
 })
 
 test('runs older than 30 days are pruned on tick', async () => {
