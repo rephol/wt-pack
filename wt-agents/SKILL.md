@@ -17,7 +17,7 @@ on demand.
 
 ```bash
 ~/.claude/skills/wt-agents/scripts/agents.sh list [role] [--json]    # name, pane, status, cwd (--json: + pane tokens)
-~/.claude/skills/wt-agents/scripts/agents.sh spawn worker [cwd]      # starts in the worktree
+~/.claude/skills/wt-agents/scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
 ~/.claude/skills/wt-agents/scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
 ~/.claude/skills/wt-agents/scripts/agents.sh rm <name|pane> [--force]
@@ -62,11 +62,18 @@ the second agent never starts.
 
 ## Lean MCP
 
-`spawn` starts claude with `--strict-mcp-config --mcp-config mcp/<role>.json`: a worker gets wt-memory
-only, a planner wt-memory + context7 (remote HTTP, no local process). Strict mode drops every other MCP
-server, including plugin-provided ones (context-mode, claude-mem) and claude.ai connectors, so a spawned
-agent runs 1 MCP node process instead of 3-4. Plugins' hooks and skills still load. A role without a file,
-or `WT_AGENTS_MCP=full`, starts with the full set as before.
+`spawn` starts claude with `--strict-mcp-config` and one merged `--mcp-config`, built per agent in
+`~/.cache/wt-agents/mcp-<name>.json` (removed by `rm`). Later sources win on a name clash:
+1. **Role** `mcp/<role>.json`: worker = wt-memory; planner = wt-memory + context7 (remote HTTP).
+2. **Repo**: the committed `.mcp.json` at the root of the agent's cwd, else the main checkout's.
+3. **Task**: `--mcp a,b` picks from `mcp/catalog.json` (figma, context7, railway); an unknown name fails
+   before any tab is made. claude.ai connectors (Linear, Supabase, Drive…) can't be passed this way, so
+   they aren't in the catalog; a task that needs one needs `WT_AGENTS_MCP=full`.
+
+Strict mode drops every other MCP server, including plugin-provided ones (context-mode, claude-mem) and
+claude.ai connectors, so a spawned agent runs 1 MCP node process instead of 3-4. Plugins' hooks and skills
+still load. A role without a file, or `WT_AGENTS_MCP=full`, starts with the full set as before (plus any
+`--mcp` picks). figma's server is OAuth: a fresh agent may need `/mcp` to sign in once.
 
 ## Removing
 

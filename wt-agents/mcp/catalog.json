@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "figma": {
+      "type": "http",
+      "url": "https://mcp.figma.com/mcp",
+      "headers": {
+        "X-Figma-Plugin-Bundle": "figma_prod@2_2_120"
+      }
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp?client=claude-code-plugin",
+      "headers": {
+        "Authorization": "${CONTEXT7_API_KEY:-}"
+      }
+    },
+    "railway": {
+      "args": [
+        "mcp"
+      ],
+      "command": "railway"
+    }
+  }
+}

@@ -2,7 +2,7 @@
 # Manage the named agent pools this pack hands work to.
 #
 #   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
-#   agents.sh spawn <role> [cwd]           # -> prints "<name> <pane>"
+#   agents.sh spawn <role> [cwd] [--mcp a,b] # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #
 # A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
@@ -78,7 +78,20 @@ list)
   ;;
 
 spawn)
+  # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
+  extra=; n=$#
+  while [ "$n" -gt 0 ]; do
+    a=$1; shift; n=$((n - 1))
+    if [ "$a" = --mcp ]; then extra=$1; shift; n=$((n - 1)); else set -- "$@" "$a"; fi
+  done
   role=${1:?role required, e.g. worker|planner}
+  # Check --mcp names before anything is created.
+  dir=$(cd "$(dirname "$0")/.." && pwd)/mcp
+  if [ -n "$extra" ]; then
+    picks=$(printf '%s' "$extra" | jq -R 'split(",") | map(select(. != ""))')
+    missing=$(jq -r --argjson p "$picks" '[$p[] as $n | select(.mcpServers[$n] == null) | $n] | join(",")' "$dir/catalog.json")
+    [ -n "$missing" ] && { echo "unknown MCP server(s): $missing (see $dir/catalog.json)" >&2; exit 1; }
+  fi
   main=$(repo_root "$PWD"); repo=$(basename "$main")
   # A planner makes its own worktree, so it starts in the main checkout; so does any other role without a cwd.
   case "$role" in worker) cwd=${2:-$PWD} ;; *) cwd=${2:-$main} ;; esac
@@ -100,6 +113,31 @@ spawn)
     | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
   label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
 
+  # Lean MCP: only the servers in mcp/<role>.json (--strict-mcp-config also drops plugin and claude.ai
+  # servers — context-mode, claude-mem, railway, plan… — each a node process per session).
+  # WT_AGENTS_MCP=full, or a role without a file, keeps the full set (still adding any --mcp picks).
+  mcp_file=; strict=; files=
+  if [ "${WT_AGENTS_MCP:-}" != full ] && [ -f "$dir/$role.json" ]; then
+    strict=--strict-mcp-config; files=$dir/$role.json
+    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+    for f in "$top/.mcp.json" "$main/.mcp.json"; do [ -f "$f" ] && { files="$files
+$f"; break; }; done
+  fi
+  if [ -n "$extra" ]; then
+    mkdir -p "${TMPDIR:-/tmp}/wt-agents"
+    jq --argjson p "$picks" '{mcpServers: (.mcpServers | with_entries(select(.key as $k | $p | index($k))))}' "$dir/catalog.json" \
+      > "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
+    files="$files
+${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
+  fi
+  if [ -n "$files" ]; then
+    mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents"
+    mcp_file=${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$label.json
+    # Later files win on a name clash: role < repo < --mcp.
+    printf '%s\n' "$files" | sed '/^$/d' | tr '\n' '\0' | xargs -0 jq -s '{mcpServers: (map(.mcpServers // {}) | add)}' > "$mcp_file"
+    rm -f "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
+  fi
+
   # A path claude has never seen opens the first-run trust dialog and blocks,
   # and `agent start` then fails with agent_not_ready. Seed the flag first.
   conf="$HOME/.claude.json"
@@ -120,12 +158,8 @@ spawn)
   # Two names, two layers: `agent start <NAME>` names the agent to HERDR, while
   # `claude --name` sets the session's own display name. Setting only the first
   # leaves the session itself unnamed wherever claude lists its own sessions.
-  # Lean MCP: only the servers in mcp/<role>.json (--strict-mcp-config also drops plugin and claude.ai
-  # servers — context-mode, claude-mem, railway, plan… — each a node process per session).
-  # WT_AGENTS_MCP=full, or a role without a file, starts claude with everything as before.
-  mcp=$(cd "$(dirname "$0")/.." && pwd)/mcp/$role.json
   set -- --name "$label"
-  [ "${WT_AGENTS_MCP:-}" != full ] && [ -f "$mcp" ] && set -- "$@" --strict-mcp-config --mcp-config "$mcp"
+  if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
   while ! herdr agent start "$label" --kind claude --pane "$pane" -- "$@" >/dev/null 2>&1; do
     n=$((n + 1))
     [ "$n" -ge 3 ] && { echo "claude did not come up in $label (pane $pane)" >&2; exit 1; }
@@ -148,7 +182,9 @@ rm)
     exit 1
   fi
   tab=$(herdr agent get "$pane" | jq -r '.result.agent.tab_id')
+  name=$(herdr agent get "$pane" | jq -r '.result.agent.name // empty')
   herdr tab close "$tab" >/dev/null
+  [ -n "$name" ] && rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$name.json"
   echo "removed $target ($pane, was $status)"
   ;;
 
