@@ -14,7 +14,7 @@ allowed-tools: Bash
 ```bash
 ~/.claude/skills/wt-handoff/scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--no-goal] [--task "UMK-1192 Tailwind v4 for @umkmall/ui"] <cwd>
+  [--pane <id> [--clear] | --new] [--no-goal] [--task "UMK-1192 Tailwind v4 for @umkmall/ui"] [--mcp figma] <cwd>
 ```
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
@@ -26,6 +26,9 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
 
 ## Task label and awareness
 
+- `--mcp a,b` adds MCP servers from `wt-agents/mcp/catalog.json` when the handoff SPAWNS a worker (see
+  wt-agents "Lean MCP"). A reused worker keeps the set it started with, so pair it with `--new` when the
+  task needs a server the pool's workers lack.
 - `--task` labels the target: herdr pane token `task` (source `wt-dashboard`), shown in the dashboard's agent
   list, detail header and switcher. It always **starts with the ticket**; without `--task` the label is just
   the ticket from `<cwd>`'s branch (`UMK-NNN`), and with neither nothing is set. Cut to 80 characters.

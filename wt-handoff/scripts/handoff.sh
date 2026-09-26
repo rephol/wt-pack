@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--clear] [--no-goal] [--task "<TICKET> <title>"] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] <cwd> [prompt-file]
 #
 # Handoff agents live in their own herdr workspace, "<repo>-workers" (override
 # with HANDOFF_WORKSPACE), created on demand. That workspace IS the pool: an
@@ -16,6 +16,9 @@
 # first. NOTE: /clear drops the conversation, but a SessionStart memory hook
 # (claude-mem here) re-injects project context right after — so treat --clear as
 # "drop this thread", not as amnesia.
+#
+# --mcp a,b is passed to `agents.sh spawn` when a new worker is created (servers from
+# wt-agents/mcp/catalog.json); a reused worker keeps the MCP set it started with.
 #
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
 # ticket is taken from <cwd>'s branch (UMK-NNN). Both panes are told about each other through
@@ -33,6 +36,7 @@ pane_arg=
 clear=0
 goal=1
 task=
+mcp=
 while :; do
   case "${1:-}" in
     --list)  mode=list; shift ;;
@@ -41,6 +45,7 @@ while :; do
     --pane)  pane_arg=$2; mode=pane; shift 2 ;;
     --no-goal) goal=0; shift ;;
     --task)  task=$2; shift 2 ;;
+    --mcp)   mcp=$2; shift 2 ;;
     *) break ;;
   esac
 done
@@ -181,7 +186,7 @@ fi
 
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called.
-created=$("$(dirname "$0")/../../wt-agents/scripts/agents.sh" spawn worker "$cwd")
+created=$("$(dirname "$0")/../../wt-agents/scripts/agents.sh" spawn worker "$cwd" ${mcp:+--mcp "$mcp"})
 label=${created%% *}
 pane=${created##* }
 
