@@ -52,6 +52,7 @@ mcp=
 dry=0
 while :; do
   case "${1:-}" in
+    -h|--help) sed -n "2,/^[^#]/{/^#/s/^# \{0,1\}//p;}" "$0"; exit 0 ;;
     --list)  mode=list; shift ;;
     --new)   mode=new; shift ;;
     --clear) clear=1; shift ;;
