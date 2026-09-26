@@ -254,7 +254,7 @@ async function triage() {
     ? { answers: await judge('babysit_triage', { comments }, questions, { timeoutMs: 10000 }) }
     : await ask({ comments }, questions);
   if (!body.answers) { console.error('Jev unavailable (no key, timeout or HTTP error)'); process.exit(3); }
-  const rows = comments.map((c, i) => ({ comment: c, actionable: body.answers[`c${i}`].noul,
+  const rows = comments.map((c, i) => ({ comment: c, actionable: body.answers[`c${i}`]?.noul ?? 0,
     ...(classes ? { class: body.answers[`k${i}`]?.choice ?? null, p: body.answers[`k${i}`]?.confidence ?? null } : {}) }));
   if (json) return console.log(JSON.stringify(rows, null, 2));
   for (const { comment, actionable, class: k } of rows) {

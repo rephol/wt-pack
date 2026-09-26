@@ -174,7 +174,8 @@ export async function judge(feature, state, questions, { timeoutMs = 2000, key, 
   const h = createHash('sha1').update(input).digest('hex');
   const ck = `${feature}:${h}`;
   const rec = (answers, err, cached) => {
-    const outcome = answers == null ? 'failopen' : (pick ? (pick(answers) ? 'picked' : 'not') : 'picked');
+    let outcome = 'failopen';
+    if (answers != null) try { outcome = !pick || pick(answers) ? 'picked' : 'not'; } catch { outcome = 'not'; }
     logCall({ ts: new Date().toISOString(), feature, outcome, p: headline(answers), ms: Date.now() - t0, cache: cached, err,
       in: h.slice(0, 12), ...(envSetting('WT_JEV_LOG_SNIPPETS') === 'on' ? { snippet: JSON.stringify(state).slice(0, 120) } : {}) });
     return answers;
