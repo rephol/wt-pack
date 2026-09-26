@@ -179,3 +179,15 @@ test('jevApply / jevUndo', async () => {
   const b = await t.create('wt-pack', { title: 'B', type: 'ux' }, user) // set by the creator: never in `empty`, never changed
   assert.equal((await t.jevApply(b.id, d, ['size'])).type, 'ux')
 })
+
+test('jevApply re-triage (wt-ticket triage): keeps earlier undoable fields, never re-fills an undone one', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const a = await t.create('wt-pack', { title: 'A' }, user)
+  assert.equal(await t.project(a.id.toLowerCase()), 'wt-pack')
+  const all = ['type', 'size', 'priority']
+  await t.jevApply(a.id, { type: 'bug', size: null, priority: 2, owner: 'worker', dupes: [] }, all)
+  await t.jevUndo(a.id, 'priority', user)
+  const j = await t.jevApply(a.id, { type: 'ux', size: 'S', priority: 3, owner: 'planner', dupes: ['WP-2'] }, all)
+  assert.deepEqual([j.type, j.size, j.priority, j.jev.owner], ['bug', 'S', 0, 'planner']) // Jev's own edit entry does not block size
+  assert.deepEqual(Object.keys(j.jev.applied).sort(), ['size', 'type'])
+})

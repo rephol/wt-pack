@@ -1721,11 +1721,18 @@ async function ticketsApi(req, res, url, parts) {
     const t = await tickets.create(project, b, author)
     if (!boardKeys.includes(t.id.split('-')[0])) await refreshKeys()
     send(res, 200, t)
-    if (jevOn('TICKET_TRIAGE')) triageTicket(project, t, empty, { tickets, min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
-      ask: (state, q, pick) => jevAsk('TICKET_TRIAGE', state, q, pick, { timeoutMs: 5000 }) })
+    if (jevOn('TICKET_TRIAGE')) triage(project, t, empty)
     return
   }
   const id = parts[2]
+  // On demand (wt-ticket triage): an existing ticket has no request to tell "left empty", so every field still at its
+  // default and never edited counts as empty (jevApply's own check).
+  if (req.method === 'POST' && parts[3] === 'triage') {
+    if (!jevOn('TICKET_TRIAGE')) return send(res, 409, { error: 'Ticket triage is off (Settings › Integrations)' })
+    const t = await tickets.get(id)
+    const out = await triage(await tickets.project(t.id), t, ['type', 'size', 'priority'])
+    return out ? send(res, 200, out) : send(res, 502, { error: 'Jev gave no answer (no key, timeout or error)' })
+  }
   if (req.method === 'PATCH' && parts.length === 3) {
     let assignee
     if (b.assignee === 'me') assignee = me()
@@ -1745,6 +1752,8 @@ async function ticketsApi(req, res, url, parts) {
 
 // ---- rooms ----
 // Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
+const triage = (project, t, empty) => triageTicket(project, t, empty, { tickets, min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
+  ask: (state, q, pick) => jevAsk('TICKET_TRIAGE', state, q, pick, { timeoutMs: 5000 }) })
 const jevOn = (feature) => cfg.get(`WT_JEV_${feature}`) === 'on'
 const jevAsk = (feature, state, questions, pick, opts) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick, ...opts })
 const rooms = new Rooms({

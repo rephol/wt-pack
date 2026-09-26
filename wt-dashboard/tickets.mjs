@@ -93,6 +93,7 @@ export class Tickets {
     return JSON.parse(r.json)
   }
   async get(id) { return this.row(id) }
+  async project(id) { return this.db.prepare('SELECT project FROM tickets WHERE id = ?').get(String(id).toUpperCase())?.project ?? null }
   async create(project, body, author) {
     const f = clean(body, { create: true })
     await this.board(project)
@@ -144,14 +145,14 @@ export class Tickets {
   // edited since; record what changed so the UI can offer undo. d = { type, size, priority, owner, dupes }.
   async jevApply(id, d, empty) {
     return this.mutate(id, (t, at) => {
-      const edited = new Set(t.history.filter((h) => h.kind === 'edit').flatMap((h) => h.text?.split(', ') ?? []))
+      const edited = new Set(t.history.filter((h) => h.kind === 'edit' && h.author !== 'jev').flatMap((h) => h.text?.split(', ') ?? []))
       const applied = {}
       for (const k of empty) {
         if (d[k] == null || edited.has(k) || t[k] !== DEFAULTS[k] || d[k] === t[k]) continue
         applied[k] = { from: t[k], to: d[k] }
         t[k] = d[k]
       }
-      t.jev = { at, applied, owner: d.owner ?? null, dupes: d.dupes ?? [] }
+      t.jev = { at, applied: { ...t.jev?.applied, ...applied }, owner: d.owner ?? null, dupes: d.dupes ?? [] }
       if (Object.keys(applied).length) t.history.push({ at, author: 'jev', kind: 'edit', text: `jev: ${Object.keys(applied).join(', ')}` })
       return t
     })
