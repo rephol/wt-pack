@@ -180,6 +180,19 @@ test('action: timeout, and a skipped result', async () => {
   assert.deepEqual([r.runs()[0].status, r.runs()[0].reason], ['skipped', 'triage off'])
 })
 
+test('action: a timed-out action still running blocks the next run of that action, from any routine', async () => {
+  let finish
+  const { r } = setup({ actions: { housekeeping: () => new Promise((res) => { finish = res }) } })
+  const x = r.create({ ...HK, timeout_min: 0.0005 }), y = r.create({ ...HK, name: 'hk2' })
+  await r.runNow(x.id); await r.idle()
+  assert.equal(r.runs()[0].status, 'timeout')
+  await r.runNow(y.id)
+  assert.deepEqual([r.runs()[0].status, r.runs()[0].reason], ['skipped', 'housekeeping still running'])
+  finish({ summary: 'late' }); await new Promise((res) => setTimeout(res, 0))
+  await r.runNow(x.id); finish({ summary: 'ok' }); await r.idle()
+  assert.equal(r.runs()[0].status, 'ok')
+})
+
 test('startup cleanup: orphaned spawn run → agent removed, run failed', async () => {
   const { w, r } = setup()
   r.db.prepare("INSERT INTO routine_runs (routine_id, started, status, agent, kind) VALUES ('seed-audit', 1, 'running', 'p7', 'spawn'), ('seed-digest', 1, 'running', 'orch', 'prompt')").run()

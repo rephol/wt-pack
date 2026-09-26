@@ -74,7 +74,7 @@ const DAY = 86_400_000
 export class Routines {
   // deps: { agents, host, prompt(agent, text), spawn({kind, project, prompt}), remove(pane, {force}), actions: {name: (target) => result} }
   constructor({ dir, db, deps = {}, log = console.error, pollMs = 15_000 }) {
-    Object.assign(this, { file: dir && join(dir, 'wt.db'), _db: db, deps, log, pollMs, ticking: false, inflight: new Set() })
+    Object.assign(this, { file: dir && join(dir, 'wt.db'), _db: db, deps, log, pollMs, ticking: false, inflight: new Set(), busy: new Set() })
   }
   get db() { return this._db ?? open(this.file, { log: this.log }) } // lazy: server.mjs is imported by tests
 
@@ -188,6 +188,8 @@ export class Routines {
         const max = this.settings().maxWorking
         if (working.length + pending >= max) return skip(`cap: ${working.length + pending} working ≥ ${max}`)
       }
+      // An action that timed out may still be running; one at a time per action, across routines.
+      if (t.kind === 'action' && this.busy.has(t.action)) return skip(`${t.action} still running`)
       if ((await this.deps.host())?.pressure === 'critical') return skip('memory pressure critical')
       if (t.kind === 'prompt') {
         a = ags.find((x) => t.agent ? x.name === t.agent : x.pool === t.role && x.project === t.project)
@@ -211,8 +213,10 @@ export class Routines {
     }
     if (t.kind === 'action') {
       let timer
+      this.busy.add(t.action) // released when the action settles, not when the run times out
+      const work = Promise.resolve().then(() => this.deps.actions[t.action](t)).finally(() => this.busy.delete(t.action))
       const out = await Promise.race([
-        this.deps.actions[t.action](t),
+        work,
         new Promise((resolve) => { timer = setTimeout(() => resolve({ timeout: true }), ms) }),
       ]).finally(() => clearTimeout(timer))
       if (out?.timeout) return this.#close(runId, 'timeout', `after ${r.timeout_min} min`)
