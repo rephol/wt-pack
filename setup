@@ -53,6 +53,20 @@ plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.
 pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; then echo "sudo apt-get install -y $1"; elif has dnf; then echo "sudo dnf install -y $1"; else echo "install $1 with your package manager"; fi; }
 # The OTHER wt-pack checkout the existing skill links point into ("" when none, or when it is this one).
 link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(dirname "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
+# herdr: report, never install. $1 = bad|opt (how a missing herdr counts); $2 = 1 also runs `herdr config check`.
+herdr_check() {
+  if ! has herdr; then
+    $1 "herdr — needed for agents, handoffs and rooms; run: $(if has brew; then echo 'brew install herdr'; else echo 'curl -fsSL https://herdr.dev/install.sh | sh'; fi)"; return
+  fi
+  how="direct install, update: herdr update"; has brew && brew list herdr >/dev/null 2>&1 && how="Homebrew, update: brew upgrade herdr"
+  ok "$(herdr --version 2>/dev/null | head -1) ($how)"
+  case "$(herdr integration status 2>/dev/null | grep '^claude:')" in
+    "claude: current"*) ok "herdr claude integration" ;;
+    *) opt "herdr claude integration missing or outdated (agent state) — run: herdr integration install claude" ;;
+  esac
+  [ "${2:-0}" = 1 ] || return 0
+  if herdr config check >/dev/null 2>&1; then ok "herdr config"; else opt "herdr config check reports problems — run: herdr config check"; fi
+}
 built() { [ -f "$DASH/web/dist/index.html" ] && [ -z "$(find "$DASH/web/src" "$DASH/web/index.html" "$DASH/web/package.json" -newer "$DASH/web/dist/index.html" 2>/dev/null | head -1)" ]; }
 
 # ---------------------------------------------------------------- doctor
@@ -65,7 +79,7 @@ doctor() {
   if ! has gh; then bad "gh — $(pkg gh)"
   elif gh auth status >/dev/null 2>&1; then ok "gh (authenticated)"
   else bad "gh not logged in — run: ! gh auth login"; fi
-  if has herdr; then ok "herdr"; else bad "herdr — needed for agents, handoffs and rooms; install it from its own docs"; fi
+  herdr_check bad 1
   if has claude; then ok "claude"; else bad "claude (Claude Code) not on PATH"; fi
 
   n=0; miss=""; other=""; home=$(link_home); later=""
@@ -134,7 +148,7 @@ deps() {
   has gh || want="$want gh"
   has git || want="$want git"
   has curl || want="$want curl"
-  has herdr || opt "herdr is not on PATH — needed for agents, handoffs and rooms; install it from its own docs"
+  herdr_check opt
   if [ -z "$want" ]; then ok "already: node, jq, gh"; return 0; fi
   if [ "$OS" != Darwin ]; then bad "missing:$want — $(pkg "$(echo $want | sed 's/node/nodejs/')")"; return 1; fi
   if ! has brew; then

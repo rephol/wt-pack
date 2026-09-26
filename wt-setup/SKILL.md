@@ -19,6 +19,10 @@ or, before anything is linked, the clone the user names.
 2. **Install** when doctor fails or the user asked: `<repo>/setup install`. It lists missing Homebrew packages
    and asks one y/N before installing them. Ask the user that question with AskUserQuestion; if they say
    yes, re-run with `--yes`. Never install Homebrew or herdr yourself: setup prints how, the user runs it.
+   herdr is detected (version, and Homebrew vs direct install for the update command); when missing, setup
+   prints `brew install herdr` if brew exists, else the herdr.dev curl line — never pipe it yourself. When the
+   claude integration is missing or outdated it prints `herdr integration install claude`; doctor also runs
+   `herdr config check`. setup never writes herdr's `config.toml`.
    Pass `--no-secrets` (this session cannot type into a hidden prompt), and tell the user the keys come last.
 3. **Secrets are typed by the user**, never by you: ask them to run `! <repo>/setup secrets` for the
    TypeSafe key. The Linear key goes in the dashboard, Settings › Integrations (stored in the Keychain).
