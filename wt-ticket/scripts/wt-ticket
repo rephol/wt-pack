@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# wt-ticket — the local ticket board in wt-dashboard, from an agent pane. bash + curl + node (for JSON).
+#   wt-ticket new "<title>" [--type bug|ux|gap|debt|feature] [--size S|M|L] [--priority 0-4] [--label l]... [--link url]...
+#                           [--body text] [--column c] [--project p]
+#   wt-ticket list [--column c] [--mine] [--project p]
+#   wt-ticket show <ID>
+#   wt-ticket move <ID> <column> [--note "…"]       (blocked needs --note)
+#   wt-ticket comment <ID> "text"
+#   wt-ticket claim <ID> [--force]
+#   wt-ticket assign <ID> <agent|me|none>
+#   wt-ticket keys                                  (known board keys, one per line)
+#   --json on any command prints the raw API body. Columns: backlog ready planning building review done blocked.
+# Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
+set -u
+API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
+usage() { sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+json=0; args=()
+for a in "$@"; do [ "$a" = --json ] && json=1 || args+=("$a"); done
+set -- "${args[@]+"${args[@]}"}"
+cmd=${1:-}; [ $# -gt 0 ] && shift
+fmt() { [ $json = 1 ] && echo "" || echo "format=text"; }
+# call METHOD PATH [JSON]: prints the body; exit 1 on an HTTP error or an unreachable server.
+call() {
+  local out code
+  out=$(curl -sS -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+    ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API" >&2; exit 1; }
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  if [ "$code" -ge 400 ]; then echo "wt-ticket: $code $out" >&2; exit 1; fi
+  printf '%s\n' "$out"
+}
+# obj k=v ... → a JSON object; k:=v takes v as raw JSON (numbers, arrays, booleans).
+obj() { node -e 'const o={};for(const a of process.argv.slice(1)){const i=a.indexOf("=");const raw=a[i-1]===":";const k=a.slice(0,raw?i-1:i);o[k]=raw?JSON.parse(a.slice(i+1)):a.slice(i+1)}console.log(JSON.stringify(o))' "$@"; }
+arr() { node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "$@"; }
+project() { basename "$(dirname "$(cd "$(git rev-parse --git-common-dir 2>/dev/null || echo .git)" 2>/dev/null && pwd)")"; }
+# A mutation prints the ticket row (or JSON); a text row needs a follow-up GET.
+show() { call GET "/api/tickets/$1?$(fmt)"; }
+row() { [ $json = 1 ] && printf '%s\n' "$1" || show "$(node -e 'console.log(JSON.parse(process.argv[1]).id)' "$1")" | head -1; }
+case "$cmd" in
+  new)
+    [ $# -ge 1 ] || usage
+    kv=("title=$1"); shift; labels=(); links=(); proj=
+    while [ $# -gt 0 ]; do
+      [ $# -ge 2 ] || usage
+      case "$1" in
+        --type) kv+=("type=$2") ;; --size) kv+=("size=$2") ;; --priority) kv+=("priority:=$2") ;;
+        --body) kv+=("body=$2") ;; --column) kv+=("column=$2") ;; --project) proj=$2 ;;
+        --label) labels+=("$2") ;; --link) links+=("$2") ;; *) usage ;;
+      esac; shift 2
+    done
+    [ ${#labels[@]} -gt 0 ] && kv+=("labels:=$(arr "${labels[@]}")")
+    [ ${#links[@]} -gt 0 ] && kv+=("links:=$(arr "${links[@]}")")
+    out=$(call POST /api/tickets "$(obj "${kv[@]}" "project=${proj:-$(project)}")") || exit 1; row "$out" ;;
+  list)
+    q=; proj=
+    while [ $# -gt 0 ]; do
+      case "$1" in --column) q="$q&column=${2:?}"; shift ;; --project) proj=${2:?}; shift ;; --mine) q="$q&mine=1" ;; *) usage ;; esac; shift
+    done
+    call GET "/api/tickets?project=${proj:-$(project)}$q&$(fmt)" ;;
+  show) [ $# -eq 1 ] || usage; show "$1" ;;
+  move)
+    [ $# -ge 2 ] || usage; id=$1; kv=("column=$2"); shift 2
+    [ $# -eq 0 ] || { [ "$1" = --note ] && [ $# -eq 2 ] || usage; kv+=("note=$2"); }
+    out=$(call PATCH "/api/tickets/$id" "$(obj "${kv[@]}")") || exit 1; row "$out" ;;
+  comment) [ $# -eq 2 ] || usage; out=$(call POST "/api/tickets/$1/comments" "$(obj "text=$2")") || exit 1; row "$out" ;;
+  claim)
+    [ $# -ge 1 ] || usage; f=false; [ "${2:-}" = --force ] && f=true
+    out=$(call POST "/api/tickets/$1/claim" "$(obj "force:=$f")") || exit 1; row "$out" ;;
+  assign)
+    [ $# -eq 2 ] || usage
+    if [ "$2" = none ]; then b='{"assignee":null}'; else b=$(obj "assignee=$2"); fi
+    out=$(call PATCH "/api/tickets/$1" "$b") || exit 1; row "$out" ;;
+  keys) call GET "/api/tickets/keys?$(fmt)" ;;
+  *) usage ;;
+esac
