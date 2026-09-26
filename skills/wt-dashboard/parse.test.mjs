@@ -1090,3 +1090,17 @@ test('parseTeams: WT_LINEAR_TEAMS "KEY=project,KEY" → team key → project (WP
   assert.deepEqual(cfg.list('WT_LINEAR_TEAMS'), ['umk=umkmall', 'ENG'])
   await assert.rejects(cfg.setValue('WT_LINEAR_TEAMS', ['E"}']), (e) => e.status === 400)
 })
+
+test('rooms: the linked project can be set, cleared and survives a reload; bad values are 400 (WP-89)', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const dir = mkdtempSync(pj(tmpdir(), 'wtd-rooms-proj-'))
+  const mk = () => new Rooms({ dir, agents: async () => [], prompt: async () => {}, log: () => {} })
+  const rooms = mk()
+  await rooms.create({ title: 'ops', slug: 'ops' })
+  assert.equal((await rooms.update('ops', { project: 'wt-pack' })).project, 'wt-pack')
+  assert.equal((await mk().list()).find((r) => r.slug === 'ops').project, 'wt-pack')
+  assert.equal((await rooms.update('ops', { project: null })).project, null)
+  assert.equal((await rooms.update('ops', { paused: true })).project, null) // untouched when absent
+  await assert.rejects(rooms.update('ops', { project: '../x' }), (e) => e.status === 400)
+  await assert.rejects(rooms.update('ops', { project: 5 }), (e) => e.status === 400)
+})

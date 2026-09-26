@@ -323,13 +323,19 @@ export class Rooms {
     await this.saveIndex()
     return responder ? this.update(s, { responder }) : r
   }
-  async update(slug, { paused, members, title, archived, responder, broadcast }, agentList = null) {
+  async update(slug, { paused, members, title, archived, responder, broadcast, project }, agentList = null) {
     await this.load()
     const r = this.room(slug)
     if (!r) return null
     if (typeof paused === 'boolean') r.paused = paused
     if (typeof archived === 'boolean') r.archived = archived
     if (typeof broadcast === 'boolean') r.broadcast = broadcast
+    // WP-89: the linked project (null = none). It decides the project filter the room shows under and the
+    // project of its 'needs you' items; Dispatch's report room is chosen by name or the board's Report to, not this.
+    if (project !== undefined) {
+      if (project !== null && !(typeof project === 'string' && /^[\w.-]{1,64}$/.test(project))) throw Object.assign(new Error('project: a project name or null'), { status: 400 })
+      r.project = project
+    }
     if (responder !== undefined) {
       // Set by the user: pinned (ticket sync stops moving it). null clears it and unpins.
       const a = responder && (agentList ?? (await this.agentsFn())).find((x) => x.key === responder)

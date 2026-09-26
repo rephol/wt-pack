@@ -537,7 +537,7 @@ export default function App() {
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
           : <Banner status="info" title="Terminals are off" description="Turn them on in Settings › Terminals, from http://127.0.0.1 on this machine." />)}
-        {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} project={project} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
+        {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} project={project} projects={counts.by.map(([p]) => p)} onProject={setProject} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
       </VStack>
       </LayoutContent>
         }
