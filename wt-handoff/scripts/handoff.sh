@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--dry-run] <cwd> [prompt-file]
 #
 # Handoff agents live in their own herdr workspace, "<repo>-workers" (override
 # with HANDOFF_WORKSPACE), created on demand. That workspace IS the pool: an
@@ -19,6 +19,10 @@
 #
 # --mcp a,b is passed to `agents.sh spawn` when a new worker is created (servers from
 # wt-agents/mcp/catalog.json); a reused worker keeps the MCP set it started with.
+# Without --mcp (and without --pane), Jev picks them from the prompt (jev-mcp.mjs: one yes/no per
+# catalog server, kept at >= 0.7, 2s timeout, any failure = no picks). A free worker is reused only if
+# it already has every pick; otherwise a new one is spawned with them. WT_HANDOFF_JEV=off skips Jev.
+# --dry-run prints the target and the picks, and sends, tags and spawns nothing.
 #
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
 # ticket is taken from <cwd>'s branch (UMK-NNN). Both panes are told about each other through
@@ -37,6 +41,7 @@ clear=0
 goal=1
 task=
 mcp=
+dry=0
 while :; do
   case "${1:-}" in
     --list)  mode=list; shift ;;
@@ -46,6 +51,7 @@ while :; do
     --no-goal) goal=0; shift ;;
     --task)  task=$2; shift 2 ;;
     --mcp)   mcp=$2; shift 2 ;;
+    --dry-run) dry=1; shift ;;
     *) break ;;
   esac
 done
@@ -71,7 +77,7 @@ worker_ws() {
   id=$(herdr workspace list \
     | jq -r --arg l "$ws_label" '.result.workspaces[] | select(.label == $l) | .workspace_id' \
     | head -1)
-  [ -n "$id" ] || id=$(herdr workspace create --label "$ws_label" --cwd "$main_checkout" --no-focus \
+  [ -n "$id" ] || [ "$dry" -eq 1 ] || id=$(herdr workspace create --label "$ws_label" --cwd "$main_checkout" --no-focus \
     | jq -r '.result.workspace.workspace_id')
   echo "$id"
 }
@@ -105,6 +111,20 @@ candidates() {
 }
 
 [ "$mode" = list ] && { candidates; exit 0; }
+
+# MCP picks from Jev (before the footer is added: it judges the task, not the routing).
+jev=
+if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ]; then
+  jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
+  mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
+fi
+# A worker has the picks if it runs the full set (no lean config) or its config lists them all.
+has_picks() {
+  [ -n "$mcp" ] || return 0
+  f=${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$1.json
+  [ -f "$f" ] || return 0
+  jq -e --arg p "$mcp" '($p | split(",")) - (.mcpServers | keys) == []' "$f" >/dev/null 2>&1
+}
 
 hand_to() {
   # /clear is the user's call, never a default: a reused agent's prior context
@@ -169,21 +189,30 @@ finish() {  # <first output line> <target pane>
   echo "reach: herdr agent prompt $to \"...\""
 }
 
+dry() {  # <what would happen>
+  echo "dry-run: $1"
+  echo "mcp: ${mcp:-none}${jev:+ (jev: $jev)}"
+  exit 0
+}
+
 if [ "$mode" = pane ]; then
+  [ "$dry" -eq 1 ] && dry "would hand to pane $pane_arg"
   hand_to "$pane_arg"
   finish "reused $pane_arg" "$pane_arg"
   exit 0
 fi
 
 if [ "$mode" = auto ]; then
-  reuse=$(candidates | head -1 | cut -f1)
+  reuse=$(candidates | while IFS= read -r c; do p=${c%%"$(printf '\t')"*}; has_picks "$(name_of "$p")" && { echo "$p"; break; }; done)
   if [ -n "$reuse" ]; then
+    [ "$dry" -eq 1 ] && dry "would reuse $(name_of "$reuse") ($reuse)"
     hand_to "$reuse"
     finish "reused $reuse" "$reuse"
     exit 0
   fi
 fi
 
+[ "$dry" -eq 1 ] && dry "would spawn a worker in $cwd${mcp:+ with --mcp $mcp}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called.
 created=$("$(dirname "$0")/../../wt-agents/scripts/agents.sh" spawn worker "$cwd" ${mcp:+--mcp "$mcp"})
