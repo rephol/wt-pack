@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS = {
 
 // Agent-created rooms: at most 3 per agent per hour.
 export const AGENT_ROOMS_PER_HOUR = 3
+// Queued mentions older than this are not re-sent after a server restart (they are marked undelivered).
+export const RESTORE_MS = 3_600_000
 export const agentRoomAllowed = (times, now = Date.now()) => times.filter((t) => now - t < 3_600_000).length < AGENT_ROOMS_PER_HOUR
 
 // Quoted or code text is an example, not an address: code blocks/spans and '…', "…", ‘…’, “…” are
@@ -395,11 +397,7 @@ export class Rooms {
     room.members = [...mem].filter(Boolean)
     await this.saveIndex()
     await this.add(slug, msg)
-    for (const key of plan.deliver) {
-      const q = this.queue.get(key) ?? []
-      q.push({ slug, msg, broadcast: plan.broadcast, command: Boolean(cmd) })
-      this.queue.set(key, q)
-    }
+    for (const key of plan.deliver) this.enqueue(key, { slug, msg, broadcast: plan.broadcast, command: Boolean(cmd) })
     if (plan.pauseNote) await this.system(slug, plan.pauseNote)
     return msg
   }
@@ -411,11 +409,36 @@ export class Rooms {
   system(slug, text, extra = {}) {
     return this.add(slug, { id: randomUUID(), ts: new Date().toISOString(), author: { kind: 'system', name: 'system' }, text, mentions: [], deliveredTo: [], ...extra })
   }
+  enqueue(key, item) { this.queue.set(key, [...(this.queue.get(key) ?? []), item]) }
+  saveMsg(slug, m) { this.db.prepare('UPDATE messages SET json = ? WHERE room = ? AND id = ?').run(JSON.stringify(m), slug, m.id) }
+  // A queued mention that will never be delivered says why on its status row (WP-38), instead of 'will be notified'.
+  undeliverable(slug, m, name, reason) {
+    m.blocked = [...(m.blocked ?? []).filter((b) => b.name !== name), { name, reason }]
+    this.saveMsg(slug, m)
+    this.emit(slug, 'message', m)
+  }
+  // The queue lives in memory, so a restart lost every mention waiting for a busy agent (WP-38). On the first flush
+  // after a start it is rebuilt from the stored messages: queuedFor minus deliveredTo and blocked. Older than
+  // RESTORE_MS, a command, or for an agent that no longer exists, it is marked undeliverable rather than sent late.
+  async restoreQueue(agents, now = Date.now()) {
+    await this.load()
+    for (const r of this.index) {
+      if (r.archived) continue
+      for (const m of await this.messages(r.slug)) {
+        for (const n of (m.queuedFor ?? []).filter((n) => !m.deliveredTo.includes(n) && !(m.blocked ?? []).some((b) => b.name === n))) {
+          const a = agents.find((x) => x.name === n)
+          // A command is never re-run late: it may no longer be wanted.
+          if (a && m.route !== 'command' && now - Date.parse(m.ts) < RESTORE_MS) this.enqueue(a.key, { slug: r.slug, msg: m, broadcast: m.route === 'broadcast', command: false })
+          else this.undeliverable(r.slug, m, n, !a ? 'not delivered: agent is gone' : m.route === 'command' ? 'not run: the server restarted before the agent was idle' : 'not delivered: waited too long across a server restart')
+        }
+      }
+    }
+  }
   async markDelivered(slug, m, a) {
     const dropped = !a.local && m.attachments?.length ? m.attachments.length : 0
     m.deliveredTo.push(a.name)
     if (dropped) m.undelivered = [...(m.undelivered ?? []), { to: a.name, n: dropped }]
-    this.db.prepare('UPDATE messages SET json = ? WHERE room = ? AND id = ?').run(JSON.stringify(m), slug, m.id)
+    this.saveMsg(slug, m)
     this.emit(slug, 'delivered', { id: m.id, to: a.name, dropped })
   }
   // A command run from a room: "finished" once its agent is between turns again (seen working, or 30s on).
@@ -433,12 +456,19 @@ export class Rooms {
   // Deliver queued messages to agents that are between turns: one prompt per agent per flush. A command
   // goes alone and RAW (its own text is the prompt); plain messages are batched per room.
   async flush() {
+    if (!this.restored) { this.restored = true; await this.restoreQueue(await this.agentsFn()) }
     if (!this.queue.size && !this.running.size) return
     const agents = await this.agentsFn()
     await this.watchCommands(agents)
-    for (const [key, items] of this.queue) {
+    // A snapshot: requeue() below re-adds a key this loop deleted, which a live Map iteration would visit again, forever.
+    for (const [key, items] of [...this.queue]) {
       const a = agents.find((x) => x.key === key)
-      if (!a) { this.queue.delete(key); continue }
+      if (!a) {
+        // The pane is gone (agent closed, or its key changed after a herdr restart): say so on each message.
+        this.queue.delete(key)
+        for (const it of items) for (const n of it.msg.queuedFor ?? []) if (!it.msg.deliveredTo.includes(n) && !agents.some((x) => x.name === n)) this.undeliverable(it.slug, it.msg, n, 'not delivered: agent is gone')
+        continue
+      }
       if (!deliverable(a) || this.running.has(key)) continue
       const n = items[0].command ? 1 : Math.max(1, items.findIndex((it) => it.command) === -1 ? items.length : items.findIndex((it) => it.command))
       const take = items.slice(0, n)
@@ -448,7 +478,7 @@ export class Rooms {
       if (take[0].command) {
         const { slug, msg } = take[0]
         const room = this.room(slug)
-        if (!room || room.archived) continue
+        if (!room || room.archived) { if (room) this.undeliverable(slug, msg, a.name, 'not delivered: room archived'); continue }
         if (room.paused) { requeue(take); continue }
         try {
           await this.promptFn(a, withAttachments(msg.command.text, msg.attachments, a.local))
@@ -467,7 +497,9 @@ export class Rooms {
         const msgs = its.map((it) => it.msg)
         // The note applies only when every queued message reached this agent by broadcast.
         const broadcast = its.every((it) => it.broadcast)
-        if (!this.room(slug) || this.room(slug).paused || this.room(slug).archived) continue
+        // A paused room keeps them queued until it is resumed; an archived room never delivers.
+        if (this.room(slug)?.paused) { requeue(its); continue }
+        if (!this.room(slug) || this.room(slug).archived) { if (this.room(slug)) for (const m of msgs) this.undeliverable(slug, m, a.name, 'not delivered: room archived'); continue }
         try {
           await this.promptFn(a, batchPrompt(slug, msgs, broadcast, a.local))
           for (const m of msgs) await this.markDelivered(slug, m, a)

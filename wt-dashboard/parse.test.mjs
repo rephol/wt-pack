@@ -945,3 +945,46 @@ test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed l
   assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, undefined), 'agent-p1')
   assert.equal(agentName({ local: true }, { terminal_title_stripped: 'umkmall-orchestrator', pane_id: 'wP:p1' }, '/x/umkmall'), 'umkmall-orchestrator')
 })
+
+// WP-38: the delivery queue is in memory; a restart must not silently lose mentions waiting for a busy agent.
+test('Rooms: queued mentions survive a restart; stale, command and gone ones get a visible reason; paused keeps them', async () => {
+  const { Rooms, RESTORE_MS } = await import('./rooms.mjs')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const dir = mkdtempSync(join(tmpdir(), 'wtd-rooms-'))
+  let list = [{ name: 'w1', key: 'm/w:p1', local: true, status: 'working' }, { name: 'w2', key: 'm/w:p2', local: true, status: 'working' }]
+  const prompts = []
+  const make = () => new Rooms({ dir, agents: async () => list, prompt: async (a) => prompts.push(a.name), log: () => {} })
+  const before = make()
+  await before.create({ title: 'r', slug: 'r' })
+  const you = { kind: 'user', name: 'you' }
+  const fresh = await before.post('r', { author: you, text: '@w1 please look' })
+  const cmd = await before.post('r', { author: you, text: '@w1 /wt-audit' })
+  const stale = await before.post('r', { author: you, text: '@w2 old one' })
+  const gone = await before.post('r', { author: you, text: '@w2 bye' })
+  // age one message and remove w2's pane before the "restart"
+  stale.ts = new Date(Date.now() - RESTORE_MS - 1000).toISOString(); before.saveMsg('r', stale)
+  list = [{ ...list[0], status: 'idle' }]
+  const after = make()
+  await after.flush()
+  const byId = new Map((await after.messages('r')).map((m) => [m.id, m]))
+  assert.deepEqual(prompts, ['w1'])
+  assert.deepEqual(byId.get(fresh.id).deliveredTo, ['w1'])
+  assert.match(byId.get(cmd.id).blocked.find((b) => b.name === 'w1').reason, /not run/)
+  assert.match(byId.get(stale.id).blocked.find((b) => b.name === 'w2').reason, /not delivered/)
+  assert.match(byId.get(gone.id).blocked.find((b) => b.name === 'w2').reason, /agent is gone/)
+  // reasons are stored, so a second restart does not re-queue or re-mark them
+  const again = make(); await again.flush()
+  assert.deepEqual(prompts, ['w1'])
+  // a paused room keeps a queued mention instead of dropping it
+  list = [{ ...list[0], status: 'working' }]
+  const m2 = await after.post('r', { author: you, text: '@w1 later' })
+  await after.update('r', { paused: true })
+  list = [{ ...list[0], status: 'idle' }]
+  await after.flush()
+  assert.equal(after.queue.get('m/w:p1')?.length, 1)
+  await after.update('r', { paused: false })
+  await after.flush()
+  assert.deepEqual((await after.messages('r')).find((m) => m.id === m2.id).deliveredTo, ['w1'])
+})
