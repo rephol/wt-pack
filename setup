@@ -44,7 +44,7 @@ fails=0
 # A wt-pack checkout: a directory with the pack's marketplace manifest.
 is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt-pack"' "$1/.claude-plugin/marketplace.json"; }
 # The checkout a skill dir belongs to: <co>/skills/<s> (this layout) or <co>/<s> (before WP-69).
-root_of() { case "$1" in */skills/*) dirname "$(dirname "$1")" ;; *) dirname "$1" ;; esac; }
+root_of() { d=$(dirname "$1"); if [ "$(basename "$d")" = skills ]; then dirname "$d"; else echo "$d"; fi; }
 # A checkout's dir for skill $2, in whichever layout it has.
 skill_dir() { if [ -d "$1/skills/$2" ]; then echo "$1/skills/$2"; else echo "$1/$2"; fi; }
 skills() { for d in "$SK"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
@@ -186,7 +186,7 @@ link_skills() {
   done
   [ -n "$elsewhere" ] && opt "kept links into $elsewhere (another wt-pack checkout)"
   [ "$moved" -gt 0 ] && ok "migrated $moved link(s) to $SK"
-  if [ "$made" -eq 0 ]; then ok "already: $kept linked"; else ok "linked $made new (${kept} already)"; fi
+  if [ "$made" -eq 0 ] && [ "$moved" -eq 0 ]; then ok "already: $kept linked"; elif [ "$made" -gt 0 ]; then ok "linked $made new (${kept} already)"; fi
 }
 
 dirs() {
