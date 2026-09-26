@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel, HStack, VStack, StackItem, Card, Section } from '@astryxdesign/core/Layout'
 import { Avatar } from '@astryxdesign/core/Avatar'
+import { Switch } from '@astryxdesign/core/Switch'
 import { Badge, type BadgeVariant } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -66,6 +67,9 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
   const cardEls = useRef(new Map<string, HTMLElement>())
   const teardownRef = useRef<(() => void) | null>(null)
   const justDragged = useRef(false)
+  // Board 'Auto' (WP-39): Jev may promote Backlog → Ready; 'Run now' triages the whole Backlog.
+  const setAuto = useMutation({ mutationFn: (auto: boolean) => send('/api/tickets/board', 'PUT', { project, auto }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
+  const runNow = useMutation({ mutationFn: () => send<{ queued: number }>('/api/tickets/board/run', 'POST', { project }) })
   const move = useMutation({
     mutationFn: ({ id, to }: { id: string; to: Column }) => send(tUrl(id), 'PATCH', { column: to }),
     onMutate: async ({ id, to }) => {
@@ -175,7 +179,11 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
                 ? <Selector label="Column" isLabelHidden width={200} value={col} onChange={(v: string) => setCol(v as Column)}
                     options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
                 : <><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
-              endContent={<Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />} />
+              endContent={<HStack gap={2} vAlign="center">
+                <Switch label="Auto" value={!!q.data.auto} isDisabled={setAuto.isPending} onChange={(on: boolean) => setAuto.mutate(on)} />
+                {q.data.auto && <Button label={runNow.data ? `Queued ${runNow.data.queued}` : 'Run now'} variant="secondary" size={phone ? 'sm' : 'md'} isLoading={runNow.isPending} onClick={() => runNow.mutate()} />}
+                <Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />
+              </HStack>} />
           </LayoutHeader>
         }
         content={
@@ -435,7 +443,7 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
           <VStack gap={1}>
             {Object.entries(ticket.jev.applied).map(([f, a]) => (
               <HStack key={f} gap={2} vAlign="center">
-                <Text type="body">Jev suggested {f} {f === 'priority' ? PRIORITY[Number(a.to)] : String(a.to)}</Text>
+                <Text type="body">{f === 'column' ? 'Jev auto-promoted to Ready' : `Jev suggested ${f} ${f === 'priority' ? PRIORITY[Number(a.to)] : String(a.to)}`}</Text>
                 <Button label="Undo" variant="ghost" size="sm" isLoading={undo.isPending && undo.variables === f} onClick={() => undo.mutate(f)} />
               </HStack>
             ))}

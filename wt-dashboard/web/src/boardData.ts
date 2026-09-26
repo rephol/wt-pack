@@ -23,7 +23,7 @@ export interface Ticket {
 // Server-owned Jev triage (ticketJev.mjs): fields it filled (undoable), advisory owner role, likely duplicates.
 export interface TicketJev { at: string; applied: Record<string, { from: unknown; to: unknown }>; owner: 'planner' | 'worker' | null; dupes: string[] }
 export const jevChip = (t: Ticket) => !!t.jev && (Object.keys(t.jev.applied).length > 0 || t.jev.dupes.length > 0)
-export interface Board { key: string | null; tickets: Ticket[] }
+export interface Board { key: string | null; auto?: boolean; tickets: Ticket[] }
 
 export const columnLabel = (c: string) => c[0].toUpperCase() + c.slice(1)
 // Linear's scale: 0 none, 1 urgent … 4 low.

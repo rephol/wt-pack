@@ -138,6 +138,8 @@ export const MIGRATIONS = [
           CREATE TABLE notifications (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, json TEXT NOT NULL);`,
     legacy: (names) => names.filter((n) => /^(rooms|rooms\.json.*|notifications\.jsonl.*)$/.test(n)),
     import: (db, data, log) => { importRooms(db, data, log); importInbox(db, data) }, export: exportStage2 },
+  // Per-board settings (WP-39 'Auto'); nothing to import, and the JSON rollback has no place for them.
+  { sql: `ALTER TABLE boards ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
