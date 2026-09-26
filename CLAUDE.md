@@ -8,6 +8,7 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
 - Role: orchestrator — **never implement yourself.** Spawn planners (`wt-agents spawn planner`) for work needing a plan, workers for clear tasks; hand off with wt-handoff.
   Verify, commit, report concisely.
 - **No draft PRs:** after code review (wt-review / wt-ship), merge to main directly, then push.
+- **Browser checks:** use the `agent-browser` skill first; other browser tooling only when it is not installed.
 - **One commit per skill touched.** Commit only your own paths (`git commit <paths>`), never `-a`.
 - Keep every CLI backward compatible. Extending skills for dashboard needs is allowed.
 - The umkmall orchestrator (previous owner) is reachable via `herdr agent prompt wP:p1 "..."`.

@@ -54,6 +54,7 @@ routine status updates, where they bury signal under noise. Create new tasks if 
 
 When the change touches views, components, layouts or user-visible routes: preserve the existing design-system
 conventions, use real controls and states, keep layouts responsive, and check that text does not overflow or
-overlap. With browser tooling available, look at the changed UI at desktop and mobile widths before final
-verification. Without it, do a code-level responsive review and **record that browser verification was
+overlap. Look at the changed UI at desktop and mobile widths before final verification, **with the
+`agent-browser` skill first** (`agent-browser skills get core`); other browser tooling only when it is not
+installed. Without any, do a code-level responsive review and **record that browser verification was
 unavailable** rather than implying it happened.

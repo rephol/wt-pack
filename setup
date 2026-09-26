@@ -131,6 +131,7 @@ doctor() {
   if has security && security find-generic-password -s wt-dashboard -a LINEAR_API_KEY >/dev/null 2>&1; then ok "Linear key (optional)"
   else opt "Linear key not set (optional: dashboard Settings › Integrations)"; fi
   has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
+  has agent-browser && ok "agent-browser (optional, preferred for browser checks)" || opt "agent-browser not installed (optional, preferred for browser checks): npm i -g agent-browser && agent-browser install"
   has cargo && ok "cargo (optional, Tauri app)" || opt "cargo not installed (optional, only for the Tauri app)"
   for c in codex gemini; do has $c && opt "$c found: wt-memory hookup is manual, see wt-memory/SKILL.md"; done
   [ "$OS" = Darwin ] || opt "Linux: no launchd, no Keychain (keys go in ~/.config/wt-dashboard/env), no brew prompt (apt: nodejs jq gh git curl), no Tauri app"
