@@ -593,3 +593,11 @@ test('Rooms.createByAgent: off → 403; on → created with creator as responder
   await rooms.update('umk-2', { archived: true })
   await assert.rejects(make('umk-2'), (e) => e.status === 409)
 })
+
+import { memoryFile } from './server.mjs'
+test('memoryFile: only global, roles/<id>, projects/<name>; no traversal', () => {
+  assert.match(memoryFile('global'), /wt-memory\/global\.md$/)
+  assert.match(memoryFile('roles', 'worker'), /wt-memory\/roles\/worker\.md$/)
+  assert.match(memoryFile('projects', 'wt-pack'), /wt-memory\/projects\/wt-pack\.md$/)
+  for (const [s, n] of [['roles', '../x'], ['projects', '.hidden'], ['projects', 'a/b'], ['global', 'x'], ['other', 'x'], ['roles', '']]) assert.equal(memoryFile(s, n), null)
+})

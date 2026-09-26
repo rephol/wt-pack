@@ -648,6 +648,51 @@ async function rolesApi(req, res) {
   return send(res, 200, { roles: roleStore.roles })
 }
 
+// ---- memory (Settings › Memory): the wt-memory preference files, see wt-memory/SKILL.md ----
+// Names match wt-memory's own rule, so nothing here can address a path outside the store.
+const MEMORY = process.env.WT_MEMORY_HOME || join(homedir(), '.config', 'wt-memory')
+const MEMORY_BIN = [new URL('../wt-memory/scripts/wt-memory', import.meta.url).pathname, join(homedir(), '.claude', 'skills', 'wt-memory', 'scripts', 'wt-memory')].find((p) => existsSync(p))
+export const MEMORY_NAME = /^[A-Za-z0-9][\w.-]{0,99}$/
+export function memoryFile(scope, name) {
+  if (scope === 'global' && !name) return join(MEMORY, 'global.md')
+  if ((scope === 'roles' || scope === 'projects') && MEMORY_NAME.test(name ?? '')) return join(MEMORY, scope, `${name}.md`)
+  return null
+}
+const MEMORY_KEY = 'wt-memory@wt-pack'
+async function memoryApi(req, res, url, parts) {
+  if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
+  if (parts[2] === 'preview' && req.method === 'GET') {
+    const args = ['context']
+    for (const k of ['role', 'project']) { const v = url.searchParams.get(k); if (v && MEMORY_NAME.test(v)) args.push(`--${k}`, v) }
+    if (!MEMORY_BIN) return send(res, 200, { text: '', error: 'wt-memory not found' })
+    // --cwd / so an unset project is not guessed from the SERVER's directory.
+    return send(res, 200, { text: (await run(process.execPath, [MEMORY_BIN, ...args, '--cwd', '/'], undefined, 5000, { HERDR_PANE_ID: '' }).catch(() => '')).trim() })
+  }
+  if (req.method === 'GET' && !parts[2]) {
+    const list = async (d) => (await readdir(join(MEMORY, d)).catch(() => [])).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3))
+    const roles = [...new Set([...roleStore.roles.map((r) => r.id), ...(await list('roles'))])]
+    const projects = [...new Set([...(await projectRoots()).keys(), ...(await list('projects'))])]
+    const texts = async (scope, names) => Object.fromEntries(await Promise.all(names.map(async (n) => [n, (await readSafe(memoryFile(scope, n))) ?? ''])))
+    const installed = JSON.parse((await readSafe(join(CLAUDE, 'plugins', 'installed_plugins.json'))) ?? '{}').plugins?.[MEMORY_KEY]
+    const enabled = JSON.parse((await readSafe(join(CLAUDE, 'settings.json'))) ?? '{}').enabledPlugins?.[MEMORY_KEY]
+    return send(res, 200, {
+      dir: MEMORY, cli: MEMORY_BIN ?? null,
+      plugin: { installed: !!installed, enabled: !!installed && enabled !== false, version: installed?.[0]?.version ?? null },
+      global: (await readSafe(memoryFile('global'))) ?? '', roles: await texts('roles', roles), projects: await texts('projects', projects),
+    })
+  }
+  if (req.method === 'PUT') {
+    const f = memoryFile(parts[2], parts[3] && decodeURIComponent(parts[3]))
+    if (!f || parts.length > 4) return send(res, 400, { error: 'global, roles/<id> or projects/<name>' })
+    const { text } = JSON.parse((await body(req)) || '{}')
+    if (typeof text !== 'string' || text.length > 32_000) return send(res, 400, { error: 'text: a string up to 32 000 chars' })
+    await mkdir(dirname(f), { recursive: true })
+    await writeFile(f, text.trim() ? text.trimEnd() + '\n' : '')
+    return send(res, 200, { ok: true })
+  }
+  send(res, 405, { error: 'method' })
+}
+
 // ---- link previews (unfurl.mjs has the SSRF guards) ----
 // 24h cache in memory and on disk (data/unfurl-cache.json, 500 entries). Images are proxied only for URLs an
 // unfurl produced, never an arbitrary URL the client names.
@@ -1748,6 +1793,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
