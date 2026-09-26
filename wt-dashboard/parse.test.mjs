@@ -804,3 +804,30 @@ test('rooms: Jev resolve — answered → cleared, unanswered without ? → kept
   release(); await settle()
   assert.equal(rooms.room('r').needsYou.length, 0)
 })
+
+import { TailCache, mergeNeedsYou, needsYouJudge } from './server.mjs'
+test('jev tail cache: asks once per tail, async, answer read on a later tick; a changed tail asks again', async () => {
+  const c = new TailCache()
+  let n = 0
+  const ask = async (t) => (n++, t.includes('?'))
+  assert.equal(c.get('k', 'which env?', ask), undefined) // first tick: fired, not awaited
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(c.get('k', 'which env?', ask), true)
+  assert.equal(n, 1)
+  assert.equal(c.get('k', 'done.', ask), undefined)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual([c.get('k', 'done.', ask), n], [false, 2])
+  assert.equal(c.get('x', 't', async () => { throw new Error('x') }), undefined) // a failing ask stays undefined
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(c.get('x', 't', ask), undefined)
+})
+
+test('pane needs-you merge: picker wins, Jev yes asks with the tail, Jev no clears the regex, no answer = regex', () => {
+  const tail = 'Should I deploy to prod or staging\n\n❯ '
+  assert.deepEqual(mergeNeedsYou({ asks: false, question: null, tail }, true), { asks: true, question: 'Should I deploy to prod or staging\n❯' })
+  assert.deepEqual(mergeNeedsYou({ asks: true, question: 'Do you want to', tail }, false), { asks: false, question: null })
+  assert.deepEqual(mergeNeedsYou({ asks: true, question: 'Do you want to', tail }, undefined), { asks: true, question: 'Do you want to' })
+  assert.deepEqual(mergeNeedsYou({ picker: {}, asks: false, question: null, tail }, false), { asks: false, question: null })
+  assert.equal(needsYouJudge.decide({ waiting: { noul: 0.8 } }), true)
+  assert.equal(needsYouJudge.decide(null), false)
+})

@@ -153,8 +153,40 @@ export function parsePane(text, raw = '') {
     question,
     lastPrompt: lastUser?.text.split('\n')[0] ?? null,
     turns: out,
+    tail, // last 25 body lines: what the Jev tail judgments (needs-you, stall) read
   }
 }
+
+// ---- Jev tail judgments (WT_JEV_NEEDS_YOU, WT_JEV_STALL) ----
+// One cache per feature+pane keyed by a hash of the pane tail: an unchanged tail is asked once, the ask runs async
+// and never blocks the poll, and its answer is read on a later tick. `get` returns the answer for THIS tail or
+// undefined (not asked yet, pending, or Jev gave nothing).
+// ponytail: entries for closed panes are never pruned; one small entry per pane ever seen per server run.
+export class TailCache {
+  constructor() { this.m = new Map() }
+  get(key, tail, ask) {
+    const h = createHash('sha1').update(tail).digest('hex')
+    const e = this.m.get(key)
+    if (e?.h === h) return e.v ?? undefined
+    const n = { h, v: undefined }
+    this.m.set(key, n)
+    Promise.resolve().then(() => ask(tail)).then((v) => { if (this.m.get(key) === n) n.v = v ?? undefined }, () => {})
+    return undefined
+  }
+}
+export const needsYouJudge = {
+  questions: () => ({ waiting: { type: 'noul', instructions: 'Is this agent waiting for the user to answer or decide something?',
+    criteria: { true: 'The agent asked the user something or needs a decision before it can continue.', false: 'The agent finished, reported, or is not waiting on the user.' } } }),
+  decide: (a, min = 0.7) => (a?.waiting?.noul ?? 0) >= min,
+}
+// Jev's needs-you merged over the regex: a picker always wins; a yes asks with the regex's tail-lines extraction;
+// a no clears the regex's choice-prompt guess; no answer keeps the regex.
+export function mergeNeedsYou(p, jev) {
+  if (p.picker || jev === undefined) return { asks: p.asks ?? false, question: p.question ?? null }
+  if (!jev) return { asks: false, question: null }
+  return { asks: true, question: p.question ?? (p.tail ?? '').split('\n').filter((l) => l.trim()).slice(-6).join('\n').trim() }
+}
+const tails = new TailCache()
 
 // ---- machines ----
 const LOCAL_LABEL = hostname()
@@ -358,6 +390,11 @@ async function listAgents(m) {
     const session = m.local && a.agent_session?.kind === 'id' ? a.agent_session.value : null
     // An AskUserQuestion picker on screen beats the reply-ends-with-? heuristic (kept for permission prompts).
     const pk = p.picker ?? null
+    const jevAsks = (a.agent_status === 'idle' || a.agent_status === 'blocked') && p.tail && !pk && jevOn('NEEDS_YOU')
+      ? tails.get(`needs_you:${k}`, p.tail, (t) => jevAsk('NEEDS_YOU', { pane: t }, needsYouJudge.questions(), (x) => needsYouJudge.decide(x, minFor('needs_you')))
+        .then((x) => (x ? needsYouJudge.decide(x, minFor('needs_you')) : undefined)))
+      : undefined
+    const ny = mergeNeedsYou(p, jevAsks)
     out.push({
       key: `${m.label}/${a.pane_id}`,
       id: a.pane_id,
@@ -381,8 +418,8 @@ async function listAgents(m) {
       recap: p.recap ?? null,
       context: p.context ?? null,
       background: p.background ?? 0,
-      asks: Boolean(pk) || (p.asks ?? false),
-      question: pk ? (pk.review ? 'Review and submit your answers' : `${pk.tabs[pk.current]?.header ? pk.tabs[pk.current].header + ': ' : ''}${pk.question}`) : p.question ?? null,
+      asks: Boolean(pk) || ny.asks,
+      question: pk ? (pk.review ? 'Review and submit your answers' : `${pk.tabs[pk.current]?.header ? pk.tabs[pk.current].header + ': ' : ''}${pk.question}`) : ny.question,
       picker: pk,
       lastPrompt: p.lastPrompt ?? null,
       session,
