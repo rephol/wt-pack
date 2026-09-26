@@ -1,0 +1,19 @@
+schema_version: "1.1"
+name: skip-one-off
+description: A one-off task detail is not saved as a standing preference.
+runs: 3
+execution:
+  prompt: "For this reply only, answer in one word: what colour is the sky on a clear day?"
+  allowed_tools: [Bash]
+  max_turns: 4
+graders:
+  - name: no-remember
+    type: tool_used
+    tool: Bash
+    input_match: "remember"
+    min: 0
+    max: 0
+  - name: no-remembered-line
+    type: regex
+    pattern: "Remembered:"
+    match: not_contains

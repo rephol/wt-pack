@@ -3,3 +3,4 @@
 *.jsonl
 wt-judge-thresholds.json
 .env
+wt-memory/claude-plugin/evals/results/

@@ -12,7 +12,8 @@ try {
   const input = JSON.parse(readFileSync(0, 'utf8') || '{}')
   const event = input.hook_event_name
   // The plugin is installed as a COPY, so the CLI is found where the pack is linked, not next to this file.
-  const bin = [process.env.WT_MEMORY_BIN, join(homedir(), '.claude', 'skills', 'wt-memory', 'scripts', 'wt-memory')].find((p) => p && existsSync(p))
+  // Last resort: the pack checkout itself, when the plugin runs from source (e.g. `claude plugin eval`).
+  const bin = [process.env.WT_MEMORY_BIN, join(homedir(), '.claude', 'skills', 'wt-memory', 'scripts', 'wt-memory'), new URL('../../scripts/wt-memory', import.meta.url).pathname].find((p) => p && existsSync(p))
   if (!bin) process.exit(0)
   const ctx = execFileSync(process.execPath, [bin, 'context', ...(input.cwd ? ['--cwd', input.cwd] : [])], { encoding: 'utf8', timeout: 2000 }).trim()
   const hash = createHash('sha256').update(ctx).digest('hex').slice(0, 16)
