@@ -549,7 +549,7 @@ export default function App() {
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
       <PwaHost openInbox={() => openInbox()} />
-      <QuickSwitcher agents={all?.agents ?? []} rooms={(roomsQ.data?.rooms ?? []).filter((r) => roomInProject(r, project))} loading={!all} phone={phone} hidden={fabHidden}
+      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
   )

@@ -56,3 +56,15 @@ test('roomInProject: All shows every room; a project shows only its rooms (proje
   assert.deepEqual(pick('wt-pack'), ['b'])
   assert.deepEqual(pick('umkmall'), ['a'])
 })
+
+test('switcher scope: every section follows the project (projectless under All only); toggle row shows all', async () => {
+  const { scopedItems, SCOPE_ID } = await import('./switcherData.ts')
+  const ags = [ag('wp-1', { project: 'wt-pack', lastActivity: 3 }), ag('um-1', { project: 'umkmall', lastActivity: 2, asks: true, question: 'x?' }), ag('cr', { project: null, lastActivity: 1 })]
+  const rms = [{ slug: 'wt-pack', title: 'WT Pack', project: 'wt-pack' }, { slug: 'od', title: 'Open discussion', project: null }]
+  const ids = (xs: ReturnType<typeof scopedItems>) => xs.map((x) => x.id)
+  assert.deepEqual(ids(scopedItems(ags, rms, ['um-1', 'wp-1'], 'wt-pack', false)), [SCOPE_ID, 'agent:wp-1', 'room:wt-pack'])
+  assert.match(scopedItems(ags, rms, [], 'wt-pack', false)[0].label, /^Showing wt-pack · show all$/)
+  assert.equal(ids(scopedItems(ags, rms, ['um-1'], 'wt-pack', true)).length, 6) // toggle + 3 agents + 2 rooms
+  assert.ok(!ids(scopedItems(ags, rms, [], 'all', false)).includes(SCOPE_ID))
+  assert.deepEqual(ids(scopedItems(ags, rms, [], 'wt-pack', false, 'um')), [SCOPE_ID]) // search is scoped too
+})

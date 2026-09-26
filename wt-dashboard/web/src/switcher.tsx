@@ -11,7 +11,7 @@ import { IconButton } from '@astryxdesign/core/IconButton'
 import { Icon } from '@astryxdesign/core/Icon'
 import { HStack } from '@astryxdesign/core/HStack'
 import { shortAgo } from './notifyGate'
-import { switcherItems, needsYou, agentInitials, type SwAgent, type SwItem, type SwRoom } from './switcherData'
+import { scopedItems, needsYou, agentInitials, SCOPE_ID, type SwAgent, type SwItem, type SwRoom } from './switcherData'
 import { Delayed, Rows } from './skeletons'
 import { useRoles } from './roles'
 
@@ -39,6 +39,7 @@ function useOtherDialogOpen(mine: boolean) {
 function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   const { byId } = useRoles()
   const d = it.auxiliaryData!
+  if (d.kind === 'scope') return <div data-switcher style={{ display: 'flex', alignItems: 'center', minHeight: 36, padding: '0 4px' }}><Text type="supporting" size="sm">{it.label}</Text></div>
   const a = d.kind === 'agent' ? d.agent : null
   // No question and no recap: a single-line row (the old "idle · no recent summary" line was noise); same height.
   const line = a && !a.recap && !(needsYou(a) && a.question) ? null : d.line
@@ -65,11 +66,14 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   )
 }
 
-export function QuickSwitcher({ agents, rooms, phone, hidden, loading = false, onOpenAgent, onOpenRoom }: {
-  agents: SwAgent[]; rooms: SwRoom[]; phone: boolean; hidden: boolean; loading?: boolean
+export function QuickSwitcher({ agents, rooms, project = 'all', phone, hidden, loading = false, onOpenAgent, onOpenRoom }: {
+  agents: SwAgent[]; rooms: SwRoom[]; project?: string; phone: boolean; hidden: boolean; loading?: boolean
   onOpenAgent: (key: string, full?: boolean) => void; onOpenRoom: (slug: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+  const flipping = useRef(false)
+  useEffect(() => { if (!open && !flipping.current) setShowAll(false) }, [open]) // each open starts scoped to the project
   // ⌘Enter / Ctrl+Enter on a row opens the agent as a full page (the palette reports only which row).
   const fullPick = useRef(false)
   useEffect(() => {
@@ -93,9 +97,16 @@ export function QuickSwitcher({ agents, rooms, phone, hidden, loading = false, o
   // A fresh snapshot per open, so Recent reflects the last pick.
   const source = useMemo(() => {
     const recent = loadRecent()
-    return { bootstrap: () => switcherItems(agents, rooms, recent), search: (q: string) => switcherItems(agents, rooms, recent, q) }
-  }, [agents, rooms, open]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { bootstrap: () => scopedItems(agents, rooms, recent, project, showAll), search: (q: string) => scopedItems(agents, rooms, recent, project, showAll, q) }
+  }, [agents, rooms, open, project, showAll]) // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (id: string) => {
+    // The palette closes itself after any pick; the scope row flips the filter and keeps it open.
+    if (id === SCOPE_ID) {
+      flipping.current = true
+      setShowAll((s: boolean) => !s)
+      setTimeout(() => { setOpen(true); flipping.current = false }, 0)
+      return
+    }
     setOpen(false)
     const full = fullPick.current
     fullPick.current = false

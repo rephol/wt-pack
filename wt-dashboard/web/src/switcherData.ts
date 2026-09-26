@@ -7,13 +7,26 @@ export interface SwAgent {
   key: string; name: string; pool: string; machine: string; local: boolean
   status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown'; asks: boolean
   statusSince: number; lastActivity?: number; recap: string | null; question: string | null; task: string | null
+  project?: string | null
   tags?: Record<string, string> // tags.task: the handoff label, "UMK-1192 Tailwind v4…"
 }
-// The sidebar project selector applied to rooms: 'all' shows every room; a project shows only its own rooms
-// (a room without a project appears under All only). Shared by the sidebar list, Rooms page and switcher.
-export const roomInProject = (r: { project?: string | null }, project: string) => project === 'all' || r.project === project
+// The sidebar project selector: 'all' shows everything; a project shows only its own agents/rooms (one without a
+// project appears under All only). Shared by the sidebar list, Rooms page and quick switcher.
+export const inProject = (x: { project?: string | null }, project: string) => project === 'all' || x.project === project
+export const roomInProject = inProject
 export interface SwRoom { slug: string; title: string; project?: string | null; needsYou?: { agent: string; text: string }[]; archived?: boolean }
-export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }>
+export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }
+  | { group: string; kind: 'scope'; line: string }>
+export const SCOPE_ID = 'scope:toggle'
+// Every section (Needs you, Recent, Agents, Rooms) scoped to the project unless showAll; with a project selected the
+// first row is the 'Showing <project> · show all' toggle (a row, because the palette has no header slot).
+export function scopedItems(agents: SwAgent[], rooms: SwRoom[], recent: string[], project: string, showAll: boolean, query = ''): SwItem[] {
+  const p = showAll ? 'all' : project
+  const items = switcherItems(agents.filter((a) => inProject(a, p)), rooms.filter((r) => inProject(r, p)), recent, query)
+  if (project === 'all') return items
+  const label = showAll ? `Showing all projects · only ${project}` : `Showing ${project} · show all`
+  return [{ id: SCOPE_ID, label, auxiliaryData: { group: '', kind: 'scope', line: '' } }, ...items]
+}
 
 // The task label with its lifecycle state (planner: planning → handed to <worker> → done (PR #N) / blocked: …).
 export const taskLabel = (tags?: Record<string, string>) => (tags?.task ? [tags.task, tags.task_state].filter(Boolean).join(' · ') : undefined)
