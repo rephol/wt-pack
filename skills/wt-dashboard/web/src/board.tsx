@@ -26,11 +26,12 @@ import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
+import { IconButton } from '@astryxdesign/core/IconButton'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { api, useRoomsList } from './rooms'
-import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, group, jevChip, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
+import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, group, jevChip, moveTicket, ticketMatches, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
 // Board 'Auto' threshold (WP-46): promote tickets at this priority or more urgent; 0 = any, unprioritised too.
@@ -99,7 +100,30 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(key, ctx.prev),
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
   })
-  const cols = useMemo(() => group(q.data?.tickets ?? []), [q.data])
+  // WP-90 search: ?q= in the URL (replaceState, like ?project=); every column, count, drop target and the phone
+  // picker use the filtered cols; the header badge keeps the total.
+  const [query, setQuery] = useState(() => new URLSearchParams(location.search).get('q') ?? '')
+  const [searchOpen, setSearchOpen] = useState(() => Boolean(query))
+  const searchRef = useRef<HTMLDivElement>(null)
+  const cols = useMemo(() => group((q.data?.tickets ?? []).filter((t) => ticketMatches(t, query))), [q.data, query])
+  useEffect(() => {
+    const u = new URL(location.href)
+    if (query) u.searchParams.set('q', query); else u.searchParams.delete('q')
+    if (u.href !== location.href) history.replaceState(history.state, '', u)
+  }, [query])
+  // '/' focuses the search, as App's shortcuts do: never from a typing target, a dialog, or with a ticket open.
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || openId) return
+      if (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.closest('dialog')) return
+      e.preventDefault()
+      setSearchOpen(true)
+      requestAnimationFrame(() => searchRef.current?.querySelector('input')?.focus())
+    }
+    addEventListener('keydown', on)
+    return () => removeEventListener('keydown', on)
+  }, [openId])
   const isDragging = drag !== null
   useEffect(() => {
     if (!isDragging) return
@@ -120,6 +144,15 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   if (q.isError) return <Banner status="error" title={`Board: ${q.error.message}`} />
   if (!q.data) return <Text type="supporting">Loading board…</Text>
   const tickets = q.data.tickets
+  const matches = query.trim() ? COLUMNS.reduce((n, c) => n + cols[c].length, 0) : null
+  const search = (
+    <div ref={searchRef} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: phone ? 1 : undefined }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); (e.target as HTMLElement).blur?.() } }}>
+      <TextInput label="Search tickets" isLabelHidden size={phone ? 'sm' : 'md'} width={phone ? '100%' : 220} value={query} onChange={setQuery} placeholder="Search  /" />
+      {matches !== null && <span style={{ flexShrink: 0 }}><Badge label={`${matches} match${matches === 1 ? '' : 'es'}`} variant="neutral" /></span>}
+      {query && <IconButton label="Clear search" icon={<span aria-hidden>✕</span>} size="sm" variant="ghost" onClick={() => { setQuery(''); if (phone) setSearchOpen(false) }} />}
+    </div>
+  )
 
   const open = (id: string) => { setBlockAsk(false); setOpenId(id) }
   const moveTo = (id: string, to: Column) => {
@@ -207,13 +240,18 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
                   options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
                 <HStack gap={2} vAlign="center" justify="between">
                   {automation}
-                  <Button label="New ticket" variant="primary" size="sm" onClick={() => setOpenId('new')} />
+                  <HStack gap={1} vAlign="center">
+                    {!searchOpen && <IconButton label="Search tickets" icon={<span aria-hidden>⌕</span>} size="sm" variant="ghost"
+                      onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchRef.current?.querySelector('input')?.focus()) }} />}
+                    <Button label="New ticket" variant="primary" size="sm" onClick={() => setOpenId('new')} />
+                  </HStack>
                 </HStack>
+                {searchOpen && search}
               </VStack>
             ) : (
               <Toolbar label="Board actions" gap={2} className="hd-kb-toolbar"
                 startContent={<><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
-                endContent={<HStack gap={2} vAlign="center">{automation}<Button label="New ticket" variant="primary" onClick={() => setOpenId('new')} /></HStack>} />
+                endContent={<HStack gap={2} vAlign="center">{search}{automation}<Button label="New ticket" variant="primary" onClick={() => setOpenId('new')} /></HStack>} />
             )}
           </LayoutHeader>
         }

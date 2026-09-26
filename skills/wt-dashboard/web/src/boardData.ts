@@ -51,6 +51,16 @@ export const columnLabel = (c: string) => c[0].toUpperCase() + c.slice(1)
 export const PRIORITY = ['None', 'Urgent', 'High', 'Medium', 'Low']
 
 // Every column present (empty ones too), in board order; within a column, most urgent first, then oldest id.
+// WP-90 board search — a copy of tickets.mjs ticketMatches (the web cannot import it: it opens node:sqlite);
+// boardData.test.ts runs both over one fixture table so they cannot drift.
+export function ticketMatches(t: Ticket, q: string): boolean {
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!terms.length) return true
+  const notes = (t.history ?? []).filter((h) => (h.kind === 'comment' || h.kind === 'move') && h.text).map((h) => h.text as string)
+  const hay = [t.id, t.title, t.body ?? '', (t.labels ?? []).join(' '), ...notes].join('\n').toLowerCase()
+  return terms.every((w) => hay.includes(w))
+}
+
 export function group(tickets: Ticket[]): Record<Column, Ticket[]> {
   const out = Object.fromEntries(COLUMNS.map((c) => [c, [] as Ticket[]])) as Record<Column, Ticket[]>
   const num = (id: string) => Number(id.split('-').pop()) || 0
