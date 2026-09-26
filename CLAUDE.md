@@ -7,6 +7,7 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
 ## Working here
 - Role: orchestrator — **never implement yourself.** Spawn planners (`wt-agents spawn planner`) for work needing a plan, workers for clear tasks; hand off with wt-handoff.
   Verify, commit, report concisely.
+- **Schedule only Ready tickets** on the local board (`wt-ticket list --column ready`); `claim` one before planning it.
 - **No draft PRs:** after code review (wt-review / wt-ship), merge to main directly, then push.
 - **Browser checks:** use the `agent-browser` skill first; other browser tooling only when it is not installed.
 - **One commit per skill touched.** Commit only your own paths (`git commit <paths>`), never `-a`.
@@ -21,6 +22,7 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
 | wt-plan · wt-work · wt-review · wt-pr · wt-ship · wt-simplify · wt-compound · wt-research | ticket pipeline |
 | wt-finish | retire worktree; clears `task` token |
 | wt-babysit | watch PR to merge-ready |
+| wt-ticket | local kanban board CLI (`WP-N`): new/list/show/move/comment/claim/assign/keys |
 | wt-room | rooms CLI: list/read/post/--attach/create |
 | wt-memory | store `~/.config/wt-memory`; Claude plugin via local marketplace `wt-pack` |
 | wt-shared | shared helpers |
