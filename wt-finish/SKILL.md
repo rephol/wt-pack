@@ -87,6 +87,12 @@ then the one wt-handoff put on your pane (display-only; best effort, a no-op out
 [ -n "${HERDR_PANE_ID:-}" ] && herdr pane report-metadata "$HERDR_PANE_ID" --source wt-dashboard --clear-token task >/dev/null 2>&1 || true
 ```
 
+A local board ticket (the branch's `<KEY>-N`, not UMK) goes to **done** if it is not there already (best effort):
+
+```
+~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> done || true
+```
+
 ## 4. Report
 
 What was deleted, what is left, and where the session now is. If the branch survives on the remote, say so —
