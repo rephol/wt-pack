@@ -43,7 +43,7 @@ fails=0
 # A wt-pack checkout: a directory with the pack's marketplace manifest.
 is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt-pack"' "$1/.claude-plugin/marketplace.json"; }
 skills() { for d in "$REPO"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
-node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)'; }
+node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)'; }
 service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
 # JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
 market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).find(x=>x.name==="wt-pack");if(m)console.log(m.path||m.installLocation||"")}catch{}})'; }
@@ -73,7 +73,8 @@ built() { [ -f "$DASH/web/dist/index.html" ] && [ -z "$(find "$DASH/web/src" "$D
 doctor() {
   fails=0
   step "wt-pack doctor ($REPO)"
-  if node_ok; then ok "node $(node -v)"; else bad "node >= 22.12 (have: $(node -v 2>/dev/null || echo none)) — $(pkg node)"; fi
+  if node_ok; then ok "node $(node -v)"; else bad "node >= 22.13 (have: $(node -v 2>/dev/null || echo none)) — $(pkg node)"; fi
+  if has node && node -e "process.getBuiltinModule('node:sqlite')" >/dev/null 2>&1; then ok "node:sqlite"; else bad "node:sqlite unavailable — node >= 22.13"; fi
   for c in git curl; do if has $c; then ok "$c"; elif [ "$OS" = Darwin ]; then bad "$c — xcode-select --install"; else bad "$c — $(pkg $c)"; fi; done
   if has jq; then ok "jq"; else bad "jq — $(pkg jq)"; fi
   if ! has gh; then bad "gh — $(pkg gh)"
