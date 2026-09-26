@@ -1603,7 +1603,7 @@ async function roomsApi(req, res, url, parts) {
   if (parts[3] === 'messages' && req.method === 'POST') {
     const author = await roomAuthor(req)
     const b = await json()
-    return send(res, 200, await rooms.post(slug, { author, text: b.text, confirmAll: author.kind === 'user' && b.confirmAll === true, attachments: await roomAttachments(author, b) }))
+    return send(res, 200, await rooms.post(slug, { author, text: b.text, confirmAll: author.kind === 'user' && b.confirmAll === true, attachments: await roomAttachments(author, b), replyTo: b.replyTo }))
   }
   send(res, 404, { error: 'not found' })
 }

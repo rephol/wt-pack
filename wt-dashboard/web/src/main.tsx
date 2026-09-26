@@ -2,9 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './index.css'
-import { installEnterKeyHint } from './keys'
+import { installEnterKeyHint, installChipTriggerFix } from './keys'
 import { registerPwa } from './pwa'
 installEnterKeyHint()
+installChipTriggerFix()
 registerPwa()
 
 // The server issues a fresh session cookie on each start (it gates every user action). When a POST comes back

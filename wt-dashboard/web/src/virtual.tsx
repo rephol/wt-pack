@@ -8,16 +8,18 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 
 export const THRESHOLD = 150
 
-export function VirtualRows<T>({ items, keyOf, render, scrollRef, gap = 12, estimate = 140 }: {
+// `jump`: bring the row with this key into view (a new object each time, so the same key can be jumped to again).
+export function VirtualRows<T>({ items, keyOf, render, scrollRef, gap = 12, estimate = 140, jump }: {
   items: T[]; keyOf: (t: T) => string; render: (t: T) => ReactNode
-  scrollRef: RefObject<HTMLElement | null>; gap?: number; estimate?: number
+  scrollRef: RefObject<HTMLElement | null>; gap?: number; estimate?: number; jump?: { key: string } | null
 }) {
   if (items.length <= THRESHOLD) return <>{items.map(render)}</>
-  return <Virtual items={items} keyOf={keyOf} render={render} scrollRef={scrollRef} gap={gap} estimate={estimate} />
+  return <Virtual items={items} keyOf={keyOf} render={render} scrollRef={scrollRef} gap={gap} estimate={estimate} jump={jump} />
 }
 
-function Virtual<T>({ items, keyOf, render, scrollRef, gap, estimate }: {
+function Virtual<T>({ items, keyOf, render, scrollRef, gap, estimate, jump }: {
   items: T[]; keyOf: (t: T) => string; render: (t: T) => ReactNode; scrollRef: RefObject<HTMLElement | null>; gap: number; estimate: number
+  jump?: { key: string } | null
 }) {
   // The scroll element is an ANCESTOR (ChatLayout's root), and React attaches an ancestor's ref only after its
   // descendants' layout effects ran — so on a remount with the data already there (switching back to the
@@ -33,6 +35,10 @@ function Virtual<T>({ items, keyOf, render, scrollRef, gap, estimate }: {
     overscan: 6,
     initialOffset: () => Number.MAX_SAFE_INTEGER, // open at the newest message, like the unvirtualized list
   })
+  useEffect(() => {
+    const i = jump ? items.findIndex((t) => keyOf(t) === jump.key) : -1
+    if (i >= 0) v.scrollToIndex(i, { align: 'center' })
+  }, [jump]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={{ position: 'relative', width: '100%', height: v.getTotalSize() }}>
       {v.getVirtualItems().map((it) => (

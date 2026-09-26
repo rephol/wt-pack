@@ -605,3 +605,28 @@ test('memoryFile: only global, roles/<id>, projects/<name>; no traversal', () =>
   assert.match(memoryFile('projects', 'wt-pack'), /wt-memory\/projects\/wt-pack\.md$/)
   for (const [s, n] of [['roles', '../x'], ['projects', '.hidden'], ['projects', 'a/b'], ['global', 'x'], ['other', 'x'], ['roles', '']]) assert.equal(memoryFile(s, n), null)
 })
+
+test('rooms: one message @mentions several agents and each gets it; a reply stores its parent and addresses an agent author', async () => {
+  const R = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp((await import('node:os')).tmpdir() + '/rooms-multi-')
+  const agents = ['a', 'b', 'c'].map((n) => ({ key: `m/${n}`, name: `t-${n}`, status: 'idle', local: true }))
+  const sent = []
+  const rooms = new R.Rooms({ dir, agents: async () => agents, prompt: async (a, t) => { sent.push([a.name, t]) }, log: () => {} })
+  await rooms.load()
+  await rooms.create({ title: 'm' })
+  const user = { kind: 'user', name: 'me', handle: 'user' }
+  // Composer chips are followed by an NBSP; comma and adjacent forms too.
+  const m1 = await rooms.post('m', { author: user, text: '@t-a @t-b,@t-c hi' })
+  assert.deepEqual(m1.mentions, ['t-a', 't-b', 't-c'])
+  await rooms.flush()
+  assert.deepEqual(sent.map((s) => s[0]).sort(), ['t-a', 't-b', 't-c'])
+  const agentMsg = await rooms.post('m', { author: { kind: 'agent', name: 't-b', key: 'm/b' }, text: 'done: first line\nmore' })
+  sent.length = 0
+  const reply = await rooms.post('m', { author: user, text: 'thanks', replyTo: agentMsg.id })
+  assert.deepEqual(reply.replyTo, { id: agentMsg.id, name: 't-b', text: 'done: first line' })
+  assert.deepEqual(reply.mentions, ['t-b'])
+  await rooms.flush()
+  assert.deepEqual(sent.map((s) => s[0]), ['t-b']); assert.match(sent[0][1], /me \(replying to t-b: "done: first line"\): thanks/)
+  assert.equal((await rooms.post('m', { author: user, text: 'x', replyTo: 'nope' })).replyTo, undefined)
+})

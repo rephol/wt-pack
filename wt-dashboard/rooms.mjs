@@ -118,8 +118,9 @@ export function withAttachments(text, atts, local) {
 
 // One prompt per agent per flush, whatever is queued for it across rooms.
 export const BROADCAST_NOTE = "Reply only if this is addressed to you or concerns your work; otherwise do nothing (don't post)."
+export const replySnippet = (text) => { const l = String(text ?? '').trim().split('\n')[0]; return l.length > 80 ? `${l.slice(0, 79)}…` : l }
 export function batchPrompt(slug, msgs, broadcast = false, local = true) {
-  const lines = msgs.map((m) => withAttachments(`${m.author.name}: ${m.text}`, m.attachments, local))
+  const lines = msgs.map((m) => withAttachments(`${m.author.name}${m.replyTo ? ` (replying to ${m.replyTo.name}: "${m.replyTo.text}")` : ''}: ${m.text}`, m.attachments, local))
   return `[room #${slug}] ${msgs.length} new message${msgs.length === 1 ? '' : 's'}:\n${lines.join('\n')}\n` +
     (broadcast ? `${BROADCAST_NOTE}\n` : '') +
     `Reply with: ~/.claude/skills/wt-room/scripts/room post ${slug} "…" (mention @name to address someone)`
@@ -315,7 +316,7 @@ export class Rooms {
     for (const res of this.subs.get(slug) ?? []) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   }
   // Post a message. author: {kind, name, machine?, pane?, key?}. Returns the stored message.
-  async post(slug, { author, text, confirmAll = false, attachments = [] }) {
+  async post(slug, { author, text, confirmAll = false, attachments = [], replyTo = null }) {
     await this.load()
     const room = this.room(slug)
     if (!room) throw Object.assign(new Error('unknown room'), { status: 404 })
@@ -332,6 +333,12 @@ export class Rooms {
     const agents = (await this.agentsFn()).filter((a) => a.name)
     const msg = { id: randomUUID(), ts: new Date(now).toISOString(), author, text, mentions: parseMentions(text, [...agents.map((a) => a.name), this.settings.profile.handle]), deliveredTo: [] }
     if (attachments.length) msg.attachments = attachments
+    // A reply stores who/what it answers (snippet, so it renders without the original loaded); replying to an agent addresses it.
+    const parent = typeof replyTo === 'string' ? (await this.messages(slug)).find((m) => m.id === replyTo && m.author.kind !== 'system') : null
+    if (parent) {
+      msg.replyTo = { id: parent.id, name: parent.author.kind === 'user' ? this.settings.profile.handle : parent.author.name, text: replySnippet(parent.text) }
+      if (parent.author.kind === 'agent' && agents.some((a) => a.name === parent.author.name) && !msg.mentions.includes(parent.author.name)) msg.mentions.push(parent.author.name)
+    }
     const cmd = parseCommand(msg, room, agents, this.settings.profile.handle)
     if (cmd?.error) throw Object.assign(new Error(cmd.error), { status: 400 })
     if (cmd) msg.command = { text: cmd.text, target: cmd.target.name }

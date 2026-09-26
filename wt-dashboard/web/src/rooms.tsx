@@ -1,6 +1,6 @@
 // Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger } from '@astryxdesign/core/Chat'
 import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
@@ -57,6 +57,7 @@ interface RoomMsg {
   queuedFor?: string[]; notified?: boolean
   attachments?: { path: string; type: string; size: number }[]; undelivered?: { to: string; n: number }[]
   command?: { text: string; target: string }; agentKey?: string
+  replyTo?: { id: string; name: string; text: string }
 }
 export interface RoomSettings { profile: Profile; agentToAgent: boolean; agentsCreateRooms: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
 
@@ -208,10 +209,27 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [sendErr, setSendErr] = useState<string | null>(null)
+  // Quick reply: the message being answered (the server addresses its agent author), and a jump to a reply's original.
+  const [replyTo, setReplyTo] = useState<RoomMsg | null>(null)
+  const [jump, setJump] = useState<{ key: string } | null>(null)
+  const startReply = useCallback((m: RoomMsg) => {
+    setReplyTo(m)
+    setTimeout(() => { // after the drawer mounts; caret to the end so typing lands in the input
+      const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+      if (!el) return
+      el.focus(); getSelection()?.selectAllChildren(el); getSelection()?.collapseToEnd()
+    }, 50)
+  }, [])
+  const jumpTo = useCallback((id: string) => {
+    setJump({ key: id })
+    const flash = () => document.getElementById(`rm-${id}`)?.parentElement?.animate([{ background: 'var(--color-background-muted, rgba(127,127,127,.25))' }, { background: 'transparent' }], 1200)
+    const el = document.getElementById(`rm-${id}`)
+    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); flash() } else setTimeout(flash, 300)
+  }, [])
   const post = useMutation({
     mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST',
-      body: JSON.stringify({ ...b, attachments: atts.filter((a) => a.path).map((a) => a.path) }) }),
-    onSuccess: () => { setDraft(''); setConfirm(null); clearAtts(); setSendErr(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
+      body: JSON.stringify({ ...b, attachments: atts.filter((a) => a.path).map((a) => a.path), replyTo: replyTo?.id }) }),
+    onSuccess: () => { setDraft(''); setConfirm(null); clearAtts(); setSendErr(null); setReplyTo(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
     onError: (e) => { const m = e instanceof Error ? e.message : String(e); if (/one agent/.test(m)) setSendErr(m); else toast({ body: `Could not post: ${m}`, type: 'error' }) },
   })
   // The / menu lists the commands of the agent a command would go to: the one @mentioned, else the responder.
@@ -282,7 +300,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   const mentions = useMemo(() => [mentionPlugin(agents, profile, (a) => roleOf(a.pool ?? 'other').color as TokenColor, onOpenAgent)], [agents, profile, roleOf, onOpenAgent])
   const messageList = useMemo(() => syncing ? <Delayed><ChatSkeleton /></Delayed> : (
         <ChatMessageList density={density}>
-          <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => r.id} render={(r) => r.kind === 'status' ? (
+          <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => r.id} jump={jump} render={(r) => r.kind === 'status' ? (
             <ChatMessage key={r.id} sender="system">
               <Text type="supporting" size="sm" maxLines={1}>{r.text}</Text>
             </ChatMessage>
@@ -297,14 +315,16 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               name={m.author.kind === 'agent'
                 ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
                 : <Text size="sm" weight="medium">{profile.name}</Text>}
-              metadata={<RoomMeta m={m} />}>
+              metadata={<RoomMeta m={m} onReply={startReply} />}>
+              <span id={`rm-${m.id}`} />
+              {m.replyTo && <Link onClick={() => jumpTo(m.replyTo!.id)}><Text type="supporting" size="sm" maxLines={1}>{`↪ ${m.replyTo.name}: ${m.replyTo.text}`}</Text></Link>}
               {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions}>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.text && <LinkPreviews text={m.text} />}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
             </ChatMessage>
           ))(r.m)} />
         </ChatMessageList>
-  ), [rows, profile, agents, mentions, density, syncing]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [rows, profile, agents, mentions, density, syncing, jump]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>
@@ -394,11 +414,15 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={atts.length >= MAX_IMAGES} onClick={() => fileRef.current?.click()} />
               <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
             </>}
-            drawer={atts.length ? (
+            drawer={atts.length || replyTo ? (
               <ChatComposerDrawer>
-                <HStack gap={2} wrap="wrap">
+                {replyTo && <HStack gap={1} align="center">
+                  <Text type="supporting" size="sm" maxLines={1}>{`↪ Replying to ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text>
+                  <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={() => setReplyTo(null)} />
+                </HStack>}
+                {atts.length > 0 && <HStack gap={2} wrap="wrap">
                   {atts.map((a) => <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name} isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />)}
-                </HStack>
+                </HStack>}
               </ChatComposerDrawer>
             ) : undefined}
             input={<ChatComposerInput triggers={[mention, slash]} onFiles={addFiles} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
@@ -415,13 +439,14 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
 
 
 // Timestamp, with the details behind an info icon (as in the agent chat).
-function RoomMeta({ m }: { m: RoomMsg }) {
+function RoomMeta({ m, onReply }: { m: RoomMsg; onReply: (m: RoomMsg) => void }) {
   const [open, setOpen] = useState(false)
   const details = [new Date(m.ts).toLocaleString(), m.mentions.length ? `mentions ${m.mentions.map((n) => `@${n}`).join(' ')}` : '',
     m.deliveredTo.length ? `delivered to ${m.deliveredTo.join(', ')}` : ''].filter(Boolean).join(' · ')
   return (
     <VStack gap={0}>
       <HStack gap={1} align="center"><Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" /></Text>
+        <IconButton label="Reply" icon={<ReplyIcon />} variant="ghost" size="sm" onClick={() => onReply(m)} />
         <IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)} /></HStack>
       {open && <Text type="supporting" size="sm">{details}</Text>}
     </VStack>
@@ -437,6 +462,11 @@ function useNarrow(q = '(max-width: 639px)') {
   useEffect(() => { const m = matchMedia(q); const on = () => setN(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on) }, [q])
   return n
 }
+const ReplyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M9 17 4 12l5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+  </svg>
+)
 const ClipIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
