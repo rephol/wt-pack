@@ -450,7 +450,7 @@ export default function App() {
   const nav = (
     <SideNav
       // Mobile top bar and drawer (below AppShell's lg breakpoint): the project picker alone, one row; the title is desktop-only.
-      header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr · umkmall" />{projectPicker}</VStack>}
+      header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr agent control room" />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'board', 'agents', 'rooms', 'routines', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
