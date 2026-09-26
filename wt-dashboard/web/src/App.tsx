@@ -487,7 +487,7 @@ export default function App() {
         height="fill"
         content={
       <LayoutContent>
-      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || fullKey || termPage ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
+      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || page === 'board' || fullKey || termPage ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
         {fullKey && (fullAgent
           ? <AgentPanelBody key={`full-${fullAgent.key}`} agent={fullAgent} task={all?.tasks.find((t) => t.id === fullAgent.task) ?? null}
               mode="page" onCollapse={leaveFull} onAsPanel={narrow ? undefined : () => fullToPanel(fullAgent.key)} autoFocus={!phone} />

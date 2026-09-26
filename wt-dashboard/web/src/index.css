@@ -113,7 +113,7 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-set-list { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .hd-set-list:hover, .hd-set-list:focus-visible { background: rgba(128,128,128,.10); outline: none; }
 /* Local ticket board (board.tsx) */
-.hd-kb-page { height: calc(100dvh - 180px); min-height: 420px; }
+.hd-kb-page { flex: 1 1 0; min-height: 420px; } /* fills the page VStack (height 100% on board) down to the viewport bottom */
 .hd-kb-cols { overflow-x: auto; overflow-y: hidden; height: 100%; padding: 16px; align-items: stretch; }
 .hd-kb-col { flex: 1 1 260px; min-width: 260px; height: 100%; min-height: 0; }
 .hd-kb-card { overflow-wrap: anywhere; }
@@ -129,4 +129,3 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-kb-rule { height: 12px; }
 .hd-kb-detail { height: min(85dvh, 860px); display: flex; flex-direction: column; }
 .hd-kb-detail-phone { height: 100dvh; padding-bottom: env(safe-area-inset-bottom); box-sizing: border-box; }
-@media (max-width: 767px) { .hd-kb-page { height: calc(100dvh - 150px); } }
