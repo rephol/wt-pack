@@ -57,3 +57,12 @@ test('formatting', () => {
   assert.match(fmtWhen(new Date(now - 2 * 3_600_000).toISOString(), now), /^10:00$/)
   assert.doesNotMatch(fmtWhen('2026-09-20T09:00:00', now), /:/)
 })
+
+import { contextUsage } from './turns.ts'
+test('contextUsage: latest call in + cache read + cache write over 200k, or 1M once past 200k / for [1m]', () => {
+  const u = (model: string, i: number, cr: number, cw: number) => ({ id: String(i + cr), role: 'assistant', text: '', ts: '', meta: { mid: 'm', model, in: i, out: 5, cw, cr, cost: null, stop: null } })
+  assert.equal(contextUsage([]), null)
+  assert.deepEqual(contextUsage([u('claude-sonnet-5', 1000, 40_000, 9000)]), { used: 50_000, window: 200_000, pct: 25 })
+  assert.deepEqual(contextUsage([u('claude-opus-5-5[1m]', 0, 100_000, 0)]), { used: 100_000, window: 1_000_000, pct: 10 })
+  assert.deepEqual(contextUsage([u('claude-opus-5-5', 0, 300_000, 0), u('claude-opus-5-5', 0, 20_000, 0)]), { used: 20_000, window: 1_000_000, pct: 2 })
+})

@@ -41,7 +41,7 @@ import { LinkPreviews } from './previews'
 import { useRoles, plural, RoleBadge, TagsDialog, TagList, OTHER } from './roles'
 import { Delayed, LoadError, OverviewSkeleton, GroupedRows, Rows, ChatSkeleton } from './skeletons'
 import { useStream, mergeAgentMsgs } from './streamStore'
-import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, type Meta, type Usage } from './turns'
+import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, contextUsage, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
 import { PwaHost, InstallHint } from './pwa'
@@ -1319,6 +1319,12 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const stream = useStream<Msg>(live ? `agent|${agent.key}|${agent.session}` : null, () => agentStreamSpec(agentUrl(agent), agent.key, agent.session!))
   const paneMsgs = useMemo(() => (pane.data?.turns ?? []).map((t, i): Msg => ({ id: `pane:${i}`, role: t.role, text: t.text, ts: '' })), [pane.data])
   const msgs = live ? stream.items : paneMsgs
+  // The pane's status line is exact (it knows the window); the transcript estimate fills in when it's hidden.
+  const ctx = useMemo(() => {
+    if (agent.context) return { pct: agent.context.pct, text: `${agent.context.used} / ${agent.context.total}` }
+    const c = contextUsage(msgs)
+    return c && { pct: c.pct, text: `${fmtTokens(c.used)} / ${fmtTokens(c.window)}` }
+  }, [agent.context, msgs])
   const streamErr = live && stream.error
   // Sent while the agent works: Claude Code takes it at its next step. Shown as "queued" until the
   // transcript has it (matched on its first line), or 15s after the agent is idle again.
@@ -1465,6 +1471,10 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     composerEnter(e)
                   }} handleRef={inputRef} triggers={[slash]} onFiles={addFiles} placeholder={`Message ${agent.name}…`} isDisabled={send.isPending} />}
                   status={attErr ? { type: 'warning', message: attErr } : undefined}
+                  headerContext={ctx && (() => { const t = `${ctx.pct}% · ${ctx.text}`; return (
+                    <Tooltip content={`Context window: ${t}`}><div style={{ width: 96 }}>
+                      <ProgressBar label={`Context window ${t}`} isLabelHidden value={ctx.pct} variant={ctx.pct >= 80 ? 'error' : ctx.pct >= 60 ? 'warning' : 'accent'} />
+                    </div></Tooltip>) })()}
                   headerActions={narrow ? undefined : <>
                       <IconButton label="Skills & commands" icon={<span aria-hidden style={{ fontWeight: 600 }}>/</span>} size="sm" variant="ghost" tooltip="Skills & commands (/)"
                         onClick={() => { inputRef.current?.focus(); inputRef.current?.insertText('/') }} />

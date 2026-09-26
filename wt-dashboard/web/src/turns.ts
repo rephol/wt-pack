@@ -82,3 +82,15 @@ export function fmtWhen(ts: string, now = Date.now()) {
     ? a.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
     : a.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
+
+// Context-window use of the session: the latest API call's prompt (fresh + cache read + cache write) over the window.
+// ponytail: transcripts drop the "[1m]" suffix, so a session that ever went past 200k counts as 1M; a 1M session
+// still under 200k shows against 200k until then.
+export function contextUsage(msgs: TMsg[]) {
+  const us = msgs.map((m) => m.meta).filter((u): u is Usage => !!u && !!u.model && !u.model.startsWith('<'))
+  const last = us.at(-1)
+  if (!last) return null
+  const used = last.in + last.cr + last.cw
+  const window = /\[1m\]/i.test(last.model!) || us.some((u) => u.in + u.cr + u.cw > 200_000) ? 1_000_000 : 200_000
+  return { used, window, pct: Math.min(100, Math.round((used / window) * 100)) }
+}
