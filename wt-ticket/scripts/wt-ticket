@@ -26,7 +26,7 @@ call() {
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ticket: $code $out" >&2; exit 1; fi
-  printf '%s\n' "$out"
+  [ -z "$out" ] || printf '%s\n' "$out"
 }
 # obj k=v ... → a JSON object; k:=v takes v as raw JSON (numbers, arrays, booleans).
 obj() { node -e 'const o={};for(const a of process.argv.slice(1)){const i=a.indexOf("=");const raw=a[i-1]===":";const k=a.slice(0,raw?i-1:i);o[k]=raw?JSON.parse(a.slice(i+1)):a.slice(i+1)}console.log(JSON.stringify(o))' "$@"; }
