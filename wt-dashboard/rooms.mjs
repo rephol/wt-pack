@@ -41,7 +41,7 @@ export function parseMentions(text, names) {
   return [...out]
 }
 
-export const stripSelfMention = (text, name) => text.replace(new RegExp(`^@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[\\s:,—-]*`, 'i'), '').trim() || text
+export const stripSelfMention = (text, name) => text.replace(new RegExp(`^@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])[\\s:,—-]*`, 'i'), '').trim() || text
 
 // Who a new message goes to, and why the rest don't. `agents`: [{key, name}]. Mutates nothing.
 export function planDelivery({ msg, room, settings, agents, confirmAll = false }) {

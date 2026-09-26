@@ -25,6 +25,7 @@ import { RoomsPage, useRoomsList } from './rooms'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
+import { tileCounts } from './overviewData'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
@@ -450,7 +451,7 @@ export default function App() {
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'board', 'agents', 'rooms', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
-        const alert = p === 'overview' && data?.counts.needsYou ? data.counts.needsYou : 0
+        const alert = p === 'overview' && data ? tileCounts(data.tasks).needsYou : 0
         return (
           <SideNavItem
             key={p}
