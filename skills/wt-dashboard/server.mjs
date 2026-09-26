@@ -2,7 +2,7 @@
 // ponytail: no deps, polling instead of websockets; switch to SSE if refresh feels laggy.
 import http from 'node:http'
 import { execFile } from 'node:child_process'
-import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
+import { readFile, readdir, open as fopen, stat, statfs, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
 import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
@@ -21,6 +21,7 @@ import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -2220,6 +2221,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
+      if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -2484,11 +2486,73 @@ async function housekeepingApi(req, res, sub) {
   if (req.method === 'POST' && sub === 'run') return send(res, 200, await runHousekeeping(new URL(req.url, 'http://x').searchParams.get('dryRun') === '1'))
   return send(res, 405, { error: 'GET, PUT or POST run' })
 }
+// ---- watchdog (watchdog.mjs, WP-70): Settings › Observability › Watchdog; every 60s ----
+const WD_FILE = join(DATA, 'watchdog.json')
+let wd = { settings: cleanWatchdogSettings(), open: {}, resolved: [], lastRun: null }
+const wdLoaded = readFile(WD_FILE, 'utf8').then((t) => { const j = JSON.parse(t); wd = { settings: cleanWatchdogSettings(j.settings), open: j.open ?? {}, resolved: j.resolved ?? [], lastRun: j.lastRun ?? null } }, () => {})
+const serverErrors = [] // console.error timestamps, last hour (wrapped in the listening block)
+// The pack checkout, for Investigate's wt-handoff: skills are symlinks into it (…/wt-pack/skills/<name>).
+const packRoot = () => { try { return dirname(dirname(realpathSync(join(homedir(), '.claude', 'skills', 'wt-handoff')))) } catch { return null } }
+async function watchdogSnapshot() {
+  const ag = await agents().catch(() => null)
+  const nameOf = new Map((ag ?? []).map((a) => [a.key, a.name]))
+  const keys = await tickets.keys().catch(() => ({}))
+  const boards = []
+  for (const project of Object.keys(keys)) boards.push({ project, ...(await tickets.list(project)) })
+  const fs = await statfs(DATA).catch(() => null)
+  return {
+    starts: await readFile(join(DATA, 'server-starts.json'), 'utf8').then(JSON.parse, () => null),
+    queue: [...rooms.queue].flatMap(([key, items]) => items.map((it) => ({ agent: nameOf.get(key) ?? key, slug: it.slug, ts: it.msg.ts }))),
+    boards, agents: ag, herdr: SOURCES.herdr,
+    diskFree: fs ? fs.bavail * fs.bsize : null,
+    dbBytes: await stat(join(DATA, 'wt.db')).then((x) => x.size, () => null),
+    errors: serverErrors,
+    jev: await readCalls().catch(() => null),
+  }
+}
+async function runWatchdog() {
+  await wdLoaded
+  const d = diffFindings(wd.open, wdEvaluate(await watchdogSnapshot(), wd.settings))
+  const ops = inboxOps(d)
+  for (const it of ops.add) await inbox.add(it)
+  if (ops.resolveKeys.length) {
+    await inbox.load()
+    await inbox.resolve(inbox.items.filter((it) => it.kind === 'watchdog' && !it.resolvedAt && ops.resolveKeys.includes(it.target?.watchdog)).map((it) => it.id))
+  }
+  const at = new Date().toISOString()
+  wd = { ...wd, open: d.open, resolved: [...d.resolved.map((f) => ({ ...f, resolvedAt: at })), ...wd.resolved].slice(0, 20), lastRun: at }
+  await writeFile(WD_FILE, JSON.stringify(wd, null, 2))
+  return wd
+}
+async function watchdogApi(req, res, sub) {
+  await wdLoaded
+  const state = () => ({ checks: WD_CHECKS, ...wd })
+  if (req.method === 'GET' && !sub) return send(res, 200, state())
+  if (req.method === 'PUT' && !sub) {
+    wd.settings = cleanWatchdogSettings(JSON.parse((await body(req)) || '{}'))
+    await writeFile(WD_FILE, JSON.stringify(wd, null, 2))
+    return send(res, 200, state())
+  }
+  if (req.method === 'POST' && sub === 'run') { await runWatchdog(); return send(res, 200, state()) }
+  if (req.method === 'POST' && sub === 'investigate') {
+    const { key, role } = JSON.parse((await body(req)) || '{}')
+    const f = wd.open[key]
+    if (!f) return send(res, 404, { error: 'no open finding with that key' })
+    if (!['worker', 'auditor'].includes(role)) return send(res, 400, { error: 'role: worker|auditor' })
+    const root = packRoot()
+    if (!root) return send(res, 409, { error: 'wt-pack checkout not found (~/.claude/skills/wt-handoff)' })
+    const out = await runHandoff(execFile, HANDOFF_SH)(['--role', role, '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
+    store.delete('agents:local')
+    return send(res, 200, { ok: true, message: out.trim().split('\n')[0] })
+  }
+  return send(res, 405, { error: 'GET, PUT, POST run or POST investigate' })
+}
 async function recordStart() {
   const f = join(DATA, 'server-starts.json')
   const prev = await readFile(f, 'utf8').then(JSON.parse, () => [])
-  const { recent, warn } = restartBurst([...prev, Date.now()])
-  await writeFile(f, JSON.stringify(recent))
+  const { hour } = keepStarts([...prev, Date.now()]) // an hour for the watchdog; restartBurst takes its own 5 min
+  const { warn } = restartBurst(hour)
+  await writeFile(f, JSON.stringify(hour))
   if (warn) inbox.add({ kind: 'server', key: `server|burst|${STARTED_AT}`, title: `Server restarted ${warn} times in 5 minutes`,
     body: MANAGED_BY === 'launchd' ? 'launchd restarts it after a crash (at most every 10s). Crashes: ~/Library/Logs/wt-dashboard/server.log' : MANAGED_BY === 'app' ? 'The app gives up after 3 automatic restarts in 5 minutes; if it stops again, use Start server in the menu-bar icon. Crashes: ~/Library/Logs/wt-dashboard/server.log' : 'Crashes: ~/Library/Logs/wt-dashboard/server.log', target: {} })
 }
@@ -2512,6 +2576,11 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     const hkRun = () => runHousekeeping().catch((e) => console.error('housekeeping:', e.message))
     setTimeout(hkRun, 60_000)
     setInterval(hkRun, 3_600_000)
+    // Watchdog: count errors in-process (what reaches server.log as an error), run every 60s after a warm-up.
+    const logError = console.error
+    console.error = (...a) => { const now = Date.now(); serverErrors.push(now); while (serverErrors.length && now - serverErrors[0] > 3_600_000) serverErrors.shift(); logError(...a) }
+    const wdRun = () => runWatchdog().catch((e) => logError('watchdog:', e.message))
+    setTimeout(() => { wdRun(); setInterval(wdRun, 60_000) }, 90_000)
     // Routines: close runs a restart orphaned, then tick every 30s (a tick in flight makes the next a no-op).
     routines.recover().catch((e) => console.error('routines:', e.message)).finally(() => {
       const rt = () => routines.tick().catch((e) => console.error('routines:', e.message))

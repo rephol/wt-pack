@@ -422,7 +422,7 @@ test('usage: limits never expose tokenHash; missing fields are null; stale after
 
 // ---- Integrations & environment (config.mjs) ----
 import { Config, isLoopbackRequest, setEnvLine, keychain } from './config.mjs'
-import { mkdtempSync, writeFileSync as wfs, readFileSync as rfs, statSync as sfs } from 'node:fs'
+import { mkdtempSync, writeFileSync as wfs, readFileSync as rfs, statSync as sfs, mkdirSync, chmodSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join as pj } from 'node:path'
 
@@ -506,7 +506,7 @@ test('restartBurst: warns at 3+ starts inside 5 minutes, forgets older ones', ()
   assert.deepEqual(restartBurst([now - 400_000, now - 200_000, now - 60_000, now], now), { recent: [now - 200_000, now - 60_000, now], warn: 3 })
 })
 
-import { plist, LABEL } from './scripts/service.mjs'
+import { plist, LABEL, probePlist, PROBE_LABEL } from './scripts/service.mjs'
 import { execFileSync as xfs } from 'node:child_process'
 test('service plist: valid, crash-only KeepAlive, launchd marker, escaped paths', () => {
   const f = pj(mkdtempSync(pj(tmpdir(), 'wtd-pl-')), 'x.plist')
@@ -1032,4 +1032,28 @@ test('batchPrompt: a message cannot forge its origin (WP-67)', async () => {
   assert.equal((p.match(/<\/room-message>/g) ?? []).length, 1) // only the dashboard's closing tag
   assert.match(p, /from="bad kind=user" kind=agent>/)
   assert.notEqual(R.batchPrompt('x', [{ author: { name: 'a' }, text: 'b' }]), R.batchPrompt('x', [{ author: { name: 'a' }, text: 'b' }]))
+})
+
+test('watchdog probe plist: every 120s, no KeepAlive, runs the probe script (WP-70)', () => {
+  const f = pj(mkdtempSync(pj(tmpdir(), 'wtd-pp-')), 'p.plist')
+  wfs(f, probePlist({ root: '/a b/wt&d', log: '/tmp/l.log' }))
+  const j = JSON.parse(xfs('/usr/bin/plutil', ['-convert', 'json', '-o', '-', f], { encoding: 'utf8' }))
+  assert.equal(j.Label, PROBE_LABEL)
+  assert.deepEqual(j.ProgramArguments, ['/bin/sh', '/a b/wt&d/scripts/watchdog-probe.sh'])
+  assert.equal(j.StartInterval, 120)
+  assert.equal(j.KeepAlive, undefined)
+})
+
+test('watchdog probe: notifies once on down, once on back up (WP-70)', () => {
+  const home = mkdtempSync(pj(tmpdir(), 'wtd-probe-'))
+  const bin = pj(home, 'bin'); mkdirSync(bin)
+  wfs(pj(bin, 'osascript'), '#!/bin/sh\necho "$2" >> "$HOME/said"\n'); chmodSync(pj(bin, 'osascript'), 0o755)
+  const run = (url) => xfs('/bin/sh', [new URL('./scripts/watchdog-probe.sh', import.meta.url).pathname, url], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } })
+  const said = () => (existsSync(pj(home, 'said')) ? rfs(pj(home, "said"), "utf8").trim().split('\n') : [])
+  run('http://127.0.0.1:9/down'); run('http://127.0.0.1:9/down')
+  assert.equal(said().length, 1)
+  assert.match(said()[0], /server is down/)
+  run('file:///etc/hosts'); run('file:///etc/hosts')
+  assert.equal(said().length, 2)
+  assert.match(said()[1], /server is back/)
 })
