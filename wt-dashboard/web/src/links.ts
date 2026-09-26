@@ -2,7 +2,7 @@
 // skipped), only http(s)/mailto open, and in the desktop app they go through the opener plugin, because the
 // webview ignores target=_blank. Long URLs wrap anywhere instead of overflowing the bubble.
 import { createElement, type ComponentType, type ReactNode } from 'react'
-import { Markdown } from '@astryxdesign/core/Markdown'
+import { Markdown, type MarkdownInlinePlugin } from '@astryxdesign/core/Markdown'
 import { useChatDensity, markdownDensity } from './density.ts'
 
 type Opener = { openUrl: (u: string) => Promise<void> }
@@ -44,8 +44,8 @@ export function linksIn(text: string, max = 3): string[] {
   return out
 }
 
-export function ChatMarkdown({ children, density }: { children: string; density?: 'default' | 'compact' }): ReactNode {
+export function ChatMarkdown({ children, density, inlinePlugins }: { children: string; density?: 'default' | 'compact'; inlinePlugins?: MarkdownInlinePlugin[] }): ReactNode {
   const chat = useChatDensity()
   density ??= markdownDensity(chat)
-  return createElement(Markdown as unknown as ComponentType<Record<string, unknown>>, { density, autolink: 'gfm', onLinkClick: (h: string, e: { metaKey?: boolean; ctrlKey?: boolean; preventDefault?: () => void }) => linkClick(h, e), style: { overflowWrap: 'anywhere' } }, children)
+  return createElement(Markdown as unknown as ComponentType<Record<string, unknown>>, { density, inlinePlugins, autolink: 'gfm', onLinkClick: (h: string, e: { metaKey?: boolean; ctrlKey?: boolean; preventDefault?: () => void }) => linkClick(h, e), style: { overflowWrap: 'anywhere' } }, children)
 }

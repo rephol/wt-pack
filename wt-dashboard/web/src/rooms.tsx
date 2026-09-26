@@ -41,8 +41,12 @@ import { LinkPreviews } from './previews'
 import { useStream, mergeById } from './streamStore'
 import { Delayed, LoadError, ChatSkeleton } from './skeletons'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
+import { Token, type TokenColor } from '@astryxdesign/core/Token'
+import type { MarkdownInlinePlugin } from '@astryxdesign/core/Markdown'
+import { useRoles } from './roles'
+import { roomRows } from './roomRows'
 
-export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string }
+export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string; pool?: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
 export interface Profile { name: string; handle: string; avatar: string | null }
 interface Suggestion { ticket: string; slug: string; title: string; agent: string | null; reason: string }
@@ -168,6 +172,22 @@ function roomStreamSpec(slug: string) {
     },
   }
 }
+// @name → a Token in rendered markdown (text nodes only: code spans/blocks are left alone).
+function mentionPlugin(agents: RoomAgent[], profile: Profile, colorOf: (a: RoomAgent) => TokenColor, onOpen: (key: string) => void): MarkdownInlinePlugin {
+  const byLower = new Map(agents.map((a) => [a.name.toLowerCase(), a]))
+  const who = (n: string) => n.toLowerCase() === profile.handle.toLowerCase() || n.toLowerCase() === 'user' ? 'you' : n.toLowerCase() === 'all' ? 'all' : byLower.get(n.toLowerCase())
+  return {
+    pattern: /@([A-Za-z0-9][\w-]*[A-Za-z0-9]|[A-Za-z0-9])/g,
+    getEndIndex: (text, match) => (match.index! > 0 && /[\w@.]/.test(text[match.index! - 1])) || !who(match[1]) ? false : match.index! + match[0].length,
+    render: (match, key) => {
+      const w = who(match[1])!
+      if (w === 'you') return <Token key={key} size="sm" label={`@${profile.name}`} color="default" />
+      if (w === 'all') return <Token key={key} size="sm" label="@all" color="default" />
+      return <Token key={key} size="sm" label={`@${w.name}`} color={colorOf(w)} onClick={() => onOpen(w.key)} />
+    },
+  }
+}
+
 function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; agents: RoomAgent[]; profile: Profile; onBack: () => void; onOpenAgent: (key: string) => void }) {
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
@@ -257,9 +277,16 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
     }
     return out
   }, [msgs, room.members, byName])
+  const { byId: roleOf } = useRoles()
+  const rows = useMemo(() => roomRows(msgs, profile.handle, workingAfter), [msgs, profile.handle, workingAfter])
+  const mentions = useMemo(() => [mentionPlugin(agents, profile, (a) => roleOf(a.pool ?? 'other').color as TokenColor, onOpenAgent)], [agents, profile, roleOf, onOpenAgent])
   const messageList = useMemo(() => syncing ? <Delayed><ChatSkeleton /></Delayed> : (
         <ChatMessageList density={density}>
-          <VirtualRows items={msgs} scrollRef={layoutRef} keyOf={(m) => m.id} render={(m) => m.author.kind === 'system' ? (
+          <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => r.id} render={(r) => r.kind === 'status' ? (
+            <ChatMessage key={r.id} sender="system">
+              <Text type="supporting" size="sm" maxLines={1}>{r.text}</Text>
+            </ChatMessage>
+          ) : ((m) => m.author.kind === 'system' ? (
             <ChatMessage key={m.id} sender="system">
               <Text type="supporting" size="sm">{`— ${m.text} · `}<Timestamp value={m.ts} format="relative" />
                 {m.agentKey && <>{' · '}<Link onClick={() => onOpenAgent(m.agentKey!)}>open agent</Link></>}</Text>
@@ -270,27 +297,14 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               name={m.author.kind === 'agent'
                 ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
                 : <Text size="sm" weight="medium">{profile.name}</Text>}
-              metadata={
-                <VStack gap={0}>
-                  <Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" />{m.deliveredTo.length ? ` · delivered to ${m.deliveredTo.join(', ')}` : ''}</Text>
-                  {m.command && <Text type="supporting" size="sm">{`command for ${m.command.target}`}</Text>}
-                  {(m.undelivered ?? []).map((u) => <Text key={u.to} type="supporting" size="sm">{`${u.to}: ${u.n} image${u.n === 1 ? '' : 's'} not delivered — remote agent`}</Text>)}
-                  {(m.blocked ?? []).map((b) => <Text key={b.name} type="supporting" size="sm">{`@${b.name}: ${b.reason}`}</Text>)}
-                  {(m.queuedFor ?? m.mentions.filter((n) => n !== 'all' && n.toLowerCase() !== profile.handle.toLowerCase()))
-                    .filter((n) => !m.deliveredTo.includes(n) && !(m.blocked ?? []).some((b) => b.name === n)).map((n) =>
-                    <Text key={n} type="supporting" size="sm">{`@${n}: queued until the agent is idle`}</Text>)}
-                  {(m.notified ?? (m.author.kind === 'agent' && m.mentions.some((n) => n.toLowerCase() === profile.handle.toLowerCase()))) &&
-                    <Text type="supporting" size="sm">notified you</Text>}
-                </VStack>
-              }>
-              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown>{m.text}</ChatMarkdown></ChatMessageBubble>}
+              metadata={<RoomMeta m={m} />}>
+              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions}>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.text && <LinkPreviews text={m.text} />}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
-              {workingAfter.get(m.id)?.map((n) => <Text key={n} type="supporting" size="sm">{`@${n} is working…`}</Text>)}
             </ChatMessage>
-          )} />
+          ))(r.m)} />
         </ChatMessageList>
-  ), [msgs, profile, agents, workingAfter, density, syncing]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [rows, profile, agents, mentions, density, syncing]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>
@@ -400,6 +414,19 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
 }
 
 
+// Timestamp, with the details behind an info icon (as in the agent chat).
+function RoomMeta({ m }: { m: RoomMsg }) {
+  const [open, setOpen] = useState(false)
+  const details = [new Date(m.ts).toLocaleString(), m.mentions.length ? `mentions ${m.mentions.map((n) => `@${n}`).join(' ')}` : '',
+    m.deliveredTo.length ? `delivered to ${m.deliveredTo.join(', ')}` : ''].filter(Boolean).join(' · ')
+  return (
+    <VStack gap={0}>
+      <HStack gap={1} align="center"><Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" /></Text>
+        <IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)} /></HStack>
+      {open && <Text type="supporting" size="sm">{details}</Text>}
+    </VStack>
+  )
+}
 const PeopleIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
     <circle cx="9" cy="8" r="4" /><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3" />
