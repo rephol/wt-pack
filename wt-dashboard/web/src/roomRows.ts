@@ -27,8 +27,9 @@ export function roomRows<M extends StatusMsg>(msgs: M[], handle: string, working
     const replying = working.get(m.id) ?? []
     for (const n of [...new Set([...m.deliveredTo, ...queued, ...blocked.keys(), ...replying])]) {
       const text = blocked.has(n) ? `${n}: ${blocked.get(n)}`
-        : replying.includes(n) ? `${n} is replying…`
+        // A post after this message wins over 'working': the agent may still be busy (ending its turn, other work).
         : (lastPost.get(n) ?? -1) > i ? `${n} replied`
+        : replying.includes(n) ? `${n} is replying…`
         : m.deliveredTo.includes(n) ? `${n} was notified` : `${n} will be notified when idle`
       st.push({ key: n, text })
     }

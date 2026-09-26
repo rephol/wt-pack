@@ -26,6 +26,9 @@ test('an agent keeps one row per mention round that updates in place: queued →
   assert.deepEqual(ids(roomRows([ask({ deliveredTo: ['w', 'p'] })], 'me', new Map([['a', ['w']]]))), ['a~w w is replying…', 'a~p p was notified'])
   const done = roomRows([ask({ deliveredTo: ['w', 'p'] }), msg('r', { author: { kind: 'agent', name: 'w' } })], 'me', new Map())
   assert.deepEqual(ids(done), ['a~w w replied', 'a~p p was notified'])
+  // Still 'working' after it posted (ending its turn, other work): replied, not a stale 'replying…'.
+  const busy = roomRows([ask({ deliveredTo: ['w', 'p'] }), msg('r', { author: { kind: 'agent', name: 'w' } })], 'me', new Map([['a', ['w']]]))
+  assert.deepEqual(ids(busy), ['a~w w replied', 'a~p p was notified'])
 })
 
 import { membersFirst } from './roomRows.ts'
