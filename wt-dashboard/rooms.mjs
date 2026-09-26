@@ -277,6 +277,15 @@ export class Rooms {
   }
   room(slug) { return this.index.find((r) => r.slug === slug) }
   async list() { await this.load(); return this.index }
+  // Index entries + each room's newest non-system message. Copies: last* never reach rooms.json.
+  // messages() reads each log once, then add() keeps the cache current — no full scan per request.
+  async withLast() {
+    await this.load()
+    return Promise.all(this.index.map(async (r) => {
+      const m = (await this.messages(r.slug)).findLast((x) => x.author?.kind !== 'system')
+      return { ...r, lastAt: m?.ts ?? null, lastFrom: m?.author.name ?? null, lastText: m ? m.text.slice(0, 120) : null }
+    }))
+  }
   // An agent's `room create`: the slug must already be a valid slug (what the UI would make of it); an active room
   // with that slug is returned as is (idempotent), an archived one is a 409. The creator is the responder and a
   // member; invitees become members only — nothing is delivered to them.

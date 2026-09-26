@@ -1754,7 +1754,7 @@ async function roomsApi(req, res, url, parts) {
     if (req.method === 'GET') {
       if (url.searchParams.get('format') === 'text') return send(res, 200, rooms.index.filter((r) => !r.archived).map((r) => `${r.slug}\t${r.title}${r.paused ? ' (paused)' : ''}`).join('\n') + '\n', 'text/plain')
       const tasks = rooms.settings.ticketRooms === 'suggest' ? (await overview()).tasks : []
-      return send(res, 200, { rooms: rooms.index, settings: rooms.settings, pending: rooms.pending(),
+      return send(res, 200, { rooms: await rooms.withLast(), settings: rooms.settings, pending: rooms.pending(),
         suggestions: ticketSuggestions(tasks, rooms.index.map((r) => r.slug), rooms.settings) })
     }
     if (req.method === 'POST') {

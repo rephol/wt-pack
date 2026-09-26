@@ -866,3 +866,20 @@ test('todayCounts: local-midnight cutoff', () => {
   ]
   assert.deepEqual(todayCounts(prs, now), { prsOpened: 2, prsMerged: 2, shipped: 1 })
 })
+
+test('Rooms.withLast: newest non-system line, not persisted to the index', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const rooms = new Rooms({ dir: mkdtempSync(join(tmpdir(), 'wtd-rooms-')), agents: async () => [], prompt: async () => {}, log: () => {} })
+  const r = await rooms.create({ title: 'Last', slug: 'last' })
+  assert.equal((await rooms.withLast())[0].lastAt, null)
+  await rooms.post(r.slug, { author: { kind: 'user', name: 'you' }, text: 'x'.repeat(200) })
+  await rooms.system(r.slug, 'noise')
+  const [l] = await rooms.withLast()
+  assert.equal(l.lastFrom, 'you')
+  assert.equal(l.lastText.length, 120)
+  assert.ok(l.lastAt)
+  assert.equal(rooms.index[0].lastAt, undefined)
+})
