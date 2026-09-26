@@ -41,6 +41,8 @@ export function parseMentions(text, names) {
   return [...out]
 }
 
+export const stripSelfMention = (text, name) => text.replace(new RegExp(`^@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[\\s:,—-]*`, 'i'), '').trim() || text
+
 // Who a new message goes to, and why the rest don't. `agents`: [{key, name}]. Mutates nothing.
 export function planDelivery({ msg, room, settings, agents, confirmAll = false }) {
   const handle = settings.profile?.handle?.toLowerCase()
@@ -372,6 +374,8 @@ export class Rooms {
     if (!room) throw Object.assign(new Error('unknown room'), { status: 404 })
     if (room.archived) throw Object.assign(new Error('room is archived (read-only)'), { status: 409 })
     text = String(text ?? '').trim().slice(0, 8000)
+    // An agent opening its post with an @mention of itself (WP-13) is noise: the prefix goes, and it is never a mention.
+    if (author.kind === 'agent') text = stripSelfMention(text, author.name)
     if (!text) throw Object.assign(new Error('empty message'), { status: 400 })
     const now = Date.now()
     if (author.kind === 'agent') {
@@ -381,7 +385,7 @@ export class Rooms {
       this.posts.set(author.key, [...times.filter((t) => now - t < this.settings.rateWindowMin * 60_000), now])
     }
     const agents = (await this.agentsFn()).filter((a) => a.name)
-    const msg = { id: randomUUID(), ts: new Date(now).toISOString(), author, text, mentions: parseMentions(text, [...agents.map((a) => a.name), this.settings.profile.handle]), deliveredTo: [] }
+    const msg = { id: randomUUID(), ts: new Date(now).toISOString(), author, text, mentions: parseMentions(text, [...agents.map((a) => a.name), this.settings.profile.handle]).filter((m) => author.kind !== 'agent' || m !== author.name), deliveredTo: [] }
     if (attachments.length) msg.attachments = attachments
     // A reply stores who/what it answers (snippet, so it renders without the original loaded); replying to an agent addresses it.
     const parent = typeof replyTo === 'string' ? (await this.messages(slug)).find((m) => m.id === replyTo && m.author.kind !== 'system') : null

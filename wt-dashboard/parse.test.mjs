@@ -915,3 +915,10 @@ test('parsePane: a truncated cwd is dropped (herdr cwd wins)', () => {
   assert.equal(parsePane(pane.replace('/tmp/wt/umk-12', '/Users/x/Work/projects/umkmall...')).cwd, undefined)
   assert.equal(parsePane(pane).cwd, '/tmp/wt/umk-12')
 })
+
+test('stripSelfMention: an agent opening with @itself loses the prefix (WP-13)', async () => {
+  const { stripSelfMention } = await import('./rooms.mjs')
+  assert.equal(stripSelfMention('@wt-pack-worker-02 heads-up: on main', 'wt-pack-worker-02'), 'heads-up: on main')
+  assert.equal(stripSelfMention('@wt-pack-worker-03 over to you', 'wt-pack-worker-02'), '@wt-pack-worker-03 over to you')
+  assert.equal(stripSelfMention('@wt-pack-worker-02', 'wt-pack-worker-02'), '@wt-pack-worker-02') // never empties a post
+})
