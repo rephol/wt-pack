@@ -86,7 +86,7 @@ export function RoutinesPage({ phone, project, agents }: { phone: boolean } & Sc
             control={phone ? undefined : controls} detail={phone ? controls : undefined} />
         })}
       </SettingsCard>
-      {editing && <RoutineDialog routine={editing === 'new' ? null : editing} phone={phone} onClose={() => setEditing(null)} />}
+      {editing && <RoutineDialog routine={editing === 'new' ? null : editing} phone={phone} project={project} onClose={() => setEditing(null)} />}
       {deleting && (
         <Dialog isOpen onOpenChange={(o: boolean) => !o && setDeleting(null)} width={400}>
           <VStack gap={3}>
@@ -106,12 +106,12 @@ export function RoutinesPage({ phone, project, agents }: { phone: boolean } & Sc
 const KIND_OPTIONS = [{ value: 'prompt', label: 'Prompt an agent' }, { value: 'spawn', label: 'Spawn an agent, remove it after' }, { value: 'action', label: 'Local action' }]
 const ACTION_OPTIONS = [{ value: 'jev-run', label: 'Jev Run now (board)' }, { value: 'housekeeping', label: 'Housekeeping' }]
 
-function RoutineDialog({ routine, phone, onClose }: { routine: Routine | null; phone: boolean; onClose: () => void }) {
+function RoutineDialog({ routine, phone, project, onClose }: { routine: Routine | null; phone: boolean; project: string; onClose: () => void }) {
   const t = routine?.target
   const [d, setD] = useState({
     name: routine?.name ?? '', schedule: routine?.schedule ?? 'every 1h', timeout: String(routine?.timeout_min ?? 60),
     kind: t?.kind ?? 'prompt', agent: t?.kind === 'prompt' ? t.agent ?? '' : '',
-    role: t && t.kind !== 'action' ? t.role ?? '' : 'orchestrator', project: t?.project ?? 'wt-pack',
+    role: t && t.kind !== 'action' ? t.role ?? '' : 'orchestrator', project: t?.project ?? (project === 'all' ? 'wt-pack' : project),
     text: t?.kind === 'prompt' ? t.text : t?.kind === 'spawn' ? t.prompt : '', action: t?.kind === 'action' ? t.action : 'jev-run',
   })
   const [error, setError] = useState('')
