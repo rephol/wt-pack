@@ -36,7 +36,7 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
   Tauri 2 app in `app/`.
 - Web-only change: `cd web && npm run build` (no restart). Checks: `cd web && npx tsc --noEmit -p .`; `npm test`.
 - Server is launchd `id.local.wtdashboard.server` (`npm run service:restart|status`). **Don't restart repeatedly.**
-- Data `~/.local/share/wt-dashboard/`, config `~/.config/wt-dashboard/env`, logs `~/Library/Logs/wt-dashboard/`.
+- Data `~/.local/share/wt-dashboard/` (tickets/rooms/inbox in `data/wt.db`, `node:sqlite`, node ≥ 22.13; rollback: README), config `~/.config/wt-dashboard/env`, logs `~/Library/Logs/wt-dashboard/`.
 - No Claude API in the dashboard (user rule). Keep security: session cookie, Host/Origin allowlist,
   loopback-only terminals, SSRF guard on `/api/unfurl`.
 
