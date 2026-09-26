@@ -13,7 +13,7 @@ import { useHealth } from './status'
 import { openSettings } from './settings'
 import { UsageBars } from './usage'
 import { shortAgo } from './notifyGate'
-import { agentsByProject, recentRooms } from './overviewData'
+import { agentsByProject, recentRooms, tileCounts } from './overviewData'
 
 // ponytail: orchestrator rule "max 2 workers"; make it a setting if it ever changes.
 const WORKER_CAP = 2
@@ -24,6 +24,7 @@ const PRESSURE_DOT: Record<string, Dot> = { normal: 'success', warn: 'warning', 
 export interface OverviewData {
   agents: { project: string | null; status: string; pool: string }[]
   machines: { label: string; status: string }[]
+  tasks: { state: string; mine?: boolean }[]
   counts: { needsYou: number; stalled: number; inReview: number; today?: { prsOpened: number; prsMerged: number; shipped: number } }
   host?: { memUsedPct: number; pressure: string | null }
 }
@@ -52,7 +53,7 @@ const Line = ({ children }: { children: ReactNode }) => <HStack gap={3} align="c
 const Dotted = ({ v, label }: { v: Dot; label: string }) => <HStack gap={1} align="center"><StatusDot variant={v} label={label} /><Text size="sm">{label}</Text></HStack>
 
 export function OverviewPage({ data, onProject }: { data: OverviewData; onProject: (p: string) => void }) {
-  const c = data.counts
+  const c = { ...data.counts, ...tileCounts(data.tasks) }
   const { h } = useHealth()
   const obs = useQuery({ queryKey: ['observability', ''], queryFn: () => api<ObsStats>('/api/observability'), refetchInterval: 60_000 })
   const jevErrors = (obs.data?.stats['24h'] ?? []).reduce((n, s) => n + Math.round(s.calls * s.errorRate), 0)

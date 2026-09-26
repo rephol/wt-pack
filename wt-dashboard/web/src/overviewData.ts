@@ -17,3 +17,10 @@ export function agentsByProject(agents: { project: string | null; status: string
 export function recentRooms<R extends { lastAt?: string | null; archived?: boolean }>(rooms: R[], n = 3): R[] {
   return rooms.filter((r) => r.lastAt && !r.archived).sort((a, b) => b.lastAt!.localeCompare(a.lastAt!)).slice(0, n)
 }
+
+// Headline tiles count what Tasks shows by default ("Mine"), so a tile and the page it links to agree.
+export function tileCounts(tasks: { state: string; mine?: boolean }[]) {
+  const mine = tasks.filter((t) => t.mine !== false)
+  const n = (s: string) => mine.filter((t) => t.state === s).length
+  return { needsYou: n('needs_you'), stalled: n('stalled'), inReview: n('in_review') }
+}

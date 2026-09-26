@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentsByProject, recentRooms } from './overviewData.ts'
+import { agentsByProject, recentRooms, tileCounts } from './overviewData.ts'
 
 test('agentsByProject: per-project state counts, busiest first, null → other', () => {
   const g = agentsByProject([
@@ -25,4 +25,10 @@ test('recentRooms: newest first, skips silent and archived', () => {
     { slug: 'd', lastAt: '2026-09-26T04:00:00Z', archived: true },
   ])
   assert.deepEqual(r.map((x) => x.slug), ['c', 'a'])
+})
+
+test('tileCounts: only my tasks, like Tasks → Mine', () => {
+  const t = (state: string, mine?: boolean) => ({ state, mine })
+  assert.deepEqual(tileCounts([t('in_review', true), t('in_review', false), t('in_review'), t('needs_you'), t('stalled', false)]),
+    { needsYou: 1, stalled: 0, inReview: 2 })
 })
