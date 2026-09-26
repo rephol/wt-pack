@@ -1092,6 +1092,8 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       : wt?.plan && !worker ? 'plan_ready'
       : planner?.status === 'working' || (wt && !wt.plan) ? 'planning'
       : issue?.mine && ['unstarted', 'started'].includes(issue.stateType) && !wt && !pr && !ag.length ? 'up_next'
+      // No live signal on this machine: a local ticket's board column says where it is (WP-31).
+      : issue?.local && ['planning', 'building'].includes(issue.column) ? issue.column
       : 'queued'
     // Old closed-unmerged PR with no live signal: skip, it's noise.
     if (!issue && !wt && pr?.state === 'CLOSED') continue
