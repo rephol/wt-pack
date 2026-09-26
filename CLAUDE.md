@@ -3,7 +3,7 @@
 A pack of Claude Code skills for running herdr agents on a ticket pipeline, plus the wt-dashboard control
 room. Each `skills/<name>` dir is one skill, linked as `~/.claude/skills/<name>` by `./setup` (install, doctor,
 secrets, uninstall). Scripts refer to each other sibling-relatively (`../wt-shared/…`), so skills move together.
-Branch `main`, remote `origin` = github.com/rephol/wt-pack (private); commits are authored as rephol via
+Branch `main`, remote `origin` = github.com/rephol/wt-pack; commits are authored as rephol via
 repo-local git config — **push after committing** (`git push`). Full context: `docs/handoff-2026-09-26.md`.
 User-facing feature reference: `docs/features.md` — a user-visible change updates it in the same merge.
 Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
