@@ -115,7 +115,7 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 /* Local ticket board (board.tsx) */
 .hd-kb-page { height: calc(100dvh - 180px); min-height: 420px; }
 .hd-kb-cols { overflow-x: auto; overflow-y: hidden; height: 100%; padding: 16px; align-items: stretch; }
-.hd-kb-col { flex: 0 0 300px; min-width: 0; height: 100%; min-height: 0; }
+.hd-kb-col { flex: 1 1 260px; min-width: 260px; height: 100%; min-height: 0; }
 .hd-kb-card { overflow-wrap: anywhere; }
 .hd-kb-cols-phone { padding: 12px 0; }
 .hd-kb-cols-phone .hd-kb-col { flex: 1 1 auto; min-width: 0; }
