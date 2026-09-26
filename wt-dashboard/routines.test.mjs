@@ -233,7 +233,7 @@ test('deliver (WP-54): defaults by kind for old rows; self → Inbox; room → o
   assert.deepEqual(hk.target.deliver, { to: 'none' })
   r.db.prepare('UPDATE routines SET target = ? WHERE id = ?').run(JSON.stringify({ kind: 'prompt', agent: 'orch', text: 'x' }), hk.id) // pre-WP-54 row
   assert.deepEqual(r.get(hk.id).target.deliver, { to: 'self' })
-  r.update(hk.id, { target: HK.target })
+  r.update(hk.id, { target: { ...HK.target, deliver: { to: 'none' } } })
   await r.runNow(hk.id); await r.idle()
   assert.equal(got.notify.length + got.post.length, 0) // none + ok → silent
   const x = r.create({ ...HK, name: 'toRoom', target: { ...HK.target, deliver: { to: 'room', room: 'wt-pack' } } })
@@ -247,6 +247,8 @@ test('deliver (WP-54): defaults by kind for old rows; self → Inbox; room → o
   w.list = [{ id: 'p1', name: 'orch', status: 'idle' }]
   await r.runNow(p.id); await r.idle()
   assert.equal(got.notify.length, 2); assert.equal(got.notify[1].error, false)
+  r.update(x.id, { target: HK.target }) // no deliver → kept
+  assert.deepEqual(r.get(x.id).target.deliver, { to: 'room', room: 'wt-pack' })
   for (const d of [{ to: 'room' }, { to: 'mail' }]) assert.throws(() => r.create({ ...HK, target: { ...HK.target, deliver: d } }), (e) => e.status === 400)
 })
 

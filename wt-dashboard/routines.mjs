@@ -140,7 +140,8 @@ export class Routines {
     if (!str(name, 100)) throw err(400, 'name: 1–100 chars')
     const schedule = String(b.schedule ?? prev?.schedule ?? '').trim()
     parseSchedule(schedule)
-    const target = b.target !== undefined ? cleanTarget(b.target) : prev?.target
+    // A target without deliver keeps the saved one, so a pre-WP-54 client does not silently drop a room delivery.
+    const target = b.target !== undefined ? cleanTarget(b.target?.deliver === undefined && prev ? { ...b.target, deliver: prev.target.deliver } : b.target) : prev?.target
     if (!target) throw err(400, 'target required')
     const timeout = Number(b.timeout_min ?? prev?.timeout_min ?? 60)
     if (!(timeout > 0 && timeout <= 1440)) throw err(400, 'timeout_min: 1–1440')
