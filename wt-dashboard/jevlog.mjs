@@ -16,9 +16,10 @@ export async function readCalls(file = JEV_LOG) {
   return out
 }
 
-// /api/health: a summary only; the full stats are in Settings › Observability.
+// /api/health: a summary only; the full stats are in Settings › Observability. Eval/probe/test calls (tagged
+// test: true, or older lines by feature name) are left out, so a test run never turns health yellow (WP-30).
 export function healthSummary(calls, now = Date.now()) {
-  const day = calls.filter((c) => now - Date.parse(c.ts) < 86_400_000)
+  const day = calls.filter((c) => now - Date.parse(c.ts) < 86_400_000 && !c.test && !/^(eval:|probe$)/.test(c.feature ?? ''))
   return { today: day.length, errors: day.filter((c) => c.err).length }
 }
 

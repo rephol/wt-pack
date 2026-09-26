@@ -742,6 +742,10 @@ test('jevlog: health summary counts the last 24h and its errors', () => {
   const now = Date.parse('2026-09-26T12:00:00Z')
   const calls = [{ ts: '2026-09-26T11:00:00Z', err: null }, { ts: '2026-09-26T10:00:00Z', err: 'timeout' }, { ts: '2026-09-24T10:00:00Z', err: 'timeout' }]
   assert.deepEqual(healthSummary(calls, now), { today: 2, errors: 1 })
+  // WP-30: eval/probe/test-tagged calls never count toward health
+  const noise = [{ ts: '2026-09-26T11:00:00Z', feature: 'eval:route', err: 'timeout' }, { ts: '2026-09-26T11:00:00Z', feature: 'probe', err: 'http' },
+    { ts: '2026-09-26T11:00:00Z', feature: 'route', test: true, err: 'timeout' }]
+  assert.deepEqual(healthSummary([...calls, ...noise], now), { today: 2, errors: 1 })
 })
 
 import { featureStats, recentCalls, tailLines } from './jevlog.mjs'
