@@ -19,6 +19,8 @@ writeFileSync(join(home, 'projects', 'demo.md'), 'D1')
 // A fake herdr that answers `pane get` with role/project tokens.
 writeFileSync(join(fakeBin, 'herdr'), `#!/bin/sh\necho '{"result":{"pane":{"cwd":"/nowhere","tokens":{"role":"planner","project":"demo"}}}}'\n`)
 chmodSync(join(fakeBin, 'herdr'), 0o755)
+// Run it once now: macOS scans a new executable on its first launch (~0.7s), past the CLI's 500ms herdr timeout.
+execFileSync(join(fakeBin, 'herdr'))
 
 const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, ...env } }).trimEnd()
 
