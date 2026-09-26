@@ -2,7 +2,7 @@
   {"state": {"pane": "⏺ I've drafted the migration. Before I run it against staging: do you want me to back up the orders table first, or is the nightly snapshot enough?\n\n✻ Cooked for 2m 10s"}, "expect": true},
   {"state": {"pane": "⏺ Done. Committed 4f2a1c3 (wt-dashboard: inbox scroll fix) and pushed to main. Tests: 79 pass, 0 fail.\n\n✻ Brewed for 1m 3s"}, "expect": false},
   {"state": {"pane": "⏺ Two ways to fix the flaky test:\n  1. retry the e2e step once\n  2. mock the payment gateway\n  Which one should I take?\n\n✻ Worked for 45s"}, "expect": true},
-  {"state": {"pane": "⏺ The plan is committed at docs/plans/umk-521.md and handed off to umkmall-worker-03.\n\n✻ Cooked for 3m 2s"}, "expect": false},
+  {"state": {"pane": "⏺ The plan is committed at docs/plans/acm-521.md and handed off to acme-worker-03.\n\n✻ Cooked for 3m 2s"}, "expect": false},
   {"state": {"pane": "⏺ I need the Railway API token to continue. Please paste it or add it to ~/.claude/.env, then tell me to retry.\n\n✻ Worked for 12s"}, "expect": true},
   {"state": {"pane": "⏺ Summary: fixed the SSRF guard to reject IPv6 link-local, added 3 tests, all green. Nothing else pending.\n\n✻ Baked for 4m 1s"}, "expect": false},
   {"state": {"pane": "⏺ Review found a blocking issue: the plan's U4 targets a file that no longer exists (server/poll.mjs). I've stopped here — tell me whether to re-plan U4 or drop it.\n\n✻ Worked for 1m"}, "expect": true},

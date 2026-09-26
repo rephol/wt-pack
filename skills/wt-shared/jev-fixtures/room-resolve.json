@@ -3,7 +3,7 @@
   {"state": {"request": "deploy web to staging please", "reply": "@user which branch should I deploy, main or the release branch"}, "expect": true},
   {"state": {"request": "can you check why CI failed on PR 212", "reply": "@user CI failed on a flaky e2e test (checkout.spec). Re-ran it, green now."}, "expect": false},
   {"state": {"request": "can you check why CI failed on PR 212", "reply": "@user it's the lockfile. I can regenerate it but that bumps 14 packages — ok to go ahead"}, "expect": true},
-  {"state": {"request": "stop the worker on UMK-521", "reply": "@user stopped. Worktree kept in case you want to resume."}, "expect": false},
+  {"state": {"request": "stop the worker on ACM-521", "reply": "@user stopped. Worktree kept in case you want to resume."}, "expect": false},
   {"state": {"request": "what's left on the inbox grouping?", "reply": "@user nothing — grouping and filter scrolling are both shipped (0bfe567)."}, "expect": false},
   {"state": {"request": "merge the plan when review passes", "reply": "@user review found two blocking issues in U4; I need you to choose between polling and webhooks before I continue"}, "expect": true},
   {"state": {"request": "rename the room to wt-pack", "reply": "@user renamed. Want me to archive the old one too?"}, "expect": true},

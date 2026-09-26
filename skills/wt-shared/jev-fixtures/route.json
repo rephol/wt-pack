@@ -5,10 +5,10 @@
   {"state": {"request": "bump the plugin version in wt-memory to 0.4.1 and push"}, "expect": "worker"},
   {"state": {"request": "Add role-based access control to the dashboard: users, roles, per-room permissions, migration of existing rooms"}, "expect": "planner"},
   {"state": {"request": "run npm test in wt-dashboard and report the failures"}, "expect": "worker"},
-  {"state": {"request": "UMK-612: support multiple machines per room with remote delivery, retries and a status view — figure out the approach first"}, "expect": "planner"},
+  {"state": {"request": "ACM-612: support multiple machines per room with remote delivery, retries and a status view — figure out the approach first"}, "expect": "planner"},
   {"state": {"request": "the Settings Close button overlaps the tabs at 390px; fix it"}, "expect": "worker"},
   {"state": {"request": "Rework how agents are spawned so pools can span machines; needs a design for naming, discovery and cleanup"}, "expect": "planner"},
-  {"state": {"request": "delete the stale worktree for UMK-400 (already merged)"}, "expect": "worker"},
+  {"state": {"request": "delete the stale worktree for ACM-400 (already merged)"}, "expect": "worker"},
   {"state": {"request": "Build an offline mode for the mobile web: cache rooms, queue posts, reconcile on reconnect"}, "expect": "planner"},
   {"state": {"request": "rename the #general room to #wt-pack"}, "expect": "worker"}
 ]

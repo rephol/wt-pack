@@ -105,8 +105,8 @@
  },
  {
   "state": {
-   "title": "Overview Agents tile truncates project name 'umkmall…' at 1440",
-   "body": "Evidence: Overview Agents tile third row 'umkmall...' at 1440×900 with free width. Screenshot s1-overview.\nImpact: can't tell which project it is.",
+   "title": "Overview Agents tile truncates project name 'acme…' at 1440",
+   "body": "Evidence: Overview Agents tile third row 'acme...' at 1440×900 with free width. Screenshot s1-overview.\nImpact: can't tell which project it is.",
    "candidates": []
   },
   "expect": "debt"
@@ -114,7 +114,7 @@
  {
   "state": {
    "title": "Machine tile 'workers 0/2' unclear with 8+ workers listed",
-   "body": "Evidence: Overview Machine 'workers 0/2' while sidebar lists umkmall-worker-01..06 and wt-pack-worker-01..03.\nImpact: unclear what the cap counts; needs a label/tooltip.",
+   "body": "Evidence: Overview Machine 'workers 0/2' while sidebar lists acme-worker-01..06 and wt-pack-worker-01..03.\nImpact: unclear what the cap counts; needs a label/tooltip.",
    "candidates": []
   },
   "expect": "gap"
@@ -146,7 +146,7 @@
  {
   "state": {
    "title": "Board: 7 columns don't fit even at 2000px — fixed ~510px columns force a horizontal scrollbar; Building/Review/Done off-screen",
-   "body": "Screenshot: /Users/octeumkm/.local/share/wt-dashboard/uploads/2026-09-26/b0d738d0-c61d-4766-b2f2-ca0b6d8fe465.png. Columns should size to fit the viewport (min ~260px, flexible), with horizontal scroll only when truly needed (e.g. < 7×260); consider collapsing empty columns (Backlog 0, Blocked) to a narrow rail. Also check card priority badges: P0 shows no badge while P2 shows 'High' and P3 'Medium' — confirm the priority scale (Linear-style 0=none,1=urgent,2=high,3=medium,4=low?) and make the CLI/API/UI agree.",
+   "body": "Screenshot: ~/.local/share/wt-dashboard/uploads/2026-09-26/b0d738d0-c61d-4766-b2f2-ca0b6d8fe465.png. Columns should size to fit the viewport (min ~260px, flexible), with horizontal scroll only when truly needed (e.g. < 7×260); consider collapsing empty columns (Backlog 0, Blocked) to a narrow rail. Also check card priority badges: P0 shows no badge while P2 shows 'High' and P3 'Medium' — confirm the priority scale (Linear-style 0=none,1=urgent,2=high,3=medium,4=low?) and make the CLI/API/UI agree.",
    "candidates": []
   },
   "expect": "ux"
