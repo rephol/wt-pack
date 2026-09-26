@@ -14,7 +14,7 @@ mkdirSync(join(home, 'projects'))
 mkdirSync(fakeBin)
 writeFileSync(join(home, 'global.md'), 'G1\n')
 writeFileSync(join(home, 'roles', 'worker.md'), '<!-- template only -->\n')
-writeFileSync(join(home, 'roles', 'planner.md'), 'P1')
+writeFileSync(join(home, 'roles', 'planner.md'), '<!--\n  template\n-->\nP1 <!-- note -->')
 writeFileSync(join(home, 'projects', 'demo.md'), 'D1')
 // A fake herdr that answers `pane get` with role/project tokens.
 writeFileSync(join(fakeBin, 'herdr'), `#!/bin/sh\necho '{"result":{"pane":{"cwd":"/nowhere","tokens":{"role":"planner","project":"demo"}}}}'\n`)

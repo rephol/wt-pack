@@ -25,16 +25,16 @@ const file = (kind, name) => {
   return join(HOME, kind === 'role' ? 'roles' : 'projects', `${name}.md`)
 }
 const read = (f) => { try { return readFileSync(f, 'utf8').trim() } catch { return '' } }
-// A file holding only HTML comments (the template) counts as empty.
-const body = (s) => (s.replace(/<!--[\s\S]*?-->/g, '').trim() ? s : '')
+// Injected text never carries HTML comments: not the template's, not agent-entry trailers.
+const body = (s) => s.replace(/ *<!--[\s\S]*?-->/g, '').replace(/\n{3,}/g, '\n\n').trim()
 // Agent-written entries are one bullet line each, with a trailer the injected text never shows.
 const TRAILER = / *<!-- wtm:([^>]*?) *-->/
 const strip = (s) => s.replace(/ *<!-- wtm:[^>]*?-->/g, '')
 
 function merge({ role, project }) {
-  const parts = [['Global preferences', body(strip(read(file('global'))))]]
-  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body(strip(read(file('role', role))))])
-  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body(strip(read(file('project', project))))])
+  const parts = [['Global preferences', body((read(file('global'))))]]
+  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body((read(file('role', role))))])
+  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body((read(file('project', project))))])
   return parts.filter(([, t]) => t).map(([h, t]) => `## ${h}\n\n${t}`).join('\n\n')
 }
 

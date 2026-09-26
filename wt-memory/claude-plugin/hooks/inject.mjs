@@ -22,7 +22,7 @@ try {
   try { prev = readFileSync(state, 'utf8') } catch {}
   let text = ''
   // Fixed instruction, SessionStart only (kept out of the hash so it never triggers a re-injection).
-  const how = `## Maintaining these preferences\n\nWhen the user states a standing preference or corrects a recurring behaviour ("always", "never", "from now on", "stop doing"), run \`${bin} remember "<concise imperative>" --scope <role|project|global>\`. Not for one-off task details. Use global only for what holds across every project and role (it waits for the user's approval). Then tell the user in one short line what you remembered.`
+  const how = `## Maintaining these preferences\n\nWhen the user states a standing preference or corrects a recurring behaviour ("always", "never", "from now on", "stop doing"), run \`${bin} remember "<concise imperative>" --scope <role|project|global>\`. Not for one-off task details. Use global only for what holds across every project and role (it waits for the user's approval). Then tell the user in exactly one line: \"Remembered: <what>\".`
   if (event === 'SessionStart') text = ctx ? `${ctx}\n\n${how}` : how
   else if (prev !== hash && (ctx || prev !== null)) text = `Preferences updated:\n\n${ctx || '(all standing preferences were removed)'}`
   mkdirSync(dir, { recursive: true })
