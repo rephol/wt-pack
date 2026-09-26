@@ -36,7 +36,8 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
   required). Moving to Backlog clears the assignee.
 - Fields: type (bug, ux, gap, debt, feature — default feature), size (S, M, L — default none), priority
   (Urgent, High, Medium, Low, none — default none), up to 20 labels, up to 20 links, title ≤ 200 chars,
-  body ≤ 20k chars. Cards sort by priority (none last), then id. Labels and links show only in the detail
+  body ≤ 20k chars. The `needs-plan` label shows as a **needs plan** badge on the card and routes Dispatch to a
+  planner. Cards sort by priority (none last), then id. Labels and links show only in the detail
   rail, not on the card.
 - A card shows id, priority, type, size, a Jev chip, a dispatch badge, title, two lines of body, last edit
   and @assignee. Columns are a fixed 280px and scroll sideways; on a phone (< 768px) one column shows at a
@@ -47,7 +48,7 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 - `WT_JEV_TICKET_TRIAGE`, **default on** (Settings › Integrations).
 - After a card is created (web, `wt-ticket new`, auditor) one Jev call (5s timeout, fail-open) fills type,
   size and priority **only where the creator left them empty**, adds an advisory hint ("Jev: needs a plan" /
-  "Jev: worker-ready") and flags possible duplicates among open cards (linked, never merged).
+  "Jev: worker-ready"; a planner hint also adds the `needs-plan` label, undoable) and flags possible duplicates among open cards (linked, never merged).
 - Each suggestion has **Undo** in the detail rail; editing the field by hand also drops Jev's claim.
 - Re-triage an existing card: `wt-ticket triage <ID>` or `wt-ticket triage --column backlog`.
 - Logged to Settings › Observability as `ticket_triage`.
@@ -71,7 +72,7 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 
 - Per-board switch in the Automation sheet, **default off**.
 - Every 30s (first tick 15s after start), per board, the most urgent unassigned Ready card is handed to a
-  free agent via `wt-handoff --role`: size **L → planner** (wt-plan), anything else **→ worker** (wt-work →
+  free agent via `wt-handoff --role`: size **L** or label **`needs-plan` → planner** (wt-plan), anything else **→ worker** (wt-work →
   wt-ship → merge to main → push). The card moves to Planning / Building and is assigned. One card per board
   per tick.
 - Limits: shares the Routines cap (`maxWorking`, default 4) and memory-pressure guard; waits if the

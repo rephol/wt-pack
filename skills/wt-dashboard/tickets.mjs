@@ -185,6 +185,11 @@ export class Tickets {
         applied[k] = { from: t[k], to: d[k] }
         t[k] = d[k]
       }
+      const labels = t.labels ?? []
+      if (d.owner === 'planner' && !edited.has('labels') && !labels.includes('needs-plan')) { // Dispatch routes it to a planner
+        applied.labels = { from: labels, to: [...labels, 'needs-plan'] }
+        t.labels = applied.labels.to
+      }
       t.jev = { at, applied: { ...t.jev?.applied, ...applied }, owner: d.owner ?? null, dupes: d.dupes ?? [] }
       if (Object.keys(applied).length) t.history.push({ at, author: 'jev', kind: 'edit', text: `jev: ${Object.keys(applied).join(', ')}` })
       return t
@@ -202,7 +207,7 @@ export class Tickets {
   }
   async jevUndo(id, field, author) {
     return this.mutate(id, (t, at) => {
-      const a = (Object.hasOwn(DEFAULTS, field) || field === 'column') && Object.hasOwn(t.jev?.applied ?? {}, field) ? t.jev.applied[field] : null
+      const a = (Object.hasOwn(DEFAULTS, field) || field === 'column' || field === 'labels') && Object.hasOwn(t.jev?.applied ?? {}, field) ? t.jev.applied[field] : null
       if (!a) throw err(400, `no Jev suggestion on ${field}`)
       if (field === 'column') t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: a.from, text: 'undo Jev auto-promote' })
       else t.history.push({ at, author: author.name, kind: 'edit', text: field })

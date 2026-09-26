@@ -66,6 +66,15 @@ test('priority order: urgent first, none last, one dispatch per tick', async () 
   assert.match(calls[0].args.join(' '), new RegExp(`--task ${urgent.id} urgent`))
 })
 
+test('needs-plan label sends an M card to a planner', async () => {
+  const { tickets, d, calls } = await setup()
+  const m = await ready(tickets, 'needs design', { size: 'M', priority: 1, labels: ['ui', 'needs-plan'] })
+  await d.tick()
+  assert.deepEqual(calls[0].args.slice(0, 2), ['--role', 'planner'])
+  assert.match(calls[0].prompt, /^Use wt-plan/)
+  assert.equal((await tickets.get(m.id)).column, 'planning')
+})
+
 test('L goes to a planner, M goes to a worker, both with --role; success → assigned with history', async () => {
   const { tickets, d, calls } = await setup()
   const l = await ready(tickets, 'big', { size: 'L', priority: 1 })
