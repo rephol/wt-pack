@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+// Tool-agnostic agent preferences: plain markdown files any agent runtime can be fed.
+//
+//   wt-memory context [--role R] [--project P] [--cwd D]   # merged markdown: global → role → project
+//   wt-memory hash    [same flags]                         # short content hash of that output
+//   wt-memory path    [global | role R | project P]        # the store dir, or one file's path
+//
+// Store: $WT_MEMORY_HOME or ~/.config/wt-memory → global.md, roles/<role-id>.md, projects/<repo>.md.
+// Without flags the scope is inferred: $HERDR_PANE_ID → `herdr pane get` → tokens role/project and the pane's
+// cwd; project falls back to the git repo of the cwd (a worktree resolves to its MAIN repo, as the dashboard does).
+// Runs inside agent hooks, so `context`/`hash` never fail loudly: any error → exit 0 and empty output.
+import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { join, basename, dirname } from 'node:path'
+import { homedir } from 'node:os'
+
+const HOME = process.env.WT_MEMORY_HOME || join(homedir(), '.config', 'wt-memory')
+const NAME = /^[A-Za-z0-9][\w.-]{0,99}$/ // role ids and repo basenames; no slashes, no leading dot
+const file = (kind, name) => {
+  if (kind === 'global') return join(HOME, 'global.md')
+  if (!NAME.test(name ?? '')) throw new Error(`bad ${kind} name: ${name}`)
+  return join(HOME, kind === 'role' ? 'roles' : 'projects', `${name}.md`)
+}
+const read = (f) => { try { return readFileSync(f, 'utf8').trim() } catch { return '' } }
+// A file holding only HTML comments (the template) counts as empty.
+const body = (s) => (s.replace(/<!--[\s\S]*?-->/g, '').trim() ? s : '')
+
+function merge({ role, project }) {
+  const parts = [['Global preferences', body(read(file('global')))]]
+  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body(read(file('role', role)))])
+  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body(read(file('project', project)))])
+  return parts.filter(([, t]) => t).map(([h, t]) => `## ${h}\n\n${t}`).join('\n\n')
+}
+
+const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] })
+function infer({ role, project, cwd }) {
+  if ((!role || !project) && process.env.HERDR_PANE_ID) {
+    try {
+      const p = JSON.parse(sh('herdr', ['pane', 'get', process.env.HERDR_PANE_ID])).result?.pane ?? {}
+      role ||= p.tokens?.role
+      project ||= p.tokens?.project
+      cwd ||= p.cwd
+    } catch {}
+  }
+  if (!project) {
+    try { project = basename(dirname(sh('git', ['-C', cwd || process.cwd(), 'rev-parse', '--path-format=absolute', '--git-common-dir']).trim())) } catch {}
+  }
+  return { role, project }
+}
+
+function flags(argv) {
+  const o = {}
+  for (let i = 0; i < argv.length; i++) if (/^--(role|project|cwd)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
+  return o
+}
+
+{
+  const [cmd, ...rest] = process.argv.slice(2)
+  if (cmd === 'context' || cmd === 'hash') {
+    let out = ''
+    try { out = merge(infer(flags(rest))) } catch {}
+    if (cmd === 'hash') console.log(createHash('sha256').update(out).digest('hex').slice(0, 16))
+    else if (out) console.log(out)
+  } else if (cmd === 'path') {
+    try { console.log(rest[0] ? file(rest[0], rest[1]) : HOME) } catch (e) { console.error(e.message); process.exit(2) }
+  } else {
+    console.error(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(2, 6).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
+    process.exit(2)
+  }
+}
