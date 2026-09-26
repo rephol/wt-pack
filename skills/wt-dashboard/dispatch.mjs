@@ -104,10 +104,12 @@ export class Dispatch {
   // Steps 1–7 of the plan: at most one dispatch per board per tick, so the next tick's cap check sees it.
   async dispatchOne(project, ags, now = Date.now()) {
     const s = this.st(project)
-    const next = (await this.tickets.list(project, 'ready')).tickets
+    const open = (await this.tickets.list(project, 'ready')).tickets
       .filter((t) => !t.assignee && (!t.dispatch || (t.dispatch.state === 'failed' && now - Date.parse(t.dispatch.at) > 120_000)))
-      .sort((a, b) => prio(a) - prio(b))[0] // stable: seq order within a priority
-    if (!next) { s.waiting = null; return }
+    // Jev triage may still add needs-plan (roleFor): t.jev marks it done; fail-open after 60s, nothing to wait for when off.
+    const triaging = this.deps.triageOn?.() ? (t) => !t.jev && now - Date.parse(t.created) < 60_000 : () => false
+    const next = open.filter((t) => !triaging(t)).sort((a, b) => prio(a) - prio(b))[0] // stable: seq order within a priority
+    if (!next) { s.waiting = open.length ? 'waiting for triage' : null; return }
     if (!ags) { s.waiting = 'agents unavailable'; return }
     const w = ags.filter((a) => a.status === 'working')
     const working = w.length

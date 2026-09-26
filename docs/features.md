@@ -75,12 +75,14 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
   free agent via `wt-handoff --role`: size **L** or label **`needs-plan` → planner** (wt-plan), anything else **→ worker** (wt-work →
   wt-ship → merge to main → push). The card moves to Planning / Building and is assigned. One card per board
   per tick.
+- A card still waiting for Jev triage (created < 60s ago, not yet triaged) is skipped so a `needs-plan` label
+  can land first; the header shows `waiting for triage`. Nothing waits when triage is off.
 - Limits: shares the Routines cap (`maxWorking`, default 4) and memory-pressure guard; waits if the
   project has no checkout. Handoff timeout 120s.
 - Failures retry after 2 min; the **3rd failure holds** the card. Card menu **Retry dispatch** (failed or
   held) or moving the card to Ready/Backlog clears it.
 - Badges: Dispatching…, Dispatch failed, Dispatch held, Stalled. The Automation sheet shows `Dispatching N…`,
-  `waiting: …`, `last: … ago` or `idle`.
+  `waiting: …`, `waiting for triage`, `last: … ago` or `idle`.
 - **Flag stalled after N min idle** (default 45, range 1–1440) shows under the switch while Dispatch is on.
 
 ### Reconcile

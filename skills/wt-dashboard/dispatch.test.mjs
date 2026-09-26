@@ -10,7 +10,7 @@ import { Dispatch, mergeIds } from './dispatch.mjs'
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
 
-async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0 } = {}) {
+async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn } = {}) {
   const tickets = new Tickets({ dir: await mkdtemp(join(tmpdir(), 'dispatch-')) })
   await tickets.board('wt-pack')
   await tickets.setSettings('wt-pack', { dispatch: true })
@@ -19,7 +19,7 @@ async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merge
     tickets, log: () => {},
     deps: {
       agents: async () => agents, host: async () => ({ pressure }), maxWorking: () => max, pending: () => pending,
-      repoOf: async () => '/repo', ticketOf: tagTicket,
+      repoOf: async () => '/repo', ticketOf: tagTicket, triageOn: () => triageOn,
       git: async (repo, ...a) => a[0] === 'log' ? merges : a[0] === 'rev-parse' ? 'abc123\n' : '',
       handoff: async (args, prompt, cwd) => {
         calls.push({ args, prompt, cwd })
@@ -226,4 +226,25 @@ test('dispatchRetry clears failed/held, refuses a claim in flight or a sent card
   await assert.rejects(tickets.dispatchRetry(t.id), /dispatching/)
   await tickets.setDispatch(t.id, { state: 'held', fails: 3 })
   assert.equal((await tickets.dispatchRetry(t.id)).dispatch, undefined)
+})
+
+test('Jev triage pending: skipped for up to 60s, dispatched once triaged; nothing waits when triage is off', async () => {
+  const { tickets, d, calls } = await setup({ triageOn: true })
+  const t = await ready(tickets, 'fresh', { size: 'M' })
+  const born = Date.parse(t.created)
+  await d.tick(born + 1000)
+  assert.equal(calls.length, 0)
+  assert.equal(d.status('wt-pack').waiting, 'waiting for triage')
+  await tickets.jevApply(t.id, { owner: 'planner', dupes: [] }, []) // triage done: adds needs-plan
+  await d.tick(born + 2000)
+  assert.deepEqual(calls[0].args.slice(0, 2), ['--role', 'planner'])
+  const late = await ready(tickets, 'jev never answered', { size: 'S' })
+  await d.tick(Date.parse(late.created) + 30_000)
+  assert.equal(calls.length, 1)
+  await d.tick(Date.parse(late.created) + 61_000) // past the cap: fail-open
+  assert.equal(calls.length, 2)
+  const off = await setup({ triageOn: false })
+  await ready(off.tickets, 'no jev')
+  await off.d.tick()
+  assert.equal(off.calls.length, 1)
 })
