@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { switcherItems, type SwAgent } from './switcherData.ts'
+import { scopedItems, switcherItems, ticketItems, type SwAgent } from './switcherData.ts'
 
 const ag = (name: string, o: Partial<SwAgent> = {}): SwAgent => ({ key: name, name, pool: 'worker', machine: 'm', local: true, status: 'idle', asks: false, statusSince: 0, lastActivity: 0, recap: null, question: null, task: null, ...o })
 const A = [ag('w-01', { status: 'working', lastActivity: 5 }), ag('w-02', { asks: true, question: 'Merge?', lastActivity: 9 }), ag('p-10', { lastActivity: 7, recap: 'fixing the parser' }), ag('p-02', { lastActivity: 1, task: 'UMK-1183' })]
@@ -67,4 +67,18 @@ test('switcher scope: every section follows the project (projectless under All o
   assert.equal(ids(scopedItems(ags, rms, ['um-1'], 'wt-pack', true)).length, 6) // toggle + 3 agents + 2 rooms
   assert.ok(!ids(scopedItems(ags, rms, [], 'all', false)).includes(SCOPE_ID))
   assert.deepEqual(ids(scopedItems(ags, rms, [], 'wt-pack', false, 'um')), [SCOPE_ID]) // search is scoped too
+})
+
+test('ticketItems: id and title search, exact id first, done last, none without a query', () => {
+  const ts = [
+    { id: 'WP-22', title: 'Jev on the board', column: 'done', project: 'wt-pack' },
+    { id: 'WP-2', title: 'Board columns', column: 'ready', project: 'wt-pack' },
+    { id: 'WP-220', title: 'Other', column: 'backlog', project: 'wt-pack' },
+  ]
+  assert.deepEqual(ticketItems(ts, ''), [])
+  assert.deepEqual(ticketItems(ts, 'WP-22').map((i) => i.id), ['ticket:wt-pack:WP-22', 'ticket:wt-pack:WP-220'])
+  assert.deepEqual(ticketItems(ts, '22').map((i) => i.id), ['ticket:wt-pack:WP-22'])
+  assert.deepEqual(ticketItems(ts, 'board').map((i) => i.label), ['WP-2 Board columns', 'WP-22 Jev on the board'])
+  assert.equal(scopedItems([], [], [], 'umkmall', false, 'wp-22', ts).filter((i) => i.id.startsWith('ticket:')).length, 0) // scoped
+  assert.equal(scopedItems([], [], [], 'umkmall', true, 'wp-22', ts).filter((i) => i.id.startsWith('ticket:')).length, 2)
 })

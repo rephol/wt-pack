@@ -90,6 +90,13 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
     return () => { document.body.style.userSelect = prev }
   }, [isDragging])
   useEffect(() => () => teardownRef.current?.(), [])
+  // #board/<ID> (quick switcher, links) opens that ticket; closing it drops the id so the same link works again.
+  useEffect(() => {
+    const on = () => { const id = decodeURIComponent(location.hash.match(/^#board\/(.+)$/)?.[1] ?? ''); if (id) { setBlockAsk(false); setOpenId(id) } }
+    on()
+    addEventListener('hashchange', on)
+    return () => removeEventListener('hashchange', on)
+  }, [])
 
   if (project === 'all') return <EmptyState title="Pick a project" description="The board is per project: choose one in the sidebar." />
   if (q.isError) return <Banner status="error" title={`Board: ${q.error.message}`} />
@@ -207,7 +214,7 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
       )}
       {openId && (
         <TicketDetail phone={phone} project={project} ticket={opened} isNew={openId === 'new'} blockAsk={blockAsk}
-          onClose={() => { setOpenId(null); setBlockAsk(false) }} onCreated={(id) => setOpenId(id)} />
+          onClose={() => { setOpenId(null); setBlockAsk(false); if (location.hash.startsWith('#board/')) history.replaceState(null, '', '#board') }} onCreated={(id) => setOpenId(id)} />
       )}
     </Section>
   )

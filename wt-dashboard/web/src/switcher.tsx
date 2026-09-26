@@ -11,7 +11,9 @@ import { IconButton } from '@astryxdesign/core/IconButton'
 import { Icon } from '@astryxdesign/core/Icon'
 import { HStack } from '@astryxdesign/core/HStack'
 import { shortAgo } from './notifyGate'
-import { scopedItems, needsYou, agentInitials, SCOPE_ID, type SwAgent, type SwItem, type SwRoom } from './switcherData'
+import { useQuery } from '@tanstack/react-query'
+import { api } from './rooms'
+import { scopedItems, needsYou, agentInitials, SCOPE_ID, type SwAgent, type SwItem, type SwRoom, type SwTicket } from './switcherData'
 import { Delayed, Rows } from './skeletons'
 import { useRoles } from './roles'
 
@@ -47,7 +49,7 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   return (
     <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 12, minHeight: phone ? 44 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
       <div style={{ position: 'relative', flex: `0 0 ${av}px`, width: av, height: av, borderRadius: av / 2, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
-        {a ? agentInitials(a.name, a.local ? byId(a.pool).letter : undefined) : '#'}
+        {a ? agentInitials(a.name, a.local ? byId(a.pool).letter : undefined) : d.kind === 'ticket' ? 'T' : '#'}
         {(a || line) && <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
           <StatusDot variant={!a || needsYou(a) ? 'error' : DOT[a.status]} label={a ? (needsYou(a) ? 'needs you' : a.status) : 'waiting on you'} isPulsing={a?.status === 'working'} />
         </span>}
@@ -66,11 +68,18 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   )
 }
 
-export function QuickSwitcher({ agents, rooms, project = 'all', phone, hidden, loading = false, onOpenAgent, onOpenRoom }: {
-  agents: SwAgent[]; rooms: SwRoom[]; project?: string; phone: boolean; hidden: boolean; loading?: boolean
-  onOpenAgent: (key: string, full?: boolean) => void; onOpenRoom: (slug: string) => void
+export function QuickSwitcher({ agents, rooms, project = 'all', projects = [], phone, hidden, loading = false, onOpenAgent, onOpenRoom, onOpenTicket }: {
+  agents: SwAgent[]; rooms: SwRoom[]; project?: string; projects?: string[]; phone: boolean; hidden: boolean; loading?: boolean
+  onOpenAgent: (key: string, full?: boolean) => void; onOpenRoom: (slug: string) => void; onOpenTicket: (project: string, id: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // Every known project's board, fetched while the palette is open (a project with no board answers key: null).
+  const boards = useQuery({
+    queryKey: ['switcher-tickets', projects.join(':')], enabled: open, staleTime: 10_000,
+    queryFn: () => Promise.all(projects.map((p) => api<{ tickets: Omit<SwTicket, 'project'>[] }>(`/api/tickets?project=${encodeURIComponent(p)}`)
+      .then((b) => b.tickets.map((t) => ({ id: t.id, title: t.title, column: t.column, project: p })), () => []))).then((x) => x.flat()),
+  })
+  const tickets = boards.data ?? []
   const [showAll, setShowAll] = useState(false)
   const flipping = useRef(false)
   useEffect(() => { if (!open && !flipping.current) setShowAll(false) }, [open]) // each open starts scoped to the project
@@ -97,8 +106,8 @@ export function QuickSwitcher({ agents, rooms, project = 'all', phone, hidden, l
   // A fresh snapshot per open, so Recent reflects the last pick.
   const source = useMemo(() => {
     const recent = loadRecent()
-    return { bootstrap: () => scopedItems(agents, rooms, recent, project, showAll), search: (q: string) => scopedItems(agents, rooms, recent, project, showAll, q) }
-  }, [agents, rooms, open, project, showAll]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { bootstrap: () => scopedItems(agents, rooms, recent, project, showAll), search: (q: string) => scopedItems(agents, rooms, recent, project, showAll, q, tickets) }
+  }, [agents, rooms, open, project, showAll, tickets]) // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (id: string) => {
     // The palette closes itself after any pick; the scope row flips the filter and keeps it open.
     if (id === SCOPE_ID) {
@@ -112,12 +121,13 @@ export function QuickSwitcher({ agents, rooms, project = 'all', phone, hidden, l
     fullPick.current = false
     if (id.startsWith('agent:')) onOpenAgent(id.slice(6), full)
     else if (id.startsWith('room:')) onOpenRoom(id.slice(5))
+    else if (id.startsWith('ticket:')) { const [, p, t] = id.split(':'); onOpenTicket(p, t) }
   }
   const palette = (inline: boolean) => (
     <CommandPalette<SwItem> isOpen={open} onOpenChange={setOpen} searchSource={source} label="Agent conversations"
       value="" onValueChange={pick} renderItem={(it) => <Row it={it} phone={phone} />}
       footer={phone ? false : <div style={{ padding: '8px 12px' }}><Text type="supporting" size="sm">↑↓ navigate · ↩ open · ⌘↩ full page · esc close</Text></div>}
-      emptySearchText="No agent or room matches" emptyBootstrapText={loading ? <Delayed><Rows n={6} avatar={phone ? 32 : 28} height={phone ? 48 : 52} /></Delayed> : 'No agents yet'}
+      emptySearchText="No agent, room or ticket matches" emptyBootstrapText={loading ? <Delayed><Rows n={6} avatar={phone ? 32 : 28} height={phone ? 48 : 52} /></Delayed> : 'No agents yet'}
       isInline={inline} width={inline ? '100%' : 640} maxHeight={inline ? '100%' : 'min(560px, 80vh)'} />
   )
 

@@ -15,14 +15,16 @@ export interface SwAgent {
 export const inProject = (x: { project?: string | null }, project: string) => project === 'all' || x.project === project
 export const roomInProject = inProject
 export interface SwRoom { slug: string; title: string; project?: string | null; needsYou?: { agent: string; text: string }[]; archived?: boolean }
+export interface SwTicket { id: string; title: string; column: string; project: string }
 export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }
+  | { group: string; kind: 'ticket'; ticket: SwTicket; line: string }
   | { group: string; kind: 'scope'; line: string }>
 export const SCOPE_ID = 'scope:toggle'
 // Every section (Needs you, Recent, Agents, Rooms) scoped to the project unless showAll; with a project selected the
 // first row is the 'Showing <project> · show all' toggle (a row, because the palette has no header slot).
-export function scopedItems(agents: SwAgent[], rooms: SwRoom[], recent: string[], project: string, showAll: boolean, query = ''): SwItem[] {
+export function scopedItems(agents: SwAgent[], rooms: SwRoom[], recent: string[], project: string, showAll: boolean, query = '', tickets: SwTicket[] = []): SwItem[] {
   const p = showAll ? 'all' : project
-  const items = switcherItems(agents.filter((a) => inProject(a, p)), rooms.filter((r) => inProject(r, p)), recent, query)
+  const items = [...switcherItems(agents.filter((a) => inProject(a, p)), rooms.filter((r) => inProject(r, p)), recent, query), ...ticketItems(tickets.filter((t) => inProject(t, p)), query)]
   if (project === 'all') return items
   const label = showAll ? `Showing all projects · only ${project}` : `Showing ${project} · show all`
   return [{ id: SCOPE_ID, label, auxiliaryData: { group: 'Project', kind: 'scope', line: '' } }, ...items]
@@ -65,6 +67,22 @@ export function switcherItems(agents: SwAgent[], rooms: SwRoom[], recent: string
     out.push({ id: `room:${r.slug}`, label: r.title, auxiliaryData: { group: 'Rooms', kind: 'room', room: r, line: n ? `${n.agent}: ${n.text}` : '' } })
   }
   return out
+}
+
+// Tickets only while searching (the bootstrap list stays agents/rooms): an id prefix ("wp-22", "22") or the title.
+// An exact id comes first; done tickets sort last. Capped at 8 so a vague query does not bury the agents.
+export function ticketItems(tickets: SwTicket[], query: string): SwItem[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const rank = (t: SwTicket) => {
+    const id = t.id.toLowerCase()
+    if (id === q) return 3
+    if (id.startsWith(q) || id.split('-')[1] === q) return 2
+    return fuzzy(q, t.title.toLowerCase()) >= 0 ? 1 : 0
+  }
+  return tickets.map((t) => ({ t, r: rank(t) })).filter((x) => x.r > 0)
+    .sort((a, b) => b.r - a.r || Number(a.t.column === 'done') - Number(b.t.column === 'done'))
+    .slice(0, 8).map(({ t }) => ({ id: `ticket:${t.project}:${t.id}`, label: `${t.id} ${t.title}`, auxiliaryData: { group: 'Tickets', kind: 'ticket', ticket: t, line: `${t.column} · ${t.project}` } }))
 }
 
 // planner-02 → P2, worker-05 → W5, orchestrator → O, code-reviewer/w5:p9 → CR, else the first letters of two words.

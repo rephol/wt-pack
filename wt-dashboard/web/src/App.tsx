@@ -556,7 +556,9 @@ export default function App() {
       <InboxHost onOpenAgent={open} />
       <PwaHost openInbox={() => openInbox()} />
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
-        onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
+        projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
+        onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }}
+        onOpenTicket={(p, id) => { setProject(p); location.hash = `board/${encodeURIComponent(id)}` }} />
     </AppShell>
   )
 }
