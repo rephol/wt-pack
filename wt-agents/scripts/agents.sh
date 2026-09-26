@@ -21,6 +21,9 @@ set -eu
 
 command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 
+# herdr names allow only [a-z0-9_-], up to 32 chars; "<repo>-<role>-NN" must fit, so the repo part is cut to 20.
+repo_slug() { basename "$1" | LC_ALL=C tr ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz | LC_ALL=C tr -c 'a-z0-9_\n-' '-' | cut -c1-20; }
+
 repo_root() {
   dirname "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null
 }
@@ -92,9 +95,10 @@ spawn)
   # Number from existing AGENT NAMES across all pools: herdr names are GLOBAL,
   # so two repos numbering from 1 collide on the second pool with
   # agent_name_taken and the agent never starts.
+  slug=$(repo_slug "$main")
   next=$(herdr agent list | jq -r '.result.agents[].name // empty' \
-    | sed -n "s/^$repo-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
-  label=$(printf '%s-%s-%02d' "$repo" "$role" "$(( ${next:-0} + 1 ))")
+    | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
+  label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
 
   # A path claude has never seen opens the first-run trust dialog and blocks,
   # and `agent start` then fails with agent_not_ready. Seed the flag first.
