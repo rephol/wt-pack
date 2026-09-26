@@ -75,6 +75,8 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
   free agent via `wt-handoff --role`: size **L** or label **`needs-plan` → planner** (wt-plan), anything else **→ worker** (wt-work →
   wt-ship → merge to main → push). The card moves to Planning / Building and is assigned. One card per board
   per tick.
+- When the project has a room of the same name (not archived), the prompt also asks for a one-line result
+  there (`room post <room> "…"`), besides the reply to the sender.
 - A card still waiting for Jev triage (created < 60s ago, not yet triaged) is skipped so a `needs-plan` label
   can land first; the header shows `waiting for triage`. Nothing waits when triage is off.
 - Limits: shares the Routines cap (`maxWorking`, default 4) and memory-pressure guard; waits if the
