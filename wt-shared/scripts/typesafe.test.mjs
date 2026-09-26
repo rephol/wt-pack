@@ -79,3 +79,13 @@ test('eval/probe calls are logged with test: true; real features are not (WP-30)
   await judge('route', { a: 91 }, Q, fail)
   assert.equal(lines().at(-1).test, undefined)
 })
+
+test('a transient 5xx is retried once within the budget (WP-47); a 4xx is not', async () => {
+  let n = 0
+  const flaky = async () => (++n === 1 ? { ok: false, status: 500 } : { ok: true, status: 200, json: async () => ({ answers: { q: 1 } }) })
+  assert.deepEqual(await judge('t', { a: 70 }, Q, { key: 'k', fetchImpl: flaky }), { q: 1 })
+  assert.equal(n, 2)
+  let m = 0
+  assert.equal(await judge('t', { a: 71 }, Q, { key: 'k', fetchImpl: async () => (++m, { ok: false, status: 400 }) }), null)
+  assert.equal(m, 1)
+})

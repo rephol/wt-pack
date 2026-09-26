@@ -188,12 +188,17 @@ export async function judge(feature, state, questions, { timeoutMs = 2000, key, 
   const k = key ?? keyFor();
   if (!k) return rec(null, 'nokey', false);
   try {
-    const res = await fetchImpl(ENDPOINT, {
+    const call = (ms) => fetchImpl(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ state, model: MODEL, questions }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(ms),
     });
+    let res = await call(timeoutMs);
+    // A 5xx is transient on Jev's side (WP-47: route's fail-opens were fast http_500s between successes): retry once
+    // within what is left of the time budget.
+    const left = timeoutMs - (Date.now() - t0);
+    if (res.status >= 500 && left > 200) res = await call(left);
     if (!res.ok) return rec(null, `http_${res.status}`, false);
     let j;
     try { j = await res.json(); } catch { return rec(null, 'parse', false); }
