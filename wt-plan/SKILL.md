@@ -64,8 +64,12 @@ unrelated in-flight work plans against a tree nobody else has. Resolve it from t
 
 ## 2. Worktree
 
-`scripts/worktree.sh` resolves the base and creates the worktree with plain `git worktree add`, following the
-repo's existing convention. **Creation stays plain git** — `EnterWorktree` branches from the repository's
+`scripts/worktree.sh` resolves the base and creates the worktree with plain `git worktree add` at
+`<main checkout>/.claude/worktrees/<name>`, Claude Code's own location; `WT_WORKTREE_DIR` overrides the folder.
+It resolves the main checkout from `--git-common-dir`, so running it from inside a worktree still nests under the
+main repo, and it never copies the folder of an existing worktree (in umkmall that was a sibling repo's, which put
+every worktree beside the repo). If the repo doesn't ignore `.claude/worktrees`, it adds it to
+`.git/info/exclude` and says so. **Creation stays plain git** — `EnterWorktree` branches from the repository's
 default branch, which is the wrong base wherever the integration branch is not `main`.
 
 **The base is resolved in three steps, and the first two exist because `origin/HEAD` lies.** A repo can

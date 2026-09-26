@@ -6,7 +6,10 @@ set -euo pipefail
 
 branch="${1:?usage: worktree.sh <branch-name> [dir-name]}"
 name="${2:-$(basename "$branch")}"
-root="$(git rev-parse --show-toplevel)"
+# The MAIN checkout, also when run from inside a worktree: a worktree's --show-toplevel is the
+# worktree itself, but its git-common-dir is the main repo's .git.
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+root="$(dirname "$common")"
 
 # Integration branch: origin/HEAD if the remote publishes one, else the first of the
 # conventional names that exists. Repos integrating to preview/develop/staging are common,
@@ -42,11 +45,17 @@ fi
 echo "base: origin/$base" >&2
 git -C "$root" fetch --quiet origin "$base"
 
-# Follow the convention already in use: take the parent directory of an existing worktree
-# rather than inventing one. Fall back to .claude/worktrees, which the harness also uses.
-dir=$(git -C "$root" worktree list --porcelain | awk '/^worktree /{print $2}' \
-      | grep -v "^$root\$" | head -1 | xargs -I{} dirname {} 2>/dev/null || true)
-case "$dir" in ""|"$root") dir="$root/.claude/worktrees";; esac
+# Always under the main checkout, where Claude Code puts its own worktrees. Not "wherever the first
+# existing worktree is": in umkmall that was a sibling repo's folder, so every new worktree landed
+# beside the repo in ~/Work/projects. WT_WORKTREE_DIR overrides; existing worktrees are left alone.
+dir="${WT_WORKTREE_DIR:-$root/.claude/worktrees}"
+# Nested worktrees must be ignored by the main checkout, or they show up as untracked files there.
+# Ignore them locally (.git/info/exclude, never committed) when the repo's own .gitignore doesn't.
+if [ -z "${WT_WORKTREE_DIR:-}" ] && ! git -C "$root" check-ignore -q ".claude/worktrees/x"; then
+  mkdir -p "$common/info"
+  echo "/.claude/worktrees/" >> "$common/info/exclude"
+  echo "worktree.sh: .claude/worktrees was not gitignored; added to .git/info/exclude (add it to .gitignore to share)" >&2
+fi
 mkdir -p "$dir"
 
 path="$dir/$name"
