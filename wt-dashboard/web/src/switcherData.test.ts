@@ -13,12 +13,13 @@ test('switcher: subtitle is never empty', () => {
   for (const it of switcherItems(A, [], [])) assert.ok(it.auxiliaryData!.line.length > 0)
   assert.equal(switcherItems(A, [], []).find((x) => x.label === 'p-02')!.auxiliaryData!.line, 'idle · no recent summary')
 })
-test('switcher: fuzzy name, ticket id and recap search; rooms only when waiting on you', () => {
+test('switcher: fuzzy name, ticket id and recap search; all open rooms, waiting-on-you first', () => {
   assert.deepEqual(switcherItems(A, [], [], 'p10').map((x) => x.label), ['p-10'])
   assert.deepEqual(switcherItems(A, [], [], 'umk-1183').map((x) => x.label), ['p-02'])
   assert.deepEqual(switcherItems(A, [], [], 'parser').map((x) => x.label), ['p-10'])
-  const rooms = [{ slug: 'ops', title: 'Ops', needsYou: [{ agent: 'w-01', text: 'ok?' }] }, { slug: 'quiet', title: 'Quiet' }]
-  assert.deepEqual(switcherItems([], rooms, []).map((x) => x.id), ['room:ops'])
+  const rooms = [{ slug: 'ops', title: 'Ops', needsYou: [{ agent: 'w-01', text: 'ok?' }] }, { slug: 'quiet', title: 'Quiet' }, { slug: 'old', title: 'Old', archived: true }]
+  assert.deepEqual(switcherItems([], [rooms[1], rooms[0], rooms[2]], []).map((x) => x.id), ['room:ops', 'room:quiet'])
+  assert.deepEqual(switcherItems([], rooms, [], 'qui').map((x) => x.id), ['room:quiet'])
 })
 import { agentInitials } from './switcherData.ts'
 test('agentInitials: role letter + number without leading zeros', () => {

@@ -1,5 +1,5 @@
 // Quick-switcher results: one flat, grouped list for Astryx's CommandPalette (auxiliaryData.group makes the headings).
-// An agent appears once, in its highest section: Needs you › Recent (5) › Working › Agents; then Rooms waiting on you.
+// An agent appears once, in its highest section: Needs you › Recent (5) › Working › Agents; then Rooms (waiting on you first).
 import type { SearchableItem } from '@astryxdesign/core/Typeahead'
 import { fuzzy } from './commands.ts'
 
@@ -9,7 +9,7 @@ export interface SwAgent {
   statusSince: number; lastActivity?: number; recap: string | null; question: string | null; task: string | null
   tags?: Record<string, string> // tags.task: the handoff label, "UMK-1192 Tailwind v4…"
 }
-export interface SwRoom { slug: string; title: string; needsYou?: { agent: string; text: string }[] }
+export interface SwRoom { slug: string; title: string; needsYou?: { agent: string; text: string }[]; archived?: boolean }
 export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }>
 
 export const needsYou = (a: SwAgent) => a.asks && a.status !== 'working'
@@ -40,10 +40,11 @@ export function switcherItems(agents: SwAgent[], rooms: SwRoom[], recent: string
     ...take('Working', pool.filter((a) => a.status === 'working').sort(order)),
     ...take('Agents', [...pool].sort(order)),
   ]
-  for (const r of rooms) {
-    if (!r.needsYou?.length) continue
+  const waiting = (r: SwRoom) => (r.needsYou?.length ? 0 : 1)
+  for (const r of rooms.filter((r) => !r.archived).sort((x, y) => waiting(x) - waiting(y))) {
     if (q && fuzzy(q, r.title.toLowerCase()) < 0 && !r.slug.includes(q)) continue
-    out.push({ id: `room:${r.slug}`, label: r.title, auxiliaryData: { group: 'Rooms', kind: 'room', room: r, line: `${r.needsYou[0].agent}: ${r.needsYou[0].text}` } })
+    const n = r.needsYou?.[0]
+    out.push({ id: `room:${r.slug}`, label: r.title, auxiliaryData: { group: 'Rooms', kind: 'room', room: r, line: n ? `${n.agent}: ${n.text}` : '' } })
   }
   return out
 }

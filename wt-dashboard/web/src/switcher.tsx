@@ -1,5 +1,5 @@
 // Quick switcher: a floating button (bottom-right) and ⌘K / Ctrl+K open Astryx's CommandPalette over agent
-// conversations and rooms that need you (grouping, keyboard ↑/↓/Enter/Esc and the active row are the palette's).
+// conversations and rooms (grouping, keyboard ↑/↓/Enter/Esc and the active row are the palette's).
 // Desktop: the palette's own centered dialog. Phone: the same palette inline in a full-height BottomSheet.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CommandPalette } from '@astryxdesign/core/CommandPalette'
@@ -47,9 +47,9 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
     <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 12, minHeight: phone ? 44 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
       <div style={{ position: 'relative', flex: `0 0 ${av}px`, width: av, height: av, borderRadius: av / 2, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
         {a ? agentInitials(a.name, a.local ? byId(a.pool).letter : undefined) : '#'}
-        <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
+        {(a || line) && <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
           <StatusDot variant={!a || needsYou(a) ? 'error' : DOT[a.status]} label={a ? (needsYou(a) ? 'needs you' : a.status) : 'waiting on you'} isPulsing={a?.status === 'working'} />
-        </span>
+        </span>}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <Text weight="medium" maxLines={1} hasTruncateTooltip={false}>{it.label}</Text>
