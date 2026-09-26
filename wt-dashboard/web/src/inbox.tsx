@@ -130,17 +130,22 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const act = (label: string, icon: React.ReactNode, f: () => void) => (
     <IconButton label={label} tooltip={tip(label)} icon={icon} size="sm" variant="ghost" onClick={(e: React.MouseEvent) => { e.stopPropagation(); f() }} />
   )
-  const row = (it: InboxRow, inGroup = false) => (
-    <div key={it.id} className={`hd-inbox-row${inGroup ? ' hd-in-group' : ''}`} role="button" tabIndex={0} onClick={() => go(it)} onKeyDown={(e) => e.key === 'Enter' && go(it)}
-      aria-label={`${LABEL[it.kind]}: ${it.title}${it.count > 1 ? `, ${it.count} times` : ''}${it.anyUnread ? ', unread' : ''}`}>
+  // Inside a group the group's name is already on the header: show the event (its body, else the title without the name).
+  const row = (it: InboxRow, group?: string) => {
+    const own = group && it.title.startsWith(group) ? it.title.slice(group.length).replace(/^\s*\([^)]*\)/, '').trim() : null
+    const title = own != null ? (it.body || own || it.title) : it.title
+    const body = own != null && it.body ? null : it.body
+    return (
+    <div key={it.id} className={`hd-inbox-row${group ? ' hd-in-group' : ''}`} role="button" tabIndex={0} onClick={() => go(it)} onKeyDown={(e) => e.key === 'Enter' && go(it)}
+      aria-label={`${LABEL[it.kind]}: ${title}${it.count > 1 ? `, ${it.count} times` : ''}${it.anyUnread ? ', unread' : ''}`}>
       <span className="hd-kind" style={{ color: COLOR[it.kind] }}>{ICON[it.kind]}</span>
       <span className="hd-main">
         <span className={`hd-title${it.anyUnread ? ' unread' : ''}`}>
-          {it.anyUnread && <span className="hd-dot" />}<span className="hd-trunc">{it.title}</span>
+          {it.anyUnread && <span className="hd-dot" />}<span className="hd-trunc">{title}</span>
           {it.count > 1 && <span className="hd-count">{`×${it.count}`}</span>}
           {it.resolvedAt && <span className="hd-count">resolved</span>}
         </span>
-        {it.body && <span className="hd-body hd-trunc">{it.body}</span>}
+        {body && <span className="hd-body hd-trunc">{body}</span>}
       </span>
       <span className="hd-side">
         <span className="hd-time">{shortAgo(it.ts)}</span>
@@ -156,7 +161,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
         </span>
       </span>
     </div>
-  )
+  )}
   // Several rows from one agent/room/task/memory: one header row that expands; its actions cover every row.
   const group = (g: InboxGroup) => {
     if (g.rows.length === 1) return row(g.rows[0])
@@ -182,7 +187,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
             </span>
           </span>
         </div>
-        {isOpen && g.rows.map((r) => row(r, true))}
+        {isOpen && g.rows.map((r) => row(r, g.label))}
       </div>
     )
   }
@@ -201,7 +206,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
               <IconButton label="Close" tooltip={tip('Close (Esc)')} icon={I.x} size="sm" variant="ghost" onClick={onClose} />
             </HStack>
           </HStack>
-          <div style={{ overflowX: 'auto', margin: '0 -4px', padding: '0 4px' }}>
+          <div className="hd-filter" style={{ overflowX: 'auto', margin: '0 -4px', padding: '0 4px' }}>
             <SegmentedControl label="Filter" value={filter} onChange={(v) => setFilter(v as 'all' | Kind)} size="sm">
               <SegmentedControlItem value="all" label="All" />
               <SegmentedControlItem value="question" label="Questions" />

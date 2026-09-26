@@ -88,3 +88,5 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-chev[data-open="true"] svg { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .hd-chev svg { transition: none; } }
 .hd-in-group { padding-left: 28px; background: rgba(128,128,128,.04); }
+.hd-group[aria-expanded="true"] .hd-acts { opacity: 1; } /* an open group's actions stay visible (hover-only rows are pointer:fine only) */
+.hd-filter > * { width: max-content; min-width: 100%; } /* the tab bar scrolls sideways instead of clipping its last tab */
