@@ -152,10 +152,13 @@ export class Config {
 
 // Only a request made on this machine to 127.0.0.1/localhost itself — not one `tailscale serve` proxied in
 // (that also arrives from loopback, but with the tailnet Host and forwarding headers).
+// Host names that mean "this machine": the Mac app loads wt-dashboard.localhost (WebKit resolves *.localhost to loopback)
+// so Activity Monitor names its web process after the app, not "http://127.0.0.1:7777".
+export const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|wt-dashboard\.localhost)(:\d+)?$/
 export function isLoopbackRequest(req) {
   const addr = req.socket?.remoteAddress ?? ''
   const h = req.headers ?? {}
   return /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(addr)
-    && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h.host ?? '')
+    && LOOPBACK_HOST.test(h.host ?? '')
     && !h['x-forwarded-for'] && !h['x-forwarded-host'] && !h['tailscale-user-login'] && !h.forwarded
 }

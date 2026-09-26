@@ -13,7 +13,7 @@ import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
-import { Config, KEYS, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -26,6 +26,8 @@ for (const f of [join(homedir(), '.config', 'wt-dashboard', 'env'), join(homedir
 }
 
 const PORT = Number(process.env.PORT ?? 7777)
+// Activity Monitor and ps show this instead of "node".
+process.title = 'wt-dashboard server'
 // Integrations & environment (config.mjs): env var > Keychain > ~/.config/wt-dashboard/env > default.
 const cfg = new Config({ file: join(homedir(), '.config', 'wt-dashboard', 'env') })
 // ponytail: the default repo is read once; changing it asks for a restart (it is threaded through many paths).
@@ -1508,7 +1510,7 @@ const send = (res, code, data, type = 'application/json') => {
 // `tailscale serve` proxies from. Comma-separated; exact match only, never a wildcard.
 const LOCAL = {
   test: (h) =>
-    /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(h) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
+    LOOPBACK_HOST.test(h) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
 }
 const PANE = /^[\w.:-]+$/
 const KEY = /^[\w+-]{1,20}$/

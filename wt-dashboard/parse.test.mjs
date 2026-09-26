@@ -478,6 +478,8 @@ test('isLoopbackRequest: only this machine\'s own 127.0.0.1 page, never a tailne
   const r = (addr, headers) => ({ socket: { remoteAddress: addr }, headers })
   assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777' })), true)
   assert.equal(isLoopbackRequest(r('::1', { host: 'localhost:7777' })), true)
+  assert.equal(isLoopbackRequest(r('127.0.0.1', { host: 'wt-dashboard.localhost:7777' })), true) // the Mac app
+  assert.equal(isLoopbackRequest(r('100.64.0.2', { host: 'wt-dashboard.localhost:7777' })), false) // Host alone never makes it loopback
   assert.equal(isLoopbackRequest(r('127.0.0.1', { host: 'mac.tail1234.ts.net' })), false) // tailscale serve
   assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777', 'x-forwarded-for': '100.64.0.2' })), false)
   assert.equal(isLoopbackRequest(r('127.0.0.1', { host: '127.0.0.1:7777', 'tailscale-user-login': 'a@b' })), false)
