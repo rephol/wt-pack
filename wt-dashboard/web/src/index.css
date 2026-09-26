@@ -113,7 +113,7 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-set-list { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .hd-set-list:hover, .hd-set-list:focus-visible { background: rgba(128,128,128,.10); outline: none; }
 /* Local ticket board (board.tsx) */
-/* WP-41: at phone widths the toolbar wraps to two rows instead of pushing 'Run now' off-screen. */
+/* Desktop board header; phones use their own two-row header (WP-64). */
 .hd-kb-toolbar { flex-wrap: wrap; row-gap: 8px; min-width: 0; }
 .hd-kb-page { flex: 1 1 0; min-height: 420px; } /* fills the page VStack (height 100% on board) down to the viewport bottom */
 .hd-kb-cols { overflow-x: auto; overflow-y: hidden; height: 100%; padding: 16px; align-items: stretch; }
