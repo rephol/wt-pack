@@ -1,9 +1,7 @@
-// Local ticket boards: one DATA/tickets/<project>.json per project, { key, next, tickets }. Ids are <KEY>-N.
-// The server is the only writer (the wt-ticket CLI goes through the API), so an in-process lock is enough.
-// ponytail: per-project in-process lock; the server is the only writer.
-import { readFile, readdir, mkdir, rename } from 'node:fs/promises'
+// Local ticket boards in DATA/wt.db (store.mjs): boards { project, key, next } and one row per ticket. Ids are <KEY>-N.
+// The server is the only writer (the wt-ticket CLI goes through the API); each change is one transaction.
 import { join } from 'node:path'
-import { atomicWrite } from './rooms.mjs'
+import { open, tx } from './store.mjs'
 
 export const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked']
 export const TYPES = ['bug', 'ux', 'gap', 'debt', 'feature']
@@ -62,112 +60,61 @@ export function clean(b, { create = false } = {}) {
 export class Tickets {
   // reserved: keys owned by Linear (PROJECT_BY_TEAM), never given to a board.
   constructor({ dir, reserved = [], log = console.error }) {
-    Object.assign(this, { dir: join(dir, 'tickets'), reserved: new Set(reserved), log })
-    this.locks = new Map()
-    this.boards = new Map() // project -> board (cache; the server is the only writer)
+    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log })
   }
-  lock(name, fn) {
-    const p = (this.locks.get(name) ?? Promise.resolve()).then(fn, fn)
-    this.locks.set(name, p.catch(() => {}))
-    return p
-  }
-  file(project) { return join(this.dir, `${project}.json`) }
-  async read(project) {
-    if (this.boards.has(project)) return this.boards.get(project)
-    const raw = await readFile(this.file(project), 'utf8').catch(() => null)
-    if (raw === null) return null
-    try {
-      const b = JSON.parse(raw)
-      if (typeof b?.key !== 'string' || !Array.isArray(b.tickets)) throw new Error('bad shape')
-      this.boards.set(project, b)
-      return b
-    } catch (e) {
-      const to = `${this.file(project)}.corrupt-${Date.now()}`
-      this.log(`tickets/${project}.json unreadable (${e.message}); kept as ${to}`)
-      await rename(this.file(project), to).catch(() => {})
-      return null
-    }
-  }
-  async save(project, b) {
-    await mkdir(this.dir, { recursive: true })
-    await atomicWrite(this.file(project), JSON.stringify(b, null, 2))
-    this.boards.set(project, b)
-  }
-  // { key, next } scraped from <project>.json.corrupt-* text (not parseable as JSON, so by regex).
-  async salvage(project) {
-    let key = null, next = 1
-    for (const f of (await readdir(this.dir).catch(() => [])).filter((f) => f.startsWith(`${project}.json.corrupt-`))) {
-      const raw = await readFile(join(this.dir, f), 'utf8').catch(() => '')
-      key ??= raw.match(/"key"\s*:\s*"([A-Z]{2,5})"/)?.[1] ?? null
-      for (const m of raw.matchAll(/"next"\s*:\s*(\d+)|"id"\s*:\s*"[A-Z]+-(\d+)"/g)) next = Math.max(next, Number(m[1] ?? Number(m[2]) + 1))
-    }
-    return { key, next }
-  }
-  async projects() {
-    return (await readdir(this.dir).catch(() => [])).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).filter((p) => PROJECT.test(p))
-  }
-  // { project: key } for every board on disk.
+  get db() { return open(this.file, { log: this.log }) } // lazy: server.mjs is imported by tests
+  // { project: key } for every board.
   async keys() {
-    const out = {}
-    for (const p of await this.projects()) { const b = await this.read(p); if (b) out[p] = b.key }
-    return out
+    return Object.fromEntries(this.db.prepare('SELECT project, key FROM boards').all().map((r) => [r.project, r.key]))
   }
-  async projectOf(id) {
-    const key = String(id).split('-')[0].toUpperCase()
-    const hit = Object.entries(await this.keys()).find(([, k]) => k === key)
-    if (!hit) throw err(404, `no board for ${key}`)
-    return hit[0]
-  }
-  // Existing board, or a new one whose key is picked under one global lock.
-  board(project) {
+  // Existing board, or a new one whose key is picked in the same transaction.
+  async board(project) {
     if (!PROJECT.test(project ?? '')) throw err(400, 'project required')
-    return this.lock('__keys__', async () => {
-      const have = await this.read(project)
-      if (have) return have
-      const taken = new Set([...this.reserved, ...Object.values(await this.keys())])
-      // A quarantined board keeps its key and id range, so new ids never reuse ones already handed out.
-      const old = await this.salvage(project)
-      const b = { key: old.key && !taken.has(old.key) ? old.key : deriveKey(project, taken), next: old.next, tickets: [] }
-      await this.save(project, b)
+    return tx(this.db, () => {
+      const have = this.db.prepare('SELECT key, next FROM boards WHERE project = ?').get(project)
+      if (have) return { ...have }
+      const taken = new Set([...this.reserved, ...this.db.prepare('SELECT key FROM boards').all().map((r) => r.key)])
+      const b = { key: deriveKey(project, taken), next: 1 }
+      this.db.prepare('INSERT INTO boards (project, key, next) VALUES (?, ?, ?)').run(project, b.key, b.next)
       return b
     })
   }
   // A read never creates a board (a typo'd project must not take a key); the first create does.
   async list(project, column) {
     if (!PROJECT.test(project ?? '')) throw err(400, 'project required')
-    const b = await this.read(project) ?? { key: null, tickets: [] }
-    return { key: b.key, tickets: column ? b.tickets.filter((t) => t.column === column) : b.tickets }
+    const key = this.db.prepare('SELECT key FROM boards WHERE project = ?').get(project)?.key ?? null
+    const tickets = this.db.prepare('SELECT json FROM tickets WHERE project = ? ORDER BY seq').all(project).map((r) => JSON.parse(r.json))
+    return { key, tickets: column ? tickets.filter((t) => t.column === column) : tickets }
   }
-  async get(id) {
-    const t = (await this.read(await this.projectOf(id)))?.tickets.find((x) => x.id === String(id).toUpperCase())
-    if (!t) throw err(404, `no ticket ${id}`)
-    return t
+  row(id) {
+    const r = this.db.prepare('SELECT json FROM tickets WHERE id = ?').get(String(id).toUpperCase())
+    if (!r) throw err(404, `no ticket ${id}`)
+    return JSON.parse(r.json)
   }
+  async get(id) { return this.row(id) }
   async create(project, body, author) {
     const f = clean(body, { create: true })
     await this.board(project)
-    return this.lock(project, async () => {
-      const b = await this.read(project)
+    return tx(this.db, () => {
+      const b = this.db.prepare('SELECT key, next FROM boards WHERE project = ?').get(project)
       const at = new Date().toISOString()
       const t = { id: `${b.key}-${b.next}`, title: f.title, body: f.body ?? '', type: f.type ?? 'feature', size: f.size ?? null,
         priority: f.priority ?? 0, labels: f.labels ?? [], links: f.links ?? [], column: f.column ?? 'backlog', assignee: null,
         created: at, updated: at, history: [{ at, author: author.name, kind: 'create', to: f.column ?? 'backlog' }] }
-      await this.save(project, { ...b, next: b.next + 1, tickets: [...b.tickets, t] })
+      this.db.prepare('INSERT INTO tickets (id, project, seq, json) VALUES (?, ?, ?, ?)').run(t.id, project, b.next, JSON.stringify(t))
+      this.db.prepare('UPDATE boards SET next = ? WHERE project = ?').run(b.next + 1, project)
       return t
     })
   }
-  // fn(ticket, at) → mutated copy; runs under the project's lock against the latest file.
+  // fn(ticket, at) → mutated copy; read, apply and write in one transaction.
   async mutate(id, fn) {
-    const project = await this.projectOf(id)
-    return this.lock(project, async () => {
-      const b = await this.read(project)
-      const i = b.tickets.findIndex((x) => x.id === String(id).toUpperCase())
-      if (i < 0) throw err(404, `no ticket ${id}`)
+    return tx(this.db, () => {
+      const old = this.row(id)
       const at = new Date().toISOString()
-      const t = fn(structuredClone(b.tickets[i]), at)
-      if (JSON.stringify(t) === JSON.stringify(b.tickets[i])) return t // no-op: no write, no updated bump
+      const t = fn(structuredClone(old), at)
+      if (JSON.stringify(t) === JSON.stringify(old)) return t // no-op: no write, no updated bump
       t.updated = at
-      await this.save(project, { ...b, tickets: b.tickets.with(i, t) })
+      this.db.prepare('UPDATE tickets SET json = ? WHERE id = ?').run(JSON.stringify(t), old.id)
       return t
     })
   }

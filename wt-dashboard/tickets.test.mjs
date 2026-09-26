@@ -5,6 +5,7 @@ import { mkdtemp, readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets, deriveKey, ticketRow } from './tickets.mjs'
+import { exportTo } from './store.mjs'
 
 const tmp = () => mkdtemp(join(tmpdir(), 'tickets-'))
 const user = { name: 'Rep' }
@@ -18,15 +19,14 @@ test('deriveKey', () => {
   assert.equal(deriveKey('my_app2'), 'MA')
 })
 
-test('create: sequential ids, history, board file', async () => {
+test('create: sequential ids, history, next', async () => {
   const dir = await tmp()
   const t = new Tickets({ dir, reserved: ['UMK'] })
   const a = await t.create('wt-pack', { title: ' First ', type: 'bug' }, user)
   const b = await t.create('wt-pack', { title: 'Second', column: 'ready' }, agent)
   assert.deepEqual([a.id, b.id, a.title, a.column, b.column], ['WP-1', 'WP-2', 'First', 'backlog', 'ready'])
   assert.equal(a.history[0].author, 'Rep')
-  const file = JSON.parse(await readFile(join(dir, 'tickets', 'wt-pack.json'), 'utf8'))
-  assert.equal(file.next, 3)
+  assert.equal((await t.board('wt-pack')).next, 3)
   assert.equal(ticketRow(a), 'WP-1 [backlog] (bug) First') // priority 0 = none
   assert.equal(ticketRow({ ...a, priority: 2 }), 'WP-1 [backlog] (bug,P2) First')
   assert.deepEqual(await t.keys(), { 'wt-pack': 'WP' })
@@ -74,22 +74,35 @@ test('claim: 409 when held by another agent, force takes it', async () => {
   assert.equal((await t.patch(id, {}, user, null)).assignee, null)
 })
 
-test('corrupt file is quarantined', async () => {
+const board = { key: 'WPK', next: 8, tickets: [{ id: 'WPK-6', title: 'six', column: 'done', history: [{ kind: 'create' }] }, { id: 'WPK-7', title: 'seven', column: 'ready', history: [] }] }
+const legacy = async (files) => {
   const dir = await tmp()
   await mkdir(join(dir, 'tickets'), { recursive: true })
-  await writeFile(join(dir, 'tickets', 'wt-pack.json'), '{nope')
+  for (const [f, text] of Object.entries(files)) await writeFile(join(dir, 'tickets', f), text)
+  return dir
+}
+
+test('import: legacy board keeps ids, next and history; files move to pre-sqlite-*; no re-import', async () => {
+  const dir = await legacy({ 'wt-pack.json': JSON.stringify(board) })
   const t = new Tickets({ dir, log: () => {} })
-  assert.equal((await t.board('wt-pack')).key, 'WP')
-  assert.ok((await readdir(join(dir, 'tickets'))).some((f) => f.startsWith('wt-pack.json.corrupt-')))
+  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', tickets: board.tickets })
+  assert.equal((await t.create('wt-pack', { title: 'after' }, user)).id, 'WPK-8')
+  const [backup] = (await readdir(dir)).filter((f) => f.startsWith('pre-sqlite-'))
+  assert.deepEqual(JSON.parse(await readFile(join(dir, backup, 'tickets', 'wt-pack.json'), 'utf8')), board)
+  assert.equal((await readdir(dir)).includes('tickets'), false)
+  // export writes the old { key, next, tickets } shape
+  const out = await tmp()
+  exportTo(join(dir, 'wt.db'), out)
+  const back = JSON.parse(await readFile(join(out, 'tickets', 'wt-pack.json'), 'utf8'))
+  assert.deepEqual([back.key, back.next, back.tickets.map((x) => x.id)], ['WPK', 9, ['WPK-6', 'WPK-7', 'WPK-8']])
 })
 
-test('a quarantined board keeps its key and id range', async () => {
-  const dir = await tmp()
-  await mkdir(join(dir, 'tickets'), { recursive: true })
-  await writeFile(join(dir, 'tickets', 'wt-pack.json'), '{"key": "WPK", "next": 8, "tickets": [{"id": "WPK-7"}, {"id": "WPK-12", trunc')
-  const t = new Tickets({ dir, log: () => {} })
-  assert.equal(await t.read('wt-pack'), null)
+test('import: an unreadable board keeps its key and id range', async () => {
+  const dir = await legacy({ 'wt-pack.json.corrupt-1': '{"key": "WPK", "next": 8, "tickets": [{"id": "WPK-7"}, {"id": "WPK-12", trunc', 'web.json': '{nope' })
+  const logs = []
+  const t = new Tickets({ dir, log: (m) => logs.push(m) })
   assert.equal((await t.create('wt-pack', { title: 'after' }, user)).id, 'WPK-13')
+  assert.equal(logs.filter((m) => m.includes('unreadable')).length, 2)
 })
 
 test('no-op patch keeps updated and history', async () => {
@@ -120,7 +133,7 @@ test('list never creates a board', async () => {
 })
 
 // The pane is verified before the body is parsed or the board touched: an unknown pane gets 403 even for a bad body.
-test('server: unknown pane → 403 before body parsing, board file unchanged', async () => {
+test('server: unknown pane → 403 before body parsing, board unchanged', async () => {
   const { spawn } = await import('node:child_process')
   const root = await tmp()
   await mkdir(join(root, 'data', 'tickets'), { recursive: true })
@@ -142,6 +155,6 @@ test('server: unknown pane → 403 before body parsing, board file unchanged', a
     assert.equal((await call('PATCH', '/api/tickets/WP-1', '{not json')).status, 403)
     assert.equal((await call('POST', '/api/tickets', '{"title":"t","project":"wt-pack"}')).status, 403)
     assert.equal((await call('POST', '/api/tickets/WP-1/claim', '{}')).status, 403)
-    assert.equal(await readFile(file, 'utf8'), board)
+    assert.deepEqual((await new Tickets({ dir: join(root, 'data') }).list('wt-pack')).tickets, JSON.parse(board).tickets)
   } finally { srv.kill() }
 })

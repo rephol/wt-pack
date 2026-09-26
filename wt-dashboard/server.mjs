@@ -1699,7 +1699,6 @@ export function needsSession(method, path, headers) {
 const tickets = new Tickets({ dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM) })
 // boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
 const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values(k) }, (e) => console.error('tickets:', e.message))
-refreshKeys()
 async function ticketsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
   const text = url.searchParams.get('format') === 'text'
@@ -2345,6 +2344,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     setTimeout(hkRun, 60_000)
     setInterval(hkRun, 3_600_000)
     recordStart().catch((e) => console.error('starts:', e.message))
+    refreshKeys() // opens wt.db (and runs any import) only in a listening server
     inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${MANAGED_BY === 'app' ? 'app-managed' : MANAGED_BY})`, body: `pid ${process.pid}`, target: {}, quiet: true })
   }))
 // Spawned by the desktop app: exit with it, however it quit (a macOS quit can skip the app's own kill).

@@ -1,6 +1,8 @@
 #!/bin/sh
 # Build server.mjs into a Node single-executable (SEA) sidecar for Tauri.
 set -eu
+# store.mjs needs node:sqlite without a flag (node >= 22.13, same floor as ./setup); the SEA embeds this node.
+node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)' || { echo "sidecar: node >= 22.13 required (have $(node -v))" >&2; exit 1; }
 cd "$(dirname "$0")/.."
 mkdir -p build src-tauri/binaries
 OUT=src-tauri/binaries/wt-dashboard-server-aarch64-apple-darwin
