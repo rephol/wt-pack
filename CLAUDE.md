@@ -8,7 +8,7 @@ Skills pack: each top-level dir is a skill symlinked as `~/.claude/skills/<name>
   Verify, commit, report concisely.
 - **One commit per skill touched.** Commit only your own paths (`git commit <paths>`), never `-a`.
 - Keep every CLI backward compatible. Extending skills for dashboard needs is allowed.
-- The umkmall orchestrator (previous owner) is reachable via `herdr agent prompt <pane> "..."`.
+- The umkmall orchestrator (previous owner) is reachable via `herdr agent prompt wP:p1 "..."`.
 
 ## Skill map
 | Skill | What / where to look |
