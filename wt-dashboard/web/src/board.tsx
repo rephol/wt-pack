@@ -267,7 +267,7 @@ function AutomationButton({ phone, board, busy, onSet, runNow }: {
       <Divider />
       <VStack gap={1}>
         <Switch label="Dispatch" value={!!board.dispatch} isDisabled={busy} onChange={(v: boolean) => onSet({ dispatch: v })} />
-        <Text type="supporting" size="sm" color="secondary">Hand unassigned Ready tickets to free agents (L → planner, else worker), one per 30s, within the Routines cap.</Text>
+        <Text type="supporting" size="sm" color="secondary">Hand unassigned Ready tickets to free agents (L or needs-plan label → planner, else worker), one per 30s, within the Routines cap.</Text>
       </VStack>
       {board.dispatch && <StallMinutes value={board.stallMin ?? 45} onSave={(n) => onSet({ stallMin: n })} />}
       {board.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(board.dispatchStatus)}</Text>}
@@ -310,6 +310,7 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
           {t.type && <Badge label={t.type} variant="neutral" />}
           {t.size && <Badge label={t.size} variant="neutral" />}
           {jevChip(t) && <Badge label="Jev" variant="info" />}
+          {t.labels?.includes('needs-plan') && <Badge label="needs plan" variant="warning" />}
           {db && <Tooltip content={db[2]}><Badge label={db[0]} variant={db[1]} /></Tooltip>}
         </HStack>
         <MoreMenu label={`Actions for ${t.id}`} size="sm" alignment="end" presentation="adaptive"
@@ -529,7 +530,7 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
           <VStack gap={1}>
             {Object.entries(ticket.jev.applied).map(([f, a]) => (
               <HStack key={f} gap={2} vAlign="center">
-                <Text type="body">{f === 'column' ? 'Jev auto-promoted to Ready' : `Jev suggested ${f} ${f === 'priority' ? PRIORITY[Number(a.to)] : String(a.to)}`}</Text>
+                <Text type="body">{f === 'column' ? 'Jev auto-promoted to Ready' : f === 'labels' ? 'Jev added label needs-plan' : `Jev suggested ${f} ${f === 'priority' ? PRIORITY[Number(a.to)] : String(a.to)}`}</Text>
                 <Button label="Undo" variant="ghost" size="sm" isLoading={undo.isPending && undo.variables === f} onClick={() => undo.mutate(f)} />
               </HStack>
             ))}

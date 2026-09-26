@@ -40,7 +40,7 @@ test('triageTicket: fail-open leaves the ticket as created; answers fill only em
   assert.deepEqual(await tickets.get(t.id), t)
   const out = await triageTicket('wt-pack', t, ['type', 'priority'], { ask: async () => ({ ...answers, size: { choice: 'L', confidence: 1 } }), tickets, log: () => {} })
   assert.deepEqual([out.type, out.size, out.priority], ['bug', 'M', 2])
-  assert.deepEqual(Object.keys(out.jev.applied), ['type', 'priority'])
+  assert.deepEqual(Object.keys(out.jev.applied), ['type', 'priority', 'labels']) // Jev said planner → needs-plan
   assert.equal(await triageTicket('wt-pack', t, [], { ask: async () => { throw new Error('boom') }, tickets, log: () => {} }), null)
 })
 
