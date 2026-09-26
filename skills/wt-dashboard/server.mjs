@@ -2409,6 +2409,7 @@ const dispatcher = new Dispatch({
     agents: () => agents(),
     host: () => host(),
     maxWorking: () => routines.settings().maxWorking,
+    triageOn: () => jevOn('TICKET_TRIAGE'),
     pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
     git: (repo, ...args) => git(repo, ...args),

@@ -41,6 +41,7 @@ test('dispatch badge and status line (WP-52)', () => {
   assert.equal(dispatchBadge({ state: 'held', fails: 3 })?.[1], 'error')
   assert.equal(dispatchBadge({ state: 'sent', stalled: 'w idle 50m' })?.[0], 'Stalled')
   assert.equal(dispatchLine({ last: null, waiting: 'cap: 4 working ≥ 4', inflight: 0 }), 'waiting: cap: 4 working ≥ 4')
+  assert.equal(dispatchLine({ last: null, waiting: 'waiting for triage', inflight: 0 }), 'waiting for triage')
   assert.equal(dispatchLine({ last: { at: 0, text: 'WP-9 → w2' }, waiting: null, inflight: 0 }, 180_000), 'last: WP-9 → w2 3m ago')
   assert.equal(dispatchLine({ last: null, waiting: null, inflight: 1 }), 'Dispatching 1…')
 })

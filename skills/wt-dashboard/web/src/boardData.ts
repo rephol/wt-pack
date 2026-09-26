@@ -37,7 +37,7 @@ export function dispatchBadge(d?: TicketDispatch | null): [string, 'info' | 'war
 export function dispatchLine(s?: DispatchStatus | null, now = Date.now()): string | null {
   if (!s) return null
   if (s.inflight) return `Dispatching ${s.inflight}…`
-  if (s.waiting) return `waiting: ${s.waiting}`
+  if (s.waiting) return s.waiting.startsWith('waiting') ? s.waiting : `waiting: ${s.waiting}`
   if (s.last) return `last: ${s.last.text} ${Math.max(0, Math.round((now - s.last.at) / 60_000))}m ago`
   return 'idle'
 }
