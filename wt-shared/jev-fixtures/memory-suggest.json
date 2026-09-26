@@ -1,0 +1,14 @@
+[
+  {"state": {"message": "from now on always answer in English"}, "expect": true},
+  {"state": {"message": "fix the typo in README line 3"}, "expect": false},
+  {"state": {"message": "stop opening draft PRs, just merge after review"}, "expect": true},
+  {"state": {"message": "what's the status of UMK-521?"}, "expect": false},
+  {"state": {"message": "never use npm in this repo, it's pnpm"}, "expect": true},
+  {"state": {"message": "deploy web to staging"}, "expect": false},
+  {"state": {"message": "you keep restarting the server after every edit — don't, once per change is enough"}, "expect": true},
+  {"state": {"message": "rename the room to wt-pack"}, "expect": false},
+  {"state": {"message": "always use the agent-browser skill for browser checks"}, "expect": true},
+  {"state": {"message": "can you run the tests again?"}, "expect": false},
+  {"state": {"message": "for this PR, skip the changelog"}, "expect": false},
+  {"state": {"message": "please stop adding emoji to commit messages"}, "expect": true}
+]

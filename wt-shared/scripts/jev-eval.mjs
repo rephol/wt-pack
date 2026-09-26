@@ -18,6 +18,8 @@ export const EVALUATORS = {
   needs_you: 'wt-dashboard/server.mjs#needsYouJudge',
   stall: 'wt-dashboard/server.mjs#stallJudge',
   route: 'wt-handoff/scripts/jev-route.mjs#route',
+  memory_dup: 'wt-memory/scripts/jev-memory.mjs#memoryDup',
+  memory_suggest: 'wt-memory/scripts/jev-memory.mjs#memorySuggest',
 }
 
 const feature = process.argv[2]
