@@ -404,9 +404,33 @@ export default function App() {
     return () => removeEventListener('keydown', on)
   })
 
+  const projectRows = [['all', 'All projects', counts.all] as const, ...counts.by.map(([p, c]) => [p, p, c] as const)]
+  const current = projectRows.find(([v]) => v === project) ?? projectRows[0]
+  const countsEnd = (c: typeof counts.all) => (
+    <HStack gap={1} align="center">
+      {c.needs > 0 && <StatusDot variant="error" label={`${c.needs} need you`} />}
+      {c.working > 0 && <Text type="supporting" size="sm">{`${c.working}▸`}</Text>}
+      <Badge label={String(c.agents)} />
+    </HStack>
+  )
+  const projectIcon = (v: string, label: string, dot: boolean) => initialsIcon(v === 'all' ? '*' : initials(label), dot)
+  const projectPicker = (
+    <DropdownMenu hasChevron={!navCollapsed} menuWidth={260}
+      button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
+      items={projectRows.map(([v, label, c]) => ({ id: v, label, icon: projectIcon(v, label, false), endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} />
+  )
+  const [sideList, setSideListState] = useState<'agents' | 'rooms'>(() => { try { return localStorage.getItem('nav-list') === 'rooms' ? 'rooms' : 'agents' } catch { return 'agents' } })
+  const setSideList = (v: string) => {
+    const s = v === 'rooms' ? 'rooms' : 'agents'
+    setSideListState(s)
+    try { localStorage.setItem('nav-list', s) } catch { /* private mode */ }
+  }
+  const sideRooms = (roomsQ.data?.rooms ?? []).filter((r) => !r.archived && (project === 'all' || r.project === project))
+    .sort((x, y) => Number(Boolean(y.needsYou?.length)) - Number(Boolean(x.needsYou?.length)))
+
   const nav = (
     <SideNav
-      header={<SideNavHeading heading="wt-dashboard" subheading={phone ? undefined : 'herdr · umkmall'} />}
+      header={<VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading={phone ? undefined : 'herdr · umkmall'} />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings('profile')} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'agents', 'rooms', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
@@ -422,17 +446,21 @@ export default function App() {
           />
         )
       })}
-      <SideNavSection title="Projects">
-        {[['all', 'All projects', counts.all] as const, ...counts.by.map(([p, c]) => [p, p, c] as const)].map(([v, label, c]) => (
-          <SideNavItem key={v} label={label} icon={initialsIcon(v === 'all' ? '*' : initials(label), navCollapsed && c.needs > 0)}
-            isSelected={project === v} onClick={() => setProject(v)}
-            endContent={<Tooltip content={countTooltip(c)}><HStack gap={1} align="center">
-              {c.needs > 0 && <StatusDot variant="error" label={`${c.needs} need you`} />}
-              {c.working > 0 && <Text type="supporting" size="sm">{`${c.working}▸`}</Text>}
-              <Badge label={String(c.agents)} />
-            </HStack></Tooltip>} />
-        ))}
-      </SideNavSection>
+      {!navCollapsed && <SideNavSection title="Open">
+        <SegmentedControl label="Sidebar list" value={sideList} onChange={setSideList} size="sm">
+          <SegmentedControlItem value="agents" label="Agents" />
+          <SegmentedControlItem value="rooms" label="Rooms" />
+        </SegmentedControl>
+        {sideList === 'agents'
+          ? sortAgents(data?.agents ?? [], 'attention').map((a) => (
+            <SideNavItem key={a.key} label={a.name} icon={initialsIcon(initials(a.name), false)} isSelected={openPane === a.key || fullKey === a.key} onClick={() => open(a.key)}
+              endContent={needsYou(a) ? <StatusDot variant="error" label="needs you" /> : a.status === 'working' ? <Text type="supporting" size="sm">▸</Text> : undefined} />
+          ))
+          : sideRooms.map((r) => (
+            <SideNavItem key={r.slug} label={r.title} icon={navIcon('rooms', false)} href={`#rooms/${encodeURIComponent(r.slug)}`} isSelected={page === 'rooms' && roomSlug === r.slug}
+              endContent={r.needsYou?.length ? <StatusDot variant="error" label="needs you" /> : undefined} />
+          ))}
+      </SideNavSection>}
     </SideNav>
   )
 
