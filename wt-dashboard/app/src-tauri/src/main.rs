@@ -282,6 +282,13 @@ static SRV: Mutex<Srv> = Mutex::new(Srv::Starting);
 static LAST_TRAY: Mutex<Option<TrayState>> = Mutex::new(None);
 static RESTARTS: Mutex<Vec<Instant>> = Mutex::new(Vec::new());
 static BUSY: AtomicBool = AtomicBool::new(false);
+/// A new web build is waiting (WP-55): a dot on the tray title and the Dock icon until reloaded/dismissed.
+static UPDATE: AtomicBool = AtomicBool::new(false);
+static NEEDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+fn tray_title(n: usize) -> Option<String> {
+    let dot = if UPDATE.load(Ordering::Relaxed) { "•" } else { "" };
+    if n > 0 || !dot.is_empty() { Some(format!("{}{dot}", if n > 0 { n.to_string() } else { String::new() })) } else { None }
+}
 const MAX_AUTO_RESTARTS: usize = 3; // per 5 minutes
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -595,13 +602,21 @@ fn main() {
                 let Ok(st) = serde_json::from_str::<TrayState>(e.payload()) else { return };
                 *lock(&LAST_TRAY) = Some(st.clone());
                 let n = st.needs.len();
-                let _ = tray.set_title(if n > 0 { Some(n.to_string()) } else { None });
+                NEEDS.store(n, Ordering::Relaxed);
+                let _ = tray.set_title(tray_title(n));
                 if last.swap(n, std::sync::atomic::Ordering::Relaxed) != n {
                     log(&format!("tray: needs={n} working={}", st.working.len()));
                 }
                 if let Ok(m) = build_menu(&hh, &st) {
                     let _ = tray.set_menu(Some(m));
                 }
+            });
+            let hh = h.clone();
+            app.listen("update", move |e| {
+                if EXITING.load(Ordering::Relaxed) { return }
+                UPDATE.store(e.payload() == "true", Ordering::Relaxed);
+                if let Some(t) = hh.tray_by_id("main") { let _ = t.set_title(tray_title(NEEDS.load(Ordering::Relaxed))); }
+                if let Some(w) = hh.get_webview_window("main") { let _ = w.set_badge_label(UPDATE.load(Ordering::Relaxed).then(|| "•".to_string())); }
             });
             let hh = h.clone();
             app.listen("notify", move |e| {

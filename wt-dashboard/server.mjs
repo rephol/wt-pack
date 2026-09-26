@@ -1423,6 +1423,13 @@ async function tick() {
     broadcastEvent('tray', trayOfInbox())
   } catch (e) { console.error('inbox:', e.message) }
 }
+// WP-55: the loaded build (index.html mtime) and what changed since `since` (ms) — wt-dashboard commit subjects.
+async function buildInfo(since) {
+  const st = await stat(join(DIST, 'index.html')).catch(() => null)
+  const after = Number(since) > 0 ? ['--since', `@${Math.floor(Number(since) / 1000)}`] : ['-n', '0']
+  const log = await git(new URL('.', import.meta.url).pathname, 'log', '--no-merges', '-n', '8', '--format=%s', ...after, '--', '.').catch(() => '')
+  return { build: st?.mtimeMs ?? null, changes: log.split('\n').filter(Boolean) }
+}
 function streamEvents(req, res) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
   subs.add(res)
@@ -2195,6 +2202,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === '/api/health') return send(res, 200, await health())
       if (url.pathname === '/api/events') return streamEvents(req, res)
+      if (url.pathname === '/api/build') return send(res, 200, await buildInfo(url.searchParams.get('since')))
       if (url.pathname.startsWith('/api/notifications')) return await inboxApi(req, res, url)
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)
       if (url.pathname.startsWith('/api/unfurl') && req.method === 'GET') {

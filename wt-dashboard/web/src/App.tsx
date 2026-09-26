@@ -47,7 +47,7 @@ import { useStream, mergeAgentMsgs } from './streamStore'
 import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, contextUsage, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
-import { PwaHost, InstallHint } from './pwa'
+import { PwaHost, InstallHint, UpdateBanner } from './pwa'
 import { openInbox } from './inbox'
 import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
@@ -511,6 +511,7 @@ export default function App() {
           </HStack>
         </HStack>}
 
+        <UpdateBanner />
         {q.isError && (data
           ? <Banner status="warning" title="Can't reach the dashboard server — showing the last data" description={String(q.error)} endContent={<Button label="Retry" size="sm" onClick={() => q.refetch()} />} />
           : <LoadError what="the dashboard (is the server running on 127.0.0.1:7777?)" error={q.error} retry={() => q.refetch()} />)}
