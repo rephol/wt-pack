@@ -31,7 +31,10 @@ process.title = 'wt-dashboard server'
 // Integrations & environment (config.mjs): env var > Keychain > ~/.config/wt-dashboard/env > default.
 const cfg = new Config({ file: join(homedir(), '.config', 'wt-dashboard', 'env') })
 // ponytail: the default repo is read once; changing it asks for a restart (it is threaded through many paths).
-const REPO = cfg.get('UMKMALL_REPO') ?? join(homedir(), 'Work', 'projects', 'umkmall')
+const REPO = cfg.get('WT_DASHBOARD_REPO') ?? join(homedir(), 'Work', 'projects', 'umkmall')
+// No repo on disk: worktrees and PRs (both derived from it) are skipped, with one warning instead of an ENOENT per poll.
+const REPO_OK = existsSync(REPO)
+if (!REPO_OK) console.warn(`WT_DASHBOARD_REPO ${REPO} does not exist: worktrees and PRs are off. Set it in ~/.config/wt-dashboard/env (./setup does) and restart.`)
 // WT_DASHBOARD_* env names; the old HERDR_DASH_* names are still read as a fallback.
 const envOf = (k) => process.env[`WT_DASHBOARD_${k}`] ?? process.env[`HERDR_DASH_${k}`]
 // Everything the dashboard writes lives outside the source tree: <root>/data and <root>/uploads.
@@ -786,7 +789,7 @@ const AGENTS_SH = join(homedir(), '.claude', 'skills', 'wt-agents', 'scripts', '
 // and every repo a local agent is working in.
 async function projectRoots() {
   return cached('projectRoots', 30_000, async () => {
-    const dirs = [REPO, ...cfg.list('WT_DASHBOARD_PROJECTS'), ...(await agents()).filter((a) => a.local && a.cwd).map((a) => a.cwd)]
+    const dirs = [...(REPO_OK ? [REPO] : []), ...cfg.list('WT_DASHBOARD_PROJECTS'), ...(await agents()).filter((a) => a.local && a.cwd).map((a) => a.cwd)]
     const map = new Map()
     for (const d of new Set(dirs)) {
       const c = await git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
@@ -840,6 +843,7 @@ async function spawnAgent(b) {
 }
 
 async function worktrees() {
+  if (!REPO_OK) return []
   return cached('worktrees', 10_000, async () => {
     const out = await git(REPO, 'worktree', 'list', '--porcelain')
     const wts = out
@@ -866,6 +870,7 @@ async function worktrees() {
 
 const shippedShas = new Set()
 async function prs() {
+  if (!REPO_OK) return []
   // ponytail: 30s TTL, not 3s — gh hits the GitHub API rate limit.
   return cached('prs', 30_000, async () => {
     const list = JSON.parse(
@@ -1729,7 +1734,7 @@ async function configApi(req, res, parts) {
   } else {
     const v = req.method === 'DELETE' ? (d.list ? [] : '') : b.value
     if (k === 'WT_DASHBOARD_PROJECTS') for (const p of v ?? []) await repoRoot(p)
-    if (k === 'UMKMALL_REPO' && v) await repoRoot(v)
+    if (k === 'WT_DASHBOARD_REPO' && v) await repoRoot(v)
     await cfg.setValue(k, v)
     store.delete('projectRoots')
   }

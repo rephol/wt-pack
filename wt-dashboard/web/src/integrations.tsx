@@ -51,7 +51,7 @@ export function IntegrationsSection() {
       <SecretKey it={by.TYPESAFE_API_KEY} put={put} del={() => save.mutate({ key: 'TYPESAFE_API_KEY', del: true })} placeholder="TypeSafe key (console.typesafe.ai/keys)" />
       <ListEditor it={by.WT_DASHBOARD_PROJECTS} put={put} placeholder="/Users/me/Work/projects/repo" hint="Repo paths offered in New agent. Each must be a git repository." check />
       <HostsEditor it={by.WT_DASHBOARD_ALLOWED_HOSTS} loopback={q.data.loopback} put={put} />
-      <RepoEditor it={by.UMKMALL_REPO} app={q.data.app} put={put} />
+      <RepoEditor it={by.WT_DASHBOARD_REPO} app={q.data.app} put={put} />
     </VStack>
   )
 }
@@ -143,7 +143,7 @@ function RepoEditor({ it, app, put }: { it: Item; app: boolean; put: (k: string,
   const { busy, run } = useServerControl()
   const restart = 'restartNeeded' in it && it.restartNeeded
   return (
-    <Field label={it.label} inputID="umkmall-repo" isGroupLabel description="UMKMALL_REPO: the main checkout used for worktrees, PRs and the default project. Must be a git repository.">
+    <Field label={it.label} inputID="umkmall-repo" isGroupLabel description="WT_DASHBOARD_REPO: the main checkout used for worktrees, PRs and the default project. Must be a git repository.">
       <VStack gap={2}>
         <Source it={it} />
         <HStack gap={2} align="end" wrap="wrap">

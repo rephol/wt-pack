@@ -14,7 +14,7 @@ export const KEYS = {
   TYPESAFE_API_KEY: { secret: true, label: 'TypeSafe (Jev) API key' },
   WT_DASHBOARD_PROJECTS: { list: ':', legacy: 'HERDR_DASH_PROJECTS', label: 'Extra projects' },
   WT_DASHBOARD_ALLOWED_HOSTS: { list: ',', legacy: 'HERDR_DASH_ALLOWED_HOSTS', label: 'Allowed hosts', loopbackOnly: true },
-  UMKMALL_REPO: { label: 'Default repo', restart: true },
+  WT_DASHBOARD_REPO: { legacy: 'UMKMALL_REPO', label: 'Default repo', restart: true },
 }
 const SERVICE = 'wt-dashboard'
 const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/
@@ -80,11 +80,11 @@ export class Config {
   source(k) {
     if (this.override(k) != null) return 'env'
     if (KEYS[k].secret && this.secrets[k]) return 'keychain'
-    if (this.fileVals[k]) return 'file'
+    if (this.fileVals[k] || (KEYS[k].legacy && this.fileVals[KEYS[k].legacy])) return 'file'
     return 'default'
   }
   get(k) {
-    return this.override(k) ?? (KEYS[k].secret ? this.secrets[k] : null) ?? this.fileVals[k] ?? null
+    return this.override(k) ?? (KEYS[k].secret ? this.secrets[k] : null) ?? this.fileVals[k] ?? (KEYS[k].legacy ? this.fileVals[KEYS[k].legacy] : null) ?? null
   }
   list(k) { return (this.get(k) ?? '').split(KEYS[k].list).map((s) => s.trim()).filter(Boolean) }
 

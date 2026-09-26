@@ -696,3 +696,11 @@ test('deriveTasks: responder carries its task_state label', () => {
     cwd: '/x', tags: { task: 'UMK-5 x', task_state: 'babysitting PR #7' }, asks: false, project: 'p' }
   assert.equal(deriveTasks({ agents: [a], worktrees: [], prs: [], issues: [] })[0].responder.taskState, 'babysitting PR #7')
 })
+
+test('config: WT_DASHBOARD_REPO, with UMKMALL_REPO still read from the env file', async () => {
+  const old = tmpCfg('UMKMALL_REPO=/old/repo\n'); await old.cfg.load()
+  assert.equal(old.cfg.get('WT_DASHBOARD_REPO'), '/old/repo')
+  assert.equal(old.cfg.source('WT_DASHBOARD_REPO'), 'file')
+  const both = tmpCfg('UMKMALL_REPO=/old/repo\nWT_DASHBOARD_REPO=/new/repo\n'); await both.cfg.load()
+  assert.equal(both.cfg.get('WT_DASHBOARD_REPO'), '/new/repo')
+})
