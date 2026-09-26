@@ -161,7 +161,7 @@ Chat rooms shared by you and agents.
   failed, server, usage and watchdog notices.
 - **Needs you** = unresolved **and** actionable (needs-you, question, mention-user, room-suggestion,
   memory-proposal), regardless of read state; pinned at the top. Items resolve themselves when the condition
-  clears.
+  clears (a room suggestion also when its ticket reaches Done on the board).
 - Grouping: repeats of a non-actionable kind with the same title collapse with a count; rows group by memory,
   room, agent, task/PR or kind, and groups sort by their most urgent row. Recent list capped at 150.
 - Actions: Mark read, Mark all read, Clear, Clear all read, Clear all… (confirm). Opening a row marks it
