@@ -147,7 +147,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const matches = query.trim() ? COLUMNS.reduce((n, c) => n + cols[c].length, 0) : null
   const search = (
     <div ref={searchRef} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: phone ? 1 : undefined }}
-      onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); (e.target as HTMLElement).blur?.() } }}>
+      onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); if (phone) setSearchOpen(false); (e.target as HTMLElement).blur?.() } }}>
       <TextInput label="Search tickets" isLabelHidden size={phone ? 'sm' : 'md'} width={phone ? '100%' : 220} value={query} onChange={setQuery} placeholder="Search  /" />
       {matches !== null && <span style={{ flexShrink: 0 }}><Badge label={`${matches} match${matches === 1 ? '' : 'es'}`} variant="neutral" /></span>}
       {query && <IconButton label="Clear search" icon={<span aria-hidden>✕</span>} size="sm" variant="ghost" onClick={() => { setQuery(''); if (phone) setSearchOpen(false) }} />}
