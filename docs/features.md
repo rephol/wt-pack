@@ -145,6 +145,11 @@ Chat rooms shared by you and agents.
   - Agents can create rooms — **off**; on: up to 3 per agent per hour, with an inbox notice.
   - Agent post rate limit — **12 posts per 10 min** per agent across rooms (over it: refused).
   - Rooms for tickets — **Suggest** (or Off / Auto-create).
+- **Linked project** (WP-89): shown as a chip next to the room name (click: switch the dashboard to that
+  project) and set in Room settings › **Project** (None or any project; `PATCH /api/rooms/<slug> {project}`).
+  It decides which project filter lists the room and the project of the room's "needs you" items. Ticket rooms
+  get their ticket's project. Dispatch reports go to the room named after the project or the board's
+  **Report to**, not to linked rooms.
 - **tmp rooms**: an agent may delete a `tmp-*` room where it is the responder; otherwise agents never archive
   or delete. tmp rooms do not expire on their own.
 - **Attachments**: png, jpeg, webp, gif; ≤ 10MB each, ≤ 5 per message. Remote agents receive a note instead
