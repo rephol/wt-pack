@@ -282,6 +282,7 @@ export class Rooms {
   async withLast() {
     await this.load()
     return Promise.all(this.index.map(async (r) => {
+      if (r.archived) return { ...r, lastAt: null, lastFrom: null, lastText: null } // never load archived logs into the cache
       const m = (await this.messages(r.slug)).findLast((x) => x.author?.kind !== 'system')
       return { ...r, lastAt: m?.ts ?? null, lastFrom: m?.author.name ?? null, lastText: m ? m.text.slice(0, 120) : null }
     }))

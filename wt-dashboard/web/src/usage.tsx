@@ -53,7 +53,8 @@ const Loading = ({ h }: { h: number }) => <Delayed><VStack gap={2}><Skeleton wid
 // Overview: just the 5-hour and weekly bars.
 export function UsageBars() {
   const q = useUsage()
-  if (!q.data) return q.isError ? <LoadError what="Claude usage" error={q.error} retry={() => q.refetch()} /> : <Loading h={40} />
+  // No Retry button here: this renders inside a clickable Overview card.
+  if (!q.data) return q.isError ? <Text type="supporting" size="sm">Claude usage unavailable</Text> : <Loading h={40} />
   const l = q.data.limits
   if (!l) return <Text type="supporting" size="sm">No plan limits file (~/.cache/ccstatusline/usage.json)</Text>
   return (
