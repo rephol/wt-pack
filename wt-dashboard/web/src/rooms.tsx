@@ -2,7 +2,7 @@
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger } from '@astryxdesign/core/Chat'
+import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
 import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Popover } from '@astryxdesign/core/Popover'
@@ -208,6 +208,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   const [confirm, setConfirm] = useState<string | null>(null)
   const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<ChatComposerInputHandle>(null)
   const [sendErr, setSendErr] = useState<string | null>(null)
   // Quick reply: the message being answered (the server addresses its agent author), and a jump to a reply's original.
   const [replyTo, setReplyTo] = useState<RoomMsg | null>(null)
@@ -218,6 +219,9 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
       const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
       if (!el) return
       el.focus(); getSelection()?.selectAllChildren(el); getSelection()?.collapseToEnd()
+      // An @author chip, as the @ menu would insert it; not for your own message, nor twice.
+      const at = `@${m.author.name}`, h = inputRef.current
+      if (m.author.kind !== 'user' && h && !h.getValue().includes(at)) h.insertToken({ value: at, label: at, variant: 'blue' })
     }, 50)
   }, [])
   const jumpTo = useCallback((id: string) => {
@@ -425,7 +429,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
                 </HStack>}
               </ChatComposerDrawer>
             ) : undefined}
-            input={<ChatComposerInput triggers={[mention, slash]} onFiles={addFiles} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
+            input={<ChatComposerInput handleRef={inputRef} triggers={[mention, slash]} onFiles={addFiles} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
           </VStack>
         )}>
         {messageList}
