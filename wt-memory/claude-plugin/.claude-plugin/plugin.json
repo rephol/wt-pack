@@ -1,0 +1,5 @@
+{
+  "name": "wt-memory",
+  "version": "0.1.0",
+  "description": "Injects wt-memory preferences (global, role, project) at session start, and again when they change."
+}

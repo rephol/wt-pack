@@ -1,0 +1,8 @@
+{
+  "name": "wt-pack",
+  "owner": { "name": "wt-pack" },
+  "description": "Local plugins shipped with wt-pack.",
+  "plugins": [
+    { "name": "wt-memory", "source": "./wt-memory/claude-plugin", "description": "wt-memory preferences injected into Claude Code sessions." }
+  ]
+}
