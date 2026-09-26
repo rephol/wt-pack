@@ -153,7 +153,9 @@ export const deliverable = (a) => a && (a.status === 'idle' || a.status === 'don
 // ---- ticket rooms ----
 const TICKET = /^[A-Z]+-\d+$/
 export const ticketSlug = (id) => id.toLowerCase()
-const active = (t) => TICKET.test(t.id) && !t.adHoc && (t.worktree || t.pr || t.agent) && !['shipped', 'merged'].includes(t.state)
+// A ticket closed on its board (local Done, Linear Done/Canceled) is not active, even with an agent still tagged (WP-84).
+const closed = (t) => /^(done|canceled|cancelled)$/i.test(t.linearState ?? '')
+const active = (t) => TICKET.test(t.id) && !t.adHoc && (t.worktree || t.pr || t.agent) && !['shipped', 'merged'].includes(t.state) && !closed(t)
 const who = (t) => t.agent?.name ?? 'someone'
 // What is already known about a ticket, as system posts (the back-fill when its room is created).
 export function ticketFacts(t) {
