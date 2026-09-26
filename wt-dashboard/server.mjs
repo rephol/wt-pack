@@ -1225,13 +1225,16 @@ async function health() {
 
 // Throughput since local midnight. Pure: tested in parse.test.mjs.
 // ponytail: from the last 50 PRs only (prs() --limit 50) — enough for one day.
-export function todayCounts(prs, now = new Date()) {
+// local: board issues (localIssues); boardDone counts tickets moved to Done today — wt-pack merges straight
+// to main without PRs, so the PR counts alone read zero for it (WP-32).
+export function todayCounts(prs, now = new Date(), local = []) {
   const midnight = new Date(now).setHours(0, 0, 0, 0)
   const today = (iso) => Boolean(iso) && Date.parse(iso) >= midnight
   return {
     prsOpened: prs.filter((p) => today(p.createdAt)).length,
     prsMerged: prs.filter((p) => today(p.mergedAt)).length,
     shipped: prs.filter((p) => p.shipped && today(p.mergedAt)).length,
+    boardDone: local.filter((i) => today(i.doneAt)).length,
   }
 }
 
@@ -1253,7 +1256,8 @@ async function localIssues() {
   const out = []
   for (const project of Object.keys(keys)) for (const t of (await tickets.list(project)).tickets)
     out.push({ identifier: t.id, title: t.title, url: null, priority: t.priority, updatedAt: t.updated, state: t.column,
-      mine: t.column === 'ready', stateType: t.column === 'ready' ? 'unstarted' : 'backlog', local: true, project, column: t.column })
+      mine: t.column === 'ready', stateType: t.column === 'ready' ? 'unstarted' : 'backlog', local: true, project, column: t.column,
+      doneAt: t.column === 'done' ? t.history?.findLast((h) => h.to === 'done')?.at ?? null : null })
   return out
 }
 async function overview() {
@@ -1288,7 +1292,7 @@ async function overview() {
         building: n('building'),
         inReview: n('in_review'),
         idleAgents: ag.filter((a) => a.status === 'idle').length,
-        today: todayCounts(pr),
+        today: todayCounts(pr, undefined, local),
       },
       host: await host(),
     }

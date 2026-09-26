@@ -26,7 +26,7 @@ export interface OverviewData {
   agents: { project: string | null; status: string; pool: string }[]
   machines: { label: string; status: string }[]
   tasks: { state: string; mine?: boolean }[]
-  counts: { needsYou: number; stalled: number; inReview: number; today?: { prsOpened: number; prsMerged: number; shipped: number } }
+  counts: { needsYou: number; stalled: number; inReview: number; today?: { prsOpened: number; prsMerged: number; shipped: number; boardDone?: number } }
   host?: { memUsedPct: number; pressure: string | null }
 }
 type ObsStats = { stats: Record<'24h', { calls: number; errorRate: number }[]> }
@@ -83,9 +83,9 @@ export function OverviewPage({ data, onProject }: { data: OverviewData; onProjec
           ))}
           {!data.agents.length && <Text type="supporting" size="sm">No agents.</Text>}
         </Row>
-        {/* ponytail: repo-wide PR counts; per-project needs project on each PR */}
+        {/* ponytail: repo-wide PR and board counts; per-project needs project on each PR */}
         <Row title="Today (all projects)" href="#tasks">
-          <Text size="sm">{t ? `PRs ${t.prsOpened} opened · ${t.prsMerged} merged · ${t.shipped} reached main` : '—'}</Text>
+          <Text size="sm">{t ? `PRs ${t.prsOpened} opened · ${t.prsMerged} merged · ${t.shipped} reached main${t.boardDone ? ` · Board ${t.boardDone} done` : ''}` : '—'}</Text>
         </Row>
         <Row title="Machine" href="#agents">
           <Line>

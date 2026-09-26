@@ -881,7 +881,9 @@ test('todayCounts: local-midnight cutoff', () => {
     { createdAt: at(23, 59, 25), mergedAt: at(23, 59, 25), shipped: true },
     { createdAt: at(0, 1), mergedAt: null, shipped: false },
   ]
-  assert.deepEqual(todayCounts(prs, now), { prsOpened: 2, prsMerged: 2, shipped: 1 })
+  assert.deepEqual(todayCounts(prs, now), { prsOpened: 2, prsMerged: 2, shipped: 1, boardDone: 0 })
+  const local = [{ doneAt: at(0, 15) }, { doneAt: at(23, 0, 25) }, { doneAt: null }]
+  assert.equal(todayCounts([], now, local).boardDone, 1)
 })
 
 test('Rooms.withLast: newest non-system line, not persisted to the index', async () => {

@@ -137,7 +137,7 @@ interface Overview {
   agents: Agent[]
   tasks: Task[]
   machines: Machine[]
-  counts: { needsYou: number; stalled: number; building: number; inReview: number; idleAgents: number; today?: { prsOpened: number; prsMerged: number; shipped: number } }
+  counts: { needsYou: number; stalled: number; building: number; inReview: number; idleAgents: number; today?: { prsOpened: number; prsMerged: number; shipped: number; boardDone?: number } }
   host?: { memUsedPct: number; pressure: string | null }
 }
 interface Machine {
