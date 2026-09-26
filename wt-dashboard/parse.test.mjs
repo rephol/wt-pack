@@ -937,4 +937,5 @@ test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed l
   assert.equal(agentName({ local: true }, { name: 'wt-pack-worker-03', pane_id: 'w1:p1' }, '/w'), 'wt-pack-worker-03')
   assert.equal(agentName({ local: true }, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 'w1:p1' }, '/x/umkmall-product-ops'), 'umkmall-product-ops-p1')
   assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, undefined), 'agent-p1')
+  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'umkmall-orchestrator', pane_id: 'wP:p1' }, '/x/umkmall'), 'umkmall-orchestrator')
 })

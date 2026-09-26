@@ -386,8 +386,11 @@ export function remoteName(label, cwd, paneId) {
   return room > 0 ? `${head}-${mid.slice(0, room).replace(/-$/, '')}-${tail}` : `${head.slice(0, 32 - tail.length - 1)}-${tail}`
 }
 export function agentName(m, a, cwd) {
-  // An unnamed agent's title is a session topic, never a name: local → <cwd>-<pane>, remote → <machine>-<cwd>-<pane>.
-  return a.name || remoteName(m.local ? '' : m.label, cwd, a.pane_id)
+  // Local agents without a herdr name are often named by their title (umkmall-orchestrator); a title that is not
+  // name-shaped is a session topic → <cwd>-<pane>. Remote titles are always topics → <machine>-<cwd>-<pane>.
+  if (a.name) return a.name
+  const t = a.terminal_title_stripped?.trim()
+  return m.local && t && /^[a-z0-9_-]{1,32}$/.test(t) ? t : remoteName(m.local ? '' : m.label, cwd, a.pane_id)
 }
 
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
