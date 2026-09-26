@@ -16,6 +16,12 @@ body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-se
 div:has(> div > .hd-nav-footer) { display: flex; flex-direction: column; }
 div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; background: inherit; padding-bottom: env(safe-area-inset-bottom); }
 
+/* The Agents|Rooms list is the only scrolling part of the nav: it takes the room between the page items and the footer. */
+.astryx-side-nav-section:has(.hd-nav-scroll), .astryx-side-nav-section div:has(> .hd-nav-scroll) { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-direction: column; }
+.hd-nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.hd-project-picker button { justify-content: flex-start; }
+
 /* Phones: stable height as the URL bar shows/hides; composer clear of the home indicator. */
 .astryx-app-shell { height: 100dvh; }
 .astryx-chat-layout > :last-child { padding-bottom: env(safe-area-inset-bottom); }

@@ -416,9 +416,9 @@ export default function App() {
   )
   const projectIcon = (v: string, label: string, dot: boolean) => initialsIcon(v === 'all' ? '*' : initials(label), dot)
   const projectPicker = (
-    <DropdownMenu hasChevron={!navCollapsed} menuWidth={260}
-      button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
-      items={projectRows.map(([v, label, c]) => ({ id: v, label, icon: projectIcon(v, label, false), endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} />
+    <div className="hd-project-picker"><DropdownMenu hasChevron={!navCollapsed} menuWidth={260}
+      button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: current[0] === 'all' && !navCollapsed ? undefined : <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
+      items={projectRows.map(([v, label, c]) => ({ id: v, label, icon: projectIcon(v, label, false), endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} /></div>
   )
   const [sideList, setSideListState] = useState<'agents' | 'rooms'>(() => { try { return localStorage.getItem('nav-list') === 'rooms' ? 'rooms' : 'agents' } catch { return 'agents' } })
   const setSideList = (v: string) => {
@@ -453,7 +453,7 @@ export default function App() {
           <SegmentedControlItem value="agents" label="Agents" />
           <SegmentedControlItem value="rooms" label="Rooms" />
         </SegmentedControl>
-        {sideList === 'agents'
+        <div className="hd-nav-scroll">{sideList === 'agents'
           ? sortAgents(data?.agents ?? [], 'attention').map((a) => (
             <SideNavItem key={a.key} label={a.name} icon={initialsIcon(initials(a.name), false)} isSelected={openPane === a.key || fullKey === a.key} onClick={() => open(a.key)}
               endContent={needsYou(a) ? <StatusDot variant="error" label="needs you" /> : a.status === 'working' ? <Text type="supporting" size="sm">▸</Text> : undefined} />
@@ -461,7 +461,7 @@ export default function App() {
           : sideRooms.map((r) => (
             <SideNavItem key={r.slug} label={r.title} icon={navIcon('rooms', false)} href={`#rooms/${encodeURIComponent(r.slug)}`} isSelected={page === 'rooms' && roomSlug === r.slug}
               endContent={r.needsYou?.length ? <StatusDot variant="error" label="needs you" /> : undefined} />
-          ))}
+          ))}</div>
       </SideNavSection>}
     </SideNav>
   )
