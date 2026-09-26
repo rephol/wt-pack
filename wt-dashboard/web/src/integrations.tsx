@@ -47,7 +47,8 @@ export function IntegrationsSection() {
     <VStack gap={5}>
       <Heading level={3}>Integrations & environment</Heading>
       <Text type="supporting" size="sm">Precedence: server env var › Keychain (secrets) › ~/.config/wt-dashboard/env › default.</Text>
-      <LinearKey it={by.LINEAR_API_KEY} put={put} del={() => save.mutate({ key: 'LINEAR_API_KEY', del: true })} />
+      <SecretKey it={by.LINEAR_API_KEY} put={put} del={() => save.mutate({ key: 'LINEAR_API_KEY', del: true })} placeholder="lin_api_…" testable />
+      <SecretKey it={by.TYPESAFE_API_KEY} put={put} del={() => save.mutate({ key: 'TYPESAFE_API_KEY', del: true })} placeholder="TypeSafe key (console.typesafe.ai/keys)" />
       <ListEditor it={by.WT_DASHBOARD_PROJECTS} put={put} placeholder="/Users/me/Work/projects/repo" hint="Repo paths offered in New agent. Each must be a git repository." check />
       <HostsEditor it={by.WT_DASHBOARD_ALLOWED_HOSTS} loopback={q.data.loopback} put={put} />
       <RepoEditor it={by.UMKMALL_REPO} app={q.data.app} put={put} />
@@ -55,14 +56,15 @@ export function IntegrationsSection() {
   )
 }
 
-function LinearKey({ it, put, del }: { it: Item; put: (k: string, v: unknown) => Promise<boolean>; del: () => void }) {
+// A Keychain-backed secret (Linear, TypeSafe); only Linear has a connection test — Jev's shows in Settings › Server.
+function SecretKey({ it, put, del, placeholder, testable }: { it: Item; put: (k: string, v: unknown) => Promise<boolean>; del: () => void; placeholder: string; testable?: boolean }) {
   const [v, setV] = useState('')
   const [editing, setEditing] = useState(false)
   const test = useMutation({ mutationFn: () => api<{ ok: boolean; user?: string; workspace?: string; error?: string }>('/api/config/linear-test', { method: 'POST' }) })
-  if (!('set' in it)) return null
+  if (!it || !('set' in it)) return null
   const ro = it.overridden
   return (
-    <Field label={it.label} inputID="linear-key" isGroupLabel description="Stored in the macOS Keychain (service wt-dashboard); never shown again after saving.">
+    <Field label={it.label} inputID={`key-${it.key}`} isGroupLabel description="Stored in the macOS Keychain (service wt-dashboard); never shown again after saving.">
       <VStack gap={2}>
         <Source it={it} />
         {it.set && !editing ? (
@@ -74,13 +76,13 @@ function LinearKey({ it, put, del }: { it: Item; put: (k: string, v: unknown) =>
         ) : !ro && (
           <HStack gap={2} align="end" wrap="wrap">
             <div style={{ flex: '1 1 220px' }}>
-              <TextInput label="API key" isLabelHidden type="password" autoComplete="off" placeholder="lin_api_…" value={v} onChange={setV} />
+              <TextInput label="API key" isLabelHidden type="password" autoComplete="off" placeholder={placeholder} value={v} onChange={setV} />
             </div>
             <Button label="Save" variant="primary" size="sm" isDisabled={!v.trim()} onClick={() => put(it.key, v.trim()).then((ok) => ok && (setV(''), setEditing(false)))} />
             {editing && <Button label="Cancel" size="sm" variant="ghost" onClick={() => { setV(''); setEditing(false) }} />}
           </HStack>
         )}
-        {it.set && (
+        {it.set && testable && (
           <HStack gap={2} align="center" wrap="wrap">
             <Button label="Test connection" size="sm" isLoading={test.isPending} onClick={() => test.mutate()} />
             {test.data && <Text size="sm" type={test.data.ok ? undefined : 'supporting'}>{test.data.ok ? `OK — ${test.data.user}${test.data.workspace ? ` · ${test.data.workspace}` : ''}` : `Failed: ${test.data.error}`}</Text>}

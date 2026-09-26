@@ -18,6 +18,16 @@ interface Health {
   pid: number; startedAt: string; managedBy: 'app' | 'launchd' | 'external'; webBuiltAt: string | null
   runtime?: { kind: string; path: string }
   sources: Record<'herdr' | 'git' | 'gh' | 'linear' | 'machines', Source>
+  jev?: { state: 'up' | 'down' | 'unreachable'; key: 'none' | 'ok' | 'invalid' | 'unknown'; models: string[]; at: string }
+}
+// Jev (TypeSafe): health + key only; the API exposes no credits or usage.
+const JEV_KEY = { none: 'no key set', ok: 'key ok', invalid: 'key rejected', unknown: 'key not checked' } as const
+function JevRow({ j }: { j: NonNullable<Health['jev']> }) {
+  const variant = j.state === 'up' ? (j.key === 'invalid' ? 'warning' : 'success') : j.state === 'down' ? 'error' : 'neutral'
+  return (
+    <HStack gap={2} align="center"><StatusDot variant={variant} label={`Jev ${j.state}`} /><Text size="sm" weight="medium">jev</Text>
+      <Text size="sm" type="supporting">{`${j.state} · ${JEV_KEY[j.key]}${j.models.length ? ` · ${j.models.join(', ')}` : ''} · credits not exposed by the API · checked ${ago(j.at)} ago`}</Text></HStack>
+  )
 }
 type TauriEvent = { emit: (n: string, p?: unknown) => Promise<void>; listen: (n: string, cb: (e: { payload: unknown }) => void) => Promise<() => void> }
 const tauri = (window as unknown as { __TAURI__?: { event: TauriEvent } }).__TAURI__
@@ -114,6 +124,7 @@ function Details({ h, ctl, state }: { h: Health; ctl: ReturnType<typeof useServe
           {s.lastError && <Text size="sm" type="supporting" style={{ overflowWrap: 'anywhere' }}>{`last error ${ago(s.lastError.at)} ago: ${s.lastError.message}`}</Text>}
         </VStack>
       ))}
+      {h.jev && <JevRow j={h.jev} />}
       {isApp && (
         <HStack gap={2}>
           {h.managedBy !== 'external'

@@ -11,6 +11,7 @@ import { dirname } from 'node:path'
 
 export const KEYS = {
   LINEAR_API_KEY: { secret: true, label: 'Linear API key' },
+  TYPESAFE_API_KEY: { secret: true, label: 'TypeSafe (Jev) API key' },
   WT_DASHBOARD_PROJECTS: { list: ':', legacy: 'HERDR_DASH_PROJECTS', label: 'Extra projects' },
   WT_DASHBOARD_ALLOWED_HOSTS: { list: ',', legacy: 'HERDR_DASH_ALLOWED_HOSTS', label: 'Allowed hosts', loopbackOnly: true },
   UMKMALL_REPO: { label: 'Default repo', restart: true },

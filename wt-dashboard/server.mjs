@@ -1024,6 +1024,29 @@ const SOURCES = Object.fromEntries(['herdr', 'git', 'gh', 'linear', 'machines'].
 const track = (name, p) => p.then(
   (v) => (Object.assign(SOURCES[name], { ok: true, lastOkAt: new Date().toISOString() }), v),
   (e) => { Object.assign(SOURCES[name], { ok: false, lastError: { at: new Date().toISOString(), message: String(e.message ?? e).slice(0, 300) } }); throw e })
+// Jev (TypeSafe) status. The API exposes no credits/balance/usage endpoint: only a public GET /health and,
+// with a key, GET /v1/models (the models on the account — which doubles as a key check).
+export function jevState({ health, models, hasKey }) {
+  const up = health?.status === 200 && health.body?.status === 'ok'
+  const out = { state: health ? (up ? 'up' : 'down') : 'unreachable', key: hasKey ? 'unknown' : 'none', models: [] }
+  if (hasKey && models) {
+    if (models.status === 401 || models.status === 403) out.key = 'invalid'
+    else if (models.status === 200) {
+      out.key = 'ok'
+      const list = Array.isArray(models.body?.models) ? models.body.models : Array.isArray(models.body?.data) ? models.body.data : []
+      out.models = list.map((m) => (typeof m === 'string' ? m : m?.id ?? m?.name)).filter(Boolean)
+    }
+  }
+  return out
+}
+const jevGet = (path, key) => fetch(`https://api.typesafe.ai${path}`, { headers: key ? { authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(4000) })
+  .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }), () => null)
+const jev = () => cached('jev', 60_000, async () => {
+  const key = cfg.get('TYPESAFE_API_KEY')
+  const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
+  return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
+})
+
 async function health() {
   const dist = await stat(join(DIST, 'index.html')).catch(() => null)
   return {
@@ -1031,6 +1054,7 @@ async function health() {
     managedBy: MANAGED_BY,
     webBuiltAt: dist?.mtime.toISOString() ?? null,
     sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
+    jev: await jev(), // outside `sources`: Jev being down doesn't degrade this server
   }
 }
 

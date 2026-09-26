@@ -1,7 +1,7 @@
 // Run: node --test
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parsePane , snapshot, transitions } from './server.mjs'
+import { parsePane , snapshot, transitions, jevState } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -630,4 +630,15 @@ test('rooms: one message @mentions several agents and each gets it; a reply stor
   await rooms.flush()
   assert.deepEqual(sent.map((s) => s[0]), ['t-b']); assert.match(sent[0][1], /me \(replying to t-b: "done: first line"\): thanks/)
   assert.equal((await rooms.post('m', { author: user, text: 'x', replyTo: 'nope' })).replyTo, undefined)
+})
+
+test('jevState: health up/down/unreachable; key none/ok/invalid; model names from /v1/models', () => {
+  const ok = { status: 200, body: { status: 'ok' } }
+  assert.deepEqual(jevState({ health: ok, hasKey: false }), { state: 'up', key: 'none', models: [] })
+  assert.equal(jevState({ health: null, hasKey: false }).state, 'unreachable') // fetch failed or timed out
+  assert.equal(jevState({ health: { status: 503, body: null }, hasKey: false }).state, 'down')
+  assert.equal(jevState({ health: ok, models: { status: 403, body: {} }, hasKey: true }).key, 'invalid')
+  assert.equal(jevState({ health: ok, models: null, hasKey: true }).key, 'unknown')
+  assert.deepEqual(jevState({ health: ok, models: { status: 200, body: { models: [{ id: 'jev-latest' }, 'jev-mini'] } }, hasKey: true }),
+    { state: 'up', key: 'ok', models: ['jev-latest', 'jev-mini'] })
 })
