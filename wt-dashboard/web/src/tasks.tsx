@@ -107,7 +107,7 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
     <div className="hd-tq-row">
       <div className="hd-tq-main">
         <div className="hd-tq-title">
-          {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : t.local ? <Link href="#tasks/board"><Badge label={t.id} variant="info" /></Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
+          {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : t.local ? <Link href="#board"><Badge label={t.id} variant="info" /></Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
           <Text weight="semibold" maxLines={2}>{t.title}</Text>
         </div>
         {meta.length > 0 && <div className="hd-tq-meta">{meta.flatMap((m, i) => (i ? [<span key={`d${i}`}>{dot}</span>, m] : [m]))}</div>}

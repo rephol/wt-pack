@@ -243,7 +243,7 @@ const idleFor = (a: Agent) => {
 }
 
 // ---------- app ----------
-type Page = 'overview' | 'tasks' | 'agents' | 'rooms' | 'terminals'
+type Page = 'overview' | 'tasks' | 'board' | 'agents' | 'rooms' | 'terminals'
 // Project scope: ?project= wins, then localStorage, else all.
 const initialProject = () => {
   const q = new URLSearchParams(location.search).get('project')
@@ -295,6 +295,7 @@ function svgIcon(key: string, body: (dot: boolean) => import('react').ReactNode,
 }
 const NAV_PATHS: Record<string, import('react').ReactNode> = {
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+  board: <><rect x="3" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="11" rx="1.5" /><rect x="17" y="4" width="4" height="7" rx="1.5" /></>,
   tasks: <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth={3} /></>,
   rooms: <><path d="M4 5h16v10H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>,
   terminals: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12 15h5" /></>,
@@ -307,7 +308,6 @@ const initialsIcon = (text: string, dot: boolean) =>
   ), dot, 'currentColor')
 
 const termFromHash = () => decodeURIComponent(location.hash.match(/^#terminals\/(.+)$/)?.[1] ?? '') || null
-const taskViewFromHash = () => (location.hash === '#tasks/board' ? 'board' : 'queue')
 const roomFromHash = () => decodeURIComponent(location.hash.match(/^#rooms\/(.+)$/)?.[1] ?? '') || null
 // Full-page conversation: #agents/<machine>/<pane> (hash route like #rooms/<slug>, so a reload or the tailnet
 // URL needs no server fallback). Returns the agent key `${machine}/${pane}`.
@@ -320,7 +320,7 @@ const agentHash = (key: string) => { const i = key.indexOf('/'); return `agents/
 let fullBack = false
 const pageFromHash = (): Page => {
   const h = location.hash.slice(1)
-  return h.startsWith('tasks') ? 'tasks' : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('terminals') ? 'terminals' : 'overview'
+  return h.startsWith('board') || h === 'tasks/board' ? 'board' : h.startsWith('tasks') ? 'tasks' : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('terminals') ? 'terminals' : 'overview'
 }
 
 export default function App() {
@@ -328,7 +328,6 @@ export default function App() {
   const [linearHidden, setLinearHidden] = useState(() => { try { return localStorage.getItem('linear-banner-hidden') === '1' } catch { return false } })
   const hideLinear = () => { setLinearHidden(true); try { localStorage.setItem('linear-banner-hidden', '1') } catch { /* private mode */ } }
   const [roomSlug, setRoomSlug] = useState<string | null>(roomFromHash)
-  const [taskView, setTaskView] = useState(taskViewFromHash)
   const [fullKey, setFullKey] = useState<string | null>(agentFromHash)
   const [termPage, setTermPage] = useState<string | null>(termFromHash)
   const termSettings = useTermSettings()
@@ -337,7 +336,7 @@ export default function App() {
   const suggested = new Set((roomsQ.data?.suggestions ?? []).map((x) => x.ticket))
   const [openPane, setOpenPane] = useState<string | null>(null)
   useEffect(() => {
-    const on = () => { setPage(pageFromHash()); setTaskView(taskViewFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()); setTermPage(termFromHash()) }
+    const on = () => { setPage(pageFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()); setTermPage(termFromHash()) }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [])
@@ -450,7 +449,7 @@ export default function App() {
       header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr · umkmall" />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
-      {(['overview', 'tasks', 'agents', 'rooms', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
+      {(['overview', 'tasks', 'board', 'agents', 'rooms', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
         const alert = p === 'overview' && data?.counts.needsYou ? data.counts.needsYou : 0
         return (
           <SideNavItem
@@ -522,13 +521,8 @@ export default function App() {
 
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} />}
-        {!fullKey && data && page === 'tasks' && <VStack gap={4}>
-          <SegmentedControl label="Tasks view" value={taskView} onChange={(v: string) => { location.hash = v === 'board' ? 'tasks/board' : 'tasks' }} size="sm">
-            <SegmentedControlItem value="queue" label="Queue" />
-            <SegmentedControlItem value="board" label="Board" />
-          </SegmentedControl>
-          {taskView === 'board' ? <Board project={project} phone={boardPhone} /> : <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
-        </VStack>}
+        {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
+        {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />

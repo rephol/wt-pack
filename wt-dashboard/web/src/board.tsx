@@ -1,25 +1,58 @@
-// The local ticket board on Tasks (#tasks/board). Desktop: 7 columns, native HTML5 drag and drop.
-// Phone (<768px): a column switcher and one list; cards move from the fullscreen drawer. API: docs/plans/local-kanban-plan.md.
-import { useEffect, useState } from 'react'
+// The local ticket board (#board). Built on Astryx's kanban-board page template (toolbar header, muted column
+// cards with a StatusDot header, pointer drag with a floating clone and a landing ghost) and its work-item-detail
+// template for the ticket (breadcrumb header with inline selectors, description + activity, details rail).
+// Phone (<768px): the toolbar gets a column Selector and one column fills the width; cards move from the menu or
+// the ticket. API: docs/plans/local-kanban-plan.md.
+// ponytail: plain CSS classes (hd-kb-*) instead of the templates' StyleX xstyle — this app has no StyleX compiler.
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Badge } from '@astryxdesign/core/Badge'
+import { Layout, LayoutContent, LayoutHeader, LayoutPanel, HStack, VStack, StackItem, Card, Section } from '@astryxdesign/core/Layout'
+import { Avatar } from '@astryxdesign/core/Avatar'
+import { Badge, type BadgeVariant } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Dialog } from '@astryxdesign/core/Dialog'
+import { Divider } from '@astryxdesign/core/Divider'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
+import { Link } from '@astryxdesign/core/Link'
+import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList'
+import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Selector } from '@astryxdesign/core/Selector'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Toolbar } from '@astryxdesign/core/Toolbar'
+import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { api } from './rooms'
 import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, group, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
 const tUrl = (id: string) => `/api/tickets/${encodeURIComponent(id)}`
+
+type Dot = 'neutral' | 'accent' | 'warning' | 'success' | 'error'
+const COLUMN_META: Record<Column, { variant: Dot; tooltip: string; empty: string }> = {
+  backlog: { variant: 'neutral', tooltip: 'Proposals. Not scheduled until moved to Ready.', empty: 'Filed tickets appear here.' },
+  ready: { variant: 'accent', tooltip: 'Do this next: orchestrators only schedule Ready tickets.', empty: 'Move a ticket here to schedule it.' },
+  planning: { variant: 'accent', tooltip: 'Claimed; a planner is writing the plan.', empty: 'Tickets being planned appear here.' },
+  building: { variant: 'accent', tooltip: 'A worker is implementing it.', empty: 'Tickets being built appear here.' },
+  review: { variant: 'warning', tooltip: 'Implemented; under review.', empty: 'Tickets in review appear here.' },
+  done: { variant: 'success', tooltip: 'Merged and shipped.', empty: 'Finished tickets appear here.' },
+  blocked: { variant: 'error', tooltip: 'Stuck; the history says why.', empty: 'Nothing is blocked.' },
+}
+const statusOptions = COLUMNS.map((c) => ({ value: c, label: columnLabel(c), icon: <StatusDot variant={COLUMN_META[c].variant} label={columnLabel(c)} /> }))
+// Linear's scale: 1 urgent … 4 low, 0 none.
+const PRIORITY_BADGE: BadgeVariant[] = ['neutral', 'error', 'warning', 'info', 'neutral']
+const PriorityBadge = ({ p }: { p?: number | null }) => <Badge label={PRIORITY[p ?? 0]} variant={PRIORITY_BADGE[p ?? 0]} />
+
+// Pointer travel (px) before a press becomes a drag, so a click still opens the ticket.
+const DRAG_THRESHOLD = 5
+interface DropTarget { column: Column; index: number }
+interface DragState { id: string; width: number; height: number; offsetX: number; offsetY: number; pointerX: number; pointerY: number; target: DropTarget | null }
+
+// ============= BOARD =============
 
 export function Board({ project, phone }: { project: string; phone: boolean }) {
   const qc = useQueryClient()
@@ -28,7 +61,11 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
   const [openId, setOpenId] = useState<string | null>(null) // ticket id, or 'new'
   const [blockAsk, setBlockAsk] = useState(false) // opened by a drop on Blocked: the note is required
   const [col, setCol] = useState<Column>('ready')
-  const [over, setOver] = useState<Column | null>(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const columnEls = useRef(new Map<Column, HTMLElement>())
+  const cardEls = useRef(new Map<string, HTMLElement>())
+  const teardownRef = useRef<(() => void) | null>(null)
+  const justDragged = useRef(false)
   const move = useMutation({
     mutationFn: ({ id, to }: { id: string; to: Column }) => send(tUrl(id), 'PATCH', { column: to }),
     onMutate: async ({ id, to }) => {
@@ -40,147 +77,376 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(key, ctx.prev),
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
   })
+  const cols = useMemo(() => group(q.data?.tickets ?? []), [q.data])
+  const isDragging = drag !== null
+  useEffect(() => {
+    if (!isDragging) return
+    const prev = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+    return () => { document.body.style.userSelect = prev }
+  }, [isDragging])
+  useEffect(() => () => teardownRef.current?.(), [])
 
   if (project === 'all') return <EmptyState title="Pick a project" description="The board is per project: choose one in the sidebar." />
   if (q.isError) return <Banner status="error" title={`Board: ${q.error.message}`} />
   if (!q.data) return <Text type="supporting">Loading board…</Text>
-  const cols = group(q.data.tickets)
-  const drop = (to: Column, id: string) => {
-    setOver(null)
-    if (!id || q.data!.tickets.find((t) => t.id === id)?.column === to) return
+  const tickets = q.data.tickets
+
+  const open = (id: string) => { setBlockAsk(false); setOpenId(id) }
+  const moveTo = (id: string, to: Column) => {
+    if (tickets.find((t) => t.id === id)?.column === to) return
     if (to === 'blocked') { setBlockAsk(true); setOpenId(id); return } // blocked needs a reason
     move.mutate({ id, to })
   }
-  const card = (t: Ticket) => <Card key={t.id} t={t} draggable={!phone} onOpen={() => { setBlockAsk(false); setOpenId(t.id) }} />
-  const newBtn = <Button label="New ticket" size="sm" variant="ghost" onClick={() => setOpenId('new')} />
-  const opened = openId && openId !== 'new' ? q.data.tickets.find((t) => t.id === openId) ?? null : null
+
+  // Pointer position → column + insertion index, measured without the dragged card.
+  const computeTarget = (px: number, py: number, draggedId: string): DropTarget | null => {
+    for (const [c, el] of columnEls.current) {
+      const r = el.getBoundingClientRect()
+      if (px < r.left || px > r.right || py < r.top || py > r.bottom) continue
+      const ids = cols[c].filter((t) => t.id !== draggedId).map((t) => t.id)
+      let index = ids.length
+      for (let i = 0; i < ids.length; i++) {
+        const cr = cardEls.current.get(ids[i])?.getBoundingClientRect()
+        if (cr && py < cr.top + cr.height / 2) { index = i; break }
+      }
+      return { column: c, index }
+    }
+    return null
+  }
+  const onCardPointerDown = (e: ReactPointerEvent, id: string) => {
+    if (phone || e.button !== 0 || (e.target as HTMLElement).closest('button, [role="menuitem"], [role="menu"]')) return
+    const el = cardEls.current.get(id)
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const startX = e.clientX, startY = e.clientY
+    let started = false
+    let target: DropTarget | null = null
+    const onMove = (ev: PointerEvent) => {
+      if (!started && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < DRAG_THRESHOLD) return
+      started = true
+      target = computeTarget(ev.clientX, ev.clientY, id)
+      setDrag({ id, width: rect.width, height: rect.height, offsetX: startX - rect.left, offsetY: startY - rect.top, pointerX: ev.clientX, pointerY: ev.clientY, target })
+    }
+    const onUp = () => {
+      teardownRef.current?.()
+      if (started) { justDragged.current = true; setTimeout(() => { justDragged.current = false }) }
+      if (started && target) moveTo(id, target.column)
+      setDrag(null)
+    }
+    teardownRef.current = () => {
+      window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('pointerup', onUp, true)
+      teardownRef.current = null
+    }
+    // Capture phase: something in the page stops pointerup from bubbling to window.
+    window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('pointerup', onUp, true)
+  }
+
+  // ponytail: the ghost shows where the pointer is; within a column the server still orders by priority, then id.
+  const renderColumnCards = (c: Column): ReactNode => {
+    const visible = drag ? cols[c].filter((t) => t.id !== drag.id) : cols[c]
+    const ghost = drag?.target?.column === c ? drag : null
+    if (!visible.length && !ghost) return null
+    const nodes: ReactNode[] = visible.map((t) => (
+      <BoardCard key={t.id} t={t} draggable={!phone}
+        cardRef={(el) => { if (el) cardEls.current.set(t.id, el); else cardEls.current.delete(t.id) }}
+        onPointerDown={onCardPointerDown} onOpen={() => { if (!justDragged.current) open(t.id) }} onMove={moveTo} />
+    ))
+    if (ghost?.target) nodes.splice(Math.min(ghost.target.index, nodes.length), 0, <div key="drag-ghost" className="hd-kb-ghost" style={{ height: ghost.height }} />)
+    return <VStack gap={2}>{nodes}</VStack>
+  }
+
+  const dragged = drag ? tickets.find((t) => t.id === drag.id) : undefined
+  const opened = openId && openId !== 'new' ? tickets.find((t) => t.id === openId) ?? null : null
+  const shown = phone ? [col] : COLUMNS
 
   return (
-    <VStack gap={3}>
-      {move.error && <Banner status="error" title={`Move failed: ${move.error.message}`} />}
-      {phone ? (
-        <>
-          <HStack gap={2} align="end">
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <Selector label="Column" width="100%" value={col} onChange={(v: string) => setCol(v as Column)}
-                options={COLUMNS.map((c) => ({ value: c, label: `${columnLabel(c)} (${cols[c].length})` }))} />
-            </div>
-            {newBtn}
-          </HStack>
-          <div className="hd-kb-list">{cols[col].length ? cols[col].map(card) : <Text type="supporting" size="sm">No tickets in {columnLabel(col)}.</Text>}</div>
-        </>
-      ) : (
-        <div className="hd-kb">
-          {COLUMNS.map((c) => (
-            <section key={c} className={`hd-kb-col${over === c ? ' hd-kb-over' : ''}`} aria-label={columnLabel(c)}
-              onDragOver={(e) => { e.preventDefault(); if (over !== c) setOver(c) }}
-              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(null) }}
-              onDrop={(e) => { e.preventDefault(); drop(c, e.dataTransfer.getData('text/plain')) }}>
-              <HStack justify="between" align="center" gap={1}>
-                <Heading level={4}>{columnLabel(c)} <Text type="supporting" size="sm">{cols[c].length}</Text></Heading>
-                {c === 'backlog' && newBtn}
-              </HStack>
-              <div className="hd-kb-cards">{cols[c].map(card)}</div>
-            </section>
-          ))}
-        </div>
+    <Section className="hd-kb-page">
+      <Layout
+        height="fill"
+        header={
+          <LayoutHeader hasDivider padding={phone ? 3 : 4}>
+            <Toolbar label="Board actions" gap={2}
+              startContent={phone
+                ? <Selector label="Column" isLabelHidden width={200} value={col} onChange={(v: string) => setCol(v as Column)}
+                    options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
+                : <><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
+              endContent={<Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />} />
+          </LayoutHeader>
+        }
+        content={
+          <LayoutContent padding={0}>
+            {move.error && <Banner status="error" title={`Move failed: ${move.error.message}`} />}
+            <HStack gap={phone ? 0 : 4} className={phone ? 'hd-kb-cols hd-kb-cols-phone' : 'hd-kb-cols'}>
+              {shown.map((c) => (
+                <BoardColumn key={c} c={c} count={cols[c].length}
+                  contentRef={(el) => { if (el) columnEls.current.set(c, el); else columnEls.current.delete(c) }}>
+                  {renderColumnCards(c)}
+                </BoardColumn>
+              ))}
+            </HStack>
+          </LayoutContent>
+        }
+      />
+      {drag && dragged && (
+        <Card padding={3} className="hd-kb-floating" style={{ width: drag.width, transform: `translate(${drag.pointerX - drag.offsetX}px, ${drag.pointerY - drag.offsetY}px)` }}>
+          <BoardCardBody t={dragged} onMove={() => {}} />
+        </Card>
       )}
       {openId && (
-        <Drawer phone={phone} project={project} ticket={opened} isNew={openId === 'new'} blockAsk={blockAsk}
+        <TicketDetail phone={phone} project={project} ticket={opened} isNew={openId === 'new'} blockAsk={blockAsk}
           onClose={() => { setOpenId(null); setBlockAsk(false) }} onCreated={(id) => setOpenId(id)} />
       )}
+    </Section>
+  )
+}
+
+// ============= CARD =============
+
+// Shared by the column card and the floating drag clone so the two stay identical.
+function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Column) => void }) {
+  return (
+    <VStack gap={2}>
+      <HStack hAlign="between" vAlign="start">
+        <HStack gap={1} vAlign="center" wrap="wrap">
+          <Badge label={t.id} variant="neutral" />
+          {t.priority ? <PriorityBadge p={t.priority} /> : null}
+          {t.type && <Badge label={t.type} variant="neutral" />}
+          {t.size && <Badge label={t.size} variant="neutral" />}
+        </HStack>
+        <MoreMenu label={`Actions for ${t.id}`} size="sm"
+          items={COLUMNS.filter((c) => c !== t.column).map((c) => ({ label: `Move to ${columnLabel(c)}`, onClick: () => onMove(t.id, c) }))} />
+      </HStack>
+      <VStack gap={1}>
+        <Heading level={4} maxLines={3}>{t.title}</Heading>
+        {t.body && <Text type="supporting" color="secondary" maxLines={2}>{t.body}</Text>}
+      </VStack>
+      <Text type="supporting" color="secondary">
+        {t.updated ? <>Edited <Timestamp value={t.updated} format="relative" /></> : null}
+        {t.updated && t.assignee ? ' · ' : ''}{t.assignee ? `@${t.assignee.name}` : ''}
+      </Text>
     </VStack>
   )
 }
 
-function Card({ t, draggable, onOpen }: { t: Ticket; draggable: boolean; onOpen: () => void }) {
+function BoardCard({ t, draggable, cardRef, onPointerDown, onOpen, onMove }: {
+  t: Ticket; draggable: boolean; cardRef: (el: HTMLDivElement | null) => void
+  onPointerDown: (e: ReactPointerEvent, id: string) => void; onOpen: () => void; onMove: (id: string, to: Column) => void
+}) {
   return (
-    <button type="button" className="hd-kb-card" draggable={draggable} onClick={onOpen}
-      onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move' }}>
-      <Text type="supporting" size="sm">{t.id}</Text>
-      <Text weight="semibold" maxLines={3}>{t.title}</Text>
-      <span className="hd-kb-meta">
-        {t.type && <Badge label={t.type} />}
-        {t.size && <Badge label={t.size} />}
-        {t.priority ? <Badge label={`P${t.priority}`} variant={t.priority <= 2 ? 'warning' : undefined} /> : null}
-        {t.assignee && <Text type="supporting" size="sm">@{t.assignee.name}</Text>}
-      </span>
-    </button>
+    <Card ref={cardRef} padding={3} className={draggable ? 'hd-kb-card hd-kb-drag' : 'hd-kb-card'} role="button" tabIndex={0} aria-label={`${t.id}: ${t.title}`}
+      onPointerDown={(e) => onPointerDown(e, t.id)} onClick={(e) => { if (!(e.target as HTMLElement).closest('button, [role="menuitem"], [role="menu"]')) onOpen() }}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen() } }}>
+      <BoardCardBody t={t} onMove={onMove} />
+    </Card>
   )
 }
 
-const opts = (xs: readonly string[]) => [{ value: '', label: '—' }, ...xs.map((x) => ({ value: x, label: x }))]
+// ============= COLUMN =============
 
-function Drawer({ phone, project, ticket, isNew, blockAsk, onClose, onCreated }: {
+function BoardColumn({ c, count, contentRef, children }: { c: Column; count: number; contentRef: (el: HTMLDivElement | null) => void; children: ReactNode }) {
+  const meta = COLUMN_META[c]
+  return (
+    <Card variant="muted" padding={0} className="hd-kb-col">
+      <Layout
+        height="fill"
+        header={
+          <LayoutHeader hasDivider padding={3}>
+            <HStack hAlign="between" vAlign="center">
+              <HStack gap={2} vAlign="center">
+                <StatusDot variant={meta.variant} label={`${columnLabel(c)} status`} />
+                <Tooltip content={meta.tooltip}><Heading level={4}>{columnLabel(c)}</Heading></Tooltip>
+              </HStack>
+              <Text type="supporting" color="secondary" hasTabularNumbers>{count}</Text>
+            </HStack>
+          </LayoutHeader>
+        }
+        content={
+          <LayoutContent ref={contentRef} padding={2}>
+            {children ?? <EmptyState isCompact className="hd-kb-empty" title={`${columnLabel(c)} is empty`} description={meta.empty} />}
+          </LayoutContent>
+        }
+      />
+    </Card>
+  )
+}
+
+// ============= TICKET DETAIL (work-item-detail) =============
+
+const opts = (xs: readonly string[]) => [{ value: '', label: '—' }, ...xs.map((x) => ({ value: x, label: x }))]
+const priorityOptions = PRIORITY.map((l, i) => ({ value: String(i), label: l }))
+
+function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCreated }: {
   phone: boolean; project: string; ticket: Ticket | null; isNew: boolean; blockAsk: boolean; onClose: () => void; onCreated: (id: string) => void
 }) {
   const qc = useQueryClient()
-  const blank = { title: '', body: '', type: '', size: '', priority: '0' }
-  const fromT = (t: Ticket) => ({ title: t.title, body: t.body ?? '', type: t.type ?? '', size: t.size ?? '', priority: String(t.priority ?? 0) })
-  const [f, setF] = useState(ticket ? fromT(ticket) : blank)
-  const [to, setTo] = useState<string>(blockAsk ? 'blocked' : ticket?.column ?? 'backlog')
+  const done = () => qc.invalidateQueries({ queryKey: ['tickets', project] })
+  const [editing, setEditing] = useState(isNew)
+  const [draft, setDraft] = useState({ title: ticket?.title ?? '', body: ticket?.body ?? '', type: '', size: '', priority: '0' })
+  const [blockTo, setBlockTo] = useState(blockAsk) // Status set to Blocked: waiting for the reason
   const [note, setNote] = useState('')
   const [comment, setComment] = useState('')
-  useEffect(() => { if (ticket) setF(fromT(ticket)) }, [ticket?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  const done = () => qc.invalidateQueries({ queryKey: ['tickets', project] })
-  // ponytail: unset type/size are omitted (the API rejects null), so the drawer cannot clear them once set.
-  const fields = () => ({ title: f.title.trim(), body: f.body, priority: Number(f.priority), ...(f.type && { type: f.type }), ...(f.size && { size: f.size }) })
-  const save = useMutation({
-    mutationFn: () => isNew
-      ? send<Ticket>('/api/tickets', 'POST', { project, ...fields(), column: 'backlog' })
-      : send<Ticket>(tUrl(ticket!.id), 'PATCH', fields()),
-    onSuccess: (t) => { done(); if (isNew && t?.id) onCreated(t.id) },
-  })
-  const move = useMutation({ mutationFn: () => send(tUrl(ticket!.id), 'PATCH', { column: to, ...(note.trim() ? { note: note.trim() } : {}) }), onSuccess: () => { setNote(''); done() } })
-  const say = useMutation({ mutationFn: () => send(`${tUrl(ticket!.id)}/comments`, 'POST', { text: comment.trim() }), onSuccess: () => { setComment(''); done() } })
-  const dirty = ticket ? JSON.stringify(f) !== JSON.stringify(fromT(ticket)) : f.title.trim() !== ''
-  const err = save.error ?? move.error ?? say.error
+  const [railOpen, setRailOpen] = useState(true)
+  const commentRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { setDraft((d) => ({ ...d, title: ticket?.title ?? '', body: ticket?.body ?? '' })) }, [ticket?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const body = (
-    <VStack gap={3} className="hd-kb-drawer">
-      <HStack justify="between" align="center" gap={2}>
-        <Heading level={3}>{isNew ? 'New ticket' : ticket ? ticket.id : 'Ticket not found'}</Heading>
-        <Button label="Close" size="sm" variant="ghost" onClick={onClose} />
-      </HStack>
-      {err && <Banner status="error" title={err.message} />}
-      {(isNew || ticket) && <>
-        <TextInput label="Title" value={f.title} onChange={(v: string) => setF({ ...f, title: v })} />
-        <TextArea label="Description" rows={4} value={f.body} onChange={(v: string) => setF({ ...f, body: v })} />
-        <div className="hd-kb-fields">
-          <Selector label="Type" width="100%" value={f.type} options={opts(TYPES)} onChange={(v: string) => setF({ ...f, type: v })} />
-          <Selector label="Size" width="100%" value={f.size} options={opts(SIZES)} onChange={(v: string) => setF({ ...f, size: v })} />
-          <Selector label="Priority" width="100%" value={f.priority} options={PRIORITY.map((l, i) => ({ value: String(i), label: l }))} onChange={(v: string) => setF({ ...f, priority: v })} />
-        </div>
-        <HStack justify="end"><Button label={isNew ? 'Create' : 'Save'} size="sm" variant="primary" isDisabled={!dirty || !f.title.trim()} isLoading={save.isPending} onClick={() => save.mutate()} /></HStack>
-      </>}
-      {ticket && <>
-        <Text size="sm" type="supporting">Assignee: {ticket.assignee ? ticket.assignee.name : 'none'}</Text>
-        <HStack gap={2} align="end">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Selector label="Move to" width="100%" value={to} onChange={setTo} options={COLUMNS.map((c) => ({ value: c, label: columnLabel(c) }))} />
-          </div>
-          <Button label="Move" size="sm" variant="primary" isLoading={move.isPending}
-            isDisabled={to === ticket.column || (to === 'blocked' && !note.trim())} onClick={() => move.mutate()} />
+  // ponytail: unset type/size are omitted (the API rejects null), so they cannot be cleared once set.
+  const patch = useMutation({ mutationFn: (body: object) => send<Ticket>(tUrl(ticket!.id), 'PATCH', body), onSuccess: () => { done(); setEditing(false) } })
+  const create = useMutation({
+    mutationFn: () => send<Ticket>('/api/tickets', 'POST', {
+      project, column: 'backlog', title: draft.title.trim(), body: draft.body, priority: Number(draft.priority),
+      ...(draft.type && { type: draft.type }), ...(draft.size && { size: draft.size }),
+    }),
+    onSuccess: (t) => { done(); if (t?.id) { setEditing(false); onCreated(t.id) } },
+  })
+  const block = useMutation({ mutationFn: () => send(tUrl(ticket!.id), 'PATCH', { column: 'blocked', note: note.trim() }), onSuccess: () => { setNote(''); setBlockTo(false); done() } })
+  const say = useMutation({ mutationFn: () => send(`${tUrl(ticket!.id)}/comments`, 'POST', { text: comment.trim() }), onSuccess: () => { setComment(''); done() } })
+  const err = patch.error ?? create.error ?? block.error ?? say.error
+  const setStatus = (v: string) => { if (v === 'blocked') setBlockTo(true); else { setBlockTo(false); if (v !== ticket!.column) patch.mutate({ column: v }) } }
+  const label = isNew ? 'New ticket' : ticket?.id ?? 'Ticket'
+
+  const header = (
+    <LayoutHeader padding={phone ? 4 : 6} hasDivider>
+      <VStack gap={4}>
+        <HStack gap={4} vAlign="start" hAlign="between">
+          <VStack gap={2}>
+            <HStack gap={4} vAlign="center" wrap="wrap">
+              <Link href="#board" type="supporting" color="secondary" onClick={(e: React.MouseEvent) => { e.preventDefault(); onClose() }}>← Board</Link>
+              <Divider orientation="vertical" className="hd-kb-rule" />
+              <Text type="supporting" color="secondary">{label}</Text>
+              <Divider orientation="vertical" className="hd-kb-rule" />
+              <Text type="supporting" color="secondary">{project}</Text>
+            </HStack>
+            {editing
+              ? <TextInput label="Title" isLabelHidden placeholder="Title" width="100%" value={draft.title} onChange={(v: string) => setDraft({ ...draft, title: v })} />
+              : <Heading level={1} maxLines={2}>{ticket ? ticket.title : 'Ticket not found'}</Heading>}
+          </VStack>
+          <HStack gap={1}>
+            {ticket && !phone && <Button label={railOpen ? 'Hide details' : 'Show details'} variant="secondary" size="sm" onClick={() => setRailOpen(!railOpen)} />}
+            <Button label="Close" variant="ghost" size="sm" onClick={onClose} />
+          </HStack>
         </HStack>
-        {to === 'blocked' && to !== ticket.column && <TextInput label="Why is it blocked?" value={note} onChange={setNote} placeholder="Required" />}
-        <Heading level={4}>History</Heading>
-        <VStack gap={2}>
-          {(ticket.history ?? []).slice().reverse().map((h, i) => (
-            <div key={i} className="hd-kb-hist">
-              <Text size="sm"><b>{h.author}</b> {h.kind === 'move' ? `moved ${h.from ?? ''} → ${h.to ?? ''}` : h.kind === 'comment' ? '' : h.kind}
-                {' '}<Text type="supporting" size="sm"><Timestamp value={h.at} format="relative" /></Text></Text>
-              {h.text && <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{h.text}</Text>}
-            </div>
-          ))}
+        {ticket && <HStack gap={1} vAlign="center" wrap="wrap">
+          <Selector label="Status" isLabelHidden value={blockTo ? 'blocked' : ticket.column} onChange={setStatus} options={statusOptions} />
+          <Selector label="Priority" isLabelHidden value={String(ticket.priority ?? 0)} onChange={(v: string) => patch.mutate({ priority: Number(v) })}
+            options={priorityOptions} renderValue={(o) => <PriorityBadge p={Number(o.value)} />} />
+          <Selector label="Type" isLabelHidden value={ticket.type ?? ''} onChange={(v: string) => v && patch.mutate({ type: v })} options={opts(TYPES)} />
+          <Selector label="Size" isLabelHidden value={ticket.size ?? ''} onChange={(v: string) => v && patch.mutate({ size: v })} options={opts(SIZES)} />
+        </HStack>}
+        {ticket && blockTo && ticket.column !== 'blocked' && <HStack gap={2} vAlign="end">
+          <StackItem size="fill"><TextInput label="Why is it blocked?" width="100%" value={note} onChange={setNote} placeholder="Required" /></StackItem>
+          <Button label="Block" variant="primary" size="sm" isDisabled={!note.trim()} isLoading={block.isPending} onClick={() => block.mutate()} />
+        </HStack>}
+        {err && <Banner status="error" title={err.message} />}
+      </VStack>
+    </LayoutHeader>
+  )
+
+  const description = (
+    <Section padding={6}>
+      <VStack gap={4}>
+        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
+          <Heading level={2}>Description</Heading>
+          {ticket && !editing && <Button label="Edit" onClick={() => setEditing(true)} />}
+        </HStack>
+        {editing ? <>
+          <TextArea label="Description" isLabelHidden width="100%" rows={6} value={draft.body} onChange={(v: string) => setDraft({ ...draft, body: v })} />
+          {isNew && <HStack gap={2} wrap="wrap">
+            <Selector label="Type" value={draft.type} options={opts(TYPES)} onChange={(v: string) => setDraft({ ...draft, type: v })} />
+            <Selector label="Size" value={draft.size} options={opts(SIZES)} onChange={(v: string) => setDraft({ ...draft, size: v })} />
+            <Selector label="Priority" value={draft.priority} options={priorityOptions} onChange={(v: string) => setDraft({ ...draft, priority: v })} />
+          </HStack>}
+          <HStack gap={2} hAlign="end">
+            <Button label="Cancel" variant="ghost" onClick={() => (isNew ? onClose() : setEditing(false))} />
+            <Button label={isNew ? 'Create' : 'Save'} variant="primary" isDisabled={!draft.title.trim()} isLoading={patch.isPending || create.isPending}
+              onClick={() => (isNew ? create.mutate() : patch.mutate({ title: draft.title.trim(), body: draft.body }))} />
+          </HStack>
+        </> : <Text type="body" style={{ whiteSpace: 'pre-wrap' }}>{ticket?.body || <Text type="supporting" color="secondary">No description.</Text>}</Text>}
+      </VStack>
+    </Section>
+  )
+
+  const activity = ticket && (
+    <Section padding={6}>
+      <VStack gap={phone ? 6 : 10}>
+        <HStack gap={2} vAlign="center" hAlign="between" wrap="wrap">
+          <Heading level={2}>Comments and activity</Heading>
+          <Button label="Add comment" onClick={() => { commentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); commentRef.current?.focus({ preventScroll: true }) }} />
+        </HStack>
+        <VStack gap={6}>
+          {(ticket.history ?? []).map((h, i) => {
+            const isComment = h.kind === 'comment'
+            const what = h.kind === 'move' ? `moved ${h.from ?? ''} → ${h.to ?? ''}` : h.kind === 'create' ? 'created this ticket' : h.kind === 'assign' ? `assigned ${h.to ?? 'nobody'}` : 'edited'
+            return (
+              <HStack key={i} gap={3} vAlign="start">
+                <Avatar name={h.author} size="sm" />
+                <StackItem size="fill">
+                  <VStack gap={1}>
+                    <HStack gap={2} vAlign="center" wrap="wrap">
+                      <Text type="body" weight="semibold">{h.author}</Text>
+                      {!isComment && <Text type="supporting" color="secondary">{what}</Text>}
+                      <StackItem size="fill" />
+                      <Timestamp value={h.at} format="relative" type="supporting" color="secondary" />
+                    </HStack>
+                    {h.text && <Card variant="muted" padding={3}><Text type="body" style={{ whiteSpace: 'pre-wrap' }}>{h.text}</Text></Card>}
+                  </VStack>
+                </StackItem>
+              </HStack>
+            )
+          })}
         </VStack>
-        <TextArea label="Comment" rows={2} value={comment} onChange={setComment} placeholder="Add a comment…" />
-        <HStack justify="end"><Button label="Comment" size="sm" isDisabled={!comment.trim()} isLoading={say.isPending} onClick={() => say.mutate()} /></HStack>
-      </>}
+        <VStack gap={2} hAlign="stretch">
+          <TextArea ref={commentRef} width="100%" label="Add a comment" isLabelHidden placeholder="Write a comment…" value={comment} onChange={setComment} rows={phone ? 3 : 5} />
+          <HStack gap={2} hAlign="end">
+            <Button label="Cancel" variant="ghost" isDisabled={!comment} onClick={() => setComment('')} />
+            <Button label="Comment" variant="primary" isDisabled={!comment.trim()} isLoading={say.isPending} onClick={() => say.mutate()} />
+          </HStack>
+        </VStack>
+      </VStack>
+    </Section>
+  )
+
+  const details = ticket && (
+    <VStack gap={4}>
+      <Heading level={3}>Details</Heading>
+      <MetadataList>
+        <MetadataListItem label="Status">
+          <HStack gap={2} vAlign="center"><StatusDot variant={COLUMN_META[ticket.column].variant} label={columnLabel(ticket.column)} /><Text type="body">{columnLabel(ticket.column)}</Text></HStack>
+        </MetadataListItem>
+        <MetadataListItem label="Priority"><PriorityBadge p={ticket.priority} /></MetadataListItem>
+        <MetadataListItem label="Assignee">
+          {ticket.assignee ? <HStack gap={2} vAlign="center"><Avatar name={ticket.assignee.name} size="xsm" /><Text type="body">{ticket.assignee.name}</Text></HStack> : <Text type="body" color="secondary">None</Text>}
+        </MetadataListItem>
+        <MetadataListItem label="Type"><Text type="body">{ticket.type ?? '—'}</Text></MetadataListItem>
+        <MetadataListItem label="Size"><Text type="body">{ticket.size ?? '—'}</Text></MetadataListItem>
+        {ticket.created && <MetadataListItem label="Created"><Timestamp value={ticket.created} format="date" type="body" color="primary" /></MetadataListItem>}
+        {ticket.updated && <MetadataListItem label="Updated"><Timestamp value={ticket.updated} format="relative" type="body" color="primary" /></MetadataListItem>}
+        {!!ticket.labels?.length && <MetadataListItem label="Labels"><HStack gap={1} wrap="wrap">{ticket.labels.map((l) => <Badge key={l} label={l} variant="neutral" />)}</HStack></MetadataListItem>}
+        {!!ticket.links?.length && <MetadataListItem label="Links"><VStack gap={1}>{ticket.links.map((l) => <Link key={l} href={l} target="_blank">{l}</Link>)}</VStack></MetadataListItem>}
+      </MetadataList>
     </VStack>
   )
-  const label = isNew ? 'New ticket' : ticket?.id ?? 'Ticket'
-  // Phone: fullscreen Dialog, like Settings — a Selector popover does not open inside a BottomSheet.
+
+  const page = (
+    <Layout
+      height="fill"
+      header={header}
+      content={
+        <LayoutContent padding={phone ? 4 : 6} role="main">
+          <VStack gap={6}>
+            {description}
+            {/* ponytail: on a phone the details sit inline instead of in a second fullscreen dialog. */}
+            {phone && details && <><Divider /><Section padding={6}>{details}</Section></>}
+            {activity && <><Divider />{activity}</>}
+          </VStack>
+        </LayoutContent>
+      }
+      end={!phone && ticket && railOpen ? <LayoutPanel width={300} padding={6} role="complementary" hasDivider>{details}</LayoutPanel> : undefined}
+    />
+  )
   return phone
-    ? <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} variant="fullscreen" aria-label={label}><div className="hd-kb-sheet">{body}</div></Dialog>
-    : <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={640} aria-label={label}>{body}</Dialog>
+    ? <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} variant="fullscreen" padding={0} aria-label={label}><div className="hd-kb-detail hd-kb-detail-phone">{page}</div></Dialog>
+    : <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={1080} padding={0} aria-label={label}><div className="hd-kb-detail">{page}</div></Dialog>
 }
