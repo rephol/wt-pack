@@ -46,6 +46,24 @@ appears in Routines.
   is added. Seed rows are what populate the Routines list (`store.mjs:168`), so adding no row keeps dispatch
   out of it.
 
+## Review corrections (binding — where they conflict with Approach or the units below, these win)
+
+Plan review, verified against the tree:
+
+1. **Failed tickets must be retried.** Step 1 selects `!dispatch || (dispatch.state === 'failed' && at older than 2 min)`. `dispatch.fails` counts failures, and the third one sets `held`. As written, a single failure would have skipped the ticket forever and `held` could never be reached.
+2. **The gone rule applies only to dispatcher-assigned cards.** That means `dispatch.state === 'sent'` and a local assignee with a pane. A user claim assigns the profile name (`server.mjs:1845-1847` `return { kind: 'user', name: p.name …}`), which matches no agent and would otherwise be sent back to Ready.
+3. **Skip the gone pass when `agents()` threw or returned an empty local list**, because herdr being down is not the same as every agent being gone.
+4. **Close the claim window.** `claim()` returns 409 when `t.dispatch?.state === 'dispatching'` (unless `force`), since today it checks only `assignee` (`tickets.mjs:215`). Step 6 is one conditional `mutate` that requires `dispatch.state === 'dispatching' && !assignee`. It sets column, assignee, the history note and `dispatch = {state:'sent', agent}` together, and is a no-op with a log line otherwise.
+5. **`HERDR_PANE_ID: ''` in the handoff env**, as the server already does for wt-memory (`server.mjs:787` `{ HERDR_PANE_ID: '' }`). Otherwise a service started from a pane leaks that pane into handoff.sh (`handoff.sh:174` `from_pane=…HERDR_PANE_ID`) and into wt-ticket.
+6. **`dispatch` is cleared only on a move into Ready or Backlog**, not on every column change. wt-ship's move to review keeps `sent`, and rule 2 relies on it.
+7. **Retry is `POST /api/tickets/:id/dispatch-retry`** (it clears `dispatch`). `PATCH {dispatch:null}` would be dropped by the `clean()` whitelist (`tickets.mjs:30-45`). The retry endpoint and a move to Backlog are the only ways to clear `held`, because a Ready → Ready move is a no-op.
+8. **Ready notify:** `readyNotes` returns early when the board has `dispatch` on (`server.mjs:1709` sits next to the `auto` check). The `busy()` edit in Risks is dropped. The orchestrator is not told to schedule cards the dispatcher owns.
+9. **The shared guard counts both sources of pending work**: open routine spawn runs (`routines.mjs:185-187`) and `dispatching` cards. Dispatch and Routines share one `maxWorking`.
+10. **Stalled** uses the assignee's `lastActivity` (`server.mjs:449`) being older than `stallMin`. The "no commit on the card's branch" condition is removed, because tickets carry no branch.
+11. **The agent name comes from handoff's second line** (`handoff.sh:232` `echo "target ${to_name:-?} $to…"`), with the pane id as the fallback when it is `?`, rather than from the 3 s-cached `agents()`.
+
+Tests for items 1–4 and 6–8 join U1/U2/U3's verify lists. Item 5 gets a dispatch test asserting the env.
+
 ## Approach
 
 **Where it lives.** The logic goes in a new `wt-dashboard/dispatch.mjs`, a class taking injected deps in the
