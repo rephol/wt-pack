@@ -1,4 +1,4 @@
-// One SQLite file (DATA/wt.db) for tickets, rooms and the inbox, on Node's built-in node:sqlite (node >= 22.13).
+// One SQLite file (DATA/wt.db) for tickets, rooms and the notifications inbox, on Node's built-in node:sqlite (node >= 22.13).
 // The server is the only writer. Each migration stage imports its legacy JSON/JSONL once, then moves those
 // files to DATA/pre-sqlite-<ISO>/; `node store.mjs export [--to <dir>]` writes the old layout back (rollback).
 // No I/O on module load: server.mjs is imported by tests, so a DB opens only on first use.
@@ -72,12 +72,72 @@ function exportTickets(db, to) {
   }
 }
 
-// Stage n sets user_version = n. legacy: top-level names under DATA that the stage imports and then moves away.
+// Every rooms/<slug>.jsonl keeps an index entry: a room whose file exists is re-added (never dropped).
+export function reconcileIndex(index, files) {
+  const have = new Set(index.map((r) => r.slug))
+  const recovered = files.filter((f) => f.endsWith('.jsonl')).map((f) => f.slice(0, -6)).filter((slug) => !have.has(slug))
+  return [...index, ...recovered.map((slug) => ({ slug, title: slug, project: null, createdAt: new Date(0).toISOString(), paused: false, members: [], hops: 0, recovered: true }))]
+}
+
+// JSONL records, torn lines skipped.
+const lines = (f) => (existsSync(f) ? readFileSync(f, 'utf8') : '').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)] } catch { return [] } })
+
+// rooms.json order → pos; each rooms/<slug>.jsonl folded as the JSONL Rooms.messages() did: delivered lines
+// merged into deliveredTo/undelivered.
+function importRooms(db, data, log) {
+  if (db.prepare('SELECT 1 FROM rooms LIMIT 1').get()) return
+  const dir = join(data, 'rooms')
+  let index = existsSync(join(data, 'rooms.json')) ? readJson(join(data, 'rooms.json')) : []
+  if (!Array.isArray(index)) { log('store: rooms.json unreadable; rooms rebuilt from rooms/*.jsonl'); index = [] }
+  index = reconcileIndex(index, existsSync(dir) ? readdirSync(dir) : [])
+  const room = db.prepare('INSERT OR IGNORE INTO rooms (slug, pos, json) VALUES (?, ?, ?)')
+  const msg = db.prepare('INSERT OR IGNORE INTO messages (room, id, json) VALUES (?, ?, ?)')
+  index.forEach((r, i) => {
+    room.run(r.slug, i, JSON.stringify(r))
+    const out = [], byId = new Map()
+    for (const e of lines(join(dir, `${r.slug}.jsonl`))) {
+      if (e.type !== 'delivered') { out.push(e); byId.set(e.id, e); continue }
+      const m = byId.get(e.id)
+      m?.deliveredTo.push(e.to)
+      if (m && e.dropped) m.undelivered = [...(m.undelivered ?? []), { to: e.to, n: e.dropped }]
+    }
+    for (const m of out) msg.run(r.slug, m.id, JSON.stringify(m))
+  })
+}
+
+// notifications.jsonl folded as Inbox.load() did: {type:'update'} lines patched into their item.
+function importInbox(db, data) {
+  if (db.prepare('SELECT 1 FROM notifications LIMIT 1').get()) return
+  const byId = new Map()
+  for (const e of lines(join(data, 'notifications.jsonl'))) {
+    if (e.type === 'update') Object.assign(byId.get(e.id) ?? {}, e.patch)
+    else byId.set(e.id, e)
+  }
+  const ins = db.prepare('INSERT INTO notifications (id, json) VALUES (?, ?)')
+  for (const it of byId.values()) ins.run(it.id, JSON.stringify(it))
+}
+
+function exportStage2(db, to) {
+  const rooms = db.prepare('SELECT slug, json FROM rooms ORDER BY pos').all()
+  mkdirSync(join(to, 'rooms'), { recursive: true })
+  writeFileSync(join(to, 'rooms.json'), JSON.stringify(rooms.map((r) => JSON.parse(r.json)), null, 2))
+  for (const r of rooms) writeFileSync(join(to, 'rooms', `${r.slug}.jsonl`),
+    db.prepare('SELECT json FROM messages WHERE room = ? ORDER BY seq').all(r.slug).map((m) => m.json + '\n').join(''))
+  writeFileSync(join(to, 'notifications.jsonl'), db.prepare('SELECT json FROM notifications ORDER BY seq').all().map((n) => n.json + '\n').join(''))
+}
+
+// Stage n sets user_version = n. legacy(names in DATA): what the stage imports and then moves away (quarantined
+// *.corrupt-* copies too: only the old salvage code read them).
 export const MIGRATIONS = [
   { sql: `CREATE TABLE boards (project TEXT PRIMARY KEY, key TEXT UNIQUE NOT NULL, next INTEGER NOT NULL);
           CREATE TABLE tickets (id TEXT PRIMARY KEY, project TEXT NOT NULL REFERENCES boards, seq INTEGER NOT NULL, json TEXT NOT NULL);
           CREATE INDEX tickets_project ON tickets (project, seq);`,
-    legacy: ['tickets'], import: importTickets, export: exportTickets },
+    legacy: (names) => names.filter((n) => n === 'tickets'), import: importTickets, export: exportTickets },
+  { sql: `CREATE TABLE rooms (slug TEXT PRIMARY KEY, pos INTEGER NOT NULL, json TEXT NOT NULL);
+          CREATE TABLE messages (seq INTEGER PRIMARY KEY, room TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, UNIQUE (room, id));
+          CREATE TABLE notifications (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, json TEXT NOT NULL);`,
+    legacy: (names) => names.filter((n) => /^(rooms|rooms\.json.*|notifications\.jsonl.*)$/.test(n)),
+    import: (db, data, log) => { importRooms(db, data, log); importInbox(db, data) }, export: exportStage2 },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
@@ -111,7 +171,7 @@ export function open(file, { log = console.error } = {}) {
     backup ??= `pre-sqlite-${new Date().toISOString().replace(/[:.]/g, '-')}`
     for (const n of names) moveInto(join(data, n), join(data, backup, n))
   }
-  const present = (m) => mem ? [] : m.legacy.filter((n) => existsSync(join(data, n)))
+  const present = (m) => mem ? [] : m.legacy(readdirSync(data))
   MIGRATIONS.forEach((m, i) => {
     const left = present(m)
     if (i < version) {

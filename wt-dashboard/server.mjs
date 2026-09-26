@@ -1325,9 +1325,9 @@ export function transitions(prev, next) {
   }
   return out
 }
-// One always-on loop feeds the inbox (data/notifications.jsonl) from successive overviews; /api/events
+// One always-on loop feeds the inbox (data/wt.db) from successive overviews; /api/events
 // relays new items (native notifications) and the tray list (unresolved actionable items) to the app.
-const inbox = new Inbox(join(DATA, 'notifications.jsonl'))
+const inbox = new Inbox(DATA)
 const subs = new Set()
 let lastSnap = null
 const trayOfInbox = () => ({
@@ -2286,7 +2286,7 @@ async function runHousekeeping(dryRun = false) {
   const sum = await housekeep({
     roots: [DATA_ROOT, LOGS, join(CACHE, 'wt-memory'), join(CACHE, 'wt-agents')],
     uploads: UPLOADS,
-    rooms: rooms.index.map((r) => ({ file: join(DATA, 'rooms', `${r.slug}.jsonl`), archived: r.archived })),
+    roomRefs: rooms.liveText(),
     extraRefs: await readFile(join(DATA, 'settings.json'), 'utf8').catch(() => ''),
     inbox,
     rotate: [

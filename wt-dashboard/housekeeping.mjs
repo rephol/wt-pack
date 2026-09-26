@@ -1,7 +1,7 @@
 // Housekeeping: prune old uploads, compact the inbox, rotate append-only logs, drop stale agent cache files.
 // Runs hourly from server.mjs (and once a minute after start). Every delete/rename/truncate goes through guard():
 // only regular files strictly inside one of `roots`, never a symlink. dryRun reports without touching anything.
-import { readdir, lstat, readFile, rm, rename, copyFile, truncate, realpath } from 'node:fs/promises'
+import { readdir, lstat, rm, rename, copyFile, truncate, realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 
 export const DEFAULTS = { uploadsDays: 30, resolvedDays: 14, rotateMB: 5, rotateKeep: 2, cacheDays: 7 }
@@ -17,7 +17,7 @@ export function cleanSettings(b = {}) {
   return out
 }
 
-// `ctx`: { roots, uploads, rooms: [{file, archived}], extraRefs: string (text that may name uploads),
+// `ctx`: { roots, uploads, roomRefs: string (messages of non-archived rooms), extraRefs: string (text that may name uploads),
 //   inbox (Inbox), rotate: [{file, mode: 'rename'|'copytruncate'}], memCache, agentsCache,
 //   live: {sessions: Set, names: Set} | null (null = unknown → caches untouched), settings, now, dryRun }
 export async function housekeep(ctx) {
@@ -45,8 +45,7 @@ export async function housekeep(ctx) {
 
   // 1. uploads older than N days, unless a non-archived room message (or the profile) names them.
   if (ctx.uploads) {
-    let refs = ctx.extraRefs ?? ''
-    for (const r of ctx.rooms ?? []) if (!r.archived) refs += await readFile(r.file, 'utf8').catch(() => '')
+    const refs = (ctx.extraRefs ?? '') + (ctx.roomRefs ?? '')
     for (const day of await readdir(ctx.uploads, { withFileTypes: true }).catch(() => [])) {
       if (!day.isDirectory()) continue
       for (const f of await readdir(join(ctx.uploads, day.name)).catch(() => [])) {
@@ -56,12 +55,11 @@ export async function housekeep(ctx) {
       }
     }
   }
-  // 2. inbox: drop items resolved (or cleared) more than N days ago; the jsonl is rewritten compact.
+  // 2. inbox: drop items resolved (or cleared) more than N days ago (row deletes; wt.db does not shrink).
   if (ctx.inbox) {
     try {
-      const n = await ctx.inbox.compact((it) => [it.resolvedAt, it.clearedAt].some((t) => t && now - Date.parse(t) > s.resolvedDays * DAY), { dryRun: ctx.dryRun, guard })
-      if (n.dropped) sum.actions.push(`inbox: drop ${n.dropped} old resolved items (${n.bytes} bytes)`)
-      sum.bytes += n.bytes
+      const n = await ctx.inbox.compact((it) => [it.resolvedAt, it.clearedAt].some((t) => t && now - Date.parse(t) > s.resolvedDays * DAY), { dryRun: ctx.dryRun })
+      if (n.dropped) sum.actions.push(`inbox: drop ${n.dropped} old resolved items`)
     } catch (e) { sum.errors.push(`inbox: ${e.message}`) }
   }
   // 3. rotate append-only files over the size limit: f → f.1 → f.2 …, keeping `rotateKeep`.

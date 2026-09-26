@@ -276,7 +276,7 @@ test('rooms routing: mention > responder > broadcast > nobody', async () => {
 test('rooms index: a room whose jsonl exists is never dropped; writes are atomic', async () => {
   const R = await import('./rooms.mjs')
   const idx = [{ slug: 'a', title: 'A' }]
-  assert.deepEqual(R.reconcileIndex(idx, ['a.jsonl', 'b.jsonl', 'x.tmp']).map((r) => [r.slug, Boolean(r.recovered)]), [['a', false], ['b', true]])
+  assert.deepEqual((await import('./store.mjs')).reconcileIndex(idx, ['a.jsonl', 'b.jsonl', 'x.tmp']).map((r) => [r.slug, Boolean(r.recovered)]), [['a', false], ['b', true]])
   const { mkdtemp, readFile, readdir } = await import('node:fs/promises')
   const dir = await mkdtemp((await import('node:os')).tmpdir() + '/rooms-')
   await R.atomicWrite(dir + '/rooms.json', '[1]')
@@ -305,19 +305,19 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
   assert.deepEqual(I.toResolve(mp, new Set(), new Set(), new Set(['ab12cd'])), [])
   assert.deepEqual(I.toResolve(mp, new Set(), new Set(), new Set()), ['p'])
   const { mkdtemp } = await import('node:fs/promises')
-  const box = new I.Inbox((await mkdtemp((await import('node:os')).tmpdir() + '/inbox-')) + '/n.jsonl')
+  const box = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
   assert.ok(await box.add({ kind: 'question', key: 'k', title: 't', body: '', target: { agent: 'a' } }))
   assert.equal(await box.add({ kind: 'question', key: 'k', title: 't', body: '', target: { agent: 'a' } }), null)
   await box.patch([box.items[0].id], { read: true })
-  const again = new I.Inbox(box.file); await again.load()
+  const again = new I.Inbox((await import('node:path')).dirname(box.file)); await again.load()
   assert.equal(again.items[0].read, true) // updates survive a reload
   await box.add({ kind: 'agent-done', key: 'd', title: 'd', body: '', target: { agent: 'a' } })
   assert.equal(await box.clear({ allRead: true }), 1) // only the read one
   assert.deepEqual(box.list().map((it) => it.key), ['d'])
   assert.equal(box.open().length, 0) // a cleared question leaves the tray
   await box.clear({ all: true })
-  const third = new I.Inbox(box.file); await third.load()
-  assert.equal(third.list().length, 0); assert.equal(third.items.length, 2) // kept in the jsonl, not shown
+  const third = new I.Inbox((await import('node:path')).dirname(box.file)); await third.load()
+  assert.equal(third.list().length, 0); assert.equal(third.items.length, 2) // kept in the DB, not shown
 })
 
 test('rooms: a "/" message is a command for exactly one agent (mention, else responder), never broadcast', async () => {

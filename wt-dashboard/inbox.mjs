@@ -1,8 +1,7 @@
-// Notifications inbox: one feed at <data root>/data/notifications.jsonl, the single source for the in-app
-// inbox, native notifications and the tray count. Items are appended; later {type:'update'} lines mark them
-// read or resolved. Pure pieces (kind mapping, actionable, resolution) are exported for parse.test.mjs.
-import { readFile, appendFile, mkdir, writeFile, rename } from 'node:fs/promises'
-import { dirname } from 'node:path'
+// Notifications inbox: one feed in <data root>/data/wt.db (table notifications), the single source for the
+// in-app inbox, native notifications and the tray count. Items are inserted; read/resolved/cleared update the row. Pure pieces (kind mapping, actionable, resolution) are exported for parse.test.mjs.
+import { join } from 'node:path'
+import { open, tx } from './store.mjs'
 import { randomUUID } from 'node:crypto'
 
 export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal']
@@ -43,21 +42,13 @@ export const inboxRank = {
 }
 
 export class Inbox {
-  constructor(file) { Object.assign(this, { file, items: null, subs: new Set(), q: Promise.resolve() }) }
-  // File writes run one at a time, so compact()'s rewrite never races an append.
-  write(fn) { const r = this.q.then(fn); this.q = r.catch(() => {}); return r }
+  // dir: the data dir; items live in its wt.db (store.mjs). `items` is the in-memory copy: the server is the only
+  // writer, and each change updates it in the same call as the DB.
+  constructor(dir) { Object.assign(this, { file: join(dir, 'wt.db'), items: null, subs: new Set() }) }
+  get db() { return open(this.file) }
   async load() {
     if (this.items) return
-    await mkdir(dirname(this.file), { recursive: true })
-    const byId = new Map()
-    for (const l of (await readFile(this.file, 'utf8').catch(() => '')).split('\n').filter(Boolean)) {
-      try {
-        const e = JSON.parse(l)
-        if (e.type === 'update') Object.assign(byId.get(e.id) ?? {}, e.patch)
-        else byId.set(e.id, e)
-      } catch { /* torn line */ }
-    }
-    this.items = [...byId.values()]
+    this.items = this.db.prepare('SELECT json FROM notifications ORDER BY seq').all().map((r) => JSON.parse(r.json))
   }
   async add(draft) {
     await this.load()
@@ -66,8 +57,8 @@ export class Inbox {
     const now = Date.now()
     if (this.items.some((it) => it.key === draft.key && ((ACTIONABLE.has(draft.kind) && !it.resolvedAt) || now - Date.parse(it.ts) < 60_000))) return null
     const it = { id: randomUUID(), ts: new Date(now).toISOString(), read: false, resolvedAt: null, ...draft }
+    this.db.prepare('INSERT INTO notifications (id, json) VALUES (?, ?)').run(it.id, JSON.stringify(it))
     this.items.push(it)
-    await this.write(() => appendFile(this.file, JSON.stringify(it) + '\n'))
     for (const f of this.subs) f(it)
     return it
   }
@@ -75,30 +66,25 @@ export class Inbox {
     await this.load()
     const set = new Set(ids)
     const hit = this.items.filter((it) => set.has(it.id))
+    tx(this.db, () => {
+      const up = this.db.prepare('UPDATE notifications SET json = ? WHERE id = ?')
+      for (const it of hit) up.run(JSON.stringify({ ...it, ...patch }), it.id)
+    })
     for (const it of hit) Object.assign(it, patch)
-    if (hit.length) await this.write(() => appendFile(this.file, hit.map((it) => JSON.stringify({ type: 'update', id: it.id, patch })).join('\n') + '\n'))
     return hit.length
   }
-  // Drop items matching `drop` and rewrite the jsonl as one folded line per item. Returns {dropped, bytes freed}.
-  async compact(drop, { dryRun = false, guard = async () => {} } = {}) {
+  // Drop items matching `drop`. Returns {dropped}.
+  async compact(drop, { dryRun = false } = {}) {
     await this.load()
-    return this.write(async () => {
-      const before = Buffer.byteLength(await readFile(this.file, 'utf8').catch(() => ''))
-      const keep = this.items.filter((it) => !drop(it))
-      const text = keep.map((it) => JSON.stringify(it) + '\n').join('')
-      const dropped = this.items.length - keep.length
-      if (!dropped) return { dropped: 0, bytes: 0 }
-      if (!dryRun) {
-        await guard(this.file)
-        await writeFile(this.file + '.tmp', text)
-        await rename(this.file + '.tmp', this.file)
-        this.items = keep
-      }
-      return { dropped, bytes: Math.max(0, before - Buffer.byteLength(text)) }
-    })
+    const gone = this.items.filter(drop)
+    if (gone.length && !dryRun) {
+      tx(this.db, () => { const del = this.db.prepare('DELETE FROM notifications WHERE id = ?'); for (const it of gone) del.run(it.id) })
+      this.items = this.items.filter((it) => !gone.includes(it))
+    }
+    return { dropped: gone.length }
   }
   resolve(ids) { return ids.length ? this.patch(ids, { resolvedAt: new Date().toISOString() }) : 0 }
-  // Cleared items stay in the jsonl (an update line) but are never listed or counted.
+  // Cleared items stay in the DB but are never listed or counted.
   list(limit = 300) { return this.items.filter((it) => !it.clearedAt).slice(-limit).reverse() }
   // The tray/badge: unresolved actionable items.
   open() { return this.items.filter((it) => !it.resolvedAt && !it.clearedAt && ACTIONABLE.has(it.kind)) }

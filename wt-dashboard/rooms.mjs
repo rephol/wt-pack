@@ -1,9 +1,10 @@
-// Chat rooms shared by the user and agents. Append-only JSONL per room + a rooms.json index + settings.json,
-// all under the data root (~/.local/share/wt-dashboard/data). Pure delivery rules (mentions, @all, agent→agent, hops, rate limit) are exported
+// Chat rooms shared by the user and agents. Rooms and messages live in DATA/wt.db (store.mjs); settings.json stays
+// a file, all under the data root (~/.local/share/wt-dashboard/data). Pure delivery rules (mentions, @all, agent→agent, hops, rate limit) are exported
 // for parse.test.mjs; the Rooms class does I/O and the per-agent delivery queue.
-import { readFile, writeFile, appendFile, mkdir, rm, rename, readdir } from 'node:fs/promises'
+import { readFile, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { open, tx } from './store.mjs'
 
 export const DEFAULT_SETTINGS = {
   agentToAgent: false, // agents may @mention other agents (delivered)
@@ -202,19 +203,12 @@ export const roomResolve = {
   decide: (a, min = 0.7) => (a?.open?.noul ?? 0) >= min, // true = still needs the user
 }
 
-// Write-then-rename, so a crash mid-write never leaves a truncated index or settings file.
+// Write-then-rename, so a crash mid-write never leaves a truncated settings file.
 export async function atomicWrite(file, data) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
   await writeFile(tmp, data)
   await rename(tmp, file)
 }
-// Every rooms/<slug>.jsonl keeps an index entry: a room whose file exists is re-added (never dropped).
-export function reconcileIndex(index, files) {
-  const have = new Set(index.map((r) => r.slug))
-  const recovered = files.filter((f) => f.endsWith('.jsonl')).map((f) => f.slice(0, -6)).filter((slug) => !have.has(slug))
-  return [...index, ...recovered.map((slug) => ({ slug, title: slug, project: null, createdAt: new Date(0).toISOString(), paused: false, members: [], hops: 0, recovered: true }))]
-}
-
 export const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'room'
 
 export class Rooms {
@@ -230,18 +224,10 @@ export class Rooms {
     this.posts = new Map() // agentKey -> [ts] (rate limit)
     this.lock = Promise.resolve()
   }
+  get db() { return open(join(this.dir, 'wt.db'), { log: this.log }) } // lazy: server.mjs is imported by tests
   async load() {
     if (this.index) return
-    await mkdir(join(this.dir, 'rooms'), { recursive: true })
-    const raw = await readFile(join(this.dir, 'rooms.json'), 'utf8').catch(() => null)
-    let index = []
-    try { index = raw ? JSON.parse(raw) : [] } catch (e) {
-      // A broken index is set aside, never overwritten blind; rooms are rebuilt from their files below.
-      this.log(`rooms.json unreadable (${e.message}); kept as rooms.json.corrupt-${Date.now()}`)
-      await rename(join(this.dir, 'rooms.json'), join(this.dir, `rooms.json.corrupt-${Date.now()}`)).catch(() => {})
-    }
-    this.index = reconcileIndex(index, await readdir(join(this.dir, 'rooms')).catch(() => []))
-    if (this.index.length !== index.length) await this.saveIndex()
+    this.index = this.db.prepare('SELECT json FROM rooms ORDER BY pos').all().map((r) => JSON.parse(r.json))
     this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse((await readFile(join(this.dir, 'settings.json'), 'utf8').catch(() => '{}'))) }
   }
   // A late Jev answer is applied only while msg is still the room's latest word (no newer post, user's or agent's,
@@ -258,7 +244,14 @@ export class Rooms {
       await this.saveIndex()
     }).catch((e) => this.log(`room resolve: ${e.message}`))
   }
-  saveIndex() { return atomicWrite(join(this.dir, 'rooms.json'), JSON.stringify(this.index, null, 2)) }
+  // ponytail: rewrites every row per change; fine at tens of rooms.
+  saveIndex() {
+    tx(this.db, () => {
+      this.db.exec('DELETE FROM rooms')
+      const ins = this.db.prepare('INSERT INTO rooms (slug, pos, json) VALUES (?, ?, ?)')
+      this.index.forEach((r, i) => ins.run(r.slug, i, JSON.stringify(r)))
+    })
+  }
   async setSettings(patch) {
     await this.load()
     for (const [k, v] of Object.entries(patch)) {
@@ -279,7 +272,7 @@ export class Rooms {
   }
   room(slug) { return this.index.find((r) => r.slug === slug) }
   async list() { await this.load(); return this.index }
-  // Index entries + each room's newest non-system message. Copies: last* never reach rooms.json.
+  // Index entries + each room's newest non-system message. Copies: last* never reach the stored index.
   // messages() reads each log once, then add() keeps the cache current — no full scan per request.
   async withLast() {
     await this.load()
@@ -343,26 +336,12 @@ export class Rooms {
   }
   async messages(slug) {
     await this.load()
-    if (!this.msgs.has(slug)) {
-      const lines = (await readFile(join(this.dir, 'rooms', `${slug}.jsonl`), 'utf8').catch(() => '')).split('\n').filter(Boolean)
-      const out = [], byId = new Map()
-      for (const l of lines) {
-        try {
-          const e = JSON.parse(l)
-          if (e.type === 'delivered') {
-            const m = byId.get(e.id)
-            m?.deliveredTo.push(e.to)
-            if (m && e.dropped) m.undelivered = [...(m.undelivered ?? []), { to: e.to, n: e.dropped }]
-          }
-          else { out.push(e); byId.set(e.id, e) }
-        } catch { /* torn line */ }
-      }
-      this.msgs.set(slug, out)
-    }
+    if (!this.msgs.has(slug)) this.msgs.set(slug, this.db.prepare('SELECT json FROM messages WHERE room = ? ORDER BY seq').all(slug).map((m) => JSON.parse(m.json)))
     return this.msgs.get(slug)
   }
-  async append(slug, rec) {
-    await appendFile(join(this.dir, 'rooms', `${slug}.jsonl`), JSON.stringify(rec) + '\n')
+  // Text of every message in a non-archived room (housekeeping: which uploads are still referenced).
+  liveText() {
+    return this.db.prepare(`SELECT m.json FROM messages m JOIN rooms r ON r.slug = m.room WHERE json_extract(r.json, '$.archived') IS NOT 1`).all().map((m) => m.json).join('\n')
   }
   emit(slug, event, data) {
     for (const res of this.subs.get(slug) ?? []) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
@@ -426,7 +405,7 @@ export class Rooms {
   }
   async add(slug, msg) {
     (await this.messages(slug)).push(msg)
-    await this.append(slug, msg)
+    this.db.prepare('INSERT INTO messages (room, id, json) VALUES (?, ?, ?)').run(slug, msg.id, JSON.stringify(msg))
     this.emit(slug, 'message', msg)
   }
   system(slug, text, extra = {}) {
@@ -436,7 +415,7 @@ export class Rooms {
     const dropped = !a.local && m.attachments?.length ? m.attachments.length : 0
     m.deliveredTo.push(a.name)
     if (dropped) m.undelivered = [...(m.undelivered ?? []), { to: a.name, n: dropped }]
-    await this.append(slug, { type: 'delivered', id: m.id, to: a.name, ts: new Date().toISOString(), ...(dropped ? { dropped } : {}) })
+    this.db.prepare('UPDATE messages SET json = ? WHERE room = ? AND id = ?').run(JSON.stringify(m), slug, m.id)
     this.emit(slug, 'delivered', { id: m.id, to: a.name, dropped })
   }
   // A command run from a room: "finished" once its agent is between turns again (seen working, or 30s on).
@@ -533,12 +512,12 @@ export class Rooms {
     await this.saveIndex()
     await this.system(r.slug, `responder: ${a.name}`)
   }
-  // Delete: index entry, its jsonl, its live streams and anything still queued for it.
+  // Delete: index entry, its messages, its live streams and anything still queued for it.
   async remove(slug) {
     await this.load()
     this.index = this.index.filter((r) => r.slug !== slug)
     await this.saveIndex()
-    await rm(join(this.dir, 'rooms', `${slug}.jsonl`), { force: true })
+    this.db.prepare('DELETE FROM messages WHERE room = ?').run(slug)
     this.msgs.delete(slug)
     for (const res of this.subs.get(slug) ?? []) res.end()
     this.subs.delete(slug)
