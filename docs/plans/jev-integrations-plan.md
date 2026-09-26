@@ -77,9 +77,38 @@ No Claude API anywhere in the dashboard.
 12. `judge()` does `mkdir -p` of `~/.local/share/wt-dashboard` before appending, failures swallowed;
     `typesafe.test.mjs` is added to `wt-dashboard/package.json` `npm test` in U1.
 
+## Addition — observability (user, #wt-pack, after the first commit)
+
+Research: Settings has **no server-log viewer today**. The Server tab only prints the path as text
+(`web/src/status.tsx:108` `log ~/Library/Logs/wt-dashboard/server.log`; `server.mjs:2050`). So "move server logs"
+means a new read-only viewer in the new tab, and the Server tab keeps its path text. Tabs are one array,
+`web/src/settings.tsx:33` `const SECTIONS: [Section, string][] = [... ['server', 'Server'], ['about', 'About']]`.
+
+- **U1 log record** (supersedes the `{ts, feature, ms, ok}` line in Approach): `judge()` appends to
+  `~/.local/share/wt-dashboard/jev-calls.jsonl` `{ts, feature, outcome ('picked'|'not'|'failopen'), p, ms,
+  cache (bool), err ('timeout'|'http_<n>'|'nokey'|'parse'|null), in}`. `in` is a sha1 prefix (12 chars) of the
+  input; with `WT_JEV_LOG_SNIPPETS=on` (default off) also the first 120 chars. The key is never written.
+  Cache hits are logged too (`cache:true`, `ms` ≈0) so the fail-open and hit rates are real. Rotation: when the file passes
+  5 MB, rename it to `.1` (one old file kept) before appending. `ponytail:` a single rename, not a rotation library.
+- **U2 changes:** `/api/health` `jev.calls` becomes a summary only (`today`, `errors`). The full stats move to U2b.
+- **U2b — wt-dashboard: Observability tab (before U3).** Server: `GET /api/observability` (session-gated like
+  `/api/config`) returns, for 24h and 7d, per feature: calls, cache hits, fail-open count, error and timeout
+  rate, p50/p95 ms (computed from `jev-calls.jsonl` + `.1`); plus the `recent` 200 calls, filterable by
+  `?feature=&outcome=&err=`. It also returns `sources` from the existing `track()` (`server.mjs:1085`:
+  herdr/git/gh/linear), because those are already collected, so no new Linear/GitHub probes. `GET /api/logs/server?lines=500`
+  tails `~/Library/Logs/wt-dashboard/server.log` (read-only, lines capped at 2000, file path fixed on the server,
+  never taken from the query). Web: new `observability.tsx`, a new `['observability', 'Observability']` entry in
+  `SECTIONS`, with two parts: **Integrations** (per-feature stats table, 24h/7d toggle, recent-calls table with
+  feature/outcome/error filters, sources health) and **Server logs** (a tail with refresh and a text filter,
+  in a native `overflow:auto` pre, as the Inbox fix used). The `WT_JEV_LOG_SNIPPETS` switch lives here. Verify:
+  a server test aggregating a fixture jsonl (known p50/p95, fail-open count), plus a test that `/api/logs/server`
+  ignores any path-like query; `npm test`, tsc, build; check it at 390px and on desktop with agent-browser.
+- Every feature unit U3–U9 must show up under Integrations with its feature name. Its DoD report includes a
+  screenshot of its row.
+
 ## Implementation units
 
-Order: U1 → U2, then pairs that touch different skills (max 2 workers): U3∥U6, U4∥U7, U5∥U8, U9.
+Order: U1 → U2 → U2b, then pairs that touch different skills (max 2 workers): U3∥U6, U4∥U7, U5∥U8, U9.
 One commit per skill per unit; merge to main after review, push.
 
 **U1 — wt-shared: fail-open client + eval runner.** Files: `wt-shared/scripts/typesafe.mjs`,
@@ -148,7 +177,7 @@ blocking / needs attention soon / FYI / noise) when `WT_JEV_INBOX_RANK` on, stor
 `wt-handoff/scripts/jev-mcp.mjs`, `wt-handoff/scripts/jev-route.mjs`, `wt-handoff/scripts/handoff.sh`,
 `wt-handoff/SKILL.md`, `wt-dashboard/config.mjs`, `wt-dashboard/server.mjs`, `wt-handoff/scripts/agents.sh` (read-only check), `wt-dashboard/rooms.mjs`,
 `wt-dashboard/inbox.mjs`, `wt-dashboard/parse.test.mjs`, `wt-dashboard/package.json` (add typesafe test),
-`wt-dashboard/web/src/integrations.tsx`, `wt-dashboard/web/src/notifyGate.ts`,
+`wt-dashboard/web/src/integrations.tsx`, `wt-dashboard/web/src/observability.tsx` (new), `wt-dashboard/web/src/settings.tsx`, `wt-dashboard/web/src/notifyGate.ts`,
 `wt-dashboard/web/src/notifyGate.test.ts`, `wt-memory/scripts/wt-memory`, `wt-memory/scripts/wt-memory.test.mjs`,
 `wt-memory/claude-plugin/hooks/inject.mjs`, plugin manifest version, `wt-babysit/SKILL.md`.
 
@@ -162,7 +191,8 @@ Server restarted at most once per dashboard unit.
 ## Definition of Done
 
 - `judge()` exists in `typesafe.mjs`, returns null on timeout/HTTP error/no key (tested), and `jev-mcp.mjs` uses it.
-- 8 `WT_JEV_*` switches appear in Settings with the defaults above; `/api/health` reports `jev.calls`.
+- Settings › Observability shows the Jev stats (24h/7d), the filterable recent calls and the server log tail; `jev-calls.jsonl` rotates at 5 MB and never contains the key.
+- 8 `WT_JEV_*` feature switches (plus `WT_JEV_LOG_SNIPPETS`) appear in Settings with the defaults above; `/api/health` reports `jev.calls`.
 - Each of U3–U9 is on main, each gated by its switch, each with a stub-judge test proving the fail-open path
   and a fixture file with ≥10 labelled cases.
 - `jev-eval.mjs` results (accuracy, p50/p95) for every feature are posted in #wt-pack.
