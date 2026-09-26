@@ -3,6 +3,6 @@
   "owner": { "name": "wt-pack" },
   "description": "Local plugins shipped with wt-pack.",
   "plugins": [
-    { "name": "wt-memory", "source": "./wt-memory/claude-plugin", "description": "wt-memory preferences injected into Claude Code sessions." }
+    { "name": "wt-memory", "source": "./skills/wt-memory/claude-plugin", "description": "wt-memory preferences injected into Claude Code sessions." }
   ]
 }

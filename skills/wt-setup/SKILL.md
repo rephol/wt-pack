@@ -11,7 +11,7 @@ allowed-tools: Bash, Read, AskUserQuestion
 # wt-setup
 
 All the logic lives in `<repo>/setup`; this skill only runs it and relays what it asks. `<repo>` is the
-wt-pack checkout: the directory `~/.claude/skills/wt-setup` links into (`dirname "$(readlink -f ~/.claude/skills/wt-setup)"`),
+wt-pack checkout: the directory `~/.claude/skills/wt-setup` links into (`git -C "$(readlink -f ~/.claude/skills/wt-setup)" rev-parse --show-toplevel`),
 or, before anything is linked, the clone the user names.
 
 1. **Doctor first.** `<repo>/setup doctor`: one line per need (✓ ok, ✗ required and failing, – optional),

@@ -14,7 +14,8 @@ set -u
 
 REPO=$(cd "$(dirname "$0")" && pwd -P)
 SKILLS="$HOME/.claude/skills"
-DASH="$REPO/wt-dashboard"
+SK="$REPO/skills"
+DASH="$SK/wt-dashboard"
 PLIST="$HOME/Library/LaunchAgents/id.local.wtdashboard.server.plist"
 PORT=${PORT:-7777}
 OS=$(uname -s)
@@ -42,7 +43,11 @@ fails=0
 
 # A wt-pack checkout: a directory with the pack's marketplace manifest.
 is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt-pack"' "$1/.claude-plugin/marketplace.json"; }
-skills() { for d in "$REPO"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
+# The checkout a skill dir belongs to: <co>/skills/<s> (this layout) or <co>/<s> (before WP-69).
+root_of() { case "$1" in */skills/*) dirname "$(dirname "$1")" ;; *) dirname "$1" ;; esac; }
+# A checkout's dir for skill $2, in whichever layout it has.
+skill_dir() { if [ -d "$1/skills/$2" ]; then echo "$1/skills/$2"; else echo "$1/$2"; fi; }
+skills() { for d in "$SK"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
 node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)'; }
 service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
 # JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
@@ -52,7 +57,7 @@ plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.
 # Install hint for a missing package, for this OS.
 pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; then echo "sudo apt-get install -y $1"; elif has dnf; then echo "sudo dnf install -y $1"; else echo "install $1 with your package manager"; fi; }
 # The OTHER wt-pack checkout the existing skill links point into ("" when none, or when it is this one).
-link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(dirname "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
+link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(root_of "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
 # herdr: report, never install. $1 = bad|opt (how a missing herdr counts); $2 = 1 also runs `herdr config check`.
 herdr_check() {
   if ! has herdr; then
@@ -87,13 +92,16 @@ doctor() {
   for s in $(skills); do
     l="$SKILLS/$s"
     t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P)
-    if [ "$t" = "$REPO/$s" ]; then n=$((n + 1))
-    elif [ -n "$t" ] && [ "$(basename "$t")" = "$s" ] && is_pack "$(dirname "$t")"; then n=$((n + 1)); other=$(dirname "$t")
-    elif [ -z "$t" ] && [ -n "$home" ] && [ ! -d "$home/$s" ]; then later="$later $s"
+    if [ "$t" = "$SK/$s" ]; then n=$((n + 1))
+    elif [ -n "$t" ] && [ "$(basename "$t")" = "$s" ] && is_pack "$(root_of "$t")"; then n=$((n + 1)); other=$(root_of "$t")
+    elif [ -z "$t" ] && [ -n "$home" ] && [ ! -d "$(skill_dir "$home" "$s")" ]; then later="$later $s"
     else miss="$miss $s"; fi
   done
   [ -n "$later" ] && opt "not linked yet:$later (new here; $home has none yet — run ./setup there after merging)"
   if [ -z "$miss" ]; then ok "skills linked in $SKILLS ($n)${other:+ — from $other}"; else bad "skills not linked:$miss — ./setup install"; fi
+
+  grep -qs "$REPO/wt-shared/hooks/" "$HOME/.claude/settings.json" \
+    && opt "~/.claude/settings.json runs a hook from $REPO/wt-shared/hooks (pre-WP-69 path) — change it to ~/.claude/skills/wt-shared/hooks/"
 
   mp=$(market_path)
   if plugin_ok enabled; then
@@ -101,7 +109,7 @@ doctor() {
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
 
   if [ -f "$DASH/web/dist/index.html" ]; then
-    if built; then ok "dashboard web built"; else opt "dashboard web built, but older than web/src — npm --prefix wt-dashboard run build"; fi
+    if built; then ok "dashboard web built"; else opt "dashboard web built, but older than web/src — npm --prefix skills/wt-dashboard run build"; fi
   else bad "dashboard web not built — ./setup install"; fi
 
   if [ "$service" -eq 0 ]; then opt "service not checked (--no-service)"
@@ -134,7 +142,7 @@ doctor() {
   has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
   has agent-browser && ok "agent-browser (optional, preferred for browser checks)" || opt "agent-browser not installed (optional, preferred for browser checks): npm i -g agent-browser && agent-browser install"
   has cargo && ok "cargo (optional, Tauri app)" || opt "cargo not installed (optional, only for the Tauri app)"
-  for c in codex gemini; do has $c && opt "$c found: wt-memory hookup is manual, see wt-memory/SKILL.md"; done
+  for c in codex gemini; do has $c && opt "$c found: wt-memory hookup is manual, see skills/wt-memory/SKILL.md"; done
   [ "$OS" = Darwin ] || opt "Linux: no launchd, no Keychain (keys go in ~/.config/wt-dashboard/env), no brew prompt (apt: nodejs jq gh git curl), no Tauri app"
 
   if [ "$fails" -eq 0 ]; then step "doctor: all required checks pass"; return 0; fi
@@ -162,19 +170,22 @@ deps() {
 link_skills() {
   step "skills → $SKILLS"
   mkdir -p "$SKILLS"
-  made=0; kept=0; elsewhere=""; home=$(link_home)
+  made=0; kept=0; moved=0; elsewhere=""; home=$(link_home)
   for s in $(skills); do
-    l="$SKILLS/$s"; want="$REPO/$s"
+    l="$SKILLS/$s"; want="$SK/$s"
     if [ -L "$l" ]; then
       t=$(cd "$l" 2>/dev/null && pwd -P)
       if [ "$t" = "$want" ]; then kept=$((kept + 1))
-      elif [ -n "$t" ] && is_pack "$(dirname "$t")"; then elsewhere=$(dirname "$t"); kept=$((kept + 1))
+      # This checkout's pre-WP-69 path (<repo>/<s>, now dangling): re-point it.
+      elif [ "$(readlink "$l")" = "$REPO/$s" ]; then ln -sfn "$want" "$l" && moved=$((moved + 1))
+      elif [ -n "$t" ] && is_pack "$(root_of "$t")"; then elsewhere=$(root_of "$t"); kept=$((kept + 1))
       else bad "not touching $l: it links to ${t:-a missing path}, not a wt-pack checkout"; fi
     elif [ -e "$l" ]; then bad "not touching $l: it is a real file/directory, not a link"
     elif [ -n "$home" ]; then opt "not linking $s: the other skills come from $home, which has no $s yet — re-run ./setup there after merging"
     else ln -s "$want" "$l" && made=$((made + 1)); fi
   done
   [ -n "$elsewhere" ] && opt "kept links into $elsewhere (another wt-pack checkout)"
+  [ "$moved" -gt 0 ] && ok "migrated $moved link(s) to $SK"
   if [ "$made" -eq 0 ]; then ok "already: $kept linked"; else ok "linked $made new (${kept} already)"; fi
 }
 
@@ -216,7 +227,7 @@ web() {
   if [ -d "$w/node_modules" ] && [ "$w/node_modules/.package-lock.json" -nt "$w/package-lock.json" ] 2>/dev/null; then ok "already: web dependencies"
   else (cd "$w" && npm ci --no-audit --no-fund >/dev/null 2>&1) && ok "installed web dependencies (npm ci)" || { bad "npm ci in $w failed (run it there to see why)"; return 1; }; fi
   if built; then ok "already: web built"
-  else (npm --prefix "$DASH" run build >/dev/null 2>&1) && ok "built web (wt-dashboard/web/dist)" || { bad "npm --prefix $DASH run build failed"; return 1; }; fi
+  else (npm --prefix "$DASH" run build >/dev/null 2>&1) && ok "built web (skills/wt-dashboard/web/dist)" || { bad "npm --prefix $DASH run build failed"; return 1; }; fi
 }
 
 svc() {
@@ -226,7 +237,9 @@ svc() {
   root=$(service_root)
   running=$(node "$DASH/scripts/service.mjs" status 2>/dev/null | grep -c ': running')
   if [ "$root" = "$DASH" ] && [ "$running" -eq 1 ]; then ok "already: running from $DASH"
-  elif [ -n "$root" ] && [ "$root" != "$DASH" ] && is_pack "$(dirname "$root")"; then opt "kept: the service runs $root (another wt-pack checkout)"
+  # This checkout's pre-WP-69 path: service.mjs rewrites the plist from its own (new) location.
+  elif [ "$root" = "$REPO/wt-dashboard" ]; then node "$DASH/scripts/service.mjs" install >/dev/null && ok "migrated service to $DASH" || bad "service migration failed — node $DASH/scripts/service.mjs install"
+  elif [ -n "$root" ] && [ "$root" != "$DASH" ] && is_pack "$(root_of "$root")"; then opt "kept: the service runs $root (another wt-pack checkout)"
   else node "$DASH/scripts/service.mjs" install >/dev/null && ok "installed and started ($PLIST)" || bad "service install failed — node $DASH/scripts/service.mjs install"; fi
 }
 
@@ -251,7 +264,7 @@ install() {
 # ---------------------------------------------------------------- uninstall
 uninstall() {
   step "wt-pack uninstall ($REPO)"
-  if [ "$OS" = Darwin ] && [ "$(service_root)" = "$DASH" ]; then node "$DASH/scripts/service.mjs" uninstall >/dev/null && ok "service removed"
+  if [ "$OS" = Darwin ] && { [ "$(service_root)" = "$DASH" ] || [ "$(service_root)" = "$REPO/wt-dashboard" ]; }; then node "$DASH/scripts/service.mjs" uninstall >/dev/null && ok "service removed"
   else opt "service: not installed from this checkout, left alone"; fi
   if has claude && [ "$(market_path)" = "$REPO" ]; then
     claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
@@ -260,7 +273,8 @@ uninstall() {
   n=0
   for l in "$SKILLS"/*; do
     [ -L "$l" ] || continue
-    case "$(cd "$l" 2>/dev/null && pwd -P)" in "$REPO"/*) rm "$l" && n=$((n + 1)) ;; esac
+    # readlink too: a pre-WP-69 link into this checkout dangles, so cd fails on it.
+    case "$(cd "$l" 2>/dev/null && pwd -P)|$(readlink "$l")" in "$REPO"/*|*"|$REPO"/*) rm "$l" && n=$((n + 1)) ;; esac
   done
   ok "removed $n skill link(s) pointing into $REPO"
   keep="$HOME/.local/share/wt-dashboard $HOME/.config/wt-dashboard $HOME/.config/wt-memory $HOME/Library/Logs/wt-dashboard"
