@@ -154,6 +154,8 @@ export const MIGRATIONS = [
     import: (db, data, log) => { importRooms(db, data, log); importInbox(db, data) }, export: exportStage2 },
   // Per-board settings (WP-39 'Auto'); nothing to import, and the JSON rollback has no place for them.
   { sql: `ALTER TABLE boards ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`, legacy: () => [], import: () => {}, export: () => {} },
+  // WP-46: the lowest priority 'Auto' promotes (1 urgent … 4 low; 0 = any, unprioritised too). Default 2 = High.
+  { sql: `ALTER TABLE boards ADD COLUMN min_priority INTEGER NOT NULL DEFAULT 2;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

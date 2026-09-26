@@ -31,6 +31,8 @@ import { api } from './rooms'
 import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, group, jevChip, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
+// Board 'Auto' threshold (WP-46): promote tickets at this priority or more urgent; 0 = any, unprioritised too.
+const MIN_PRIORITY_OPTIONS = [1, 2, 3, 4].map((p) => ({ value: String(p), label: p === 1 ? 'Urgent only' : `${PRIORITY[p]}+` })).concat({ value: '0', label: 'Any priority' })
 const tUrl = (id: string) => `/api/tickets/${encodeURIComponent(id)}`
 
 type Dot = 'neutral' | 'accent' | 'warning' | 'success' | 'error'
@@ -68,7 +70,7 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
   const teardownRef = useRef<(() => void) | null>(null)
   const justDragged = useRef(false)
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready; 'Run now' triages the whole Backlog.
-  const setAuto = useMutation({ mutationFn: (auto: boolean) => send('/api/tickets/board', 'PUT', { project, auto }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
+  const setBoard = useMutation({ mutationFn: (b: { auto?: boolean; minPriority?: number }) => send('/api/tickets/board', 'PUT', { project, ...b }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
   const runNow = useMutation({ mutationFn: () => send<{ queued: number }>('/api/tickets/board/run', 'POST', { project }) })
   const move = useMutation({
     mutationFn: ({ id, to }: { id: string; to: Column }) => send(tUrl(id), 'PATCH', { column: to }),
@@ -187,7 +189,9 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
                     options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
                 : <><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
               endContent={<HStack gap={2} vAlign="center" className="hd-kb-toolbar-end">
-                <Switch label="Auto" value={!!q.data.auto} isDisabled={setAuto.isPending} onChange={(on: boolean) => setAuto.mutate(on)} />
+                <Switch label="Auto" value={!!q.data.auto} isDisabled={setBoard.isPending} onChange={(on: boolean) => setBoard.mutate({ auto: on })} />
+                {q.data.auto && <Selector label="Promote from priority" isLabelHidden width={phone ? 120 : 140} value={String(q.data.minPriority ?? 2)}
+                  onChange={(v: string) => setBoard.mutate({ minPriority: Number(v) })} options={MIN_PRIORITY_OPTIONS} />}
                 {q.data.auto && <Button label={runNow.data ? `Queued ${runNow.data.queued}` : 'Run now'} variant="secondary" size={phone ? 'sm' : 'md'} isLoading={runNow.isPending} onClick={() => runNow.mutate()} />}
                 <Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />
               </HStack>} />

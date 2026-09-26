@@ -1737,9 +1737,9 @@ async function ticketsApi(req, res, url, parts) {
     if (jevOn('TICKET_TRIAGE')) triage(project, t, empty)
     return
   }
-  // Board settings and 'Run now' (WP-39): PUT /api/tickets/board {project, auto}; POST /api/tickets/board/run {project}.
+  // Board settings and 'Run now' (WP-39/46): PUT /api/tickets/board {project, auto?, minPriority?}; POST /api/tickets/board/run {project}.
   if (parts[2] === 'board') {
-    if (req.method === 'PUT' && parts.length === 3) return send(res, 200, { auto: await tickets.setAuto(b.project, b.auto === true) })
+    if (req.method === 'PUT' && parts.length === 3) return send(res, 200, await tickets.setSettings(b.project, { auto: typeof b.auto === 'boolean' ? b.auto : undefined, minPriority: b.minPriority }))
     if (req.method === 'POST' && parts[3] === 'run') {
       if (!jevOn('TICKET_TRIAGE')) return send(res, 409, { error: 'Ticket triage is off (Settings › Integrations)' })
       if (boardRuns.has(b.project)) return send(res, 409, { error: 'a run is already going on this board' })
@@ -1778,7 +1778,7 @@ async function ticketsApi(req, res, url, parts) {
 
 // ---- rooms ----
 // Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
-const triage = async (project, t, empty) => triageTicket(project, t, empty, { tickets, auto: await tickets.auto(project).catch(() => false), min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
+const triage = async (project, t, empty) => triageTicket(project, t, empty, { tickets, ...(await tickets.settings(project).catch(() => ({ auto: false }))), min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
   ask: (state, q, pick) => jevAsk('TICKET_TRIAGE', state, q, pick, { timeoutMs: 5000 }) })
 const jevOn = (feature) => cfg.get(`WT_JEV_${feature}`) === 'on'
 const jevAsk = (feature, state, questions, pick, opts) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick, ...opts })

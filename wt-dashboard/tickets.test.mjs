@@ -85,7 +85,7 @@ const legacy = async (files) => {
 test('import: legacy board keeps ids, next and history; files move to pre-sqlite-*; no re-import', async () => {
   const dir = await legacy({ 'wt-pack.json': JSON.stringify(board) })
   const t = new Tickets({ dir, log: () => {} })
-  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', auto: false, tickets: board.tickets })
+  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', auto: false, minPriority: 2, tickets: board.tickets })
   assert.equal((await t.create('wt-pack', { title: 'after' }, user)).id, 'WPK-8')
   const [backup] = (await readdir(dir)).filter((f) => f.startsWith('pre-sqlite-'))
   assert.deepEqual(JSON.parse(await readFile(join(dir, backup, 'tickets', 'wt-pack.json'), 'utf8')), board)
@@ -140,7 +140,7 @@ test('needsSession: pane exempts ticket POST/PATCH only', async () => {
 test('list never creates a board', async () => {
   const dir = await tmp()
   const t = new Tickets({ dir })
-  assert.deepEqual(await t.list('typo-proj'), { key: null, auto: false, tickets: [] })
+  assert.deepEqual(await t.list('typo-proj'), { key: null, auto: false, minPriority: 2, tickets: [] })
   assert.deepEqual(await t.keys(), {})
 })
 
@@ -225,4 +225,14 @@ test('setAuto never creates a board', async () => {
 test('list: an unknown column is a 400, not an empty list', async () => {
   const t = new Tickets({ dir: await tmp() })
   await assert.rejects(t.list('wt-pack', 'nope'), (e) => e.status === 400 && /column: backlog\|ready/.test(e.message))
+})
+
+test('board settings: minPriority defaults to High, partial updates, validated (WP-46)', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  await t.create('wt-pack', { title: 'A' }, user)
+  assert.deepEqual(await t.settings('wt-pack'), { auto: false, minPriority: 2 })
+  assert.deepEqual(await t.setSettings('wt-pack', { auto: true }), { auto: true, minPriority: 2 })
+  assert.deepEqual(await t.setSettings('wt-pack', { minPriority: 3 }), { auto: true, minPriority: 3 }) // auto untouched
+  await assert.rejects(t.setSettings('wt-pack', { minPriority: 5 }), (e) => e.status === 400)
+  await assert.rejects(t.setSettings('nope', { minPriority: 3 }), (e) => e.status === 404)
 })

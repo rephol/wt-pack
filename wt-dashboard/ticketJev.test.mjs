@@ -86,3 +86,14 @@ test('triageTicket with Auto: promotes, notifies onReady once, undo moves back',
   await tickets.patch(t.id, { column: 'ready' }, user) // by hand: notifies again
   assert.equal(ready.length, 2)
 })
+
+test('shouldPromote honours the board minimum priority (WP-46)', () => {
+  const d = { ready: 0.7, owner: 'worker' }
+  const t = (priority) => ({ column: 'backlog', size: 'S', priority })
+  assert.equal(shouldPromote(t(3), d), null) // default High
+  assert.equal(shouldPromote(t(3), d, { minPriority: 3 }), 0.7) // Medium
+  assert.equal(shouldPromote(t(4), d, { minPriority: 3 }), null)
+  assert.equal(shouldPromote(t(0), d, { minPriority: 4 }), null) // unprioritised stays unless 'any'
+  assert.equal(shouldPromote(t(0), d, { minPriority: 0 }), 0.7)
+  assert.equal(shouldPromote(t(1), d, { minPriority: 1 }), 0.7)
+})

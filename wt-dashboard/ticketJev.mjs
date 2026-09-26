@@ -48,11 +48,13 @@ export const ticketTriage = {
     }
   },
 }
-// Board 'Auto' promote rule (WP-39), on the ticket after jevApply: Backlog only, priority High or Urgent, and Jev
+// Board 'Auto' promote rule (WP-39), on the ticket after jevApply: Backlog only, priority at least the board's, and Jev
 // judges it ready (p ≥ min); a Large or planner-hinted ticket needs p ≥ sure. Returns p to promote with, else null.
-export function shouldPromote(t, d, { min = 0.6, sure = 0.8 } = {}) {
+// minPriority (the board's, WP-46): lowest priority promoted, 1 urgent … 4 low; 0 = any, unprioritised included.
+export function shouldPromote(t, d, { min = 0.6, sure = 0.8, minPriority = 2 } = {}) {
   const p = d.ready
-  if (t.column !== 'backlog' || typeof p !== 'number' || !(t.priority >= 1 && t.priority <= 2)) return null
+  const prioOk = minPriority === 0 || (t.priority >= 1 && t.priority <= minPriority)
+  if (t.column !== 'backlog' || typeof p !== 'number' || !prioOk) return null
   const easy = (t.size === 'S' || t.size === 'M') && d.owner !== 'planner'
   return p >= (easy ? min : sure) ? p : null
 }
@@ -75,7 +77,7 @@ export const ticketType = { questions: ticketTriage.questions, decide: (a) => ti
 
 // Fire-and-forget after create. empty: the fields the creator left unset. Never throws.
 // auto: the board's 'Auto' toggle — when on, a ticket that passes shouldPromote moves to Ready.
-export async function triageTicket(project, t, empty, { ask, tickets, min, routeMin, auto = false, log = console.error }) {
+export async function triageTicket(project, t, empty, { ask, tickets, min, routeMin, auto = false, minPriority = 2, log = console.error }) {
   try {
     const { tickets: all } = await tickets.list(project)
     const state = { title: t.title, body: t.body.slice(0, 4000), candidates: candidates(t, all) }
@@ -83,7 +85,7 @@ export async function triageTicket(project, t, empty, { ask, tickets, min, route
     if (!a) return null
     const d = ticketTriage.decide(a, min, routeMin)
     const out = await tickets.jevApply(t.id, d, empty)
-    const p = auto ? shouldPromote(out, d, { min }) : null
+    const p = auto ? shouldPromote(out, d, { min, minPriority }) : null
     return p == null ? out : await tickets.jevPromote(t.id, p)
   } catch (e) { log('ticket triage:', e.message); return null }
 }

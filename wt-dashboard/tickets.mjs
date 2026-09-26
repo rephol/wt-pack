@@ -65,12 +65,21 @@ export class Tickets {
     Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log, onReady })
   }
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready. Off for a board that does not exist yet.
-  async auto(project) { return !!this.db.prepare('SELECT auto FROM boards WHERE project = ?').get(project)?.auto }
-  async setAuto(project, on) {
-    if (!this.db.prepare('SELECT 1 FROM boards WHERE project = ?').get(project ?? '')) throw err(404, `no board ${project}`) // never creates one
-    this.db.prepare('UPDATE boards SET auto = ? WHERE project = ?').run(on ? 1 : 0, project)
-    return on
+  async auto(project) { return (await this.settings(project)).auto }
+  // { auto, minPriority } — minPriority: the lowest priority 'Auto' promotes (1 urgent … 4 low, 0 = any).
+  async settings(project) {
+    const r = this.db.prepare('SELECT auto, min_priority FROM boards WHERE project = ?').get(project)
+    return { auto: !!r?.auto, minPriority: r?.min_priority ?? 2 }
   }
+  // Only the fields given change; never creates a board.
+  async setSettings(project, { auto, minPriority }) {
+    if (!this.db.prepare('SELECT 1 FROM boards WHERE project = ?').get(project ?? '')) throw err(404, `no board ${project}`)
+    if (minPriority !== undefined && !(Number.isInteger(minPriority) && minPriority >= 0 && minPriority <= 4)) throw err(400, 'minPriority: 0-4')
+    if (auto !== undefined) this.db.prepare('UPDATE boards SET auto = ? WHERE project = ?').run(auto ? 1 : 0, project)
+    if (minPriority !== undefined) this.db.prepare('UPDATE boards SET min_priority = ? WHERE project = ?').run(minPriority, project)
+    return this.settings(project)
+  }
+  async setAuto(project, on) { return (await this.setSettings(project, { auto: on })).auto }
   get db() { return open(this.file, { log: this.log }) } // lazy: server.mjs is imported by tests
   // { project: key } for every board.
   async keys() {
@@ -94,7 +103,7 @@ export class Tickets {
     if (column && !COLUMNS.includes(column)) throw err(400, `column: ${COLUMNS.join('|')}`)
     const key = this.db.prepare('SELECT key FROM boards WHERE project = ?').get(project)?.key ?? null
     const tickets = this.db.prepare('SELECT json FROM tickets WHERE project = ? ORDER BY seq').all(project).map((r) => JSON.parse(r.json))
-    return { key, auto: await this.auto(project), tickets: column ? tickets.filter((t) => t.column === column) : tickets }
+    return { key, ...(await this.settings(project)), tickets: column ? tickets.filter((t) => t.column === column) : tickets }
   }
   row(id) {
     const r = this.db.prepare('SELECT json FROM tickets WHERE id = ?').get(String(id).toUpperCase())
