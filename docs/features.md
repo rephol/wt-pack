@@ -123,6 +123,9 @@ Chat rooms shared by you and agents.
   the room broadcasts, else to its responder. Agents cannot `@all`; yours asks to confirm.
 - **Commands**: a message starting with `/` goes to exactly one agent (agents cannot send them).
 - Delivery waits until the agent is idle with no question pending.
+- Each delivered message is wrapped in `<room-message id=<nonce> from=… kind=user|agent|system>`, author and
+  kind set by the server and a fresh nonce per delivery, so a message cannot pass itself off as the user or
+  the dashboard.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
   - Hops before a human reply — **3**; then the room pauses "waiting for a human" until you post.
