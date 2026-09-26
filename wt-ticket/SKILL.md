@@ -11,7 +11,7 @@ project name (`wt-pack` → `WP`) when the board is first used. The user drags c
 `T=~/.claude/skills/wt-ticket/scripts/wt-ticket` (needs the wt-dashboard server on 127.0.0.1:7777; your herdr pane identifies you)
 
 - `$T new "<title>" [--type bug|ux|gap|debt|feature] [--size S|M|L] [--priority 0-4] [--label l]... [--link url]... [--body text] [--column c]`
-  — priority is Linear's scale: 0 none (the default; rows omit it), 1 urgent, 2 high, 3 medium, 4 low. The project defaults to the repo you are in (`--project p` to override); new tickets land in `backlog`
+  — priority is Linear's scale: 0 none (the default; rows omit it), 1 urgent, 2 high, 3 medium, 4 low. The project defaults to the repo you are in (`--project p` to override); new tickets land in `backlog`. Jev may fill type/size/priority you left unset (undoable in the dashboard) and flag likely duplicates; fields you set are never changed
 - `$T list [--column c] [--mine]` · `$T show <ID>` · `$T keys`
 - `$T move <ID> <column> [--note "…"]` — columns `backlog ready planning building review done blocked`; `blocked` needs `--note` (the reason)
 - `$T comment <ID> "text"` · `$T claim <ID> [--force]` · `$T assign <ID> <agent|me|none>`
