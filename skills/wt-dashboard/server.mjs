@@ -17,7 +17,7 @@ import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
-import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
@@ -45,6 +45,9 @@ const REPO_OK = existsSync(REPO)
 if (!REPO_OK) console.warn(`WT_DASHBOARD_REPO ${REPO} does not exist: worktrees and PRs are off. Set it in ~/.config/wt-dashboard/env (./setup does) and restart.`)
 // WT_DASHBOARD_* env names; the old HERDR_DASH_* names are still read as a fallback.
 const envOf = (k) => process.env[`WT_DASHBOARD_${k}`] ?? process.env[`HERDR_DASH_${k}`]
+// WP-80: loopback unless WT_DASHBOARD_HOST is set; a non-loopback host also needs WT_ALLOW_REMOTE=1 (checked at listen).
+const BIND = envOf('HOST') || '127.0.0.1'
+const BIND_OK = bindCheck(BIND, process.env.WT_ALLOW_REMOTE === '1')
 // Everything the dashboard writes lives outside the source tree: <root>/data and <root>/uploads.
 const DATA_ROOT = process.env.WT_DASHBOARD_DATA ?? join(homedir(), '.local', 'share', 'wt-dashboard')
 const DATA = join(DATA_ROOT, 'data')
@@ -1694,7 +1697,7 @@ const send = (res, code, data, type = 'application/json') => {
 // `tailscale serve` proxies from. Comma-separated; exact match only, never a wildcard.
 const LOCAL = {
   test: (h) =>
-    LOOPBACK_HOST.test(h) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
+    LOOPBACK_HOST.test(h) || (BIND_OK.remote && h.toLowerCase() === bindHostHeader(BIND, PORT)) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
 }
 const PANE = /^[\w.:-]+$/
 const KEY = /^[\w+-]{1,20}$/
@@ -2591,8 +2594,9 @@ const crashed = (kind) => async (e) => {
 // Loopback only. Guarded so parse.test.mjs can import without listening.
 // WT_DASHBOARD_SERVE=1: the desktop app's single-executable build, where argv/import.meta differ.
 if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url))
-  Promise.all([cfg.load(), terms.load(), roleStore.load()]).catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
-    console.log(`agent control room api → http://127.0.0.1:${PORT}`)
+  if (!BIND_OK.ok) { console.error(BIND_OK.message); process.exit(1) }
+  else Promise.all([cfg.load(), terms.load(), roleStore.load()]).catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, BIND, () => {
+    console.log(`agent control room api → http://${bindHostHeader(BIND, PORT)}${BIND_OK.remote ? ' (WT_ALLOW_REMOTE=1: reachable beyond loopback; terminals stay loopback-only)' : ''}`)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
     process.on('uncaughtException', crashed('uncaughtException'))
     process.on('unhandledRejection', crashed('unhandledRejection'))
