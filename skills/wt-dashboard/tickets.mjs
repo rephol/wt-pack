@@ -67,20 +67,25 @@ export class Tickets {
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready. Off for a board that does not exist yet.
   async auto(project) { return (await this.settings(project)).auto }
   // { auto, minPriority, dispatch, stallMin } — minPriority: the lowest priority 'Auto' promotes (1 urgent … 4 low, 0 = any);
-  // dispatch (WP-52): hand Ready tickets to free agents; stallMin: idle minutes before reconcile flags a card.
+  // dispatch (WP-52): hand Ready tickets to free agents; stallMin: idle minutes before reconcile flags a card;
+  // reportRoom (WP-75): where dispatched work posts its result — null = the project room, '' = none, else a slug;
+  // reportOrch: also tell the project's orchestrator.
   async settings(project) {
-    const r = this.db.prepare('SELECT auto, min_priority, dispatch, stall_min FROM boards WHERE project = ?').get(project)
-    return { auto: !!r?.auto, minPriority: r?.min_priority ?? 2, dispatch: !!r?.dispatch, stallMin: r?.stall_min ?? 45 }
+    const r = this.db.prepare('SELECT auto, min_priority, dispatch, stall_min, report_room, report_orch FROM boards WHERE project = ?').get(project)
+    return { auto: !!r?.auto, minPriority: r?.min_priority ?? 2, dispatch: !!r?.dispatch, stallMin: r?.stall_min ?? 45, reportRoom: r?.report_room ?? null, reportOrch: r ? !!r.report_orch : true }
   }
   // Only the fields given change; never creates a board.
-  async setSettings(project, { auto, minPriority, dispatch, stallMin }) {
+  async setSettings(project, { auto, minPriority, dispatch, stallMin, reportRoom, reportOrch }) {
     if (!this.db.prepare('SELECT 1 FROM boards WHERE project = ?').get(project ?? '')) throw err(404, `no board ${project}`)
     if (minPriority !== undefined && !(Number.isInteger(minPriority) && minPriority >= 0 && minPriority <= 4)) throw err(400, 'minPriority: 0-4')
     if (stallMin !== undefined && !(Number.isInteger(stallMin) && stallMin >= 1 && stallMin <= 1440)) throw err(400, 'stallMin: 1-1440')
+    if (reportRoom !== undefined && !(reportRoom === null || (typeof reportRoom === 'string' && reportRoom.length <= 64))) throw err(400, 'reportRoom: null, \'\' or a room slug (≤64)')
     if (auto !== undefined) this.db.prepare('UPDATE boards SET auto = ? WHERE project = ?').run(auto ? 1 : 0, project)
     if (minPriority !== undefined) this.db.prepare('UPDATE boards SET min_priority = ? WHERE project = ?').run(minPriority, project)
     if (dispatch !== undefined) this.db.prepare('UPDATE boards SET dispatch = ? WHERE project = ?').run(dispatch ? 1 : 0, project)
     if (stallMin !== undefined) this.db.prepare('UPDATE boards SET stall_min = ? WHERE project = ?').run(stallMin, project)
+    if (reportRoom !== undefined) this.db.prepare('UPDATE boards SET report_room = ? WHERE project = ?').run(reportRoom, project)
+    if (reportOrch !== undefined) this.db.prepare('UPDATE boards SET report_orch = ? WHERE project = ?').run(reportOrch ? 1 : 0, project)
     return this.settings(project)
   }
   async setAuto(project, on) { return (await this.setSettings(project, { auto: on })).auto }

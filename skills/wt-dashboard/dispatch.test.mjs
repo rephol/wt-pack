@@ -5,12 +5,12 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { Dispatch, mergeIds, dispatchPrompt } from './dispatch.mjs'
+import { Dispatch, mergeIds, dispatchPrompt, resolveReport } from './dispatch.mjs'
 
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
 
-async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn, room = null } = {}) {
+async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn, report = null } = {}) {
   const tickets = new Tickets({ dir: await mkdtemp(join(tmpdir(), 'dispatch-')) })
   await tickets.board('wt-pack')
   await tickets.setSettings('wt-pack', { dispatch: true })
@@ -19,7 +19,7 @@ async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merge
     tickets, log: () => {},
     deps: {
       agents: async () => agents, host: async () => ({ pressure }), maxWorking: () => max, pending: () => pending,
-      repoOf: async () => '/repo', roomOf: async (p) => (room && p === 'wt-pack' ? room : null), ticketOf: tagTicket, triageOn: () => triageOn,
+      repoOf: async () => '/repo', reportOf: async (p) => (p === 'wt-pack' ? report : null), ticketOf: tagTicket, triageOn: () => triageOn,
       git: async (repo, ...a) => a[0] === 'log' ? merges : a[0] === 'rev-parse' ? 'abc123\n' : '',
       handoff: async (args, prompt, cwd) => {
         calls.push({ args, prompt, cwd })
@@ -249,17 +249,41 @@ test('Jev triage pending: skipped for up to 60s, dispatched once triaged; nothin
   assert.equal(off.calls.length, 1)
 })
 
-test('dispatchPrompt: worker and planner report to the project room when there is one (WP-74)', () => {
+test('dispatchPrompt: report line in four shapes, both roles; no "reply to the sender" (WP-75)', () => {
   const t = { id: 'WP-9', title: 'x' }
+  const orch = { name: 'o', pane: 'w1:p2' }
   for (const role of ['worker', 'planner']) {
-    assert.match(dispatchPrompt(t, role, 'wt-pack'), /post a one-line result in #wt-pack with `room post wt-pack "…"`, and still reply to the sender/)
-    assert.doesNotMatch(dispatchPrompt(t, role), /room post/)
+    const room = dispatchPrompt(t, role, { room: 'wt-pack', orch: null })
+    assert.match(room, /When done, post a one-line result in #wt-pack with `room post wt-pack "…"`\.\n$/)
+    const o = dispatchPrompt(t, role, { room: null, orch })
+    assert.match(o, /When done, send a one-line result to o with `herdr agent prompt w1:p2 "…"`\.\n$/)
+    const both = dispatchPrompt(t, role, { room: 'wt-pack', orch })
+    assert.match(both, /room post wt-pack "…"` and send a one-line result to o with `herdr agent prompt w1:p2/)
+    const none = dispatchPrompt(t, role, { room: null, orch: null })
+    assert.doesNotMatch(none, /When done/)
+    assert.equal(none, dispatchPrompt(t, role))
+    for (const p of [room, o, both, none]) assert.doesNotMatch(p, /reply to the sender/)
   }
 })
 
-test('dispatch: the handoff prompt names the room of the board project (WP-74)', async () => {
-  const { tickets, d, calls } = await setup({ room: 'wt-pack' })
+test('resolveReport: project room by default, none, a slug, archived skipped, local orchestrator only (WP-75)', () => {
+  const rooms = { 'wt-pack': { slug: 'wt-pack' }, ops: { slug: 'ops' }, old: { slug: 'old', archived: true } }
+  const room = (s) => rooms[s]
+  const local = { local: true, pool: 'orchestrator', project: 'wt-pack', name: 'o', id: 'w1:p2' }
+  const remote = { ...local, local: false, name: 'r', id: 'w9:p1' }
+  assert.deepEqual(resolveReport('wt-pack', {}, room, [local]), { room: 'wt-pack', orch: { name: 'o', pane: 'w1:p2' } })
+  assert.deepEqual(resolveReport('wt-pack', { reportRoom: '', reportOrch: false }, room, [local]), { room: null, orch: null })
+  assert.equal(resolveReport('wt-pack', { reportRoom: 'ops' }, room).room, 'ops')
+  assert.equal(resolveReport('wt-pack', { reportRoom: 'old' }, room).room, null)
+  assert.equal(resolveReport('wt-pack', { reportRoom: 'gone' }, room).room, null)
+  assert.equal(resolveReport('wt-pack', {}, room, [remote]).orch, null)
+  assert.equal(resolveReport('x', {}, room, [local]).orch, null) // another project's orchestrator
+})
+
+test('dispatch: tick() puts the resolved room and orchestrator in the prompt (WP-75)', async () => {
+  const { tickets, d, calls } = await setup({ report: { room: 'wt-pack', orch: { name: 'o', pane: 'w1:p2' } } })
   await ready(tickets, 'a')
   await d.tick()
   assert.match(calls[0].prompt, /room post wt-pack/)
+  assert.match(calls[0].prompt, /herdr agent prompt w1:p2/)
 })

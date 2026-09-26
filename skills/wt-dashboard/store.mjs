@@ -176,6 +176,11 @@ export const MIGRATIONS = [
           ALTER TABLE boards ADD COLUMN stall_min INTEGER NOT NULL DEFAULT 45;
           CREATE TABLE board_events (id INTEGER PRIMARY KEY, project TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, ticket TEXT, text TEXT);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-75 Dispatch 'Report to': report_room NULL = the project room, '' = no room, else a room slug; report_orch = also
+  // tell the project's orchestrator. Not exported (like dispatch/stall_min): the JSON rollback loses them.
+  { sql: `ALTER TABLE boards ADD COLUMN report_room TEXT;
+          ALTER TABLE boards ADD COLUMN report_orch INTEGER NOT NULL DEFAULT 1;`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

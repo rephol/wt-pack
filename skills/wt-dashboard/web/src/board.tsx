@@ -29,7 +29,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
-import { api } from './rooms'
+import { api, useRoomsList } from './rooms'
 import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, group, jevChip, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
@@ -86,7 +86,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const teardownRef = useRef<(() => void) | null>(null)
   const justDragged = useRef(false)
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready; 'Run now' triages the whole Backlog.
-  const setBoard = useMutation({ mutationFn: (b: { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number }) => send('/api/tickets/board', 'PUT', { project, ...b }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
+  const setBoard = useMutation({ mutationFn: (b: BoardSettings) => send('/api/tickets/board', 'PUT', { project, ...b }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
   const runNow = useMutation({ mutationFn: () => send<{ queued: number }>('/api/tickets/board/run', 'POST', { project }) })
   const move = useMutation({
     mutationFn: ({ id, to }: { id: string; to: Column }) => send(tUrl(id), 'PATCH', { column: to }),
@@ -245,7 +245,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
 }
 
 // WP-64: Auto and Dispatch settings live behind one status button — popover on desktop, bottom sheet on phones — so the header stays one row.
-type BoardSettings = { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number }
+type BoardSettings = { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number; reportRoom?: string | null; reportOrch?: boolean }
 function AutomationButton({ phone, board, busy, onSet, runNow }: {
   phone: boolean; board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void
   runNow: { data?: { queued: number }; isPending: boolean; mutate: () => void }
@@ -270,6 +270,7 @@ function AutomationButton({ phone, board, busy, onSet, runNow }: {
         <Text type="supporting" size="sm" color="secondary">Hand unassigned Ready tickets to free agents (L or needs-plan label → planner, else worker), one per 30s, within the Routines cap.</Text>
       </VStack>
       {board.dispatch && <StallMinutes value={board.stallMin ?? 45} onSave={(n) => onSet({ stallMin: n })} />}
+      {board.dispatch && <ReportTo board={board} busy={busy} onSet={onSet} phone={phone} />}
       {board.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(board.dispatchStatus)}</Text>}
     </VStack>
   )
@@ -278,6 +279,24 @@ function AutomationButton({ phone, board, busy, onSet, runNow }: {
   return phone
     ? <>{trigger}<BottomSheet label="Automation" isOpen={open} onOpenChange={setOpen} height="auto">{body}</BottomSheet></>
     : <Popover label="Automation" placement="below" alignment="end" isOpen={open} onOpenChange={setOpen} content={body}>{trigger}</Popover>
+}
+
+// WP-75: where dispatched work posts its one-line result. reportRoom null = the project room, '' = none, else a slug;
+// the Selector needs strings, so those two ride as ':project' / ':none' (a colon never appears in a slug).
+function ReportTo({ board, busy, onSet, phone }: { board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void; phone: boolean }) {
+  const rooms = (useRoomsList().data?.rooms ?? []).filter((r) => !r.archived)
+  const saved = board.reportRoom ?? null
+  const value = saved === null ? ':project' : saved === '' ? ':none' : saved
+  const options = [{ value: ':project', label: 'Project room' }, { value: ':none', label: 'None' }, ...rooms.map((r) => ({ value: r.slug, label: `#${r.slug}` }))]
+  // Keep a saved room selectable after it was archived or deleted (as routines.tsx keep()).
+  if (saved && !rooms.some((r) => r.slug === saved)) options.push({ value: saved, label: `#${saved} (archived)` })
+  return (
+    <VStack gap={2}>
+      <Selector label="Report to room" width={phone ? '100%' : 220} value={value} options={options} hasSearch
+        onChange={(v: string) => onSet({ reportRoom: v === ':project' ? null : v === ':none' ? '' : v })} />
+      <Switch label="Also tell the orchestrator" value={board.reportOrch ?? true} isDisabled={busy} onChange={(on: boolean) => onSet({ reportOrch: on })} />
+    </VStack>
+  )
 }
 
 // Reconcile flags a Building card whose agent sat idle this long (Dispatch boards only). Saved on blur or Enter.
