@@ -307,12 +307,12 @@ function BoardCard({ t, draggable, cardRef, onPointerDown, onOpen, onMove }: {
 function BoardColumn({ c, count, contentRef, children }: { c: Column; count: number; contentRef: (el: HTMLDivElement | null) => void; children: ReactNode }) {
   const meta = COLUMN_META[c]
   return (
-    <Card variant="muted" padding={0} className={count ? 'hd-kb-col' : 'hd-kb-col hd-kb-col-empty'}>
+    <Card variant="muted" padding={0} className="hd-kb-col">
       <Layout
         height="fill"
         header={
           <LayoutHeader hasDivider padding={3}>
-            <HStack hAlign="between" vAlign="center" className="hd-kb-colhead">
+            <HStack hAlign="between" vAlign="center">
               <HStack gap={2} vAlign="center">
                 <StatusDot variant={meta.variant} label={`${columnLabel(c)} status`} />
                 <Tooltip content={meta.tooltip}><Heading level={4}>{columnLabel(c)}</Heading></Tooltip>
