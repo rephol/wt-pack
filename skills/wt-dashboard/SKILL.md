@@ -15,7 +15,7 @@ A local control room for herdr-managed Claude Code agents: overview, tasks (work
 - **Data:** `$WT_DASHBOARD_DATA` or `~/.local/share/wt-dashboard` → `data/` (`wt.db` — SQLite via `node:sqlite`, node >= 22.13 — for tickets, rooms and the inbox; `settings.json`; `pre-sqlite-*/` backup of the old JSON) and `uploads/`. Rollback: README.
 - **Config:** `~/.config/wt-dashboard/env` (`KEY=VALUE`: `LINEAR_API_KEY`, `WT_DASHBOARD_ALLOWED_HOSTS` for tailnet access, `WT_DASHBOARD_PROJECTS` extra repo paths offered in "New agent"). Editable in Settings › Integrations (applies without a restart, except `WT_DASHBOARD_REPO`); precedence is process env var › Keychain (`LINEAR_API_KEY`, service `wt-dashboard`) › env file › default. Allowed hosts can be changed only from `http://127.0.0.1` on this machine.
 - **Memory:** Settings › Memory edits the wt-memory preference files (global / per role / per project; `/api/memory`, session cookie required for read and write) previews what an agent receives, and lists agent-remembered entries (Remove) and pending global proposals (Accept/Reject). The inbox raises `memory` notices (Undo) and `memory-proposal` notices (Accept/Reject) from a wt-memory store scan on each tick; POST `/api/memory/entries/<id>/(forget|accept|reject)`. See wt-memory.
-- **Spawn/remove agents:** the Agents page's "New agent" and the ⋯ "Remove agent" run `wt-agents/scripts/agents.sh spawn`/`rm`; nothing reimplements it.
+- **Spawn/remove agents:** the Agents page's "New agent" and the ⋯ "Remove agent" run `~/.claude/skills/wt-agents/scripts/agents.sh spawn`/`rm`; nothing reimplements it.
 - **Logs:** `~/Library/Logs/wt-dashboard/app.log`.
 
 Never use the dashboard to type into, answer or stop real agents unless the user asks.
