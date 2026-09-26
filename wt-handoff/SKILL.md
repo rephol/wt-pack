@@ -29,6 +29,8 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
 - `--mcp a,b` adds MCP servers from `wt-agents/mcp/catalog.json` when the handoff SPAWNS a worker (see
   wt-agents "Lean MCP"). A reused worker keeps the set it started with, so pair it with `--new` when the
   task needs a server the pool's workers lack.
+- Jev's picks only run in lean MCP mode (dashboard Settings switch, or `WT_AGENTS_MCP=lean`); in the default
+  full mode every worker already has every server, so Jev is not called.
 - Without `--mcp` (and without `--pane`), **Jev picks the servers** from the prompt: `scripts/jev-mcp.mjs` asks
   TypeSafe one yes/no (Noul) question per catalog server and keeps those at ≥ 0.7 (`WT_HANDOFF_JEV_MIN`),
   ~0.4s, 2s timeout; no key, timeout or any error means no picks, so a handoff never blocks on it. A free

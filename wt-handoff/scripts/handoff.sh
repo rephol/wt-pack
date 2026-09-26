@@ -21,7 +21,8 @@
 # wt-agents/mcp/catalog.json); a reused worker keeps the MCP set it started with.
 # Without --mcp (and without --pane), Jev picks them from the prompt (jev-mcp.mjs: one yes/no per
 # catalog server, kept at >= 0.7, 2s timeout, any failure = no picks). A free worker is reused only if
-# it already has every pick; otherwise a new one is spawned with them. WT_HANDOFF_JEV=off skips Jev.
+# it already has every pick; otherwise a new one is spawned with them. WT_HANDOFF_JEV=off skips Jev;
+# so does full MCP mode (the default: wt-shared/scripts/mcp-mode.sh), where every worker has every server.
 # --dry-run prints the target and the picks, and sends, tags and spawns nothing.
 #
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
@@ -114,7 +115,9 @@ candidates() {
 
 # MCP picks from Jev (before the footer is added: it judges the task, not the routing).
 jev=
-if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ]; then
+# Only in lean mode: a full-set worker already has every server, so there is nothing to pick.
+if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] \
+  && [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh")" = lean ]; then
   jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
   mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
 fi
