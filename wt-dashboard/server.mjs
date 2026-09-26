@@ -9,6 +9,7 @@ import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
+import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
@@ -1645,7 +1646,44 @@ export function needsSession(method, path, headers) {
   if (method === 'GET' || method === 'HEAD' || !path.startsWith('/api/')) return false
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/rooms\/[^/]+\/messages$/.test(path)) return false // agent post
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
+  if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   return true
+}
+
+// ---- local ticket boards (tickets.mjs) ----
+const tickets = new Tickets({ dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM) })
+async function ticketsApi(req, res, url, parts) {
+  const json = async () => JSON.parse((await body(req)) || '{}')
+  const text = url.searchParams.get('format') === 'text'
+  if (req.method === 'GET') {
+    if (parts[2] === 'keys') { const k = Object.values(await tickets.keys()); return text ? send(res, 200, k.join('\n') + (k.length ? '\n' : ''), 'text/plain') : send(res, 200, k) }
+    if (parts[2]) { const t = await tickets.get(parts[2]); return text ? send(res, 200, ticketText(t), 'text/plain') : send(res, 200, t) }
+    const out = await tickets.list(url.searchParams.get('project'), url.searchParams.get('column') || undefined)
+    return text ? send(res, 200, out.tickets.map(ticketRow).join('\n') + (out.tickets.length ? '\n' : ''), 'text/plain') : send(res, 200, out)
+  }
+  // Every mutation names its author first: the user (session) or a verified local agent pane.
+  const author = await roomAuthor(req)
+  const b = await json()
+  const me = () => { if (author.kind !== 'agent') throw Object.assign(new Error("'me' is an agent"), { status: 400 }); return { name: author.name, pane: author.pane } }
+  if (req.method === 'POST' && parts.length === 2) {
+    const project = b.project ?? (author.kind === 'agent' ? (await agents()).find((a) => a.key === author.key)?.project : null)
+    return send(res, 200, await tickets.create(project, b, author))
+  }
+  const id = parts[2]
+  if (req.method === 'PATCH' && parts.length === 3) {
+    let assignee
+    if (b.assignee === 'me') assignee = me()
+    else if (b.assignee === null || b.assignee === 'none') assignee = null
+    else if (typeof b.assignee === 'string') {
+      const a = (await agents()).find((x) => x.name === b.assignee)
+      if (!a) return send(res, 400, { error: `unknown agent ${b.assignee}` })
+      assignee = { name: a.name, pane: a.id }
+    }
+    return send(res, 200, await tickets.patch(id, b, author, assignee))
+  }
+  if (req.method === 'POST' && parts[3] === 'comments') return send(res, 200, await tickets.comment(id, b.text, author))
+  if (req.method === 'POST' && parts[3] === 'claim') return send(res, 200, await tickets.claim(id, me(), b.force === true))
+  send(res, 404, { error: 'not found' })
 }
 
 // ---- rooms ----
@@ -2045,6 +2083,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
