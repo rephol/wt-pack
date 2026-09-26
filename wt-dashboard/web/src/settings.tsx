@@ -56,8 +56,8 @@ const GROUPS: { label: string; panels: Panel[] }[] = [
     { id: 'integrations', label: 'Integrations', description: 'API keys, projects, hosts and Jev judgments.' },
     { id: 'terminals', label: 'Terminals', description: 'Shells on this machine, mirrored into the dashboard.' },
     { id: 'usage', label: 'Usage', description: 'Claude usage by agent, project and model.' },
-    { id: 'observability', label: 'Observability', description: 'Jev calls, outcomes and the server log.' },
-    { id: 'server', label: 'Server', description: 'The dashboard server, its data sources and housekeeping.' },
+    { id: 'observability', label: 'Observability', description: 'Jev calls, outcomes, the server log and housekeeping.' },
+    { id: 'server', label: 'Server', description: 'The dashboard server and its data sources.' },
     { id: 'about', label: 'About', description: 'What this is, keyboard shortcuts and install.' },
   ] },
 ]
@@ -169,10 +169,10 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
-          {section === 'observability' && <ObservabilitySection />}
+          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><HousekeepingSection /></VStack>}
           {section === 'usage' && <UsageBreakdown />}
           {section === 'terminals' && <TerminalsSection />}
-          {section === 'server' && <VStack gap={6}><SettingsCard title="Status"><div className="hd-set-row"><ServerPanel /></div></SettingsCard><HousekeepingSection /></VStack>}
+          {section === 'server' && <VStack gap={6}><SettingsCard title="Status"><div className="hd-set-row"><ServerPanel /></div></SettingsCard></VStack>}
           {section === 'about' && <AboutSection />}
     </>
   )

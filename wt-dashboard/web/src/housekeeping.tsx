@@ -1,5 +1,4 @@
-// Settings › Server › Housekeeping: retention settings, Run now, the last run's summary and the server's memory.
-// Self-contained so it can move to Settings › Observability as one piece.
+// Settings › Observability › Housekeeping: retention settings, Run now, the last run's summary and the server's memory.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HStack } from '@astryxdesign/core/HStack'
