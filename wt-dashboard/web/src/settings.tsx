@@ -4,7 +4,7 @@
 // (settingsRows.tsx). Phone: a section list, then the section full-screen with Back. Opened from the sidebar,
 // ⌘, in the app, or `openSettings(section)` from anywhere. Server-side settings save on change ("Saved");
 // the profile has an explicit Save because name/handle are typed.
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Layout, LayoutContent } from '@astryxdesign/core/Layout'
@@ -69,7 +69,15 @@ const panel = (id: Section) => PANELS.find((p) => p.id === id)!
 export const openSettings = (section?: Section) => dispatchEvent(new CustomEvent('open-settings', { detail: section }))
 
 const PHONE = '(max-width: 639px)'
-export function SettingsHost() {
+// The sidebar project scope, for sections that filter by it (Routines history).
+type Scope = { project: string; agents: { name: string; project?: string | null }[] }
+const ScopeCtx = createContext<Scope>({ project: 'all', agents: [] })
+
+export function SettingsHost(scope: Scope) {
+  return <ScopeCtx.Provider value={scope}><SettingsDialog /></ScopeCtx.Provider>
+}
+
+function SettingsDialog() {
   const [open, setOpen] = useState(false)
   const [section, setSection] = useState<Section>('profile')
   const [listing, setListing] = useState(false) // phone: the section list instead of a section
@@ -162,6 +170,7 @@ function PanelPane({ id }: { id: Section }) {
 }
 
 function SectionBody({ section }: { section: Section }) {
+  const scope = useContext(ScopeCtx)
   return (
     <>
           {section === 'profile' && <ProfileSection />}
@@ -170,7 +179,7 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
-          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><RoutinesHistorySection /><HousekeepingSection /></VStack>}
+          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><RoutinesHistorySection {...scope} /><HousekeepingSection /></VStack>}
           {section === 'usage' && <UsageBreakdown />}
           {section === 'terminals' && <TerminalsSection />}
           {section === 'server' && <VStack gap={6}><SettingsCard title="Status"><div className="hd-set-row"><ServerPanel /></div></SettingsCard></VStack>}

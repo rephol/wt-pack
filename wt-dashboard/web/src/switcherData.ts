@@ -14,6 +14,9 @@ export interface SwAgent {
 // project appears under All only). Shared by the sidebar list, Rooms page and quick switcher.
 export const inProject = (x: { project?: string | null }, project: string) => project === 'all' || x.project === project
 export const roomInProject = inProject
+// A routine's project (WP-53): its target's, else the named agent's; local housekeeping has none (All only).
+export const routineProject = (t: { kind: string; agent?: string; project?: string }, agents: { name: string; project?: string | null }[]) =>
+  t.project ?? (t.agent ? agents.find((a) => a.name === t.agent)?.project ?? null : null)
 export interface SwRoom { slug: string; title: string; project?: string | null; needsYou?: { agent: string; text: string }[]; archived?: boolean }
 export interface SwTicket { id: string; title: string; column: string; project: string }
 export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }

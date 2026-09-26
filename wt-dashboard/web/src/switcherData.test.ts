@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { scopedItems, switcherItems, ticketItems, type SwAgent } from './switcherData.ts'
+import { scopedItems, switcherItems, ticketItems, routineProject, type SwAgent } from './switcherData.ts'
 
 const ag = (name: string, o: Partial<SwAgent> = {}): SwAgent => ({ key: name, name, pool: 'worker', machine: 'm', local: true, status: 'idle', asks: false, statusSince: 0, lastActivity: 0, recap: null, question: null, task: null, ...o })
 const A = [ag('w-01', { status: 'working', lastActivity: 5 }), ag('w-02', { asks: true, question: 'Merge?', lastActivity: 9 }), ag('p-10', { lastActivity: 7, recap: 'fixing the parser' }), ag('p-02', { lastActivity: 1, task: 'UMK-1183' })]
@@ -81,4 +81,12 @@ test('ticketItems: id and title search, exact id first, done last, none without 
   assert.deepEqual(ticketItems(ts, 'board').map((i) => i.label), ['WP-2 Board columns', 'WP-22 Jev on the board'])
   assert.equal(scopedItems([], [], [], 'umkmall', false, 'wp-22', ts).filter((i) => i.id.startsWith('ticket:')).length, 0) // scoped
   assert.equal(scopedItems([], [], [], 'umkmall', true, 'wp-22', ts).filter((i) => i.id.startsWith('ticket:')).length, 2)
+})
+
+test('routineProject: target project, else the named agent, else none (All only)', () => {
+  const ags = [{ name: 'a1', project: 'p1' }]
+  assert.equal(routineProject({ kind: 'spawn', project: 'p2' }, ags), 'p2')
+  assert.equal(routineProject({ kind: 'prompt', agent: 'a1' }, ags), 'p1')
+  assert.equal(routineProject({ kind: 'prompt', agent: 'gone' }, ags), null)
+  assert.equal(routineProject({ kind: 'action' }, ags), null)
 })

@@ -16,6 +16,9 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { SettingsCard, SettingsRow } from './settingsRows'
+import { inProject, routineProject } from './switcherData'
+
+type Scope = { project: string; agents: { name: string; project?: string | null }[] }
 
 type Target =
   | { kind: 'prompt'; agent?: string; role?: string; project?: string; text: string }
@@ -54,13 +57,14 @@ function useRoutineMutations() {
   }
 }
 
-export function RoutinesPage({ phone }: { phone: boolean }) {
+export function RoutinesPage({ phone, project, agents }: { phone: boolean } & Scope) {
   const q = useQuery({ queryKey: ['routines'], queryFn: () => api<List>('/api/routines'), refetchInterval: 15_000 })
   const m = useRoutineMutations()
   const [editing, setEditing] = useState<Routine | 'new' | null>(null)
   const [deleting, setDeleting] = useState<Routine | null>(null)
   if (q.isError) return <Text type="supporting">Could not load routines: {errText(q.error)}</Text>
   if (!q.data) return null
+  const routines = q.data.routines.filter((r) => inProject({ project: routineProject(r.target, agents) }, project))
   return (
     <VStack gap={3}>
       <HStack justify="between" align="center" wrap="wrap" gap={2}>
@@ -68,8 +72,8 @@ export function RoutinesPage({ phone }: { phone: boolean }) {
         <Button label="New routine" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setEditing('new')} />
       </HStack>
       <SettingsCard>
-        {q.data.routines.length === 0 && <SettingsRow title="No routines" description="Create one with New routine." />}
-        {q.data.routines.map((r) => {
+        {routines.length === 0 && <SettingsRow title="No routines" description={project === 'all' ? 'Create one with New routine.' : `None in ${project}. Create one with New routine, or pick All projects.`} />}
+        {routines.map((r) => {
           const controls = <HStack gap={1} align="center" wrap="wrap">
             <Switch label={r.enabled ? 'On' : 'Off'} value={r.enabled} isDisabled={m.toggle.isPending} onChange={() => m.toggle.mutate(r)} />
             <Button label="Run now" size="sm" isLoading={m.run.isPending && m.run.variables?.id === r.id} onClick={() => m.run.mutate(r)} />
@@ -143,13 +147,17 @@ function RoutineDialog({ routine, phone, onClose }: { routine: Routine | null; p
 }
 
 // Settings › Observability › Routines history.
-export function RoutinesHistorySection() {
+// A run of a deleted routine has no known project, so it shows under All only.
+export function RoutinesHistorySection({ project, agents }: Scope) {
   const q = useQuery({ queryKey: ['routine-runs'], queryFn: () => api<Run[]>('/api/routines/runs?limit=50'), refetchInterval: 15_000 })
-  if (!q.data) return null
+  const rq = useQuery({ queryKey: ['routines'], queryFn: () => api<List>('/api/routines'), refetchInterval: 15_000 })
+  if (!q.data || !rq.data) return null
+  const byId = new Map(rq.data.routines.map((r) => [r.id, routineProject(r.target, agents)]))
+  const runs = q.data.filter((u) => inProject({ project: byId.get(u.routine_id) ?? null }, project))
   return (
     <SettingsCard title="Routines history">
-      {q.data.length === 0 && <SettingsRow title="No runs yet" description="Runs of the last 30 days show here." />}
-      {q.data.map((u) => (
+      {runs.length === 0 && <SettingsRow title="No runs yet" description={project === 'all' ? 'Runs of the last 30 days show here.' : `No runs in ${project} in the last 30 days.`} />}
+      {runs.map((u) => (
         <SettingsRow key={u.id} title={`${u.name ?? `${u.routine_id} (deleted)`} — ${u.status}`}
           description={`${when(u.started)}${u.ended ? ` · ${Math.max(0, Math.round((u.ended - u.started) / 1000))}s` : ''}${u.reason ? ` · ${u.reason}` : ''}${u.agent ? ` · ${u.agent}` : ''}`} />
       ))}
