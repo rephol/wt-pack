@@ -15,6 +15,8 @@ export const KEYS = {
   WT_DASHBOARD_PROJECTS: { list: ':', legacy: 'HERDR_DASH_PROJECTS', label: 'Extra projects' },
   WT_DASHBOARD_ALLOWED_HOSTS: { list: ',', legacy: 'HERDR_DASH_ALLOWED_HOSTS', label: 'Allowed hosts', loopbackOnly: true },
   WT_DASHBOARD_REPO: { legacy: 'UMKMALL_REPO', label: 'Default repo', restart: true },
+  // Linear teams whose tickets the dashboard shows and recognises: KEY=project (project defaults to the key, lower-cased).
+  WT_LINEAR_TEAMS: { list: ',', label: 'Linear teams', restart: true },
   // Read by the shell scripts too (wt-shared/scripts/mcp-mode.sh): lean | full (default).
   WT_AGENTS_MCP: { oneOf: ['full', 'lean'], label: 'Lean agent MCP' },
   // Jev integrations (read by the server via cfg.get, by the CLIs via typesafe.mjs enabled()). ON where calls are
@@ -31,6 +33,16 @@ export const KEYS = {
 const SERVICE = 'wt-dashboard'
 const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/
 const SECRET = /^[\w-]{8,200}$/ // Linear keys are lin_api_…; also keeps the value safe inside `security -i` quoting
+
+// WT_LINEAR_TEAMS entries → { KEY: project }. Malformed entries are skipped.
+export function parseTeams(list) {
+  const out = {}
+  for (const e of list) {
+    const [k, p] = e.split('=').map((x) => x.trim())
+    if (/^[A-Za-z][A-Za-z0-9]*$/.test(k ?? '') && (!p || /^[\w.-]+$/.test(p))) out[k.toUpperCase()] = p || k.toLowerCase()
+  }
+  return out
+}
 
 export function parseEnvFile(text) {
   const out = {}
@@ -142,6 +154,10 @@ export class Config {
         const bad = items.map((h) => h.toLowerCase()).filter((h) => !HOST.test(h))
         if (bad.length) throw Object.assign(new Error(`exact hostnames only (no scheme, port or wildcard): ${bad.join(', ')}`), { status: 400 })
         s = items.map((h) => h.toLowerCase()).join(',')
+      } else if (k === 'WT_LINEAR_TEAMS') {
+        const bad = items.filter((t) => !/^[A-Za-z][A-Za-z0-9]*(=[\w.-]+)?$/.test(t.replace(/\s*=\s*/, '=')))
+        if (bad.length) throw Object.assign(new Error(`KEY or KEY=project (letters/digits; project: letters, digits, . _ -): ${bad.join(', ')}`), { status: 400 })
+        s = items.map((t) => t.replace(/\s*=\s*/, '=')).join(',')
       } else {
         if (items.some((p) => !p.startsWith('/') || p.includes(':') || /[\n"]/.test(p))) throw Object.assign(new Error('absolute paths only'), { status: 400 })
         s = items.join(':')

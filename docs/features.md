@@ -210,10 +210,13 @@ Terminals, Usage, Observability, Server, About.
 - **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries, Accept/Reject pending
   global proposals, **Preview for agent…** shows what an agent receives. Warns when the plugin is missing.
 - **Integrations**: precedence is process env › Keychain (secrets) › `~/.config/wt-dashboard/env` › default;
-  applies without restart except `WT_DASHBOARD_REPO`.
+  applies without restart except `WT_DASHBOARD_REPO` and `WT_LINEAR_TEAMS`.
   - `LINEAR_API_KEY` (Keychain, last 4 shown, Test connection), `TYPESAFE_API_KEY` (Keychain, powers Jev).
+  - `WT_LINEAR_TEAMS` (`KEY=project,KEY`, needs a restart): the Linear teams whose open tickets show up besides
+    your own, and whose ids (`ENG-12`) are recognised in branches, worktrees and handoff labels. Unset: only
+    tickets assigned to you, and only local board ids are recognised.
   - `WT_DASHBOARD_PROJECTS` (extra repos for New agent), `WT_DASHBOARD_ALLOWED_HOSTS` (tailnet hostnames;
-    loopback only), `WT_DASHBOARD_REPO` (needs a restart).
+    loopback only), `WT_DASHBOARD_REPO` (needs a restart; default: this wt-pack checkout, which `./setup` writes).
   - **Lean MCP for new agents** (`WT_AGENTS_MCP`, default **full**): lean gives new agents only their role's
     MCP servers plus Jev's picks at handoff.
   - The Jev switches, see [Jev](#jev-features).

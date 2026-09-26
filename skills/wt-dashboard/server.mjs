@@ -17,7 +17,7 @@ import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
-import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, bindCheck, bindHostHeader } from './config.mjs'
+import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
@@ -40,7 +40,8 @@ process.title = 'wt-dashboard server'
 // Integrations & environment (config.mjs): env var > Keychain > ~/.config/wt-dashboard/env > default.
 const cfg = new Config({ file: join(homedir(), '.config', 'wt-dashboard', 'env') })
 // ponytail: the default repo is read once; changing it asks for a restart (it is threaded through many paths).
-const REPO = cfg.get('WT_DASHBOARD_REPO') ?? join(homedir(), 'Work', 'projects', 'umkmall')
+// Default: the checkout this server runs from (<repo>/skills/wt-dashboard); setup writes WT_DASHBOARD_REPO.
+const REPO = cfg.get('WT_DASHBOARD_REPO') ?? fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '')
 // No repo on disk: worktrees and PRs (both derived from it) are skipped, with one warning instead of an ENOENT per poll.
 const REPO_OK = existsSync(REPO)
 if (!REPO_OK) console.warn(`WT_DASHBOARD_REPO ${REPO} does not exist: worktrees and PRs are off. Set it in ~/.config/wt-dashboard/env (./setup does) and restart.`)
@@ -55,8 +56,9 @@ const DATA = join(DATA_ROOT, 'data')
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
 const STALL_MS = 20 * 60_000
-// Linear team key → project name (project = basename of the repo root).
-const PROJECT_BY_TEAM = { UMK: 'umkmall' }
+// Linear team key → project name (project = basename of the repo root), from WT_LINEAR_TEAMS (WP-82).
+const PROJECT_BY_TEAM = parseTeams(cfg.list('WT_LINEAR_TEAMS'))
+const TEAM_KEYS = Object.keys(PROJECT_BY_TEAM)
 const REPO_PROJECT = basename(REPO)
 
 // execFile, never a shell: prompt text goes through as one argv entry.
@@ -877,10 +879,11 @@ async function unfurlImage(res, url) {
 }
 
 // ---- git / gh / linear ----
-// A ticket id is <KEY>-<N>: UMK (Linear) or a local board key (refreshed by overview()).
+// A ticket id is <KEY>-<N>: a Linear team key (WT_LINEAR_TEAMS) or a local board key (refreshed by overview()).
 let boardKeys = []
-export const ticketOf = (s, keys = boardKeys) => {
-  const m = s?.match(new RegExp(`(?:^|[/_-])(${['UMK', ...keys].join('|')})-(\\d+)(?=\\D|$)`, 'i'))
+export const ticketOf = (s, keys = [...TEAM_KEYS, ...boardKeys]) => {
+  if (!keys.length) return null
+  const m = s?.match(new RegExp(`(?:^|[/_-])(${keys.join('|')})-(\\d+)(?=\\D|$)`, 'i'))
   return m ? `${m[1].toUpperCase()}-${m[2]}` : null
 }
 
@@ -959,9 +962,9 @@ async function worktrees() {
         const ticket = ticketOf(w.branch) ?? ticketOf(w.path)
         let plan = null
         if (ticket && w.path !== REPO) {
-          const n = ticket.split('-')[1]
+          const [k, n] = ticket.split('-')
           const files = await git(w.path, 'ls-files', 'docs/plans').catch(() => '')
-          plan = files.split('\n').find((f) => new RegExp(`umk-${n}(?!\\d)`, 'i').test(f)) ?? null
+          plan = files.split('\n').find((f) => new RegExp(`${k}-${n}(?!\\d)`, 'i').test(f)) ?? null
         }
         return { ...w, ticket, plan }
       }),
@@ -1040,10 +1043,11 @@ function ciOf(checks) {
   return 'pass'
 }
 
+// Your open issues, plus every open issue of the WT_LINEAR_TEAMS teams.
 const LINEAR_Q = `query {
   issues(first: 50, orderBy: updatedAt, filter: {
     state: { type: { nin: ["completed", "canceled"] } },
-    or: [{ assignee: { isMe: { eq: true } } }, { team: { key: { eq: "UMK" } } }]
+    or: [{ assignee: { isMe: { eq: true } } }${TEAM_KEYS.length ? `, { team: { key: { in: ${JSON.stringify(TEAM_KEYS)} } } }` : ''}]
   }) { nodes { identifier title priority url updatedAt assignee { isMe } state { name type } } }
 }`
 async function linear() {
@@ -1064,7 +1068,7 @@ async function linear() {
 // ---- task model ----
 const inside = (cwd, dir) => cwd && (cwd === dir || cwd.startsWith(dir + '/'))
 
-// The ticket an agent's tokens name: `ticket`, else the UMK id a handoff's `task` label starts with.
+// The ticket an agent's tokens name: `ticket`, else the ticket id a handoff's `task` label starts with.
 const tagTicket = (a) => (a.local && (a.tags?.ticket || a.tags?.task?.match(/^[A-Z]+-\d+/i)?.[0])?.toUpperCase()) || null
 export function deriveTasks({ agents, worktrees, prs, issues }) {
   const now = Date.now()
