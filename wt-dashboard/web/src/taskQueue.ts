@@ -24,6 +24,7 @@ export const SECTIONS = [
   { key: 'in_review', label: 'In review' },
   { key: 'stalled', label: 'Stalled' },
   { key: 'up_next', label: 'Up next' },
+  { key: 'in_flight', label: 'In flight' },
   { key: 'shipped', label: 'Merged this week' },
 ] as const
 export type SectionKey = (typeof SECTIONS)[number]['key']
@@ -33,12 +34,15 @@ export const isBabysitting = (t: QTask) => /^babysitting\b/i.test(t.responder?.t
 
 const WEEK = 7 * 24 * 3600_000
 
+const IN_FLIGHT = ['planning', 'building', 'queued']
+
 // Sections in order, empty ones dropped. Shipped = shipped or merged, updated in the last 7 days.
+// In flight = planning/building/queued: nothing to act on, but Tasks must agree with the Board (WP-31).
 export function sections<T extends QTask>(tasks: T[], now = Date.now()) {
   const of = (key: SectionKey) => tasks
     .filter((t) => key === 'shipped'
       ? (t.state === 'shipped' || t.state === 'merged') && t.updatedAt != null && now - Date.parse(t.updatedAt) < WEEK
-      : t.state === key)
+      : key === 'in_flight' ? IN_FLIGHT.includes(t.state) : t.state === key)
     .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
   return SECTIONS.map((s) => ({ ...s, tasks: of(s.key) })).filter((s) => s.tasks.length)
 }

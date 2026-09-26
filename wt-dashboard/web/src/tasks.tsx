@@ -33,10 +33,10 @@ export function TaskQueue({ tasks, onOpen, showProject, suggested }: { tasks: QT
         <SegmentedControlItem value="mine" label="Mine" />
         <SegmentedControlItem value="all" label="Everyone" />
       </SegmentedControl>
-      {!secs.length && <EmptyState title="Nothing to act on" description="No task needs you, is ready to hand off, in review, stalled or up next." />}
+      {!secs.length && <EmptyState title="Nothing to act on" description="No task needs you, is ready to hand off, in review, stalled, up next or in flight." />}
       {secs.map((s) => {
         const rows = <div className="hd-tq-list">{s.tasks.map((t) => <Row key={t.id} t={t} section={s.key} onOpen={onOpen} showProject={showProject} suggested={suggested?.has(t.id)} />)}</div>
-        return s.key === 'shipped'
+        return s.key === 'shipped' || s.key === 'in_flight'
           ? <Collapsible key={s.key} defaultIsOpen={false} chevronPosition="start" trigger={<Text weight="semibold">{s.label} ({s.tasks.length})</Text>}>{rows}</Collapsible>
           : <VStack key={s.key} gap={2}><Heading level={3}>{s.label} ({s.tasks.length})</Heading>{rows}</VStack>
       })}
@@ -107,7 +107,7 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
     <div className="hd-tq-row">
       <div className="hd-tq-main">
         <div className="hd-tq-title">
-          {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : t.local ? <Link href="#board"><Badge label={t.id} variant="info" /></Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
+          {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : t.local ? <Link href={`#board/${encodeURIComponent(t.id)}`}><Badge label={t.id} variant="info" /></Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
           <Text weight="semibold" maxLines={2}>{t.title}</Text>
         </div>
         {meta.length > 0 && <div className="hd-tq-meta">{meta.flatMap((m, i) => (i ? [<span key={`d${i}`}>{dot}</span>, m] : [m]))}</div>}
@@ -118,6 +118,7 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
         {review && t.pr!.unresolved ? <Badge label={`${t.pr!.unresolved} unresolved`} variant="warning" /> : null}
         {review && t.pr!.behind && <Badge label="behind base" variant="warning" />}
         {review && (babysitting || (sent && !act.error)) && <Badge label="Babysitting" variant="info" />}
+        {section === 'in_flight' && <Badge label={t.column ?? t.state} variant="neutral" />}
         {actions}
       </div>
       {t.question && section === 'needs_you' && <div className="hd-tq-wide"><Text maxLines={3}>{t.question}</Text></div>}

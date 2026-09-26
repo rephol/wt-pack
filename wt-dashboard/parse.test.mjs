@@ -988,3 +988,9 @@ test('Rooms: queued mentions survive a restart; stale, command and gone ones get
   await after.flush()
   assert.deepEqual((await after.messages('r')).find((m) => m.id === m2.id).deliveredTo, ['w1'])
 })
+
+test('deriveTasks: a local ticket with no live signal takes its board column (WP-31)', () => {
+  const li = (identifier, column) => ({ identifier, title: identifier, url: null, state: column, mine: column === 'ready', stateType: column === 'ready' ? 'unstarted' : 'backlog', local: true, project: 'wp', column })
+  const t = deriveTasks({ agents: [], worktrees: [], prs: [], issues: [li('WP-1', 'building'), li('WP-2', 'planning'), li('WP-3', 'review'), li('WP-4', 'ready'), li('WP-5', 'backlog')] })
+  assert.deepEqual(t.map((x) => [x.id, x.state]), [['WP-1', 'building'], ['WP-2', 'planning'], ['WP-3', 'queued'], ['WP-4', 'up_next']])
+})
