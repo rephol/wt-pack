@@ -25,7 +25,7 @@ export function scopedItems(agents: SwAgent[], rooms: SwRoom[], recent: string[]
   const items = switcherItems(agents.filter((a) => inProject(a, p)), rooms.filter((r) => inProject(r, p)), recent, query)
   if (project === 'all') return items
   const label = showAll ? `Showing all projects · only ${project}` : `Showing ${project} · show all`
-  return [{ id: SCOPE_ID, label, auxiliaryData: { group: '', kind: 'scope', line: '' } }, ...items]
+  return [{ id: SCOPE_ID, label, auxiliaryData: { group: 'Project', kind: 'scope', line: '' } }, ...items]
 }
 
 // The task label with its lifecycle state (planner: planning → handed to <worker> → done (PR #N) / blocked: …).

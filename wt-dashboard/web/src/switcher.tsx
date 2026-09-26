@@ -39,7 +39,7 @@ function useOtherDialogOpen(mine: boolean) {
 function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   const { byId } = useRoles()
   const d = it.auxiliaryData!
-  if (d.kind === 'scope') return <div data-switcher style={{ display: 'flex', alignItems: 'center', minHeight: 36, padding: '0 4px' }}><Text type="supporting" size="sm">{it.label}</Text></div>
+  if (d.kind === 'scope') return <div data-switcher style={{ display: 'flex', alignItems: 'center', minHeight: 32, padding: '0 4px' }}><Text type="supporting" size="sm">{it.label}</Text></div>
   const a = d.kind === 'agent' ? d.agent : null
   // No question and no recap: a single-line row (the old "idle · no recent summary" line was noise); same height.
   const line = a && !a.recap && !(needsYou(a) && a.question) ? null : d.line

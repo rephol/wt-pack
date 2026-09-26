@@ -54,6 +54,10 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 @media (hover: none) { * { scrollbar-color: auto; } }
 
 /* Quick switcher on a phone: tight 56px rows, 12px sides, headings that stay put while the list scrolls. */
+/* Phone: the inline palette fills the sheet — no card inside the card, and the list scrolls to the sheet bottom. */
+[data-switcher-phone] .astryx-dialog { flex: 1 1 0; width: 100% !important; max-width: none !important; height: 100% !important; max-height: none !important; min-height: 0; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+[data-switcher-phone] .astryx-dialog > div { flex: 1 1 0; min-height: 0; border-radius: 0 !important; }
+[data-switcher-phone] .astryx-dialog .astryx-layout { height: 100%; max-height: 100% !important; min-height: 0; }
 [data-switcher-phone] .astryx-command-palette-item { padding: 2px 12px; min-height: 48px; }
 [data-switcher-phone] .astryx-command-palette-group-heading { position: sticky; top: 0; z-index: 1; padding: 6px 12px; background: var(--color-background-surface, var(--color-background-page, Canvas)); }
 
