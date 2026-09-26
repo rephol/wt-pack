@@ -32,7 +32,11 @@ open app/src-tauri/target/release/bundle/macos/wt-dashboard.app
 ## Data
 
 Nothing is written into this source tree. The data root is `$WT_DASHBOARD_DATA`, default `~/.local/share/wt-dashboard`:
-`data/` (rooms/*.jsonl, rooms.json, settings.json, notifications.jsonl) and `uploads/` (images pasted into the composer).
+`data/` (`wt.db`: tickets, rooms, messages and the notifications inbox; plus settings.json and other small files) and `uploads/` (images pasted into the composer).
+
+`wt.db` is SQLite via Node's built-in `node:sqlite` (**node >= 22.13**, checked by `./setup doctor`); the server is its only writer, the CLIs go through the API. On first start the old `tickets/`, `rooms.json`, `rooms/` and `notifications.jsonl` are imported once and moved to `data/pre-sqlite-<time>/`.
+
+Rollback to a pre-SQLite commit: stop the service; `node wt-dashboard/store.mjs export --to ~/.local/share/wt-dashboard/data` (read-only on `wt.db`, writes the old JSON/JSONL layout); move `data/wt.db*` aside (required: a later start of the new code would otherwise ignore the newer JSON and log "legacy JSON newer than wt.db"); check out the old commit; restart.
 Env names are `WT_DASHBOARD_*`; the old `HERDR_DASH_*` names still work as a fallback.
 
 ## Terminals
