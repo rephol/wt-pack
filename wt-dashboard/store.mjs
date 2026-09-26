@@ -45,9 +45,18 @@ function importTickets(db, data, log) {
   for (const f of files.filter((f) => f.endsWith('.json'))) {
     const p = f.slice(0, -5), b = readJson(join(dir, f))
     if (!PROJECT.test(p) || typeof b?.key !== 'string' || !Array.isArray(b.tickets)) continue
-    board.run(p, b.key, b.next)
-    b.tickets.forEach((t, i) => ticket.run(t.id, p, i, JSON.stringify(t)))
-    taken.add(b.key); done.add(p)
+    // One bad board (id-less or duplicate ticket, taken key, no next) must not abort the whole import (WP-25):
+    // undo just this board and let the salvage pass below keep its key and id range.
+    db.exec('SAVEPOINT board')
+    try {
+      board.run(p, b.key, b.next)
+      b.tickets.forEach((t, i) => ticket.run(t.id, p, i, JSON.stringify(t)))
+      db.exec('RELEASE board')
+      taken.add(b.key); done.add(p)
+    } catch (e) {
+      db.exec('ROLLBACK TO board; RELEASE board')
+      log(`store: tickets/${f} has a bad shape (${e.message}); its tickets are not imported`)
+    }
   }
   // Unreadable boards (<p>.json that failed to parse, or <p>.json.corrupt-*): keep the key and id range so new
   // ids never reuse ones already handed out. Regex, since the text is not JSON.
@@ -55,13 +64,18 @@ function importTickets(db, data, log) {
   for (const f of files) {
     const m = f.match(/^(.+)\.json(\.corrupt-.*)?$/)
     if (!m || done.has(m[1]) || !PROJECT.test(m[1])) continue
-    log(`store: tickets/${f} is unreadable; salvaging key and id range, the file moves to the backup`)
+    log(`store: tickets/${f} is unreadable or rejected; salvaging key and id range, the file moves to the backup`)
     const raw = readFileSync(join(dir, f), 'utf8'), s = salvage.get(m[1]) ?? { key: null, next: 1 }
     s.key ??= raw.match(/"key"\s*:\s*"([A-Z]{2,5})"/)?.[1] ?? null
     for (const n of raw.matchAll(/"next"\s*:\s*(\d+)|"id"\s*:\s*"[A-Z]+-(\d+)"/g)) s.next = Math.max(s.next, Number(n[1] ?? Number(n[2]) + 1))
     salvage.set(m[1], s)
   }
-  for (const [p, s] of salvage) if (s.key && !taken.has(s.key)) { board.run(p, s.key, s.next); taken.add(s.key) }
+  // Never silent: a board that cannot be kept is named, and its file stays in the pre-sqlite-* backup.
+  for (const [p, s] of salvage) {
+    if (!s.key) log(`store: tickets/${p} has no recoverable key; board not imported (file kept in the backup)`)
+    else if (taken.has(s.key)) log(`store: tickets/${p} key ${s.key} is already taken; board not imported (file kept in the backup)`)
+    else { board.run(p, s.key, s.next); taken.add(s.key) }
+  }
 }
 
 function exportTickets(db, to) {

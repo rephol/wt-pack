@@ -105,6 +105,18 @@ test('import: an unreadable board keeps its key and id range', async () => {
   assert.equal(logs.filter((m) => m.includes('unreadable')).length, 2)
 })
 
+test('import: a bad-shape board is skipped and salvaged, not blocking the rest; a keyless one is reported (WP-25)', async () => {
+  const dup = JSON.stringify({ key: 'BAD', next: 4, tickets: [{ id: 'BAD-3' }, { id: 'BAD-3' }] })
+  const ok = JSON.stringify({ key: 'OK', next: 2, tickets: [{ id: 'OK-1', title: 'kept' }] })
+  const dir = await legacy({ 'bad.json': dup, 'ok.json': ok, 'web.json': '{nope' })
+  const logs = []
+  const t = new Tickets({ dir, log: (m) => logs.push(m) })
+  assert.equal((await t.create('bad', { title: 'after' }, user)).id, 'BAD-4')
+  assert.equal((await t.create('ok', { title: 'after' }, user)).id, 'OK-2')
+  assert.ok(logs.some((m) => /bad\.json has a bad shape/.test(m)))
+  assert.ok(logs.some((m) => /tickets\/web has no recoverable key/.test(m)))
+})
+
 test('no-op patch keeps updated and history', async () => {
   const t = new Tickets({ dir: await tmp() })
   const a = await t.create('wt-pack', { title: 'x', priority: 1 }, user)
