@@ -185,6 +185,7 @@ test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-o
   assert.deepEqual(R.ticketSuggestions([task], ['umk-1177'], S), [])
   assert.deepEqual(R.ticketSuggestions([task], [], { ...S, dismissedTickets: ['UMK-1177'] }), [])
   assert.deepEqual(R.ticketSuggestions([task], [], { ...S, ticketRooms: 'auto' }), [])
+  assert.deepEqual(R.ticketSuggestions([{ ...task, linearState: 'done' }], [], S), []) // WP-84: Done on the board
   assert.equal(S.ticketRooms, 'suggest')
   const later = { ...task, state: 'in_review', plan: 'p.md', pr: { number: 9, state: 'OPEN', ci: 'fail', url: 'u' } }
   assert.deepEqual(R.ticketEvents(null, later), [])
