@@ -39,6 +39,7 @@ import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
+import { useTicketPlugins } from './ticketChip'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
 import { useRoles, plural, RoleBadge, TagsDialog, OTHER } from './roles'
@@ -362,6 +363,12 @@ export default function App() {
     history.replaceState(null, '', u)
     try { localStorage.setItem('project', p) } catch { /* private mode */ }
   }
+  // A ticket chip in a room or chat (WP-93): switch to its project, then #board/<ID> opens it.
+  useEffect(() => {
+    const on = (e: Event) => { const { project: p, id } = (e as CustomEvent<{ project: string; id: string }>).detail; setProject(p); location.hash = `board/${encodeURIComponent(id)}` }
+    addEventListener('wt:open-ticket', on)
+    return () => removeEventListener('wt:open-ticket', on)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const data = useMemo(() => (all ? scopeToProject(all, project) : undefined), [all, project])
   // Sidebar badges count AGENTS (same list and project field as the Agents page); tasks are not counted.
   const counts = useMemo(() => projectCounts(all?.agents ?? [], [...new Set(activeTasks(all?.tasks ?? []).map((t) => t.project).filter((p): p is string => Boolean(p)))]), [all])
@@ -1231,6 +1238,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   agent: Agent; task: Task | null; onCollapse: () => void; onExpand?: () => void; onAsPanel?: () => void; mode?: 'panel' | 'page'; autoFocus: boolean
 }) {
   const [tab, setTab] = useState('conversation')
+  const ticketChips = useTicketPlugins()
   const narrow = useNarrow()
   useSyncExternalStore(subDetails, () => showAllDetails) // the ⋯ menu's details label
   const { byId } = useRoles()
@@ -1394,7 +1402,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                   ) : (
                     <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
-                        {r.m.text && <ChatMarkdown>{r.m.text}</ChatMarkdown>}
+                        {r.m.text && <ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown>}
                         {r.m.text && <LinkPreviews text={r.m.text} />}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
                         {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}

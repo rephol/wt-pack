@@ -21,6 +21,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { ChatMarkdown } from './links'
+import { useTicketPlugins } from './ticketChip'
 import { VirtualRows } from './virtual'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Avatar } from '@astryxdesign/core/Avatar'
@@ -332,7 +333,8 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
   }, [msgs, room.members, byName])
   const { byId: roleOf } = useRoles()
   const rows = useMemo(() => roomRows(msgs, profile.handle, workingAfter), [msgs, profile.handle, workingAfter])
-  const mentions = useMemo(() => [mentionPlugin(agents, profile, (a) => roleOf(a.pool ?? 'other').color as TokenColor, onOpenAgent)], [agents, profile, roleOf, onOpenAgent])
+  const tickets = useTicketPlugins()
+  const mentions = useMemo(() => [mentionPlugin(agents, profile, (a) => roleOf(a.pool ?? 'other').color as TokenColor, onOpenAgent), ...tickets], [agents, profile, roleOf, onOpenAgent, tickets])
   const messageList = useMemo(() => syncing ? <Delayed><ChatSkeleton /></Delayed> : (
         <ChatMessageList density={density}>
           <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => r.id} jump={jump} render={(r) => r.kind === 'status' ? (
