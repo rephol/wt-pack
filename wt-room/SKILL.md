@@ -24,6 +24,8 @@ A room message that reaches you arrives as a prompt starting with `[room #<slug>
 Answer with `room post <slug> "…"`, not in your own conversation. After posting, end the turn with NO text —
 not even "posted": the user reads the room, and anything written in your session only spends your context.
 
+**Never @mention yourself** — you are not a recipient; the server drops a leading `@<your name>`.
+
 **An @name in a post notifies that agent and makes it a member.** To name an agent you don't mean to
 address (quoting a UI label, an example, a log line), write it without the @ or inside backticks or quotes;
 the server ignores @names in code and in '…' / "…" quotes.
