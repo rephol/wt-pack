@@ -1016,3 +1016,9 @@ test('agentMayDelete: only a tmp-* room the agent created (WP-42)', async () => 
   assert.equal(agentMayDelete({ slug: 'wt-pack', responder: 'm/w:p1' }, me), false)
   assert.equal(agentMayDelete(null, me), false)
 })
+
+// WP-40: a child that exits without reading stdin must not crash the process with an unhandled EPIPE.
+test('config defaultRun: an early-exiting child with unread stdin settles, no EPIPE crash', async () => {
+  const { defaultRun } = await import('./config.mjs')
+  for (let i = 0; i < 20; i++) assert.equal(await defaultRun('true', [], 'x'.repeat(1 << 20)), '')
+})

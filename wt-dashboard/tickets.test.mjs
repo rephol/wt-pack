@@ -156,15 +156,18 @@ test('server: unknown pane → 403 before body parsing, board unchanged', async 
   await writeFile(file, board)
   const port = 20000 + Math.floor(Math.random() * 20000)
   const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
-    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: 'ignore' })
+    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
-    const call = async (method, path, body) => {
-      for (let i = 0; ; i++) {
-        try {
-          return await fetch(`http://127.0.0.1:${port}${path}`, { method, body, headers: { 'x-herdr-pane': 'w999:p999', 'content-type': 'application/json' } })
-        } catch (e) { if (i > 50) throw e; await new Promise((r) => setTimeout(r, 100)) }
-      }
-    }
+    // Wait for the server's own "listening" line (WP-40): under a loaded `npm test` startup took > 5s, which a
+    // fixed connect-retry budget read as a failure. Exit or 30s without it is a real failure.
+    await new Promise((res, rej) => {
+      let out = '', err = ''
+      srv.stdout.on('data', (d) => { out += d; if (out.includes('api →')) res() })
+      srv.stderr.on('data', (d) => { err += d })
+      srv.on('exit', (c) => rej(new Error(`server exited (${c}) before listening: ${err.slice(-400)}`)))
+      setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
+    })
+    const call = (method, path, body) => fetch(`http://127.0.0.1:${port}${path}`, { method, body, headers: { 'x-herdr-pane': 'w999:p999', 'content-type': 'application/json' } })
     assert.equal((await call('PATCH', '/api/tickets/WP-1', '{"column":"done"}')).status, 403)
     assert.equal((await call('PATCH', '/api/tickets/WP-1', '{not json')).status, 403)
     assert.equal((await call('POST', '/api/tickets', '{"title":"t","project":"wt-pack"}')).status, 403)

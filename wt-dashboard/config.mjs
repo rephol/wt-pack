@@ -61,9 +61,12 @@ export function keychain(run = defaultRun) {
     del: (acct) => run('security', ['delete-generic-password', '-s', SERVICE, '-a', acct]).then(() => undefined, () => undefined),
   }
 }
-function defaultRun(cmd, args, input) {
+export function defaultRun(cmd, args, input) {
   return new Promise((resolve, reject) => {
     const p = execFile(cmd, args, { timeout: 10_000 }, (err, out) => (err ? reject(new Error(`${cmd} ${args[0]} failed (${err.code ?? 'error'})`)) : resolve(out)))
+    // A child that exits without reading stdin (a fast `security find-generic-password`) makes this write EPIPE;
+    // unhandled, that crashed the server at startup under load (WP-40). The result still comes from the callback.
+    p.stdin.on('error', () => {})
     p.stdin.end(input ?? '')
   })
 }
