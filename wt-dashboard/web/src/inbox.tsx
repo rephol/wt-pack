@@ -24,7 +24,7 @@ import { Delayed, LoadError, Rows } from './skeletons'
 export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
 const LABEL: Record<Kind, string> = {
   question: 'Question', 'mention-user': '@you', 'needs-you': 'Needs you', 'room-suggestion': 'Suggestion',
-  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage', 'room-created': 'New room',
+  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage', 'room-created': 'New room', memory: 'Memory', 'memory-proposal': 'Proposal',
 }
 
 export function useInbox() {
@@ -64,13 +64,14 @@ const HOVER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and
 const tip = (t: string) => (HOVER ? t : undefined) // no hover tooltips on touch: they stick open after a tap
 const COLOR: Record<Kind, string> = {
   question: 'var(--hd-red)', 'mention-user': 'var(--hd-red)', 'needs-you': 'var(--hd-red)', 'room-suggestion': 'var(--hd-blue)',
-  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)', usage: 'var(--hd-amber)', 'room-created': 'var(--hd-blue)',
+  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)', usage: 'var(--hd-amber)', 'room-created': 'var(--hd-blue)', memory: 'var(--hd-muted)', 'memory-proposal': 'var(--hd-blue)',
 }
 const sv = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
 const I = {
   check: <svg {...sv}><path d="M20 6 9 17l-5-5" /></svg>,
   checkAll: <svg {...sv}><path d="M18 6 7 17l-5-5M22 10l-7.5 7.5L13 16" /></svg>,
   x: <svg {...sv}><path d="M18 6 6 18M6 6l12 12" /></svg>,
+  undo: <svg {...sv}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>,
   plus: <svg {...sv}><path d="M12 5v14M5 12h14" /></svg>,
   trash: <svg {...sv}><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>,
   q: <svg {...sv}><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01" /></svg>,
@@ -81,7 +82,7 @@ const I = {
 }
 const ICON: Record<Kind, React.ReactNode> = {
   question: I.q, 'mention-user': I.at, 'needs-you': I.q, 'room-suggestion': I.bulb, 'agent-done': I.check,
-  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus,
+  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus, memory: I.bulb, 'memory-proposal': I.bulb,
 }
 
 function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void }) {
@@ -103,6 +104,12 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
     onSuccess: (r) => { refresh(); onClose(); location.hash = `rooms/${encodeURIComponent(r.slug)}` },
     onError: (e) => toast({ body: `Could not create the room: ${e}`, type: 'error' }),
   })
+  // wt-memory entries: Undo (forget) an agent's note, Accept/Reject a global proposal. The notice is cleared after.
+  const memory = useMutation({
+    mutationFn: async ({ id, op, ids }: { id: string; op: 'forget' | 'accept' | 'reject'; ids: string[] }) => { await api(`/api/memory/entries/${id}/${op}`, { method: 'POST' }); await post('clear')({ ids }); return op },
+    onSuccess: (op) => { refresh(); qc.invalidateQueries({ queryKey: ['memory'] }); toast({ body: op === 'forget' ? 'Forgotten' : op === 'accept' ? 'Added to global preferences' : 'Proposal rejected' }) },
+    onError: (e) => toast({ body: `Memory: ${e}`, type: 'error' }),
+  })
   const dismiss = useMutation({
     mutationFn: (ticket: string) => api('/api/rooms/dismiss', { method: 'POST', body: JSON.stringify({ ticket }) }),
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
@@ -113,7 +120,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const recent = collapseRepeats(shown.filter((it) => !isPinned(it))).slice(0, 150)
   const go = (it: InboxRow) => {
     if (it.anyUnread) read.mutate({ ids: it.ids })
-    if (it.kind === 'room-suggestion' && !it.resolvedAt) return
+    if ((it.kind === 'room-suggestion' || it.kind === 'memory-proposal') && !it.resolvedAt) return
     onClose()
     if (it.target.room) location.hash = `rooms/${encodeURIComponent(it.target.room)}`
     else if (it.target.agent) onOpenAgent(it.target.agent)
@@ -140,8 +147,11 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
           {it.kind === 'room-suggestion' && !it.resolvedAt && act('Create room', I.plus, () => createRoom.mutate(it.target.task!))}
           {it.kind === 'room-suggestion' && !it.resolvedAt && act('Dismiss suggestion', I.x, () => dismiss.mutate(it.target.task!))}
           {it.kind === 'room-created' && it.target.room && act('Archive room', I.x, () => archiveRoom.mutate({ slug: it.target.room!, ids: it.ids }))}
+          {it.kind === 'memory' && it.target.memory && act('Undo', I.undo, () => memory.mutate({ id: it.target.memory!, op: 'forget', ids: it.ids }))}
+          {it.kind === 'memory-proposal' && !it.resolvedAt && act('Accept', I.check, () => memory.mutate({ id: it.target.memory!, op: 'accept', ids: it.ids }))}
+          {it.kind === 'memory-proposal' && !it.resolvedAt && act('Reject', I.x, () => memory.mutate({ id: it.target.memory!, op: 'reject', ids: it.ids }))}
           {it.anyUnread && act('Mark read', I.check, () => read.mutate({ ids: it.ids }))}
-          {!(it.kind === 'room-suggestion' && !it.resolvedAt) && act('Clear', I.x, () => clear.mutate({ ids: it.ids }))}
+          {!((it.kind === 'room-suggestion' || it.kind === 'memory-proposal') && !it.resolvedAt) && act('Clear', I.x, () => clear.mutate({ ids: it.ids }))}
         </span>
       </span>
     </div>

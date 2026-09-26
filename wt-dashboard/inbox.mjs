@@ -5,8 +5,8 @@ import { readFile, appendFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created']
-export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion'])
+export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal']
+export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal'])
 
 // A transition (from server.mjs transitions()) → an inbox item draft.
 export function itemFromTransition(e) {
@@ -22,10 +22,12 @@ export function itemFromTransition(e) {
 }
 
 // Which unresolved actionable items no longer hold. `needs`: Set of target keys still needing the user
-// (agent keys and `room:<slug>` for room mentions); `suggested`: Set of ticket ids still suggested.
-export function toResolve(items, needs, suggested) {
+// (agent keys and `room:<slug>` for room mentions); `suggested`: Set of ticket ids still suggested;
+// `proposals`: Set of wt-memory ids still pending, or null when unknown (then none resolve).
+export function toResolve(items, needs, suggested, proposals = null) {
   return items.filter((it) => !it.resolvedAt && ACTIONABLE.has(it.kind) && (
-    it.kind === 'room-suggestion' ? !suggested.has(it.target.task)
+    it.kind === 'memory-proposal' ? proposals !== null && !proposals.has(it.target.memory)
+    : it.kind === 'room-suggestion' ? !suggested.has(it.target.task)
       : it.kind === 'mention-user' ? !needs.has(`room:${it.target.room}`)
         : !needs.has(it.target.agent)
   )).map((it) => it.id)

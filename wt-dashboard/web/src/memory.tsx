@@ -15,7 +15,8 @@ import { useRoles } from './roles'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
 type Memory = { dir: string; cli: string | null; plugin: { installed: boolean; enabled: boolean; version: string | null }
-  global: string; roles: Record<string, string>; projects: Record<string, string> }
+  global: string; roles: Record<string, string>; projects: Record<string, string>; entries: Entry[] }
+type Entry = { id: string; scope: 'global' | 'role' | 'project'; name: string | null; by: string; at: string; text: string; pending?: boolean }
 type AgentLite = { key: string; name: string; pool: string; project: string | null; tags?: Record<string, string> }
 type Tab = 'global' | 'roles' | 'projects'
 
@@ -33,6 +34,7 @@ export function MemorySection() {
         ? <Text size="sm">Claude Code plugin: installed{m.plugin.version ? ` (v${m.plugin.version})` : ''}, enabled.</Text>
         : <Banner status="warning" title={m.plugin.installed ? 'The wt-memory Claude Code plugin is disabled' : 'The wt-memory Claude Code plugin is not installed'}
             description="claude plugin marketplace add ~/Work/projects/wt-pack && claude plugin install wt-memory@wt-pack" />}
+      <Entries entries={m.entries ?? []} />
       <SegmentedControl label="Scope" value={tab} onChange={(v) => setTab(v as Tab)} size="sm">
         <SegmentedControlItem value="global" label="Global" />
         <SegmentedControlItem value="roles" label="Roles" />
@@ -42,6 +44,40 @@ export function MemorySection() {
       {tab === 'roles' && Object.entries(m.roles).map(([id, t]) => <Editor key={id} path={`roles/${id}`} label={`${byId(id).name} (${id})`} initial={t} />)}
       {tab === 'projects' && Object.entries(m.projects).map(([n, t]) => <Editor key={n} path={`projects/${n}`} label={n} initial={t} />)}
       <Preview />
+    </VStack>
+  )
+}
+
+// Agent-written entries (wt-memory remember) with author/date, and global proposals awaiting approval.
+function Entries({ entries }: { entries: Entry[] }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const op = useMutation({
+    mutationFn: ({ id, op }: { id: string; op: 'forget' | 'accept' | 'reject' }) => api(`/api/memory/entries/${id}/${op}`, { method: 'POST' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['memory'] }); qc.invalidateQueries({ queryKey: ['inbox'] }) },
+    onError: (e) => toast({ body: `Memory: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
+  const row = (e: Entry, acts: React.ReactNode) => (
+    <HStack key={e.id} justify="between" align="center" gap={2}>
+      <VStack gap={0}>
+        <Text size="sm">{e.text}</Text>
+        <Text type="supporting" size="sm">{`${e.pending ? 'global' : e.name ? `${e.scope} ${e.name}` : e.scope} · ${e.by} · ${e.at}`}</Text>
+      </VStack>
+      <HStack gap={1}>{acts}</HStack>
+    </HStack>
+  )
+  const pending = entries.filter((e) => e.pending)
+  const saved = entries.filter((e) => !e.pending)
+  return (
+    <VStack gap={2}>
+      {pending.length > 0 && <Text weight="semibold" size="sm">Proposed global preferences</Text>}
+      {pending.map((e) => row(e, <>
+        <Button label="Accept" size="sm" variant="primary" onClick={() => op.mutate({ id: e.id, op: 'accept' })} />
+        <Button label="Reject" size="sm" onClick={() => op.mutate({ id: e.id, op: 'reject' })} />
+      </>))}
+      <Text weight="semibold" size="sm">Remembered by agents</Text>
+      {!saved.length && <Text type="supporting" size="sm">None yet. Agents add entries with wt-memory remember.</Text>}
+      {saved.map((e) => row(e, <Button label="Remove" size="sm" variant="destructive" onClick={() => op.mutate({ id: e.id, op: 'forget' })} />))}
     </VStack>
   )
 }

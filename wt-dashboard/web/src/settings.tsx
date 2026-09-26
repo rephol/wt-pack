@@ -229,6 +229,7 @@ function NotificationsSection() {
   const LABELS: [Kind, string][] = [
     ['question', 'An agent asks a question'], ['mention-user', 'An agent @mentions you in a room'], ['room-suggestion', 'Room suggestions for tickets'],
     ['agent-done', 'Agent done'], ['agent-stalled', 'Agent stalled'], ['ci-failed', 'PR CI failing'], ['server', 'Server events'], ['usage', 'Claude usage at 80% / 95%'],
+    ['memory', 'An agent remembers a preference'], ['memory-proposal', 'An agent proposes a global preference'],
   ]
   return (
     <VStack gap={4}>

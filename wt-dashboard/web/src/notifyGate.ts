@@ -1,10 +1,10 @@
 // Pure gate for native notifications of inbox items: per-kind toggle, never for quiet (baseline) items,
 // suppressed while the user is looking at that agent, once per item key, ~1 per target per 30s.
-export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created'] as const
+export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal'] as const
 export type Kind = (typeof KINDS)[number]
 export interface InboxItem {
   id: string; ts: string; kind: Kind; key: string; title: string; body: string; read: boolean; resolvedAt: string | null; quiet?: boolean
-  target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null }
+  target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null; memory?: string }
 }
 export type KindPrefs = Record<Kind, boolean>
 export interface Prefs { inbox: KindPrefs; native: KindPrefs }
@@ -23,7 +23,7 @@ export function gate(e: InboxItem, s: { prefs: Prefs; focused: boolean; openKey:
   s.lastAt.set(rk, s.now)
   return true
 }
-export const ACTIONABLE_KINDS: Kind[] = ['question', 'mention-user', 'needs-you', 'room-suggestion']
+export const ACTIONABLE_KINDS: Kind[] = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'memory-proposal']
 
 // Repeats of the same non-actionable event (an agent "is done" three times) show as one row with a count.
 // The newest item stands for the group; `ids` carries every member so read/clear act on all of them.

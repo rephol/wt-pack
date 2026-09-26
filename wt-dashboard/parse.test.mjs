@@ -282,6 +282,10 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
   ]
   assert.deepEqual(I.toResolve(items, new Set(['m/p1', 'room:ops']), new Set(['UMK-1'])), [])
   assert.deepEqual(I.toResolve(items, new Set(), new Set()), ['1', '2', '3'])
+  const mp = [{ id: 'p', kind: 'memory-proposal', target: { memory: 'ab12cd' } }]
+  assert.deepEqual(I.toResolve(mp, new Set(), new Set()), []) // pending set unknown: keep
+  assert.deepEqual(I.toResolve(mp, new Set(), new Set(), new Set(['ab12cd'])), [])
+  assert.deepEqual(I.toResolve(mp, new Set(), new Set(), new Set()), ['p'])
   const { mkdtemp } = await import('node:fs/promises')
   const box = new I.Inbox((await mkdtemp((await import('node:os')).tmpdir() + '/inbox-')) + '/n.jsonl')
   assert.ok(await box.add({ kind: 'question', key: 'k', title: 't', body: '', target: { agent: 'a' } }))

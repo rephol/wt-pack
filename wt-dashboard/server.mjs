@@ -659,8 +659,32 @@ export function memoryFile(scope, name) {
   return null
 }
 const MEMORY_KEY = 'wt-memory@wt-pack'
+// Agent-written entries and pending global proposals, via the CLI (the one parser of the trailer format).
+const memoryEntries = async () => (MEMORY_BIN ? JSON.parse(await run(process.execPath, [MEMORY_BIN, 'list', '--json'], undefined, 5000)) : [])
+// Seen ids; null until the first scan, which is a baseline (no notices for what already existed).
+let memorySeen = null
+async function memoryNotices() {
+  const all = await memoryEntries()
+  if (memorySeen) for (const e of all) if (!memorySeen.has(e.id)) {
+    const where = e.name ? `${e.scope} ${e.name}` : e.scope
+    await inbox.add(e.pending
+      ? { kind: 'memory-proposal', key: `memory-proposal|${e.id}`, title: `${e.by} proposes a global preference`, body: e.text, target: { memory: e.id } }
+      : { kind: 'memory', key: `memory|${e.id}`, title: `${e.by} remembered (${where})`, body: e.text, target: { memory: e.id } })
+  }
+  memorySeen = new Set(all.map((e) => e.id))
+  return new Set(all.filter((e) => e.pending).map((e) => e.id))
+}
 async function memoryApi(req, res, url, parts) {
   if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
+  // POST /api/memory/entries/<id>/(forget|accept|reject)
+  if (req.method === 'POST' && parts[2] === 'entries' && /^[0-9a-f]{6}$/.test(parts[3] ?? '') && ['forget', 'accept', 'reject'].includes(parts[4])) {
+    if (!MEMORY_BIN) return send(res, 500, { error: 'wt-memory not found' })
+    try { await run(process.execPath, [MEMORY_BIN, parts[4], parts[3]], undefined, 5000) } catch (e) { return send(res, 404, { error: String(e.message).trim() }) }
+    await inbox.load()
+    await inbox.resolve(inbox.items.filter((it) => it.target?.memory === parts[3] && !it.resolvedAt).map((it) => it.id))
+    broadcastEvent('inbox', { changed: true })
+    return send(res, 200, { ok: true })
+  }
   if (parts[2] === 'preview' && req.method === 'GET') {
     const args = ['context']
     for (const k of ['role', 'project']) { const v = url.searchParams.get(k); if (v && MEMORY_NAME.test(v)) args.push(`--${k}`, v) }
@@ -679,6 +703,7 @@ async function memoryApi(req, res, url, parts) {
       dir: MEMORY, cli: MEMORY_BIN ?? null,
       plugin: { installed: !!installed, enabled: !!installed && enabled !== false, version: installed?.[0]?.version ?? null },
       global: (await readSafe(memoryFile('global'))) ?? '', roles: await texts('roles', roles), projects: await texts('projects', projects),
+      entries: await memoryEntries().catch(() => []),
     })
   }
   if (req.method === 'PUT') {
@@ -1080,7 +1105,7 @@ const inbox = new Inbox(join(DATA, 'notifications.jsonl'))
 const subs = new Set()
 let lastSnap = null
 const trayOfInbox = () => ({
-  needs: inbox.open().filter((it) => it.kind !== 'room-suggestion').map((it) => ({ key: it.target.agent ?? `room:${it.target.room}`, name: it.title, question: it.body })),
+  needs: inbox.open().filter((it) => it.kind !== 'room-suggestion').map((it) => ({ key: it.target.agent ?? (it.target.room ? `room:${it.target.room}` : `memory:${it.target.memory}`), name: it.title, question: it.body })),
   working: lastSnap ? [...lastSnap.agents.values()].filter((a) => a.state === 'working').map((a) => ({ key: a.key, name: a.name })) : [],
 })
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
@@ -1148,7 +1173,8 @@ async function tick() {
     const sugg = rooms.settings.ticketRooms === 'suggest' ? ticketSuggestions(o.tasks, rooms.index.map((r) => r.slug), rooms.settings) : []
     for (const x of sugg) await inbox.add({ kind: 'room-suggestion', key: `suggest|${x.ticket}`, title: `Room suggested: #${x.slug}`, body: `${x.title} — ${x.reason}`, target: { task: x.ticket, room: x.slug }, quiet: true })
     const needs = new Set([...snap.agents.values()].filter((a) => a.state === 'needs_you').map((a) => a.key))
-    const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket))))
+    const proposals = await memoryNotices().catch((e) => { console.error('memory:', e.message); return null })
+    const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket)), proposals))
     if (resolved) broadcastEvent('inbox', { changed: true })
     broadcastEvent('tray', trayOfInbox())
   } catch (e) { console.error('inbox:', e.message) }
