@@ -79,7 +79,7 @@ the server is down. No Claude API.
 Missing snapshot data means "unknown" and never fires.
 
 ## Units (in order; each stands alone)
-1. **`wt-dashboard/watchdog.mjs` + `watchdog.test.mjs`** (pure): `CHECKS`, `cleanWatchdogSettings`, `enteredAt`,
+1. **`skills/wt-dashboard/watchdog.mjs` + `watchdog.test.mjs`** (pure): `CHECKS`, `cleanWatchdogSettings`, `enteredAt`,
    `evaluate(snap, settings, now)`, `diffFindings(open, findings, now)`, `investigatePrompt(f)`. Fix the draft's
    held test to `dispatch.state === 'held'` and add a test for it. Add `watchdog.test.mjs` to `npm test`.
    Done when `node --test watchdog.test.mjs` passes (≥ 15 tests: one per check, settings, diff, held, keepStarts, inboxOps, investigatePrompt).
@@ -103,7 +103,7 @@ Missing snapshot data means "unknown" and never fires.
    with a `Switch` and a threshold `TextInput`, Save, Run now; open findings with since, and Investigate → worker /
    auditor buttons; recently resolved list) mounted in `settings.tsx:182`. No native dialogs.
    Done when `npx tsc --noEmit -p .` and web tests pass, and agent-browser screenshots at 1440 and 390 show the panel.
-4. **Probe**: `wt-dashboard/scripts/watchdog-probe.sh` (curl `-sf -m 5 http://127.0.0.1:7777/api/health`; state
+4. **Probe**: `skills/wt-dashboard/scripts/watchdog-probe.sh` (curl `-sf -m 5 http://127.0.0.1:7777/api/health`; state
    file `~/.cache/wt-dashboard/probe-down`; `osascript -e 'display notification …'` on up→down only, and one
    "back up" note on down→up). `service.mjs`: `PROBE_LABEL = 'id.local.wtdashboard.watchdog'`, `probePlist()`
    (`StartInterval` 120, `RunAtLoad`, no KeepAlive), `loaded(label)`, `install` also installs the probe, new
