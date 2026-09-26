@@ -57,3 +57,6 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 [data-msg-meta] [data-copy] svg { width: 16px; height: 16px }
 /* Tool-call group rows: a little air above and below (message spacing itself comes from the list's density). */
 [data-agent-chat] [data-tools] { padding-block: 4px }
+
+/* Desktop agent table: scroll sideways inside its container instead of clipping; actions column stays pinned right. */
+.agent-table table { min-width: var(--agent-min); }

@@ -54,6 +54,9 @@ import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
 import { Grid } from '@astryxdesign/core/Grid'
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
 import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { Popover } from '@astryxdesign/core/Popover'
+import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden'
 import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
@@ -917,6 +920,56 @@ const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
 }
 const shortPath = (p: string | null) => (p ? p.split('/').filter(Boolean).at(-1) ?? p : null)
 
+// Desktop agent table columns. Agent (first) and actions (last, sticky) are fixed; these are configurable.
+type AgentCol = { id: string; label: string; width?: number; sort?: AgentSort; hidden?: boolean }
+const AGENT_COLS: AgentCol[] = [
+  { id: 'task', label: 'Task' },
+  { id: 'status', label: 'Status', width: 130, sort: 'attention' },
+  { id: 'active', label: 'Active', width: 80, sort: 'activity' },
+  { id: 'machine', label: 'Machine', width: 120 },
+  { id: 'branch', label: 'Branch', width: 160 },
+  { id: 'project', label: 'Project', width: 120, hidden: true },
+  { id: 'role', label: 'Role', width: 110, hidden: true },
+  { id: 'context', label: 'Context', width: 110, hidden: true },
+]
+type ColConfig = { order: string[]; hidden: string[] }
+const DEFAULT_COLS: ColConfig = { order: AGENT_COLS.map((c) => c.id), hidden: AGENT_COLS.filter((c) => c.hidden).map((c) => c.id) }
+const loadCols = (): ColConfig => {
+  try {
+    const v = JSON.parse(localStorage.getItem('agentCols') ?? 'null') as ColConfig | null
+    if (!v || !Array.isArray(v.order) || !Array.isArray(v.hidden)) return DEFAULT_COLS
+    const known = DEFAULT_COLS.order
+    return { order: [...v.order.filter((id) => known.includes(id)), ...known.filter((id) => !v.order.includes(id))], hidden: v.hidden }
+  } catch { return DEFAULT_COLS }
+}
+const TASK_MIN = 260, AGENT_W = 220, ACT_W = 48
+const stickyEnd = { position: 'sticky', right: 0, zIndex: 1, width: ACT_W, minWidth: ACT_W, maxWidth: ACT_W, background: 'var(--color-background-surface, Canvas)' } as const
+
+function ColumnsControl({ cols, setCols }: { cols: ColConfig; setCols: (c: ColConfig) => void }) {
+  const move = (i: number, d: number) => { const o = [...cols.order]; [o[i], o[i + d]] = [o[i + d], o[i]]; setCols({ ...cols, order: o }) }
+  return (
+    <Popover label="Columns" placement="below" alignment="end" content={
+      <VStack gap={1} style={{ padding: 8, minWidth: 220 }}>
+        {cols.order.map((id, i) => { const c = AGENT_COLS.find((x) => x.id === id)!
+          return (
+            <HStack key={id} gap={1} align="center">
+              <div style={{ flex: 1 }}>
+                <CheckboxInput label={c.label} value={!cols.hidden.includes(id)}
+                  onChange={(on) => setCols({ ...cols, hidden: on ? cols.hidden.filter((x) => x !== id) : [...cols.hidden, id] })} />
+              </div>
+              <IconButton label={`Move ${c.label} up`} icon={<span aria-hidden>↑</span>} variant="ghost" size="sm" isDisabled={i === 0} onClick={() => move(i, -1)} />
+              <IconButton label={`Move ${c.label} down`} icon={<span aria-hidden>↓</span>} variant="ghost" size="sm" isDisabled={i === cols.order.length - 1} onClick={() => move(i, 1)} />
+            </HStack>
+          )
+        })}
+        <Button label="Reset" variant="ghost" size="sm" onClick={() => setCols(DEFAULT_COLS)} />
+      </VStack>
+    }>
+      <Button label="Columns" variant="secondary" size="sm" />
+    </Popover>
+  )
+}
+
 function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & { allProjects: boolean }; onOpen: (p: string) => void; onOpenFull: (p: string) => void; selected: string | null }) {
   const [filter, setFilter] = useState('all')
   const { roles } = useRoles()
@@ -934,6 +987,11 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
     try { localStorage.setItem('agentGroupsCollapsed', JSON.stringify(next)) } catch { /* private mode */ }
   }
   const phone = useNarrow('(max-width: 639px)')
+  const [cols, setColsState] = useState<ColConfig>(loadCols)
+  const setCols = (c: ColConfig) => { setColsState(c); try { localStorage.setItem('agentCols', JSON.stringify(c)) } catch { /* private mode */ } }
+  const shown = cols.order.filter((id) => !cols.hidden.includes(id)).map((id) => AGENT_COLS.find((c) => c.id === id)!)
+  const tableMin = AGENT_W + ACT_W + shown.reduce((n, c) => n + (c.width ?? TASK_MIN), 0)
+  const roleTitle = (id: string) => roles.find((r) => r.id === id)?.name ?? id
   const taskOf = (a: Agent) => data.tasks.find((t) => t.id === a.task)
   const sortHead = (label: string, v: AgentSort) => (
     <button type="button" onClick={() => setSort(v)} aria-pressed={sort === v} style={{ all: 'unset', cursor: 'pointer', fontWeight: 600 }}>{`${label}${sort === v ? ' ▾' : ''}`}</button>
@@ -966,6 +1024,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
         <SegmentedControlItem value="activity" label="Last activity" />
         <SegmentedControlItem value="name" label="Name" />
       </SegmentedControl>
+      {!phone && <span style={{ marginInlineStart: 'auto' }}><ColumnsControl cols={cols} setCols={setCols} /></span>}
       </HStack>
       {[...roles, OTHER].map((role) => { const key = role.id, title = plural(role)
         const pool = data.agents.filter((a) => a.pool === key)
@@ -999,19 +1058,19 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 })}
               </VStack>
             ) : (
+              <div className="agent-table" style={{ ['--agent-min' as string]: `${tableMin}px` }}>
               <Table density="compact" hasHover textOverflow="truncate">
                 <TableHeader>
                   <TableRow isHeaderRow>
-                    <TableHeaderCell style={{ width: 230, minWidth: 230, maxWidth: 230 }}>{sortHead('Agent', 'name')}</TableHeaderCell>
-                    <TableHeaderCell style={{ width: 130, minWidth: 130, maxWidth: 130 }}>Machine</TableHeaderCell>
-                    <TableHeaderCell style={{ width: 130, minWidth: 130, maxWidth: 130 }}>{sortHead('Status', 'attention')}</TableHeaderCell>
-                    <TableHeaderCell style={{ width: 80, minWidth: 80, maxWidth: 80 }}>{sortHead('Active', 'activity')}</TableHeaderCell>
-                    {data.allProjects && <TableHeaderCell style={{ width: 120, minWidth: 120, maxWidth: 120 }}>Project</TableHeaderCell>}
-                    <TableHeaderCell style={{ minWidth: 220 }}>Task</TableHeaderCell>
-                    <TableHeaderCell style={{ width: 160, minWidth: 160, maxWidth: 160 }}>
-                      <Tooltip content="Worktree/PR linking is local-only: remote cwd paths differ"><Text weight="semibold">Branch</Text></Tooltip>
-                    </TableHeaderCell>
-                    <TableHeaderCell style={{ width: 110, minWidth: 110, maxWidth: 110 }}>Context</TableHeaderCell>
+                    <TableHeaderCell style={{ width: AGENT_W, minWidth: AGENT_W, maxWidth: AGENT_W }}>{sortHead('Agent', 'name')}</TableHeaderCell>
+                    {shown.map((c) => (
+                      <TableHeaderCell key={c.id} style={c.width ? { width: c.width, minWidth: c.width, maxWidth: c.width } : { minWidth: TASK_MIN }}>
+                        {c.sort ? sortHead(c.label, c.sort) : c.id === 'branch'
+                          ? <Tooltip content="Worktree/PR linking is local-only: remote cwd paths differ"><Text weight="semibold">Branch</Text></Tooltip>
+                          : c.label}
+                      </TableHeaderCell>
+                    ))}
+                    <TableHeaderCell style={stickyEnd}><VisuallyHidden>Actions</VisuallyHidden></TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1024,6 +1083,28 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                     const label = a.tags?.task
                     const linked = t?.url && (!label || label.startsWith(t.id)) ? t : null
                     const text = label ? (linked ? label.slice(linked.id.length).trim() : label) : t?.url ? t.title : summary
+                    const cell = (id: string) => {
+                      switch (id) {
+                        case 'task': return (
+                          <Tooltip content={label ?? summary}>
+                            <HStack gap={1} align="center">
+                              {linked && <Link href={linked.url ?? undefined} target="_blank">{linked.id}</Link>}
+                              <Text color={color} weight={label ? 'medium' : undefined} maxLines={1} hasTruncateTooltip={false}>{text}</Text>
+                            </HStack>
+                          </Tooltip>
+                        )
+                        case 'status': return <Text color={color} maxLines={1}>{`${needsYou(a) ? 'needs you' : a.status} · ${idleFor(a)}`}</Text>
+                        case 'active': return <Text type="supporting" maxLines={1}>{shortAgo(new Date(activityOf(a)).toISOString())}</Text>
+                        case 'machine': return <Text color={color} maxLines={1}>{a.machine.replace(/\.local$/, '')}</Text>
+                        case 'branch': return <Text type="code" color={color} maxLines={1}>{t?.branch ?? shortPath(a.cwd) ?? '—'}</Text>
+                        case 'project': return <Text type="supporting" maxLines={1}>{a.project ?? '—'}</Text>
+                        case 'role': return <Text type="supporting" maxLines={1}>{roleTitle(a.pool)}</Text>
+                        case 'context': return a.context ? (
+                          <ProgressBar label="Context" isLabelHidden hasValueLabel value={a.context.pct}
+                            variant={a.context.pct > 80 ? 'error' : a.context.pct > 60 ? 'warning' : 'neutral'} />
+                        ) : <Text type="supporting">—</Text>
+                      }
+                    }
                     return (
                       <TableRow key={a.key} onClick={() => onOpen(a.key)} aria-selected={selected === a.key}>
                         <TableCell>
@@ -1032,41 +1113,16 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                             <Button label={a.name} variant={selected === a.key ? "secondary" : "ghost"} size="sm" onClick={(e) => { e.stopPropagation(); onOpen(a.key) }} />
                             {needsYou(a) && <Badge variant="error" label="Needs you" />}
                             {a.background > 0 && <Badge label={`${a.background} background`} />}
-                            <span style={{ marginInlineStart: 'auto' }}>{menu(a)}</span>
                           </HStack>
                         </TableCell>
-                        <TableCell>
-                          <Text color={color} maxLines={1}>{a.local ? `${a.machine} (local)` : a.machine}</Text>
-                        </TableCell>
-                        <TableCell>
-                          <Text color={color} maxLines={1}>{`${needsYou(a) ? 'needs you' : a.status} · ${idleFor(a)}`}</Text>
-                        </TableCell>
-                        <TableCell><Text type="supporting" maxLines={1}>{shortAgo(new Date(activityOf(a)).toISOString())}</Text></TableCell>
-                        {data.allProjects && (
-                          <TableCell><Text type="supporting" maxLines={1}>{a.project ?? '—'}</Text></TableCell>
-                        )}
-                        <TableCell>
-                          <Tooltip content={a.recap ?? summary}>
-                            <HStack gap={1} align="center">
-                              {linked && <Link href={linked.url ?? undefined} target="_blank">{linked.id}</Link>}
-                              <Text color={color} weight={label ? 'medium' : undefined} maxLines={1} hasTruncateTooltip={false}>{text}</Text>
-                            </HStack>
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell>
-                          <Text type="code" color={color} maxLines={1}>{t?.branch ?? shortPath(a.cwd) ?? '—'}</Text>
-                        </TableCell>
-                        <TableCell>
-                          {a.context ? (
-                            <ProgressBar label="Context" isLabelHidden hasValueLabel value={a.context.pct}
-                              variant={a.context.pct > 80 ? 'error' : a.context.pct > 60 ? 'warning' : 'neutral'} />
-                          ) : <Text type="supporting">—</Text>}
-                        </TableCell>
+                        {shown.map((c) => <TableCell key={c.id}>{cell(c.id)}</TableCell>)}
+                        <TableCell style={stickyEnd}>{menu(a)}</TableCell>
                       </TableRow>
                     )
                   })}
                 </TableBody>
               </Table>
+              </div>
             )}
           </Collapsible>
         )
