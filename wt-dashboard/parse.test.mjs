@@ -704,3 +704,10 @@ test('config: WT_DASHBOARD_REPO, with UMKMALL_REPO still read from the env file'
   const both = tmpCfg('UMKMALL_REPO=/old/repo\nWT_DASHBOARD_REPO=/new/repo\n'); await both.cfg.load()
   assert.equal(both.cfg.get('WT_DASHBOARD_REPO'), '/new/repo')
 })
+
+test('config: WT_AGENTS_MCP is full|lean only, written to the env file', async () => {
+  const { cfg, f } = tmpCfg(''); await cfg.load()
+  await cfg.setValue('WT_AGENTS_MCP', 'lean')
+  assert.match(rfs(f, 'utf8'), /^WT_AGENTS_MCP=lean$/m)
+  await assert.rejects(cfg.setValue('WT_AGENTS_MCP', 'x'), (e) => e.status === 400)
+})

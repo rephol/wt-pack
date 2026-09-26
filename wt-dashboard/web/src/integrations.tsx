@@ -12,6 +12,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { useToast } from '@astryxdesign/core/Toast'
+import { Switch } from '@astryxdesign/core/Switch'
 import { api } from './rooms'
 import { useServerControl } from './status'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
@@ -52,6 +53,7 @@ export function IntegrationsSection() {
       <ListEditor it={by.WT_DASHBOARD_PROJECTS} put={put} placeholder="/Users/me/Work/projects/repo" hint="Repo paths offered in New agent. Each must be a git repository." check />
       <HostsEditor it={by.WT_DASHBOARD_ALLOWED_HOSTS} loopback={q.data.loopback} put={put} />
       <RepoEditor it={by.WT_DASHBOARD_REPO} app={q.data.app} put={put} />
+      <LeanMcp it={by.WT_AGENTS_MCP} put={put} />
     </VStack>
   )
 }
@@ -155,5 +157,17 @@ function RepoEditor({ it, app, put }: { it: Item; app: boolean; put: (k: string,
           : <Text size="sm">Takes effect after a restart: stop the server and run <code>npm start</code> in ~/.claude/skills/wt-dashboard.</Text>)}
       </VStack>
     </Field>
+  )
+}
+
+// WT_AGENTS_MCP: lean = each new agent gets only its role's MCP servers (+ Jev's picks at handoff); off = claude's full set.
+function LeanMcp({ it, put }: { it: Item; put: (k: string, v: unknown) => Promise<boolean> }) {
+  if (!it || 'set' in it) return null
+  return (
+    <VStack gap={2}>
+      <Switch label="Lean MCP for new agents" value={it.value === 'lean'} isDisabled={it.overridden} onChange={(on: boolean) => put(it.key, on ? 'lean' : 'full')}
+        description="On: new agents start only their role's MCP servers (plus Jev's picks at handoff), saving a node process and memory per server per agent. Off: the full normal set." />
+      <Source it={it} />
+    </VStack>
   )
 }

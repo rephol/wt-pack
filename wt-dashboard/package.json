@@ -6,7 +6,7 @@
     "dev": "trap 'kill 0' EXIT; node server.mjs & npm --prefix web run dev",
     "build": "npm --prefix web run build",
     "start": "node server.mjs",
-    "test": "node --test parse.test.mjs unfurl.test.mjs roles.test.mjs ../wt-memory/scripts/wt-memory.test.mjs && node --experimental-strip-types --test web/src/*.test.ts",
+    "test": "node --test parse.test.mjs unfurl.test.mjs roles.test.mjs ../wt-memory/scripts/wt-memory.test.mjs ../wt-agents/scripts/mcp.test.mjs && node --experimental-strip-types --test web/src/*.test.ts",
     "app:dev": "npm run build && npm --prefix app run sidecar && . ~/.cargo/env && npm --prefix app run tauri dev",
     "app:build": "if pgrep -qf 'wt-dashboard.app/Contents/MacOS/wt-dashboard'; then echo 'wt-dashboard is running: quit it (tray > Quit) before rebuilding the .app' >&2; exit 1; fi; npm run build && npm --prefix app run sidecar && . ~/.cargo/env && npm --prefix app run tauri build",
     "service:install": "node scripts/service.mjs install",

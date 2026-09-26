@@ -15,6 +15,8 @@ export const KEYS = {
   WT_DASHBOARD_PROJECTS: { list: ':', legacy: 'HERDR_DASH_PROJECTS', label: 'Extra projects' },
   WT_DASHBOARD_ALLOWED_HOSTS: { list: ',', legacy: 'HERDR_DASH_ALLOWED_HOSTS', label: 'Allowed hosts', loopbackOnly: true },
   WT_DASHBOARD_REPO: { legacy: 'UMKMALL_REPO', label: 'Default repo', restart: true },
+  // Read by the shell scripts too (wt-shared/scripts/mcp-mode.sh): lean | full (default).
+  WT_AGENTS_MCP: { oneOf: ['full', 'lean'], label: 'Lean agent MCP' },
 }
 const SERVICE = 'wt-dashboard'
 const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/
@@ -131,6 +133,9 @@ export class Config {
         if (items.some((p) => !p.startsWith('/') || p.includes(':') || /[\n"]/.test(p))) throw Object.assign(new Error('absolute paths only'), { status: 400 })
         s = items.join(':')
       }
+    } else if (d.oneOf) {
+      if (v !== '' && !d.oneOf.includes(v)) throw Object.assign(new Error(`one of: ${d.oneOf.join(', ')}`), { status: 400 })
+      s = v
     } else {
       if (typeof v !== 'string' || (v && (!v.startsWith('/') || /[\n"]/.test(v)))) throw Object.assign(new Error('an absolute path'), { status: 400 })
       s = v.trim()
