@@ -524,7 +524,7 @@ export default function App() {
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} />}
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
-        {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} />}
+        {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setProject} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
