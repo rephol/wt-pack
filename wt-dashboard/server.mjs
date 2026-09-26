@@ -1697,6 +1697,7 @@ export const hasSession = (cookieHeader, token = SESSION) =>
 export function needsSession(method, path, headers) {
   if (method === 'GET' || method === 'HEAD' || !path.startsWith('/api/')) return false
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/rooms\/[^/]+\/messages$/.test(path)) return false // agent post
+  if (headers['x-herdr-pane'] && method === 'DELETE' && /^\/api\/rooms\/tmp-[^/]+$/.test(path)) return false // agent `room delete` (agentMayDelete checks the owner)
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   return true

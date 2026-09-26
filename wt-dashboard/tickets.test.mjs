@@ -135,6 +135,8 @@ test('needsSession: pane exempts ticket POST/PATCH only', async () => {
   assert.equal(needsSession('POST', '/api/tickets/WP-1/claim', pane), false)
   assert.equal(needsSession('PATCH', '/api/tickets/WP-1', {}), true)
   assert.equal(needsSession('DELETE', '/api/tickets/WP-1', pane), true)
+  assert.equal(needsSession('DELETE', '/api/rooms/tmp-wp-42-w', pane), false) // WP-42; owner checked by agentMayDelete
+  assert.equal(needsSession('DELETE', '/api/rooms/wt-pack', pane), true)
 })
 
 test('list never creates a board', async () => {
