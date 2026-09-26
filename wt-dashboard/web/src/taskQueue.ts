@@ -6,7 +6,7 @@ export interface QTask {
   url: string | null
   state: string
   agent: { key: string; id: string | null; name: string; machine: string | null } | null
-  responder?: { key: string; name: string } | null
+  responder?: { key: string; name: string; taskState?: string | null } | null
   project: string | null
   question: string | null
   plan: string | null
@@ -25,6 +25,9 @@ export const SECTIONS = [
   { key: 'shipped', label: 'Recently shipped' },
 ] as const
 export type SectionKey = (typeof SECTIONS)[number]['key']
+
+// wt-babysit labels its own pane task_state 'babysitting PR #N' while it watches.
+export const isBabysitting = (t: QTask) => /^babysitting\b/i.test(t.responder?.taskState ?? '')
 
 const WEEK = 7 * 24 * 3600_000
 

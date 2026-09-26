@@ -125,7 +125,7 @@ interface Task extends Record<string, unknown> {
   worktree?: string | null
   linearState?: string | null
   mine?: boolean
-  responder?: { key: string; name: string } | null
+  responder?: { key: string; name: string; taskState?: string | null } | null
   roomNeed?: string
 }
 interface Overview {

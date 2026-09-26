@@ -1000,7 +1000,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       state,
       agent: agent ? { key: agent.key, id: agent.id, name: agent.name, machine: agent.machine } : null,
       // Who answers the ticket's room: the worker, else the planner.
-      responder: (worker ?? planner) ? { key: (worker ?? planner).key, name: (worker ?? planner).name } : null,
+      responder: (worker ?? planner) ? { key: (worker ?? planner).key, name: (worker ?? planner).name, taskState: (worker ?? planner).tags?.task_state ?? null } : null,
       project: agent?.project ?? (issue ? PROJECT_BY_TEAM[id.split('-')[0]] ?? id.split('-')[0].toLowerCase() : REPO_PROJECT),
       question: asker?.question ?? null,
       branch: wt?.branch ?? pr?.branch ?? null,

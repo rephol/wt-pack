@@ -16,7 +16,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { api } from './rooms'
-import { sections, type QTask } from './taskQueue'
+import { isBabysitting, sections, type QTask } from './taskQueue'
 
 const post = (url: string, body: object) => api(url, { method: 'POST', body: JSON.stringify(body) })
 // Agent keys are `<machine>/<pane>`.
@@ -47,14 +47,19 @@ export function TaskQueue({ tasks, onOpen, showProject, suggested }: { tasks: QT
 
 function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section: string; onOpen: (key: string) => void; showProject: boolean; suggested?: boolean }) {
   const qc = useQueryClient()
-  const act = useMutation({ mutationFn: (f: () => Promise<unknown>) => f(), onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }) })
+  // Optimistic: once an action is sent its button stays off until the next poll brings the task back
+  // (by then a pane label, e.g. task_state 'babysitting …', carries it); an error re-enables it.
+  const [sent, setSent] = useState(false)
+  useEffect(() => setSent(false), [t])
+  const act = useMutation({ mutationFn: (f: () => Promise<unknown>) => f(), onMutate: () => setSent(true), onError: () => setSent(false), onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }) })
   const [text, setText] = useState('')
   const [confirm, setConfirm] = useState(false)
   useEffect(() => { if (!confirm) return; const id = setTimeout(() => setConfirm(false), 5000); return () => clearTimeout(id) }, [confirm])
   const resp = t.responder
   const noResp = resp ? undefined : 'No live worker or planner on this task'
   const handoff = (mode: 'worker' | 'reassign') => act.mutate(() => post(`/api/tasks/${encodeURIComponent(t.id)}/handoff`, { mode }))
-  const busy = act.isPending
+  const busy = act.isPending || sent
+  const babysitting = isBabysitting(t)
 
   let actions: React.ReactNode = null
   if (section === 'needs_you') {
@@ -63,30 +68,30 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
       : <>
           <TextInput label="Answer" isLabelHidden size="sm" placeholder="Answer…" value={text} onChange={setText}
             onEnter={() => text.trim() && t.agent && act.mutate(() => promptKey(t.agent!.key, text).then(() => setText('')))} />
-          <Button label="Send" size="sm" variant="primary" isLoading={busy} isDisabled={!text.trim() || !t.agent}
+          <Button label="Send" size="sm" variant="primary" isLoading={act.isPending} isDisabled={act.isPending || !text.trim() || !t.agent}
             onClick={() => act.mutate(() => promptKey(t.agent!.key, text).then(() => setText('')))} />
         </>
   } else if (section === 'plan_ready') {
-    actions = <Button label="Hand to worker" size="sm" variant="primary" isLoading={busy} onClick={() => handoff('worker')} />
+    actions = <Button label="Hand to worker" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy} onClick={() => handoff('worker')} />
   } else if (section === 'in_review' && t.pr) {
     actions = <>
-      <Button label="Babysit" size="sm" variant="primary" isLoading={busy} isDisabled={!resp} tooltip={noResp}
+      <Button label="Babysit" size="sm" variant="primary" isLoading={act.isPending} isDisabled={!resp || busy || babysitting} tooltip={noResp ?? (babysitting ? resp?.taskState ?? undefined : undefined)}
         onClick={() => act.mutate(() => promptKey(resp!.key, `/wt-babysit ${t.pr!.url}`))} />
       <Link href={t.pr.url} target="_blank">Open PR</Link>
     </>
   } else if (section === 'stalled') {
     actions = <>
-      <Button label="Nudge" size="sm" variant="primary" isLoading={busy} isDisabled={!resp} tooltip={noResp}
+      <Button label="Nudge" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !resp} tooltip={noResp}
         onClick={() => act.mutate(() => promptKey(resp!.key, `You've been idle 20+ min on ${t.id}. Continue ${t.plan ?? t.title}; if blocked, say what you need.`))} />
       <Button label={confirm ? 'Confirm reassign' : 'Reassign'} size="sm" variant={confirm ? 'secondary' : 'ghost'} isDisabled={busy || !t.plan}
         tooltip={t.plan ? undefined : 'No plan to hand to a new worker'}
         onClick={() => { if (!confirm) return setConfirm(true); setConfirm(false); handoff('reassign') }} />
     </>
   } else if (section === 'up_next') {
-    actions = <Button label="Plan it" size="sm" variant="primary" isLoading={busy} isDisabled={!t.project}
+    actions = <Button label="Plan it" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !t.project}
       onClick={() => act.mutate(() => post('/api/agents/spawn', { kind: 'planner', project: t.project, prompt: `/wt-plan ${t.id}` }))} />
   } else if (section === 'shipped') {
-    actions = <Button label="Finish" size="sm" variant="primary" isLoading={busy} isDisabled={!resp} tooltip={noResp}
+    actions = <Button label="Finish" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !resp} tooltip={noResp}
       onClick={() => act.mutate(() => promptKey(resp!.key, '/wt-finish'))} />
   }
 
@@ -104,6 +109,7 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
           {t.pr && <Link href={t.pr.url} target="_blank">#{t.pr.number}</Link>}
           {section === 'in_review' && t.pr?.ci && <Badge label={`CI ${t.pr.ci}`} variant={t.pr.ci === 'pass' ? 'success' : t.pr.ci === 'fail' ? 'error' : 'warning'} />}
           {section === 'in_review' && t.pr?.unresolved ? <Badge label={`${t.pr.unresolved} unresolved`} variant="warning" /> : null}
+          {section === 'in_review' && (babysitting || (sent && !act.error)) && <Badge label="Babysitting" variant="info" />}
           {section === 'in_review' && t.pr?.behind && <Badge label="behind base" variant="warning" />}
           {suggested && <Link href="#rooms">room suggested</Link>}
           {t.updatedAt && <Text type="supporting" size="sm"><Timestamp value={t.updatedAt} format="relative" /></Text>}

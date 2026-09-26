@@ -688,3 +688,9 @@ test('deriveTasks: mine = assigned to the viewer, my PR, or local work', () => {
   const t = deriveTasks({ agents: [], worktrees: [], prs: [pr(1, 'UMK-1', false), pr(2, 'UMK-2', true), pr(3, 'UMK-3', false)], issues: [issue('UMK-1', true), issue('UMK-2', false), issue('UMK-3', false)] })
   assert.deepEqual(t.map((x) => [x.id, x.mine]), [['UMK-1', true], ['UMK-2', true], ['UMK-3', false]])
 })
+
+test('deriveTasks: responder carries its task_state label', () => {
+  const a = { key: 'm/p1', id: 'p1', name: 'w', machine: 'm', local: true, pool: 'worker', status: 'working', statusSince: Date.now(),
+    cwd: '/x', tags: { task: 'UMK-5 x', task_state: 'babysitting PR #7' }, asks: false, project: 'p' }
+  assert.equal(deriveTasks({ agents: [a], worktrees: [], prs: [], issues: [] })[0].responder.taskState, 'babysitting PR #7')
+})
