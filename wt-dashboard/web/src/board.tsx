@@ -1,10 +1,9 @@
 // The local ticket board on Tasks (#tasks/board). Desktop: 7 columns, native HTML5 drag and drop.
-// Phone (<768px): a column switcher and one list; cards move from the drawer. API: docs/plans/local-kanban-plan.md.
+// Phone (<768px): a column switcher and one list; cards move from the fullscreen drawer. API: docs/plans/local-kanban-plan.md.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
-import { BottomSheet } from '@astryxdesign/core/BottomSheet'
 import { Button } from '@astryxdesign/core/Button'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
@@ -124,7 +123,8 @@ function Drawer({ phone, project, ticket, isNew, blockAsk, onClose, onCreated }:
   const [comment, setComment] = useState('')
   useEffect(() => { if (ticket) setF(fromT(ticket)) }, [ticket?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const done = () => qc.invalidateQueries({ queryKey: ['tickets', project] })
-  const fields = () => ({ title: f.title.trim(), body: f.body, type: f.type || null, size: f.size || null, priority: Number(f.priority) })
+  // ponytail: unset type/size are omitted (the API rejects null), so the drawer cannot clear them once set.
+  const fields = () => ({ title: f.title.trim(), body: f.body, priority: Number(f.priority), ...(f.type && { type: f.type }), ...(f.size && { size: f.size }) })
   const save = useMutation({
     mutationFn: () => isNew
       ? send<Ticket>('/api/tickets', 'POST', { project, ...fields(), column: 'backlog' })
@@ -179,7 +179,8 @@ function Drawer({ phone, project, ticket, isNew, blockAsk, onClose, onCreated }:
     </VStack>
   )
   const label = isNew ? 'New ticket' : ticket?.id ?? 'Ticket'
+  // Phone: fullscreen Dialog, like Settings — a Selector popover does not open inside a BottomSheet.
   return phone
-    ? <BottomSheet label={label} isOpen onOpenChange={(o: boolean) => !o && onClose()} height="90dvh"><div className="hd-kb-sheet">{body}</div></BottomSheet>
+    ? <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} variant="fullscreen" aria-label={label}><div className="hd-kb-sheet">{body}</div></Dialog>
     : <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={640} aria-label={label}>{body}</Dialog>
 }

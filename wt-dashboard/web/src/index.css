@@ -123,5 +123,5 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-kb-meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .hd-kb-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .hd-kb-hist { display: grid; gap: 2px; padding-left: 8px; border-left: 2px solid rgba(128,128,128,.2); }
-.hd-kb-sheet { overflow-y: auto; height: 100%; padding-bottom: env(safe-area-inset-bottom); }
+.hd-kb-sheet { overflow-y: auto; height: 100dvh; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); box-sizing: border-box; }
 @media (max-width: 767px) { .hd-kb-fields { grid-template-columns: 1fr; } }
