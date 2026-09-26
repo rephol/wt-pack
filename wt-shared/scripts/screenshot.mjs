@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // screenshot.mjs — capture the current page of an agent-browser session straight over CDP.
-// ponytail: workaround for `agent-browser screenshot` hanging (0.38.1, WP-1); delete once upstream is fixed.
+// WP-1 root cause: on macOS, while the display sleeps (idle > displaysleep, or locked) headless Chrome produces no
+// frames, so every capture — agent-browser's or this one — waits forever. `caffeinate -u` wakes the display first.
 //   node screenshot.mjs --session <name> [--size 1440x900] [--full] [--url <url>] <out.png>
 // Navigation stays with agent-browser (`--url` runs `agent-browser open`); only the capture goes over CDP.
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 
 const args = process.argv.slice(2)
@@ -15,6 +16,8 @@ if (!session || !out || (size && !/^\d+x\d+$/.test(size))) {
   console.error('usage: screenshot.mjs --session <name> [--size WxH] [--full] [--url <url>] <out.png>')
   process.exit(2)
 }
+// Declare user activity for 30s so the display (and Chrome's frame clock) is on during the capture.
+if (process.platform === 'darwin') { spawn('caffeinate', ['-u', '-t', '30'], { stdio: 'ignore', detached: true }).unref(); await new Promise((r) => setTimeout(r, 1500)) }
 const ab = (...a) => execFileSync('agent-browser', ['--session', session, ...a], { encoding: 'utf8', timeout: 30_000 }).trim()
 if (url) ab('open', url)
 const root = ab('get', 'cdp-url').split('\n').at(-1)
