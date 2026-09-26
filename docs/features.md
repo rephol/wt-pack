@@ -54,8 +54,11 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 
 ### Auto
 
-- Per-board switch in the Board header, **default off**.
-- Next to it, a **minimum priority** picker: Urgent only, **High+ (default)**, Medium+, Low+, Any priority
+- Board header shows one **Automation** status button (e.g. `Auto Low+ · Dispatch on`, dot green when
+  either is on); it opens a popover (desktop) or bottom sheet (phone) holding Auto and Dispatch settings.
+  On phones the header is two rows: column picker, then Automation + New ticket.
+- Per-board **Auto** switch in that sheet, **default off**.
+- Under it, a **minimum priority** picker: Urgent only, **High+ (default)**, Medium+, Low+, Any priority
   (Any includes unprioritised). Picker and **Run now** show only while Auto is on.
 - After triage, a Backlog card meeting the minimum moves to Ready when Jev judges it ready to start:
   p ≥ 0.6 for an S/M worker-ready card, p ≥ 0.8 for L, unsized or planner-hinted cards. History reads
@@ -66,7 +69,7 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 
 ### Dispatch
 
-- Per-board switch next to Auto, **default off**.
+- Per-board switch in the Automation sheet, **default off**.
 - Every 30s (first tick 15s after start), per board, the most urgent unassigned Ready card is handed to a
   free agent via `wt-handoff --role`: size **L → planner** (wt-plan), anything else **→ worker** (wt-work →
   wt-ship → merge to main → push). The card moves to Planning / Building and is assigned. One card per board
@@ -75,9 +78,9 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
   project has no checkout. Handoff timeout 120s.
 - Failures retry after 2 min; the **3rd failure holds** the card. Card menu **Retry dispatch** (failed or
   held) or moving the card to Ready/Backlog clears it.
-- Badges: Dispatching…, Dispatch failed, Dispatch held, Stalled. The header shows `Dispatching N…`,
+- Badges: Dispatching…, Dispatch failed, Dispatch held, Stalled. The Automation sheet shows `Dispatching N…`,
   `waiting: …`, `last: … ago` or `idle`.
-- **Stall minutes** (default 45, range 1–1440) shows next to the switch while Dispatch is on.
+- **Flag stalled after N min idle** (default 45, range 1–1440) shows under the switch while Dispatch is on.
 
 ### Reconcile
 
