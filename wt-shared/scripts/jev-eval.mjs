@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Accuracy and latency of one Jev feature on its labelled fixture:
 //   node wt-shared/scripts/jev-eval.mjs <feature>
-// Fixture: wt-shared/jev-fixtures/<feature>.json = [{state, expect}]. The feature's evaluator module
+// Fixture: wt-shared/jev-fixtures/<feature, _ as ->.json = [{state, expect}]. The feature's evaluator module
 // (EVALUATORS below) exports questions(state) + decide(answers) — the same pair production uses.
 // Exit 3 without a key (same contract as the rest of typesafe.mjs).
 import { readFileSync } from 'node:fs'
@@ -11,8 +11,11 @@ import { judge, keyFor, NO_KEY } from './typesafe.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const pack = join(here, '..', '..')
-// feature → evaluator module, relative to the pack root. Each feature unit adds its line.
-export const EVALUATORS = {}
+// feature → 'module#export' relative to the pack root; the export is {questions(state), decide(answers)}.
+// Each feature unit adds its line.
+export const EVALUATORS = {
+  room_resolve: 'wt-dashboard/rooms.mjs#roomResolve',
+}
 
 const feature = process.argv[2]
 if (!feature || !EVALUATORS[feature]) {
@@ -21,8 +24,9 @@ if (!feature || !EVALUATORS[feature]) {
 }
 const key = keyFor()
 if (!key) { console.error('no TYPESAFE_API_KEY'); process.exit(NO_KEY) }
-const { questions, decide } = await import(pathToFileURL(join(pack, EVALUATORS[feature])).href)
-const cases = JSON.parse(readFileSync(join(here, '..', 'jev-fixtures', `${feature}.json`), 'utf8'))
+const [mod, name] = EVALUATORS[feature].split('#')
+const { questions, decide } = (await import(pathToFileURL(join(pack, mod)).href))[name]
+const cases = JSON.parse(readFileSync(join(here, '..', 'jev-fixtures', `${feature.replaceAll('_', '-')}.json`), 'utf8'))
 const ms = [], wrong = []
 let right = 0, failed = 0
 for (const [i, c] of cases.entries()) {

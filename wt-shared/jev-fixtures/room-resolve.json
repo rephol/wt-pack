@@ -1,0 +1,14 @@
+[
+  {"state": {"request": "deploy web to staging please", "reply": "@user done — web is on staging (build 4f2a). Anything else?"}, "expect": false},
+  {"state": {"request": "deploy web to staging please", "reply": "@user which branch should I deploy, main or the release branch"}, "expect": true},
+  {"state": {"request": "can you check why CI failed on PR 212", "reply": "@user CI failed on a flaky e2e test (checkout.spec). Re-ran it, green now."}, "expect": false},
+  {"state": {"request": "can you check why CI failed on PR 212", "reply": "@user it's the lockfile. I can regenerate it but that bumps 14 packages — ok to go ahead"}, "expect": true},
+  {"state": {"request": "stop the worker on UMK-521", "reply": "@user stopped. Worktree kept in case you want to resume."}, "expect": false},
+  {"state": {"request": "what's left on the inbox grouping?", "reply": "@user nothing — grouping and filter scrolling are both shipped (0bfe567)."}, "expect": false},
+  {"state": {"request": "merge the plan when review passes", "reply": "@user review found two blocking issues in U4; I need you to choose between polling and webhooks before I continue"}, "expect": true},
+  {"state": {"request": "rename the room to wt-pack", "reply": "@user renamed. Want me to archive the old one too?"}, "expect": true},
+  {"state": {"request": "add a Settings switch for lean MCP", "reply": "@user added: Settings › Integrations › Lean MCP for new agents, default off. Commit 367f50d."}, "expect": false},
+  {"state": {"request": "how many agents are idle", "reply": "@user 5 idle, 2 working."}, "expect": false},
+  {"state": {"request": "set up the Railway MCP", "reply": "@user I need the Railway token — paste it in Settings or tell me where it lives"}, "expect": true},
+  {"state": {"request": "run the full test suite", "reply": "@user all green: 79 server tests, 33 web tests. Let me know if you want the report."}, "expect": false}
+]
