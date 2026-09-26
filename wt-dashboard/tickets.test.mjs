@@ -173,6 +173,7 @@ test('jevApply / jevUndo', async () => {
   assert.equal(u.type, 'feature')
   assert.deepEqual(Object.keys(u.jev.applied), ['priority'])
   await assert.rejects(t.jevUndo(a.id, 'type', user), /no Jev suggestion/)
+  await assert.rejects(t.jevUndo(a.id, 'constructor', user), /no Jev suggestion/)
   const p = await t.patch(a.id, { priority: 3, jev: { applied: {} } }, user) // manual edit drops the badge; jev in a body is ignored
   assert.deepEqual([p.priority, p.jev.applied, p.jev.dupes], [3, {}, ['WP-9']])
   const b = await t.create('wt-pack', { title: 'B', type: 'ux' }, user) // set by the creator: never in `empty`, never changed

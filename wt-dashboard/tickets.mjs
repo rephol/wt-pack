@@ -158,7 +158,7 @@ export class Tickets {
   }
   async jevUndo(id, field, author) {
     return this.mutate(id, (t, at) => {
-      const a = t.jev?.applied?.[field]
+      const a = Object.hasOwn(DEFAULTS, field) && Object.hasOwn(t.jev?.applied ?? {}, field) ? t.jev.applied[field] : null
       if (!a) throw err(400, `no Jev suggestion on ${field}`)
       t[field] = a.from
       delete t.jev.applied[field]
