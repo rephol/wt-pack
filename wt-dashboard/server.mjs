@@ -4,7 +4,7 @@ import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
-import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1679,7 +1679,7 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 // index.html itself can still read the cookie — real isolation would need a per-user OS boundary.
 const SESSION = (() => {
   const f = join(DATA_ROOT, 'session')
-  try { const t = readFileSync(f, 'utf8').trim(); if (/^[\w-]{32,}$/.test(t)) return t } catch { /* first start */ }
+  try { const t = readFileSync(f, 'utf8').trim(); if (/^[\w-]{32,}$/.test(t)) { chmodSync(f, 0o600); return t } } catch { /* first start */ }
   const t = randomUUID()
   try { mkdirSync(DATA_ROOT, { recursive: true }); writeFileSync(f, t, { mode: 0o600 }) } catch (e) { console.error('session file', e) }
   return t
