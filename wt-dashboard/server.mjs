@@ -377,16 +377,17 @@ async function syncTokens(agents) {
   if (backfilled) await roleStore.saveTags().catch((e) => console.error('agent-tags:', e.message))
 }
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
-// Remote agents rarely carry a herdr name and their title is a session topic, so derive <machine>-<cwd>-<pane>.
 export function remoteName(label, cwd, paneId) {
-  const head = slug(label), tail = slug(String(paneId).split(':').pop()) || 'p'
+  const tail = slug(String(paneId).split(':').pop()) || 'p'
+  if (!label) return `${slug(String(cwd ?? '').split('/').filter(Boolean).pop() ?? '').slice(0, 31 - tail.length).replace(/-$/, '') || 'agent'}-${tail}`
+  const head = slug(label)
   const mid = slug(String(cwd ?? '').split('/').filter(Boolean).pop() ?? '') || 'agent'
   const room = 32 - head.length - tail.length - 2 // truncate the cwd part first so machine and pane stay distinct
   return room > 0 ? `${head}-${mid.slice(0, room).replace(/-$/, '')}-${tail}` : `${head.slice(0, 32 - tail.length - 1)}-${tail}`
 }
 export function agentName(m, a, cwd) {
-  if (m.local) return a.name ?? a.terminal_title_stripped ?? a.pane_id
-  return a.name || remoteName(m.label, cwd, a.pane_id)
+  // An unnamed agent's title is a session topic, never a name: local → <cwd>-<pane>, remote → <machine>-<cwd>-<pane>.
+  return a.name || remoteName(m.local ? '' : m.label, cwd, a.pane_id)
 }
 
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.

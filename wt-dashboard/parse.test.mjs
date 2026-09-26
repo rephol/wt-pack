@@ -924,7 +924,7 @@ test('stripSelfMention: an agent opening with @itself loses the prefix (WP-13)',
   assert.equal(stripSelfMention('@wp-worker please rebase', 'wp'), '@wp-worker please rebase') // a longer name is someone else
 })
 
-test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; local unchanged', () => {
+test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed local → <cwd>-<pane>', () => {
   assert.equal(remoteName('code-reviewer', '/work/projects/umkmall', 'w5:p8'), 'code-reviewer-umkmall-p8')
   assert.equal(remoteName('Herdr Box', '/x/My Repo', 'w1:p2'), 'herdr-box-my-repo-p2')
   assert.equal(remoteName('box', undefined, 'w1:p3'), 'box-agent-p3')
@@ -934,6 +934,7 @@ test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; local unc
   const rem = { local: false, label: 'code-reviewer' }
   assert.equal(agentName(rem, { name: 'pinned', pane_id: 'w5:p8' }, '/w/u'), 'pinned')
   assert.equal(agentName(rem, { terminal_title_stripped: 'Some Topic', pane_id: 'w5:p8' }, '/w/u'), 'code-reviewer-u-p8')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'T', pane_id: 'w1:p1' }, '/w'), 'T')
-  assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, '/w'), 'w1:p1')
+  assert.equal(agentName({ local: true }, { name: 'wt-pack-worker-03', pane_id: 'w1:p1' }, '/w'), 'wt-pack-worker-03')
+  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 'w1:p1' }, '/x/umkmall-product-ops'), 'umkmall-product-ops-p1')
+  assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, undefined), 'agent-p1')
 })
