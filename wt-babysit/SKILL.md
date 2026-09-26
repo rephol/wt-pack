@@ -124,6 +124,17 @@ branch — read the confidence before acting, and treat a split distribution as 
 **Exit 3 means no key: read every comment and every failure, as before.** Triage narrows attention; it never
 decides that a comment can go unanswered.
 
+**With classes** (`WT_JEV_BABYSIT_TRIAGE`, on by default; dashboard Settings › Integrations):
+
+```bash
+node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs triage comments.json --classes --json   # adds class, p
+```
+
+Per comment: `must_fix` → fix it and reply with the fix; `question` → answer it (change code only if the
+answer says so); `nit` → reply, and fix it when it is cheap and safe; `no_action` → a short acknowledgement
+is enough. **Every thread still gets a reply** — the class sets the kind of reply, never whether there is one.
+Exit 3 (switch off, no key, Jev unavailable) → read every comment, as above.
+
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
 `node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
