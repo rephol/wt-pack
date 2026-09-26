@@ -128,20 +128,22 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
       target = computeTarget(ev.clientX, ev.clientY, id)
       setDrag({ id, width: rect.width, height: rect.height, offsetX: startX - rect.left, offsetY: startY - rect.top, pointerX: ev.clientX, pointerY: ev.clientY, target })
     }
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
       teardownRef.current?.()
       if (started) { justDragged.current = true; setTimeout(() => { justDragged.current = false }) }
-      if (started && target) moveTo(id, target.column)
+      if (started && target && ev.type === 'pointerup') moveTo(id, target.column) // a cancelled pointer drops nothing
       setDrag(null)
     }
     teardownRef.current = () => {
       window.removeEventListener('pointermove', onMove, true)
       window.removeEventListener('pointerup', onUp, true)
+      window.removeEventListener('pointercancel', onUp, true)
       teardownRef.current = null
     }
     // Capture phase: something in the page stops pointerup from bubbling to window.
     window.addEventListener('pointermove', onMove, true)
     window.addEventListener('pointerup', onUp, true)
+    window.addEventListener('pointercancel', onUp, true)
   }
 
   // ponytail: the ghost shows where the pointer is; within a column the server still orders by priority, then id.
@@ -299,7 +301,10 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
       project, column: 'backlog', title: draft.title.trim(), body: draft.body, priority: Number(draft.priority),
       ...(draft.type && { type: draft.type }), ...(draft.size && { size: draft.size }),
     }),
-    onSuccess: (t) => { done(); if (t?.id) { setEditing(false); onCreated(t.id) } },
+    onSuccess: (t) => {
+      // Seed the cache so the new ticket opens at once instead of flashing "not found" until the refetch.
+      if (t?.id) qc.setQueryData<BoardT>(['tickets', project], (b) => (b ? { ...b, tickets: [...b.tickets, t] } : b))
+      done(); if (t?.id) { setEditing(false); onCreated(t.id) } },
   })
   const block = useMutation({ mutationFn: () => send(tUrl(ticket!.id), 'PATCH', { column: 'blocked', note: note.trim() }), onSuccess: () => { setNote(''); setBlockTo(false); done() } })
   const say = useMutation({ mutationFn: () => send(`${tUrl(ticket!.id)}/comments`, 'POST', { text: comment.trim() }), onSuccess: () => { setComment(''); done() } })
