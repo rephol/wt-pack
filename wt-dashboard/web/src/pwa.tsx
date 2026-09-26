@@ -80,7 +80,8 @@ export function UpdateBanner() {
   const changes = u.changes.map((c) => c.replace(/^wt-dashboard: /, ''))
   return (
     <Banner status="info" title="New version available" isDismissable onDismiss={dismiss}
-      description={changes.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{changes.map((c, i) => <li key={i}>{c}</li>)}</ul> : undefined}
+      description={changes.length ? <ul style={{ margin: 0, paddingLeft: 18, listStyle: 'disc', minWidth: 0 }}>{changes.slice(0, 5).map((c, i) =>
+        <li key={i} title={c} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c}</li>)}</ul> : undefined}
       endContent={<Button label="Reload" size="sm" variant="primary" onClick={() => location.reload()} />} />
   )
 }
