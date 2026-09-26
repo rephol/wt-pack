@@ -318,6 +318,13 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
   await box.clear({ all: true })
   const third = new I.Inbox((await import('node:path')).dirname(box.file)); await third.load()
   assert.equal(third.list().length, 0); assert.equal(third.items.length, 2) // kept in the DB, not shown
+  // a group's Clear all ({ids}) on a fresh, never-loaded Inbox (WP-44)
+  await box.add({ kind: 'agent-done', key: 'g1', title: 'g', body: '', target: { agent: 'b' } })
+  await box.add({ kind: 'agent-done', key: 'g2', title: 'g', body: '', target: { agent: 'b' } })
+  const fresh = new I.Inbox((await import('node:path')).dirname(box.file))
+  assert.equal(await fresh.clear({ ids: box.list().map((it) => it.id) }), 2)
+  const fourth = new I.Inbox((await import('node:path')).dirname(box.file)); await fourth.load()
+  assert.equal(fourth.list().length, 0)
 })
 
 test('rooms: a "/" message is a command for exactly one agent (mention, else responder), never broadcast', async () => {

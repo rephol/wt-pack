@@ -89,7 +89,8 @@ export class Inbox {
   // The tray/badge: unresolved actionable items.
   open() { return this.items.filter((it) => !it.resolvedAt && !it.clearedAt && ACTIONABLE.has(it.kind)) }
   // `which`: {ids} | {allRead: true} | {all: true}
-  clear(which) {
+  async clear(which) {
+    await this.load() // a fresh Inbox (no list/add yet) has items === null
     const live = this.items.filter((it) => !it.clearedAt)
     const ids = which.all ? live.map((it) => it.id) : which.allRead ? live.filter((it) => it.read).map((it) => it.id) : (which.ids ?? []).filter((x) => typeof x === 'string')
     return this.patch(ids, { clearedAt: new Date().toISOString(), read: true })
