@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { candidates, readyBatcher, shouldPromote, ticketTriage, ticketType, triageTicket } from './ticketJev.mjs'
+import { candidates, readyBatcher, readyToNotify, shouldPromote, ticketTriage, ticketType, triageTicket } from './ticketJev.mjs'
 
 const user = { name: 'Rep' }
 const answers = {
@@ -96,4 +96,11 @@ test('shouldPromote honours the board minimum priority (WP-46)', () => {
   assert.equal(shouldPromote(t(0), d, { minPriority: 4 }), null) // unprioritised stays unless 'any'
   assert.equal(shouldPromote(t(0), d, { minPriority: 0 }), 0.7)
   assert.equal(shouldPromote(t(1), d, { minPriority: 1 }), 0.7)
+})
+
+test('readyToNotify: skips tickets the prompted agent moved, assigned ones, and ones gone from Ready (WP-43)', () => {
+  const t = (id, author, extra = {}) => ({ id, column: 'ready', history: [{ kind: 'create', author: 'u', to: 'backlog' }, { kind: 'move', author, to: 'ready' }], ...extra })
+  const ts = [t('A', 'orch'), t('B', 'jev'), t('C', 'jev', { assignee: { name: 'w' } }), t('D', 'jev', { column: 'building' }), null,
+    { id: 'E', column: 'ready', history: [{ kind: 'create', author: 'orch', to: 'ready' }] }]
+  assert.deepEqual(readyToNotify(ts, 'orch').map((x) => x.id), ['B'])
 })

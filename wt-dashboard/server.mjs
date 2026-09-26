@@ -10,7 +10,7 @@ import { join, extname, normalize, basename, dirname, relative, isAbsolute } fro
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
-import { readyBatcher, triageTicket } from './ticketJev.mjs'
+import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
@@ -1704,6 +1704,8 @@ const readyNotes = readyBatcher(async (project, ts) => {
   if (!(await tickets.auto(project))) return
   const a = (await agents()).find((x) => x.pool === 'orchestrator' && x.project === project)
   if (!a) return
+  ts = readyToNotify(await Promise.all(ts.map((t) => tickets.get(t.id).catch(() => null))), a.name)
+  if (!ts.length) return
   const m = await machineBy(a.machine)
   if (!m) throw new Error(`machine ${a.machine} unavailable`)
   await herdrOn(m, 'agent', 'prompt', a.id, `[wt-dashboard] Ready on ${project}: ${ts.map((t) => `${t.id} ${t.title}`).join('; ')} — schedule from \`wt-ticket list --column ready\`.`)
