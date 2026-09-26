@@ -82,6 +82,25 @@ test('corrupt file is quarantined', async () => {
   assert.ok((await readdir(join(dir, 'tickets'))).some((f) => f.startsWith('wt-pack.json.corrupt-')))
 })
 
+test('a quarantined board keeps its key and id range', async () => {
+  const dir = await tmp()
+  await mkdir(join(dir, 'tickets'), { recursive: true })
+  await writeFile(join(dir, 'tickets', 'wt-pack.json'), '{"key": "WPK", "next": 8, "tickets": [{"id": "WPK-7"}, {"id": "WPK-12", trunc')
+  const t = new Tickets({ dir, log: () => {} })
+  assert.equal(await t.read('wt-pack'), null)
+  assert.equal((await t.create('wt-pack', { title: 'after' }, user)).id, 'WPK-13')
+})
+
+test('no-op patch keeps updated and history', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const a = await t.create('wt-pack', { title: 'x', priority: 1 }, user)
+  await new Promise((r) => setTimeout(r, 5))
+  const b = await t.patch(a.id, { title: 'x', priority: 1, column: 'backlog' }, user)
+  assert.equal(b.updated, a.updated)
+  assert.equal(b.history.length, 1)
+  assert.notEqual((await t.patch(a.id, { priority: 3 }, user)).updated, a.updated)
+})
+
 test('needsSession: pane exempts ticket POST/PATCH only', async () => {
   const { needsSession } = await import('./server.mjs')
   const pane = { 'x-herdr-pane': 'w1:p1' }

@@ -153,6 +153,7 @@ export class Tickets {
       if (i < 0) throw err(404, `no ticket ${id}`)
       const at = new Date().toISOString()
       const t = fn(structuredClone(b.tickets[i]), at)
+      if (JSON.stringify(t) === JSON.stringify(b.tickets[i])) return t // no-op: no write, no updated bump
       t.updated = at
       await this.save(project, { ...b, tickets: b.tickets.with(i, t) })
       return t
