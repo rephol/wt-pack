@@ -1659,6 +1659,7 @@ async function ticketsApi(req, res, url, parts) {
     if (parts[2] === 'keys') { const k = Object.values(await tickets.keys()); return text ? send(res, 200, k.join('\n') + (k.length ? '\n' : ''), 'text/plain') : send(res, 200, k) }
     if (parts[2]) { const t = await tickets.get(parts[2]); return text ? send(res, 200, ticketText(t), 'text/plain') : send(res, 200, t) }
     const out = await tickets.list(url.searchParams.get('project'), url.searchParams.get('column') || undefined)
+    if (url.searchParams.get('mine')) { const me = await roomAuthor(req); out.tickets = out.tickets.filter((t) => t.assignee?.name === me.name) }
     return text ? send(res, 200, out.tickets.map(ticketRow).join('\n') + (out.tickets.length ? '\n' : ''), 'text/plain') : send(res, 200, out)
   }
   // Every mutation names its author first: the user (session) or a verified local agent pane.
