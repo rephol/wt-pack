@@ -1194,7 +1194,7 @@ function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extra
     if (n) parts.push(`${n} attachment${n === 1 ? '' : 's'}`)
   } else if (meta?.kind === 'turn') {
     if (meta.model) parts.push(shortModel(meta.model)!)
-    if (meta.up || meta.down) parts.push(`↑${fmtTokens(meta.up)} ↓${fmtTokens(meta.down)}`)
+    if (meta.up || meta.down) parts.push(`↑${fmtTokens(meta.up)} (cache read ${fmtTokens(meta.cr)} · cache write ${fmtTokens(meta.cw)} · fresh ${fmtTokens(meta.fresh)}) ↓${fmtTokens(meta.down)}`)
     if (meta.ms) parts.push(fmtDur(meta.ms))
     if (meta.tools) parts.push(`${meta.tools} tool${meta.tools === 1 ? '' : 's'}`)
     if (meta.cost != null) parts.push(`~$${meta.cost < 0.01 ? meta.cost.toFixed(3) : meta.cost.toFixed(2)}`)

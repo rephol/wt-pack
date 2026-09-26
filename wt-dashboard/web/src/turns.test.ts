@@ -25,6 +25,7 @@ test('deriveMeta: groups by user turn, meta on the last assistant message, usage
   assert.equal(t.model, 'claude-opus-5-5')
   assert.equal(t.down, 80 + 900) // m1 counted once, at its last value
   assert.equal(t.up, 2 * 1010)
+  assert.deepEqual([t.cr, t.cw, t.fresh], [2000, 0, 20])
   assert.equal(t.ms, 60_000)
   assert.equal(t.tools, 1)
   assert.equal(t.cost, 0.02)

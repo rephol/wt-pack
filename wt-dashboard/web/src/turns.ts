@@ -4,7 +4,7 @@
 export interface Usage { mid: string; model?: string; in: number; out: number; cw: number; cr: number; cost: number | null; stop: string | null }
 export interface TMsg { id: string; role: string; text: string; ts: string; src?: string; images?: string[]; meta?: Usage; toolUseId?: string; tool?: { name: string } }
 export interface UserMeta { kind: 'user'; ts: string; src?: string; attachments: number }
-export interface TurnMeta { kind: 'turn'; ts: string; model?: string; up: number; down: number; ms: number; tools: number; cost: number | null; stop?: string }
+export interface TurnMeta { kind: 'turn'; ts: string; model?: string; up: number; cr: number; cw: number; fresh: number; down: number; ms: number; tools: number; cost: number | null; stop?: string }
 export type Meta = UserMeta | TurnMeta | { kind: 'plain'; ts: string }
 
 const INTERRUPT = /^\[Request interrupted/
@@ -28,6 +28,7 @@ export function deriveMeta(msgs: TMsg[]): Map<string, Meta> {
       out.set(lastA.id, {
         kind: 'turn', ts: lastA.ts, model, stop: stop ?? undefined,
         up: us.reduce((s, u) => s + u.in + u.cw + u.cr, 0), down: us.reduce((s, u) => s + u.out, 0),
+        cr: us.reduce((s, u) => s + u.cr, 0), cw: us.reduce((s, u) => s + u.cw, 0), fresh: us.reduce((s, u) => s + u.in, 0),
         ms: first?.role === 'user' ? ms(first.ts, end) : 0,
         tools: turn.filter((m) => m.role === 'tool' && m.tool?.name !== 'result').length,
         cost: priced.length ? priced.reduce((s, u) => s + u.cost!, 0) : null,
