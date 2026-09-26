@@ -72,3 +72,24 @@ test('global is a proposal until accepted', () => {
   assert.equal(r(['context', '--cwd', '/']), '## Global preferences\n\n- Answer in English')
   assert.equal(JSON.parse(r(['list', '--json'])).filter((e) => e.pending).length, 0)
 })
+test('MCP server: initialize, tools/list, remember, list, error', () => {
+  const h = mkdtempSync(join(tmpdir(), 'wt-memory-mcp-'))
+  const reqs = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'remember', arguments: { note: 'Use pnpm', project: 'demo' } } },
+    { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'list', arguments: {} } },
+    { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'forget', arguments: { id: 'zz' } } },
+  ]
+  const out = execFileSync(new URL('../mcp/server.mjs', import.meta.url).pathname, {
+    input: reqs.map((r) => JSON.stringify(r)).join('\n') + '\n', encoding: 'utf8',
+    env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: h },
+  }).trim().split('\n').map((l) => JSON.parse(l))
+  assert.deepEqual(out.map((m) => m.id), [1, 2, 3, 4, 5])
+  assert.equal(out[0].result.protocolVersion, '2025-06-18')
+  assert.deepEqual(out[1].result.tools.map((t) => t.name), ['remember', 'forget', 'list', 'context'])
+  assert.match(out[2].result.content[0].text, /^remembered \(project demo\)/)
+  assert.equal(JSON.parse(out[3].result.content[0].text)[0].text, 'Use pnpm')
+  assert.equal(out[4].result.isError, true)
+})

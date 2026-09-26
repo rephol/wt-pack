@@ -39,8 +39,25 @@ Accept / Reject. Settings › Memory lists agent entries (author, date, remove) 
 
 **Claude Code:** the `wt-memory` plugin (`claude-plugin/`, marketplace `wt-pack` at the repo root) injects
 `context` at SessionStart and, on UserPromptSubmit, re-injects it prefixed "Preferences updated:" only when its
-hash changed since the last injection for that session (state in `~/.cache/wt-memory/`). Other runtimes: run
-`wt-memory context` in whatever start hook they have.
+hash changed since the last injection for that session (state in `~/.cache/wt-memory/`). The plugin also
+registers the MCP server below, so Claude gets `remember`/`forget`/`list`/`context` tools.
+
+**MCP server** `mcp/server.mjs` (stdio, Node stdlib): tools `remember {note, scope?, role?, project?}`,
+`forget {id}`, `list {scope?}`, `context {role?, project?}` — each shells out to `scripts/wt-memory`
+(`$WT_MEMORY_BIN` overrides), inheriting the agent's env and cwd.
+
+**Codex CLI / Gemini CLI** — both run Claude-format `SessionStart` command hooks (stdin JSON with `cwd`,
+output `hookSpecificOutput.additionalContext`), so they reuse `claude-plugin/hooks/inject.mjs` as is.
+Add to your own configs (not done automatically):
+
+- Codex (`hooks` feature is stable/on), `~/.codex/hooks.json`:
+  `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"node ~/.claude/skills/wt-memory/claude-plugin/hooks/inject.mjs","timeout":5}]}]}}`
+  and MCP: `codex mcp add wt-memory -- node ~/.claude/skills/wt-memory/mcp/server.mjs`
+  (= `[mcp_servers.wt-memory]` `command = "node"`, `args = ["<abs path>/mcp/server.mjs"]` in `~/.codex/config.toml`).
+- Gemini, `~/.gemini/settings.json` (timeout in ms; use absolute paths):
+  `"hooks":{"SessionStart":[{"hooks":[{"name":"wt-memory","type":"command","command":"node $HOME/.claude/skills/wt-memory/claude-plugin/hooks/inject.mjs","timeout":5000}]}]}`,
+  `"mcpServers":{"wt-memory":{"command":"node","args":["/Users/<you>/.claude/skills/wt-memory/mcp/server.mjs"]}}`
+ .
 
 Install: `claude plugin marketplace add ~/Work/projects/wt-pack && claude plugin install wt-memory@wt-pack`.
 A change to the plugin needs `claude plugin marketplace update wt-pack && claude plugin update wt-memory@wt-pack`

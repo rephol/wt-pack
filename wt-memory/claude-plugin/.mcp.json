@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wt-memory": {
+      "command": "sh",
+      "args": ["-c", "exec node \"${WT_MEMORY_MCP:-$HOME/.claude/skills/wt-memory/mcp/server.mjs}\""]
+    }
+  }
+}
