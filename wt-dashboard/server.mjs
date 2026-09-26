@@ -1759,9 +1759,10 @@ async function ticketsApi(req, res, url, parts) {
     if (jevOn('TICKET_TRIAGE')) triage(project, t, empty)
     return
   }
-  // Board settings and 'Run now' (WP-39/46): PUT /api/tickets/board {project, auto?, minPriority?}; POST /api/tickets/board/run {project}.
+  // Board settings and 'Run now' (WP-39/46/52): PUT /api/tickets/board {project, auto?, minPriority?, dispatch?, stallMin?}; POST /api/tickets/board/run {project}.
   if (parts[2] === 'board') {
-    if (req.method === 'PUT' && parts.length === 3) return send(res, 200, await tickets.setSettings(b.project, { auto: typeof b.auto === 'boolean' ? b.auto : undefined, minPriority: b.minPriority }))
+    const bool = (v) => typeof v === 'boolean' ? v : undefined
+    if (req.method === 'PUT' && parts.length === 3) return send(res, 200, await tickets.setSettings(b.project, { auto: bool(b.auto), minPriority: b.minPriority, dispatch: bool(b.dispatch), stallMin: b.stallMin }))
     if (req.method === 'POST' && parts[3] === 'run') {
       const r = await runBoard(b.project)
       if (r.skipped) return send(res, 409, { error: r.skipped })
@@ -1791,6 +1792,7 @@ async function ticketsApi(req, res, url, parts) {
   }
   if (req.method === 'POST' && parts[3] === 'comments') return send(res, 200, await tickets.comment(id, b.text, author))
   if (req.method === 'POST' && parts[3] === 'jev-undo') return send(res, 200, await tickets.jevUndo(id, b.field, author))
+  if (req.method === 'POST' && parts[3] === 'dispatch-retry') return send(res, 200, await tickets.setDispatch(id, null))
   if (req.method === 'POST' && parts[3] === 'claim') return send(res, 200, await tickets.claim(id, me(), b.force === true))
   send(res, 404, { error: 'not found' })
 }
