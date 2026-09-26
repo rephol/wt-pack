@@ -78,6 +78,12 @@ Stop and report, rather than working around:
 - a finding the plan cited that the code contradicts — research was wrong, and that changes the plan
 - scope the plan does not cover that the Definition of Done requires
 
+When you stop on a blocker, also put it on the planner's label (a no-op if no planner handed you this):
+
+```
+~/.claude/skills/wt-shared/scripts/task-state.sh planner "blocked: <reason, a few words>"
+```
+
 A real defect found inside a settled approach is still reported at full strength. The label never suppresses
 defect evidence.
 
