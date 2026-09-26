@@ -9,6 +9,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { Button } from '@astryxdesign/core/Button'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Dialog } from '@astryxdesign/core/Dialog'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Switch } from '@astryxdesign/core/Switch'
 import { Selector } from '@astryxdesign/core/Selector'
 import { TextInput } from '@astryxdesign/core/TextInput'
@@ -158,9 +159,12 @@ function RoutineDialog({ routine, phone, project, projects, agents, onClose }: {
     </SegmentedControl>
   )
   return (
-    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={phone ? undefined : 560} variant={phone ? 'fullscreen' : undefined}>
+    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={phone ? undefined : 560} variant={phone ? 'fullscreen' : undefined} padding={0}>
+      {/* WP-61: header and Save/Cancel stay put; only the fields scroll (taller than a phone). */}
+      <div style={{ display: 'flex', flexDirection: 'column', maxHeight: phone ? '100dvh' : '85dvh', height: phone ? '100dvh' : undefined }}>
+      <Heading level={3} style={{ padding: '16px 16px 8px' }}>{routine ? `Edit ${routine.name}` : 'New routine'}</Heading>
+      <ScrollableArea label="Routine" style={{ flex: 1, minHeight: 0, padding: '4px 16px 16px' }}>
       <VStack gap={3}>
-        <Heading level={3}>{routine ? `Edit ${routine.name}` : 'New routine'}</Heading>
         <TextInput label="Name" value={d.name} onChange={set('name')} />
         <VStack gap={1}>
           <HStack gap={2} wrap="wrap" align="end">
@@ -183,11 +187,13 @@ function RoutineDialog({ routine, phone, project, projects, agents, onClose }: {
         <Text type="supporting" size="sm">One message per run with its status. Failures always go to the Inbox.</Text>
         <Selector label="Timeout" width={phone ? '100%' : 200} value={d.timeout} options={timeoutOpts} onChange={set('timeout')} />
         {error && <Banner status="error" title={error} />}
-        <HStack justify="end" gap={2}>
-          <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button label={routine ? 'Save' : 'Create (paused)'} variant="primary" isLoading={save.isPending} onClick={submit} />
-        </HStack>
       </VStack>
+      </ScrollableArea>
+      <HStack justify="end" gap={2} style={{ padding: '12px 16px calc(env(safe-area-inset-bottom) + 12px)', borderTop: '1px solid var(--color-border-default, rgba(128,128,128,.2))' }}>
+        <Button label="Cancel" variant="ghost" onClick={onClose} />
+        <Button label={routine ? 'Save' : 'Create (paused)'} variant="primary" isLoading={save.isPending} onClick={submit} />
+      </HStack>
+      </div>
     </Dialog>
   )
 }
