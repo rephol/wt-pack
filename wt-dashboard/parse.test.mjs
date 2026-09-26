@@ -136,6 +136,11 @@ test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-o
   const names = agents.map((a) => a.name)
   assert.deepEqual(R.parseMentions('@room-test-a say hi to @room-test-b. cc @nobody @ALL', names), ['room-test-a', 'room-test-b', 'all'])
   assert.deepEqual(R.parseMentions('mail a@room-test-a', names), [])
+  // quoted or code examples never mention (the '@a → b' incident); real mentions around them still do
+  assert.deepEqual(R.parseMentions("the chain '@room-test-a → worker' shows", names), [])
+  assert.deepEqual(R.parseMentions('write "@room-test-a" or `@room-test-a` or “@room-test-a”', names), [])
+  assert.deepEqual(R.parseMentions('```\n@room-test-a\n```\n@room-test-b', names), ['room-test-b'])
+  assert.deepEqual(R.parseMentions("it's for @room-test-a's review, 'quoted' then @room-test-b", names), ['room-test-a', 'room-test-b'])
   const S = { ...R.DEFAULT_SETTINGS }
   const room = { hops: 0, members: ['room-test-a', 'room-test-b'] }
   const user = (text) => ({ author: { kind: 'user', name: 'you' }, mentions: R.parseMentions(text, names) })

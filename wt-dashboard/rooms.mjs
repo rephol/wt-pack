@@ -20,11 +20,19 @@ export const DEFAULT_SETTINGS = {
 export const AGENT_ROOMS_PER_HOUR = 3
 export const agentRoomAllowed = (times, now = Date.now()) => times.filter((t) => now - t < 3_600_000).length < AGENT_ROOMS_PER_HOUR
 
+// Quoted or code text is an example, not an address: code blocks/spans and '…', "…", ‘…’, “…” are
+// blanked before mentions are read (a quoted "@a → b" once notified @a and made it a member).
+// A single quote counts only as a pair with non-word chars outside it, so "it's @x's" still mentions @x.
+export const unquoted = (text) => text
+  .replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ')
+  .replace(/"[^"\n]*"/g, ' ').replace(/“[^”\n]*”/g, ' ').replace(/‘[^’\n]*’/g, ' ')
+  .replace(/(^|[^\w])'[^'\n]*'(?=[^\w]|$)/g, '$1 ')
+
 // @name tokens that name a known agent (exact, case-insensitive), plus the special `all`.
 export function parseMentions(text, names) {
   const byLower = new Map(names.map((n) => [n.toLowerCase(), n]))
   const out = new Set()
-  for (const m of text.matchAll(/(^|[^\w@])@([\w./:-]+)/g)) {
+  for (const m of unquoted(text).matchAll(/(^|[^\w@])@([\w./:-]+)/g)) {
     const raw = m[2].replace(/[.:,;!?)]+$/, '')
     const t = raw.toLowerCase()
     if (t === 'all') out.add('all')
