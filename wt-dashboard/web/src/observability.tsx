@@ -26,6 +26,8 @@ const pct = (n: number) => `${Math.round(n * 100)}%`
 const time = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 // Native tables in a native scroller: they stay readable at 390px by scrolling sideways inside the box, not the page.
 const box = { overflowX: 'auto', maxWidth: '100%' } as const
+const STAT_COLS = ['Feature', 'Calls', 'Cache', 'Fail-open', 'Picked', 'Errors', 'Timeouts', 'p50', 'p95']
+const RECENT_COLS = ['Time', 'Feature', 'Outcome', 'p', 'ms', 'Error', 'Input']
 const cell = { padding: '4px 8px', textAlign: 'start', whiteSpace: 'nowrap', fontSize: 13 } as const
 
 export function ObservabilitySection() {
@@ -56,13 +58,13 @@ function Integrations() {
       </HStack>
       {stats.length === 0 ? <Text type="supporting" size="sm">No Jev calls in this range.</Text> : (
         <div style={box}>
-          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead><tr>{['Feature', 'Calls', 'Cache', 'Fail-open', 'Picked', 'Errors', 'Timeouts', 'p50', 'p95'].map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
+          <table className="hd-obs-table" style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead><tr>{STAT_COLS.map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
             <tbody>{stats.map((s) => (
               <tr key={s.feature}>
-                <td style={cell}><code>{s.feature}</code></td><td style={cell}>{s.calls}</td><td style={cell}>{s.cacheHits}</td>
-                <td style={cell}>{s.failOpen}</td><td style={cell}>{s.picked}</td><td style={cell}>{pct(s.errorRate)}</td><td style={cell}>{pct(s.timeoutRate)}</td>
-                <td style={cell}>{s.p50ms == null ? '—' : `${s.p50ms} ms`}</td><td style={cell}>{s.p95ms == null ? '—' : `${s.p95ms} ms`}</td>
+                <td data-label="Feature" style={cell}><code>{s.feature}</code></td><td data-label="Calls" style={cell}>{s.calls}</td><td data-label="Cache" style={cell}>{s.cacheHits}</td>
+                <td data-label="Fail-open" style={cell}>{s.failOpen}</td><td data-label="Picked" style={cell}>{s.picked}</td><td data-label="Errors" style={cell}>{pct(s.errorRate)}</td><td data-label="Timeouts" style={cell}>{pct(s.timeoutRate)}</td>
+                <td data-label="p50" style={cell}>{s.p50ms == null ? '—' : `${s.p50ms} ms`}</td><td data-label="p95" style={cell}>{s.p95ms == null ? '—' : `${s.p95ms} ms`}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -77,13 +79,13 @@ function Integrations() {
       </HStack>
       {q.data.recent.length === 0 ? <Text type="supporting" size="sm">No calls match.</Text> : (
         <div style={{ ...box, maxHeight: 320, overflowY: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead><tr>{['Time', 'Feature', 'Outcome', 'p', 'ms', 'Error', 'Input'].map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
+          <table className="hd-obs-table" style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead><tr>{RECENT_COLS.map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
             <tbody>{q.data.recent.map((c, i) => (
               <tr key={`${c.ts}-${i}`}>
-                <td style={cell}>{time(c.ts)}</td><td style={cell}><code>{c.feature}</code></td>
-                <td style={cell}>{c.outcome}{c.cache ? ' (cache)' : ''}</td><td style={cell}>{c.p ?? '—'}</td><td style={cell}>{c.ms}</td>
-                <td style={cell}>{c.err ?? '—'}</td><td style={cell} title={c.snippet}><code>{c.in}</code></td>
+                <td data-label="Time" style={cell}>{time(c.ts)}</td><td data-label="Feature" style={cell}><code>{c.feature}</code></td>
+                <td data-label="Outcome" style={cell}>{c.outcome}{c.cache ? ' (cache)' : ''}</td><td data-label="p" style={cell}>{c.p ?? '—'}</td><td data-label="ms" style={cell}>{c.ms}</td>
+                <td data-label="Error" style={cell}>{c.err ?? '—'}</td><td data-label="Input" style={cell} title={c.snippet}><code>{c.in}</code></td>
               </tr>
             ))}</tbody>
           </table>

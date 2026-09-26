@@ -132,3 +132,11 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-kb-rule { height: 12px; }
 .hd-kb-detail { height: min(85dvh, 860px); display: flex; flex-direction: column; }
 .hd-kb-detail-phone { height: 100dvh; padding-bottom: env(safe-area-inset-bottom); box-sizing: border-box; }
+
+/* Observability tables at phone width (WP-34): each row stacks as label/value pairs instead of clipping. */
+@media (max-width: 600px) {
+  .hd-obs-table thead { display: none; }
+  .hd-obs-table tr { display: grid; grid-template-columns: max-content 1fr; column-gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--astryx-color-border, rgba(127,127,127,.25)); }
+  .hd-obs-table td { padding: 1px 0 !important; white-space: normal !important; overflow-wrap: anywhere; display: contents; }
+  .hd-obs-table td::before { content: attr(data-label); opacity: .65; }
+}
