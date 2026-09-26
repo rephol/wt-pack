@@ -28,7 +28,7 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { api } from './rooms'
-import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, group, jevChip, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
+import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, group, jevChip, moveTicket, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
 // Board 'Auto' threshold (WP-46): promote tickets at this priority or more urgent; 0 = any, unprioritised too.
@@ -84,7 +84,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const teardownRef = useRef<(() => void) | null>(null)
   const justDragged = useRef(false)
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready; 'Run now' triages the whole Backlog.
-  const setBoard = useMutation({ mutationFn: (b: { auto?: boolean; minPriority?: number }) => send('/api/tickets/board', 'PUT', { project, ...b }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
+  const setBoard = useMutation({ mutationFn: (b: { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number }) => send('/api/tickets/board', 'PUT', { project, ...b }), onSuccess: () => qc.invalidateQueries({ queryKey: key }) })
   const runNow = useMutation({ mutationFn: () => send<{ queued: number }>('/api/tickets/board/run', 'POST', { project }) })
   const move = useMutation({
     mutationFn: ({ id, to }: { id: string; to: Column }) => send(tUrl(id), 'PATCH', { column: to }),
@@ -207,6 +207,11 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
                 {q.data.auto && <Selector label="Promote from priority" isLabelHidden width={phone ? 120 : 140} value={String(q.data.minPriority ?? 2)}
                   onChange={(v: string) => setBoard.mutate({ minPriority: Number(v) })} options={MIN_PRIORITY_OPTIONS} />}
                 {q.data.auto && <Button label={runNow.data ? `Queued ${runNow.data.queued}` : 'Run now'} variant="secondary" size={phone ? 'sm' : 'md'} isLoading={runNow.isPending} onClick={() => runNow.mutate()} />}
+                <Tooltip content="Hand unassigned Ready tickets to free agents (L → planner, else worker), one per 30s, within the Routines cap">
+                  <Switch label="Dispatch" value={!!q.data.dispatch} isDisabled={setBoard.isPending} onChange={(on: boolean) => setBoard.mutate({ dispatch: on })} />
+                </Tooltip>
+                {q.data.dispatch && <StallMinutes value={q.data.stallMin ?? 45} onSave={(n) => setBoard.mutate({ stallMin: n })} />}
+                {q.data.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(q.data.dispatchStatus)}</Text>}
                 <Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />
               </HStack>} />
           </LayoutHeader>
@@ -238,10 +243,25 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   )
 }
 
+// Reconcile flags a Building card whose agent sat idle this long (Dispatch boards only). Saved on blur or Enter.
+function StallMinutes({ value, onSave }: { value: number; onSave: (n: number) => void }) {
+  const [v, setV] = useState(String(value))
+  useEffect(() => setV(String(value)), [value])
+  const save = () => { const n = Number(v); if (Number.isInteger(n) && n >= 1 && n <= 1440 && n !== value) onSave(n); else setV(String(value)) }
+  return (
+    <Tooltip content="Flag a Building card whose agent has been idle this many minutes">
+      <div className="hd-kb-stall" onBlur={save} onKeyDown={(e) => e.key === 'Enter' && save()}>
+        <TextInput label="Stall minutes" isLabelHidden value={v} onChange={setV} width={64} />
+      </div>
+    </Tooltip>
+  )
+}
+
 // ============= CARD =============
 
 // Shared by the column card and the floating drag clone so the two stay identical.
 function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Column) => void }) {
+  const db = dispatchBadge(t.dispatch)
   return (
     <VStack gap={2}>
       <HStack hAlign="between" vAlign="start">
@@ -251,9 +271,11 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
           {t.type && <Badge label={t.type} variant="neutral" />}
           {t.size && <Badge label={t.size} variant="neutral" />}
           {jevChip(t) && <Badge label="Jev" variant="info" />}
+          {db && <Tooltip content={db[2]}><Badge label={db[0]} variant={db[1]} /></Tooltip>}
         </HStack>
         <MoreMenu label={`Actions for ${t.id}`} size="sm" alignment="end" presentation="adaptive"
-          items={COLUMNS.filter((c) => c !== t.column).map((c) => ({ label: `Move to ${columnLabel(c)}`, onClick: () => onMove(t.id, c) }))} />
+          items={[...(t.dispatch?.state === 'held' || t.dispatch?.state === 'failed' ? [{ label: 'Retry dispatch', onClick: () => { send(`${tUrl(t.id)}/dispatch-retry`, 'POST', {}).catch(() => {}) } }] : []),
+            ...COLUMNS.filter((c) => c !== t.column).map((c) => ({ label: `Move to ${columnLabel(c)}`, onClick: () => onMove(t.id, c) }))]} />
       </HStack>
       <VStack gap={1}>
         <Heading level={4} maxLines={3}>{t.title}</Heading>

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COLUMNS, group, jevChip, moveTicket, type Ticket } from './boardData.ts'
+import { COLUMNS, dispatchBadge, dispatchLine, group, jevChip, moveTicket, type Ticket } from './boardData.ts'
 
 const t = (id: string, column: Ticket['column'], priority?: number): Ticket => ({ id, title: id, column, priority })
 
@@ -32,4 +32,15 @@ test('jevChip: shown for applied fields or duplicates, not for an owner hint alo
   assert.equal(jevChip({ ...t, jev }), false)
   assert.equal(jevChip({ ...t, jev: { ...jev, dupes: ['WP-2'] } }), true)
   assert.equal(jevChip({ ...t, jev: { ...jev, applied: { type: { from: 'feature', to: 'bug' } } } }), true)
+})
+
+test('dispatch badge and status line (WP-52)', () => {
+  assert.equal(dispatchBadge(null), null)
+  assert.equal(dispatchBadge({ state: 'sent', agent: 'w' }), null)
+  assert.equal(dispatchBadge({ state: 'dispatching' })?.[0], 'Dispatching…')
+  assert.equal(dispatchBadge({ state: 'held', fails: 3 })?.[1], 'error')
+  assert.equal(dispatchBadge({ state: 'sent', stalled: 'w idle 50m' })?.[0], 'Stalled')
+  assert.equal(dispatchLine({ last: null, waiting: 'cap: 4 working ≥ 4', inflight: 0 }), 'waiting: cap: 4 working ≥ 4')
+  assert.equal(dispatchLine({ last: { at: 0, text: 'WP-9 → w2' }, waiting: null, inflight: 0 }, 180_000), 'last: WP-9 → w2 3m ago')
+  assert.equal(dispatchLine({ last: null, waiting: null, inflight: 1 }), 'Dispatching 1…')
 })
