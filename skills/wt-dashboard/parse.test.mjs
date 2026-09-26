@@ -1063,3 +1063,17 @@ test('sourceIssue: a failed overview source becomes a hint, not a 500 (WP-79)', 
   assert.match(sourceIssue('git', 'fatal: not a git repository (or any of the parent directories): .git'), /not a git checkout/)
   assert.match(sourceIssue('git', 'spawn git ENOENT'), /^git: spawn git ENOENT/)
 })
+
+import { bindCheck, bindHostHeader, LOOPBACK_BIND } from './config.mjs'
+test('bindCheck: loopback always; anything else only with WT_ALLOW_REMOTE (WP-80)', () => {
+  for (const h of ['127.0.0.1', '::1', 'localhost']) assert.deepEqual(bindCheck(h, false), { ok: true, remote: false })
+  for (const h of ['0.0.0.0', '::', '100.64.1.2', '192.168.1.5']) {
+    const r = bindCheck(h, false)
+    assert.equal(r.ok, false)
+    assert.match(r.message, /refusing to listen on .* not loopback[\s\S]*WT_ALLOW_REMOTE=1/)
+    assert.deepEqual(bindCheck(h, true), { ok: true, remote: true })
+  }
+  assert.equal(LOOPBACK_BIND.test('127.0.0.10'), false)
+  assert.equal(bindHostHeader('100.64.1.2', 7777), '100.64.1.2:7777')
+  assert.equal(bindHostHeader('fd00::1', 7777), '[fd00::1]:7777')
+})

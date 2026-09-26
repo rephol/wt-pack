@@ -1,0 +1,22 @@
+# WP-80: the dashboard as a systemd user service on Linux (launchd's job on macOS). See docs/vm.md.
+#   mkdir -p ~/.config/systemd/user && cp skills/wt-dashboard/scripts/wt-dashboard.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now wt-dashboard
+#   loginctl enable-linger "$USER"      # keep it running after you log out
+# Edit the paths if the checkout is not ~/Work/projects/wt-pack or node is not on the PATH below.
+[Unit]
+Description=wt-dashboard (herdr agent control room)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/Work/projects/wt-pack/skills/wt-dashboard
+ExecStart=/usr/bin/env node server.mjs
+Restart=on-failure
+RestartSec=10
+# gh, herdr, claude and git must be on this PATH (herdr's installer uses ~/.local/bin).
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Loopback only. Reach it with Tailscale (tailscale serve) or ssh -L; a non-loopback
+# WT_DASHBOARD_HOST is refused unless WT_ALLOW_REMOTE=1 is also set.
+Environment=WT_DASHBOARD_HOST=127.0.0.1
+
+[Install]
+WantedBy=default.target

@@ -282,7 +282,12 @@ Eval: `node skills/wt-shared/scripts/jev-eval.mjs <feature>`.
 - **PWA**: in a browser on a secure origin, **Install app** (iOS: Share → Add to Home Screen); an update banner
   shows when a new build lands. The service worker never caches `/api`.
 - **Tailscale**: the server listens on loopback only; expose it with `tailscale serve` and add the hostname to
-  `WT_DASHBOARD_ALLOWED_HOSTS` (from loopback). No login: loading the page sets an HttpOnly session cookie
+  `WT_DASHBOARD_ALLOWED_HOSTS` (from loopback).
+- **Bind address** (WP-80): `WT_DASHBOARD_HOST` (process env only, default `127.0.0.1`). Anything but
+  `127.0.0.1`/`::1`/`localhost` is **refused at start** with a why/how message unless `WT_ALLOW_REMOTE=1`; with it
+  the bound `host:port` joins the Host/Origin allowlist, the session cookie still gates writes and terminals stay
+  loopback-only. `./setup doctor` shows the configured bind. Linux VM guide and systemd unit:
+  [docs/vm.md](vm.md), `skills/wt-dashboard/scripts/wt-dashboard.service`. No login: loading the page sets an HttpOnly session cookie
   that every write needs. Terminals over the tailnet need their own switch.
 
 ## ./setup and doctor

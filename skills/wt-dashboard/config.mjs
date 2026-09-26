@@ -172,6 +172,22 @@ export class Config {
 // (that also arrives from loopback, but with the tailnet Host and forwarding headers).
 // Host names that mean "this machine": the Mac app loads wt-dashboard.localhost (WebKit resolves *.localhost to loopback)
 // so Activity Monitor names its web process after the app, not "http://127.0.0.1:7777".
+// WP-80: the server binds loopback unless WT_DASHBOARD_HOST says otherwise, and a non-loopback bind needs
+// WT_ALLOW_REMOTE=1. Anything that reaches the port can drive agents running with bypassed permissions.
+export const LOOPBACK_BIND = /^(127\.0\.0\.1|::1|localhost)$/
+export function bindCheck(host, allowRemote) {
+  if (LOOPBACK_BIND.test(host)) return { ok: true, remote: false }
+  if (allowRemote) return { ok: true, remote: true }
+  return { ok: false, message: [
+    `wt-dashboard: refusing to listen on ${host} (WT_DASHBOARD_HOST) — it is not loopback.`,
+    'Anyone who reaches that address can type into your agents, which run with bypassed permissions.',
+    'Reach a remote machine with Tailscale (tailscale serve) or an SSH tunnel (ssh -L 7777:127.0.0.1:7777 <vm>)',
+    'and keep the default bind (127.0.0.1). See docs/vm.md.',
+    'If you really mean it (e.g. a private interface only you can reach): WT_ALLOW_REMOTE=1.',
+  ].join('\n') }
+}
+// A remote bind's own host:port is added to the Host/Origin allowlist; brackets for IPv6.
+export const bindHostHeader = (host, port) => `${host.includes(':') ? `[${host}]` : host}:${port}`.toLowerCase()
 export const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|wt-dashboard\.localhost)(:\d+)?$/
 export function isLoopbackRequest(req) {
   const addr = req.socket?.remoteAddress ?? ''

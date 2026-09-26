@@ -133,6 +133,13 @@ doctor() {
   code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null)
   case "$code" in 2*|3*|401|403) ok "dashboard answers on http://127.0.0.1:$PORT ($code)" ;;
     *) if [ "$OS" = Darwin ]; then bad "dashboard not answering on 127.0.0.1:$PORT (http ${code:-none})"; else opt "dashboard not running on 127.0.0.1:$PORT"; fi ;; esac
+  # WP-80: the bind address (this shell, or the systemd unit from docs/vm.md). Loopback is the only safe default.
+  unit="$HOME/.config/systemd/user/wt-dashboard.service"
+  bind=${WT_DASHBOARD_HOST:-$( [ -f "$unit" ] && sed -n 's/^Environment=WT_DASHBOARD_HOST=//p' "$unit" | head -1 )}
+  case "${bind:-127.0.0.1}" in
+    127.0.0.1|::1|localhost) ok "dashboard binds loopback (${bind:-127.0.0.1}); reach it remotely with Tailscale or ssh -L, see docs/vm.md" ;;
+    *) opt "dashboard bind WT_DASHBOARD_HOST=$bind is not loopback — the server refuses it without WT_ALLOW_REMOTE=1; prefer Tailscale or ssh -L (docs/vm.md)" ;;
+  esac
 
   [ -f "$HOME/.config/wt-dashboard/env" ] && ok "config ~/.config/wt-dashboard/env" || opt "no ~/.config/wt-dashboard/env yet (./setup install creates it)"
   [ -d "$HOME/.config/wt-memory" ] && ok "memory store ~/.config/wt-memory" || opt "no ~/.config/wt-memory yet (./setup install creates it)"
