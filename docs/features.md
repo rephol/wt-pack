@@ -130,7 +130,7 @@ Chat rooms shared by you and agents.
   or delete. tmp rooms do not expire on their own.
 - **Attachments**: png, jpeg, webp, gif; ≤ 10MB each, ≤ 5 per message. Remote agents receive a note instead
   of the images.
-- **Link previews**: up to 3 per message, fetched by the server (private hosts blocked, 3 redirects, 5s, 1MB);
+- **Link previews**: fetched by the server (private hosts blocked, 3 redirects, 5s, 1MB);
   toggle in Settings › General.
 - Messages ≤ 8000 chars.
 - CLI (`wt-room`): `room list`, `read <slug> [--since N]`, `post <slug> "text" [--attach <img>]…`,
