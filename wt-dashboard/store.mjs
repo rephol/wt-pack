@@ -101,7 +101,7 @@ function importRooms(db, data, log) {
       m?.deliveredTo.push(e.to)
       if (m && e.dropped) m.undelivered = [...(m.undelivered ?? []), { to: e.to, n: e.dropped }]
     }
-    for (const m of out) msg.run(r.slug, m.id, JSON.stringify(m))
+    for (const m of out) if (m.id) msg.run(r.slug, m.id, JSON.stringify(m)) // an id-less line would abort the import
   })
 }
 
@@ -114,7 +114,7 @@ function importInbox(db, data) {
     else byId.set(e.id, e)
   }
   const ins = db.prepare('INSERT INTO notifications (id, json) VALUES (?, ?)')
-  for (const it of byId.values()) ins.run(it.id, JSON.stringify(it))
+  for (const it of byId.values()) if (it.id) ins.run(it.id, JSON.stringify(it))
 }
 
 function exportStage2(db, to) {
