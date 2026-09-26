@@ -69,10 +69,18 @@ export function cleanTarget(t) {
 }
 
 const row = (r) => r && { ...r, target: JSON.parse(r.target), enabled: !!r.enabled }
+
+// Shared by Routines and board Dispatch (WP-52): one cap over both, then memory. working null = no cap check (actions).
+export async function guard({ working, pending = 0, max, host }) {
+  if (working != null && working + pending >= max) return `cap: ${working + pending} working ≥ ${max}`
+  if ((await host())?.pressure === 'critical') return 'memory pressure critical'
+  return null
+}
 const DAY = 86_400_000
 
 export class Routines {
-  // deps: { agents, host, prompt(agent, text), spawn({kind, project, prompt}), remove(pane, {force}), actions: {name: (target) => result} }
+  // deps: { agents, host, prompt(agent, text), spawn({kind, project, prompt}), remove(pane, {force}), actions: {name: (target) => result},
+  //   pending?() — other pending starts sharing the cap (board dispatches in flight) }
   constructor({ dir, db, deps = {}, log = console.error, pollMs = 15_000 }) {
     Object.assign(this, { file: dir && join(dir, 'wt.db'), _db: db, deps, log, pollMs, ticking: false, inflight: new Set(), busy: new Set() })
   }
@@ -92,6 +100,11 @@ export class Routines {
     if (!Number.isInteger(n) || n < 0 || n > 100) throw err(400, 'maxWorking: 0–100')
     this.db.prepare("INSERT INTO routine_settings (k, v) VALUES ('maxWorking', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(String(n))
     return this.settings()
+  }
+  // Open spawn runs whose agent is not yet listed as working, so concurrent spawns cannot all pass the cap.
+  pendingSpawns(busy = new Set(), except = -1) {
+    return this.db.prepare("SELECT agent FROM routine_runs WHERE status = 'running' AND id != ? AND kind = 'spawn'")
+      .all(except).filter((u) => !u.agent || !busy.has(u.agent)).length
   }
   runs(limit = 100) {
     return this.db.prepare('SELECT * FROM routine_runs ORDER BY id DESC LIMIT ?')
@@ -177,20 +190,17 @@ export class Routines {
     let a // the prompt target, resolved once
     try {
       const t = r.target
-      let ags = []
+      let ags = [], working = null, pending = 0
       if (t.kind !== 'action') {
         ags = await this.deps.agents()
-        const working = ags.filter((a) => a.status === 'working')
-        const busy = new Set(working.map((a) => a.id))
-        // Open spawn runs whose agent is not yet listed as working count too, so concurrent spawns cannot all pass.
-        const pending = this.db.prepare("SELECT agent FROM routine_runs WHERE status = 'running' AND id != ? AND kind = 'spawn'")
-          .all(runId).filter((u) => !u.agent || !busy.has(u.agent)).length
-        const max = this.settings().maxWorking
-        if (working.length + pending >= max) return skip(`cap: ${working.length + pending} working ≥ ${max}`)
+        const w = ags.filter((a) => a.status === 'working')
+        working = w.length
+        pending = this.pendingSpawns(new Set(w.map((a) => a.id)), runId) + (this.deps.pending?.() ?? 0)
       }
       // An action that timed out may still be running; one at a time per action, across routines.
       if (t.kind === 'action' && this.busy.has(t.action)) return skip(`${t.action} still running`)
-      if ((await this.deps.host())?.pressure === 'critical') return skip('memory pressure critical')
+      const why = await guard({ working, pending, max: this.settings().maxWorking, host: this.deps.host })
+      if (why) return skip(why)
       if (t.kind === 'prompt') {
         a = ags.find((x) => t.agent ? x.name === t.agent : x.pool === t.role && x.project === t.project)
         if (!a) return skip('no agent')

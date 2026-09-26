@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Routines } from './routines.mjs'
+import { Dispatch, runHandoff } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
@@ -1707,7 +1708,8 @@ export function needsSession(method, path, headers) {
 // ---- local ticket boards (tickets.mjs) ----
 // A ticket entering Ready on an 'Auto' board prompts that project's orchestrator agent, batched per minute (WP-39).
 const readyNotes = readyBatcher(async (project, ts) => {
-  if (!(await tickets.auto(project))) return
+  const set = await tickets.settings(project)
+  if (!set.auto || set.dispatch) return // a Dispatch board schedules its own Ready cards (WP-52)
   const ags = await agents()
   const a = ags.find((x) => x.pool === 'orchestrator' && x.project === project)
   if (!a) return
@@ -1742,6 +1744,7 @@ async function ticketsApi(req, res, url, parts) {
     if (parts[2] === 'keys') { const k = Object.values(await tickets.keys()); return text ? send(res, 200, k.join('\n') + (k.length ? '\n' : ''), 'text/plain') : send(res, 200, k) }
     if (parts[2]) { const t = await tickets.get(parts[2]); return text ? send(res, 200, ticketText(t), 'text/plain') : send(res, 200, t) }
     const out = await tickets.list(url.searchParams.get('project'), url.searchParams.get('column') || undefined)
+    if (out.key) out.dispatchStatus = dispatcher.status(url.searchParams.get('project'))
     if (url.searchParams.get('mine')) { const me = await roomAuthor(req); out.tickets = out.tickets.filter((t) => t.assignee?.name === me.name) }
     return text ? send(res, 200, out.tickets.map(ticketRow).join('\n') + (out.tickets.length ? '\n' : ''), 'text/plain') : send(res, 200, out)
   }
@@ -2202,6 +2205,7 @@ const server = http.createServer(async (req, res) => {
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -2374,6 +2378,23 @@ const routines = new Routines({
       housekeeping: async () => { const s = await runHousekeeping(); return { summary: `${s.actions.length} actions${s.errors.length ? `, ${s.errors.length} errors` : ''}` } },
       'jev-run': async (t) => { const r = await runBoard(t.project); if (r.skipped) return r; await r.done; return { summary: `triaged ${r.queued}` } },
     },
+    pending: () => dispatcher.inflight(), // board cards claimed, not yet handed off
+  },
+})
+// ---- board Dispatch + reconcile (dispatch.mjs, WP-52): not a routine, shares its cap and memory guard ----
+const dispatcher = new Dispatch({
+  tickets,
+  deps: {
+    agents: () => agents(),
+    host: () => host(),
+    maxWorking: () => routines.settings().maxWorking,
+    pending: () => routines.pendingSpawns(),
+    repoOf: async (project) => (await projectRoots()).get(project) ?? null,
+    git: (repo, ...args) => git(repo, ...args),
+    ticketOf: tagTicket,
+    handoff: async (args, prompt, cwd) => {
+      try { return await runHandoff(execFile, HANDOFF_SH)(args, prompt, cwd) } finally { store.delete('agents:local'); store.delete('overview') }
+    },
   },
 })
 async function routinesApi(req, res, url, parts) {
@@ -2466,6 +2487,12 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
       const rt = () => routines.tick().catch((e) => console.error('routines:', e.message))
       setTimeout(rt, 5000)
       setInterval(rt, 30_000)
+    })
+    // Board dispatch + reconcile: finish or clear claims a restart orphaned, then every 30s beside routines.
+    dispatcher.recover().catch((e) => console.error('dispatch:', e.message)).finally(() => {
+      const dt = () => dispatcher.tick().catch((e) => console.error('dispatch:', e.message))
+      setTimeout(dt, 15_000)
+      setInterval(dt, 30_000)
     })
     recordStart().catch((e) => console.error('starts:', e.message))
     refreshKeys() // opens wt.db (and runs any import) only in a listening server
