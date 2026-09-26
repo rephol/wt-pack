@@ -70,6 +70,13 @@ Invoke each skill in turn. What this skill adds is what happens *between* them:
 
 ## After the PR
 
+**Tell the planner.** If a planner handed you this work, move its label on (a no-op otherwise, or once the
+planner has moved to another ticket):
+
+```
+~/.claude/skills/wt-shared/scripts/task-state.sh planner "done (PR #<N>)"
+```
+
 Not a fifth step — the four above are what `wt-ship` *does*. Both of these are the user's call, so offer
 them in one line each and wait for a yes.
 
