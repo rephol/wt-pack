@@ -41,11 +41,11 @@ working, and `./setup doctor` passes afterwards.
   (`setup:227` `elif … [ "$root" != "$DASH" ] && is_pack "$(dirname "$root")"`) treats that as "another
   checkout's service, kept", or would, if the old path still existed.
 - **One absolute repo path lives outside the repo:** the user hook in `~/.claude/settings.json:38`
-  `"command": "sh '/Users/octeumkm/Work/projects/wt-pack/wt-shared/hooks/eval-plan.sh'"`. Setup does not write
+  `"command": "sh '<repo>/wt-shared/hooks/eval-plan.sh'"`. Setup does not write
   it. It breaks the moment main has the move.
 - **The marketplace plugin source is repo-relative:** `.claude-plugin/marketplace.json`
   `"source": "./wt-memory/claude-plugin"`. The marketplace itself is registered at the repo root
-  (`known_marketplaces.json` `"path": "/Users/octeumkm/Work/projects/wt-pack"`), so `.claude-plugin/` must
+  (`known_marketplaces.json` `"path": "<repo>"`), so `.claude-plugin/` must
   **stay at the root**, and it is also setup's `is_pack` marker.
 - **wt-agents has no role-doc mechanism.** The only per-role files are MCP configs (`wt-agents/mcp/{auditor,planner,worker,catalog}.json`),
   and `grep -i orchestrator wt-agents/` finds 0 hits. Role behaviour lives in wt-memory role notes. → The
