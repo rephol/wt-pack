@@ -211,8 +211,7 @@ dirs() {
   # The repo the dashboard reads worktrees and PRs from (UMKMALL_REPO is the legacy name).
   if grep -qs '^[[:space:]]*\(WT_DASHBOARD_REPO\|UMKMALL_REPO\)=' "$env"; then ok "already: dashboard repo set in $env"
   else
-    # Keep what the server already uses (its old default) when that checkout exists; else this checkout.
-    r=$REPO; [ -d "$HOME/Work/projects/umkmall/.git" ] && r="$HOME/Work/projects/umkmall"
+    r=$REPO
     if [ "$yes" -eq 0 ] && [ -t 0 ]; then printf '  Repo for dashboard worktrees and PRs [%s]: ' "$r"; read -r a; [ -n "$a" ] && r=$a; fi
     [ -z "$(tail -c1 "$env")" ] || echo >> "$env"
     printf 'WT_DASHBOARD_REPO=%s\n' "$r" >> "$env"; ok "WT_DASHBOARD_REPO=$r written to $env"
