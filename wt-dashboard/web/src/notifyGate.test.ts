@@ -45,3 +45,13 @@ test('groupInbox: by agent / room / task / memory, first-seen order, singles sta
     ['agent:m/p2', 'w-02', ['1', '3'], 1], ['memory', 'Memory', ['2'], 1], ['room:wt-pack', '#wt-pack', ['4'], 1], ['task:UMK-1', 'UMK-1', ['5'], 1], ['agent:m/p1', 'w-01', ['6'], 1],
   ])
 })
+
+test('groupInbox: groups sort by their most urgent row (absent = 1), stable otherwise', async () => {
+  const { groupInbox } = await import('./notifyGate.ts')
+  const r = (id: string, target: InboxItem['target'], urgency?: number) =>
+    ({ id, ts: '2026-09-26T00:00:00Z', kind: 'agent-done' as Kind, key: id, title: `${id} x`, body: '', read: false, resolvedAt: null, target, ids: [id], count: 1, anyUnread: true, urgency })
+  const keys = (rows: ReturnType<typeof r>[]) => groupInbox(rows).map((g) => g.key)
+  assert.deepEqual(keys([r('1', { agent: 'a' }), r('2', { agent: 'b' }), r('3', { agent: 'c' })]), ['agent:a', 'agent:b', 'agent:c'])
+  assert.deepEqual(keys([r('1', { agent: 'a' }, 0), r('2', { agent: 'b' }), r('3', { agent: 'c' }, 3)]), ['agent:c', 'agent:b', 'agent:a'])
+  assert.deepEqual(keys([r('1', { agent: 'a' }, 1), r('2', { agent: 'b' }, 0), r('3', { agent: 'b' }, 2)]), ['agent:b', 'agent:a'])
+})

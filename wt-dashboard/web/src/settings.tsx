@@ -24,14 +24,15 @@ import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
 import { RolesSection } from './roles'
+import { ObservabilitySection } from './observability'
 import { MemorySection } from './memory'
 import { useChatDensity, setChatDensity, useLinkPreviews, setLinkPreviews, type ChatDensity } from './density'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
-export type Section = 'profile' | 'roles' | 'memory' | 'rooms' | 'notifications' | 'integrations' | 'terminals' | 'server' | 'about'
-const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['roles', 'Roles'], ['memory', 'Memory'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
+export type Section = 'profile' | 'roles' | 'memory' | 'rooms' | 'notifications' | 'integrations' | 'observability' | 'terminals' | 'server' | 'about'
+const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['roles', 'Roles'], ['memory', 'Memory'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['observability', 'Observability'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
 export const openSettings = (section: Section = 'profile') => dispatchEvent(new CustomEvent('open-settings', { detail: section }))
 
 const PHONE = '(max-width: 639px)'
@@ -88,8 +89,9 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
+          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><HousekeepingSection /></VStack>}
           {section === 'terminals' && <TerminalsSection />}
-          {section === 'server' && <VStack gap={6}><ServerPanel /><HousekeepingSection /></VStack>}
+          {section === 'server' && <ServerPanel />}
           {section === 'about' && <AboutSection />}
     </>
   )

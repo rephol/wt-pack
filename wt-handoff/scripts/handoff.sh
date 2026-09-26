@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--dry-run] <cwd> [prompt-file]
 #
 # Handoff agents live in their own herdr workspace, "<repo>-workers" (override
 # with HANDOFF_WORKSPACE), created on demand. That workspace IS the pool: an
@@ -25,6 +25,12 @@
 # so does full MCP mode (the default: wt-shared/scripts/mcp-mode.sh), where every worker has every server.
 # --dry-run prints the target and the picks, and sends, tags and spawns nothing.
 #
+# Routing (auto mode, no --role): with WT_JEV_ROUTE on (default; env or the dashboard's Settings switch), Jev
+# judges whether the prompt needs a plan first (jev-route.mjs, >= 0.75, WT_JEV_ROUTE_MIN); if so the target is a
+# planner from "<repo>-planners" (reused if free, else spawned in the main checkout), and "route: planner (p=…)"
+# is printed after the target lines. A prompt starting "Use wt-work" (wt-plan's own handoff) is never re-routed.
+# --role worker|planner forces the role (also with --new). --pane and --list are untouched.
+#
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
 # ticket is taken from <cwd>'s branch (UMK-NNN). Both panes are told about each other through
 # tokens (target: task, ticket, handoff_from[_pane], handoff_at; sender: handoff_to[_pane]), and
@@ -37,6 +43,7 @@
 set -eu
 
 mode=auto
+role=
 pane_arg=
 clear=0
 goal=1
@@ -51,6 +58,8 @@ while :; do
     --pane)  pane_arg=$2; mode=pane; shift 2 ;;
     --no-goal) goal=0; shift ;;
     --task)  task=$2; shift 2 ;;
+    --role)  role=$2; shift 2
+             case "$role" in worker|planner) ;; *) echo "--role: worker or planner" >&2; exit 2 ;; esac ;;
     --mcp)   mcp=$2; shift 2 ;;
     --dry-run) dry=1; shift ;;
     *) break ;;
@@ -121,6 +130,24 @@ if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] \
   jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
   mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
 fi
+# Worker or planner? Decided before the footer (Jev judges the request, not the routing) and before any reuse,
+# because reuse is restricted to the chosen role's pool.
+routed=
+if [ -z "$role" ] && [ "$mode" = auto ]; then
+  case "$prompt" in
+    "Use wt-work"*|"/goal Use wt-work"*) role=worker ;;
+    *) r=$(printf "%s" "$prompt" | node "$(dirname "$0")/jev-route.mjs" 2>/dev/null || true)
+       role=$(printf '%s' "$r" | jq -r '.role // "worker"' 2>/dev/null || echo worker)
+       p=$(printf '%s' "$r" | jq -r '.p // empty' 2>/dev/null || true)
+       [ -n "$p" ] && routed="route: $role (p=$p)" ;;
+  esac
+fi
+role=${role:-worker}
+[ "$role" = planner ] && ws_label=${HANDOFF_WORKSPACE:-$(basename "${main_checkout:-$cwd}")-planners}
+# A planner makes its own worktree, so it starts in the main checkout (as `agents.sh spawn planner` does).
+spawn_cwd=$cwd
+[ "$role" = planner ] && [ -n "$main_checkout" ] && spawn_cwd=$main_checkout
+
 # A worker has the picks if it runs the full set (no lean config) or its config lists them all.
 has_picks() {
   [ -n "$mcp" ] || return 0
@@ -194,11 +221,13 @@ finish() {  # <first output line> <target pane>
   echo "$line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
   echo "reach: herdr agent prompt $to \"...\""
+  [ -z "$routed" ] || echo "$routed"
 }
 
 dry() {  # <what would happen>
   echo "dry-run: $1"
   echo "mcp: ${mcp:-none}${jev:+ (jev: $jev)}"
+  [ -z "$routed" ] || echo "$routed"
   exit 0
 }
 
@@ -212,17 +241,17 @@ fi
 if [ "$mode" = auto ]; then
   reuse=$(candidates | while IFS= read -r c; do p=${c%%"$(printf '\t')"*}; has_picks "$(name_of "$p")" && { echo "$p"; break; }; done)
   if [ -n "$reuse" ]; then
-    [ "$dry" -eq 1 ] && dry "would reuse $(name_of "$reuse") ($reuse)"
+    [ "$dry" -eq 1 ] && dry "would reuse $role $(name_of "$reuse") ($reuse)"
     hand_to "$reuse"
     finish "reused $reuse" "$reuse"
     exit 0
   fi
 fi
 
-[ "$dry" -eq 1 ] && dry "would spawn a worker in $cwd${mcp:+ with --mcp $mcp}"
+[ "$dry" -eq 1 ] && dry "would spawn a $role in $spawn_cwd${mcp:+ with --mcp $mcp}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
-# one definition of what a worker is called.
-created=$("$(dirname "$0")/../../wt-agents/scripts/agents.sh" spawn worker "$cwd" ${mcp:+--mcp "$mcp"})
+# one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
+created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "$role" "$spawn_cwd" ${mcp:+--mcp "$mcp"})
 label=${created%% *}
 pane=${created##* }
 

@@ -8,12 +8,14 @@ import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Rooms, ticketSuggestions } from './rooms.mjs'
-import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
+import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
+import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
+import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -152,8 +154,51 @@ export function parsePane(text, raw = '') {
     question,
     lastPrompt: lastUser?.text.split('\n')[0] ?? null,
     turns: out,
+    tail, // last 25 body lines: what the Jev tail judgments (needs-you, stall) read
   }
 }
+
+// ---- Jev tail judgments (WT_JEV_NEEDS_YOU, WT_JEV_STALL) ----
+// One cache per feature+pane keyed by a hash of the pane tail: an unchanged tail is asked once, the ask runs async
+// and never blocks the poll, and its answer is read on a later tick. `get` returns the answer for THIS tail or
+// undefined (not asked yet, pending, or Jev gave nothing).
+// ponytail: entries for closed panes are never pruned; one small entry per pane ever seen per server run.
+export class TailCache {
+  constructor() { this.m = new Map() }
+  get(key, tail, ask) {
+    const h = createHash('sha1').update(tail).digest('hex')
+    const e = this.m.get(key)
+    if (e?.h === h) return e.v ?? undefined
+    const n = { h, v: undefined }
+    this.m.set(key, n)
+    Promise.resolve().then(() => ask(tail)).then((v) => { if (this.m.get(key) === n) n.v = v ?? undefined }, () => {})
+    return undefined
+  }
+}
+export const needsYouJudge = {
+  questions: () => ({ waiting: { type: 'noul', instructions: 'Is this agent waiting for the user to answer or decide something?',
+    criteria: { true: 'The agent asked the user something or needs a decision before it can continue.', false: 'The agent finished, reported, or is not waiting on the user.' } } }),
+  decide: (a, min = 0.7) => (a?.waiting?.noul ?? 0) >= min,
+}
+// Jev's needs-you merged over the regex: a picker always wins; a yes asks with the regex's tail-lines extraction;
+// a no clears the regex's choice-prompt guess; no answer keeps the regex.
+export function mergeNeedsYou(p, jev) {
+  if (p.picker || jev === undefined) return { asks: p.asks ?? false, question: p.question ?? null }
+  if (!jev) return { asks: false, question: null }
+  return { asks: true, question: p.question ?? (p.tail ?? '').split('\n').filter((l) => l.trim()).slice(-6).join('\n').trim() }
+}
+// WT_JEV_STALL: what a long-idle (or long-working) agent is actually doing. Only stuck/looping stay 'stalled'.
+export const stallJudge = {
+  questions: () => ({ state: { type: 'choice', instructions: 'This coding agent has shown no progress for over 20 minutes. From its terminal tail, what is its state?',
+    criteria: {
+      finished: 'It completed its task and reported; nothing more is expected from it.',
+      stuck: 'It hit an error or obstacle and stopped without finishing or asking for help.',
+      looping: 'It keeps repeating the same actions or errors without progress.',
+      waiting_on_user: 'It asked the user a question or needs a decision before it can continue.',
+    } } }),
+  decide: (a) => a?.state?.choice ?? null,
+}
+const tails = new TailCache()
 
 // ---- machines ----
 const LOCAL_LABEL = hostname()
@@ -357,6 +402,16 @@ async function listAgents(m) {
     const session = m.local && a.agent_session?.kind === 'id' ? a.agent_session.value : null
     // An AskUserQuestion picker on screen beats the reply-ends-with-? heuristic (kept for permission prompts).
     const pk = p.picker ?? null
+    const jevAsks = (a.agent_status === 'idle' || a.agent_status === 'blocked') && p.tail && !pk && jevOn('NEEDS_YOU')
+      ? tails.get(`needs_you:${k}`, p.tail, (t) => jevAsk('NEEDS_YOU', { pane: t }, needsYouJudge.questions(), (x) => needsYouJudge.decide(x, minFor('needs_you')))
+        .then((x) => (x ? needsYouJudge.decide(x, minFor('needs_you')) : undefined)))
+      : undefined
+    const ny = mergeNeedsYou(p, jevAsks)
+    const long = Date.now() - since.get(k).at > STALL_MS && (a.agent_status === 'idle' || a.agent_status === 'working')
+    const stall = long && p.tail && jevOn('STALL')
+      ? tails.get(`stall:${k}`, p.tail, (t) => jevAsk('STALL', { pane: t }, stallJudge.questions(), (x) => ['stuck', 'looping'].includes(stallJudge.decide(x)))
+        .then((x) => stallJudge.decide(x) ?? undefined))
+      : undefined
     out.push({
       key: `${m.label}/${a.pane_id}`,
       id: a.pane_id,
@@ -380,9 +435,10 @@ async function listAgents(m) {
       recap: p.recap ?? null,
       context: p.context ?? null,
       background: p.background ?? 0,
-      asks: Boolean(pk) || (p.asks ?? false),
-      question: pk ? (pk.review ? 'Review and submit your answers' : `${pk.tabs[pk.current]?.header ? pk.tabs[pk.current].header + ': ' : ''}${pk.question}`) : p.question ?? null,
+      asks: Boolean(pk) || ny.asks,
+      question: pk ? (pk.review ? 'Review and submit your answers' : `${pk.tabs[pk.current]?.header ? pk.tabs[pk.current].header + ': ' : ''}${pk.question}`) : ny.question,
       picker: pk,
+      stall, // Jev's stall class (finished|stuck|looping|waiting_on_user) or undefined: today's rule
       lastPrompt: p.lastPrompt ?? null,
       session,
     })
@@ -997,8 +1053,10 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     // main checkout: its cwd alone made it an ad-hoc task that contradicted its own ticket).
     const ag = agents.filter((a) => a.local && ((wt && inside(a.cwd, wt.path)) || (tagTicket(a) === id && !worktrees.some((w) => w.path !== REPO && inside(a.cwd, w.path)))))
     ag.forEach((a) => linked.add(a.key))
-    const asker = ag.find((a) => (a.status === 'idle' || a.status === 'blocked') && a.asks)
-    const idleLong = ag.find((a) => a.status === 'idle' && now - a.statusSince > STALL_MS)
+    // Jev's stall class, when there is one, decides: finished → not stalled, waiting_on_user → needs you,
+    // stuck/looping → stalled (also a working agent found looping). No class → the idle-for-20-min rule.
+    const asker = ag.find((a) => ((a.status === 'idle' || a.status === 'blocked') && a.asks) || a.stall === 'waiting_on_user')
+    const idleLong = ag.find((a) => (a.status === 'idle' && now - a.statusSince > STALL_MS && !['finished', 'waiting_on_user'].includes(a.stall)) || a.stall === 'looping')
     const worker = ag.find((a) => a.pool === 'worker')
     const planner = ag.find((a) => a.pool === 'planner')
     const state = asker ? 'needs_you'
@@ -1024,7 +1082,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       // Who answers the ticket's room: the worker, else the planner.
       responder: (worker ?? planner) ? { key: (worker ?? planner).key, name: (worker ?? planner).name, taskState: (worker ?? planner).tags?.task_state ?? null } : null,
       project: agent?.project ?? (issue ? PROJECT_BY_TEAM[id.split('-')[0]] ?? id.split('-')[0].toLowerCase() : REPO_PROJECT),
-      question: asker?.question ?? null,
+      question: asker ? asker.question ?? asker.recap ?? null : null,
       branch: wt?.branch ?? pr?.branch ?? null,
       worktree: wt?.path ?? null,
       plan: wt?.plan ?? null,
@@ -1040,7 +1098,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
   for (const a of agents) {
     if (linked.has(a.key)) continue
     // Only an agent asking something is a task; the rest are visible in Agents.
-    if (!a.asks || a.status === 'working') continue
+    if ((!a.asks || a.status === 'working') && a.stall !== 'waiting_on_user') continue
     const title = (a.recap ?? a.lastPrompt ?? a.name).slice(0, 120)
     tasks.push({
       id: `agent:${a.key}`,
@@ -1051,7 +1109,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       state: 'needs_you',
       agent: { key: a.key, id: a.id, name: a.name, machine: a.machine },
       project: a.project,
-      question: a.question,
+      question: a.question ?? a.recap ?? null,
       branch: null, worktree: null, plan: null, pr: null,
       updatedAt: new Date(a.statusSince).toISOString(),
       mine: true,
@@ -1117,10 +1175,13 @@ export function jevState({ health, models, hasKey }) {
 }
 const jevGet = (path, key) => fetch(`https://api.typesafe.ai${path}`, { headers: key ? { authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(4000) })
   .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }), () => null)
-const jev = () => cached('jev', 60_000, async () => {
-  const key = cfg.get('TYPESAFE_API_KEY')
-  const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
-  return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
+const jev = async () => ({
+  ...(await cached('jev', 60_000, async () => {
+    const key = cfg.get('TYPESAFE_API_KEY')
+    const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
+    return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
+  })),
+  calls: await cached('jev-calls', 60_000, async () => healthSummary(await readCalls())), // the log can reach ~10 MB
 })
 
 async function health() {
@@ -1210,6 +1271,15 @@ const trayOfInbox = () => ({
 })
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
 inbox.subs.add((it) => broadcastEvent('notification', it))
+// Scored once, async, after it is stored; the web reads `urgency` on its next list fetch (no re-broadcast: that
+// would notify twice). No answer → no urgency, which sorts as FYI.
+inbox.subs.add((it) => {
+  if (!jevOn('INBOX_RANK')) return
+  const s = inboxRank.state(it)
+  jevAsk('INBOX_RANK', s, inboxRank.questions(), (x) => (inboxRank.decide(x) ?? 0) >= 2)
+    .then((a) => { const u = inboxRank.decide(a); if (u != null) return inbox.patch([it.id], { urgency: u }) })
+    .catch((e) => console.error('inbox rank:', e.message))
+})
 // ---- Claude usage (Overview) ----
 const USAGE_FILE = join(homedir(), '.cache', 'ccstatusline', 'usage.json')
 const usageAgg = new UsageAgg()
@@ -1553,8 +1623,17 @@ export function needsSession(method, path, headers) {
 }
 
 // ---- rooms ----
+// Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
+const jevOn = (feature) => cfg.get(`WT_JEV_${feature}`) === 'on'
+const jevAsk = (feature, state, questions, pick) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick })
 const rooms = new Rooms({
   dir: DATA,
+  judge: async (state) => {
+    if (!jevOn('ROOM_RESOLVE')) return null
+    const min = minFor('room_resolve')
+    const a = await jevAsk('ROOM_RESOLVE', state, roomResolve.questions(), (x) => roomResolve.decide(x, min))
+    return a && roomResolve.decide(a, min)
+  },
   agents: () => agents(),
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
@@ -1727,6 +1806,28 @@ async function repoRoot(p) {
   if (!c) throw Object.assign(new Error(`not a git repository: ${p}`), { status: 400 })
   return dirname(c.trim())
 }
+// Settings › Observability: Jev call stats from jev-calls.jsonl, the existing source health, and a read-only tail
+// of the server log. The log path is fixed here — nothing from the query is used as a path.
+async function observabilityApi(req, res, url) {
+  if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
+  if (req.method !== 'GET') return send(res, 405, { error: 'GET only' })
+  if (url.pathname === '/api/logs/server') return send(res, 200, await serverLogTail(url.searchParams))
+  const calls = await readCalls()
+  const q = Object.fromEntries(['feature', 'outcome', 'err'].map((k) => [k, url.searchParams.get(k) || undefined]))
+  return send(res, 200, {
+    stats: { '24h': featureStats(calls, 86_400_000), '7d': featureStats(calls, 7 * 86_400_000) },
+    recent: recentCalls(calls, q),
+    features: [...new Set(calls.map((c) => c.feature))].sort(),
+    sources: SOURCES,
+  })
+}
+
+// Only `lines` is read from the query; the file is always CRASH_LOG.
+export async function serverLogTail(params, read = (f) => readFile(f, 'utf8')) {
+  const text = await read(CRASH_LOG).catch(() => '')
+  return { path: '~/Library/Logs/wt-dashboard/server.log', lines: tailLines(text, params.get('lines')) }
+}
+
 async function configApi(req, res, parts) {
   const state = () => ({ items: cfg.publicState(), loopback: isLoopbackRequest(req), app: process.env.WT_DASHBOARD_APP === '1' })
   if (req.method === 'GET' && parts.length === 2) return send(res, 200, state())
@@ -1923,6 +2024,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (url.pathname === '/api/observability' || url.pathname === '/api/logs/server') return await observabilityApi(req, res, url)
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
       if (url.pathname === '/api/uploads' && req.method === 'POST') {

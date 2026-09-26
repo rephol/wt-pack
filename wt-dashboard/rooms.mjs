@@ -191,6 +191,15 @@ export function nextNeedsYou(current, msg, handle, prev = null) {
   return [...rest, { agent: msg.author.name, text: msg.text.slice(0, 300), ts: msg.ts, id: msg.id }]
 }
 
+// Jev (WT_JEV_ROOM_RESOLVE): the '?' rule above is the sync answer; when the agent answers the user's own message,
+// Jev judges whether the reply still leaves the user needed. Shared by the server and jev-eval.mjs.
+export const roomResolve = {
+  questions: () => ({ open: { type: 'noul',
+    instructions: "Does this reply still leave the user's question/request unanswered, or ask the user something?",
+    criteria: { true: 'The user still has to answer, decide or provide something.', false: 'The reply answers or reports; nothing is asked of the user.' } } }),
+  decide: (a, min = 0.7) => (a?.open?.noul ?? 0) >= min, // true = still needs the user
+}
+
 // Write-then-rename, so a crash mid-write never leaves a truncated index or settings file.
 export async function atomicWrite(file, data) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
@@ -207,8 +216,9 @@ export function reconcileIndex(index, files) {
 export const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'room'
 
 export class Rooms {
-  constructor({ dir, agents, prompt, log = console.error }) {
-    Object.assign(this, { dir, agentsFn: agents, promptFn: prompt, log })
+  // judge(state) → Promise<boolean|null>: optional Jev resolve (true = still needs the user, null = no answer).
+  constructor({ dir, agents, prompt, log = console.error, judge = null }) {
+    Object.assign(this, { dir, agentsFn: agents, promptFn: prompt, log, judge })
     this.index = null // [{slug,title,project,createdAt,paused,members,hops}]
     this.settings = null
     this.msgs = new Map() // slug -> [message] (folded: deliveredTo filled in)
@@ -231,6 +241,20 @@ export class Rooms {
     this.index = reconcileIndex(index, await readdir(join(this.dir, 'rooms')).catch(() => []))
     if (this.index.length !== index.length) await this.saveIndex()
     this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse((await readFile(join(this.dir, 'settings.json'), 'utf8').catch(() => '{}'))) }
+  }
+  // A late Jev answer is applied only while msg is still the room's latest word (no newer post, user's or agent's,
+  // has moved needs-you on); it then sets or clears that agent's entry for msg.id.
+  resolveLater(slug, room, msg, prev) {
+    return this.judge({ request: prev.text.slice(0, 2000), reply: msg.text.slice(0, 2000) }).then(async (needs) => {
+      if (needs == null) return
+      const last = (await this.messages(slug)).findLast((m) => m.author.kind !== 'system')
+      if (last?.id !== msg.id) return
+      const rest = (room.needsYou ?? []).filter((n) => n.agent !== msg.author.name)
+      const had = (room.needsYou ?? []).some((n) => n.id === msg.id)
+      if (needs === had) return
+      room.needsYou = needs ? [...rest, { agent: msg.author.name, text: msg.text.slice(0, 300), ts: msg.ts, id: msg.id }] : rest
+      await this.saveIndex()
+    }).catch((e) => this.log(`room resolve: ${e.message}`))
   }
   saveIndex() { return atomicWrite(join(this.dir, 'rooms.json'), JSON.stringify(this.index, null, 2)) }
   async setSettings(patch) {
@@ -369,6 +393,8 @@ export class Rooms {
     room.hops = plan.hops
     const prev = (await this.messages(slug)).findLast((m) => m.author.kind !== 'system')
     room.needsYou = nextNeedsYou(room.needsYou ?? [], msg, this.settings.profile.handle, prev)
+    if (this.judge && prev?.author.kind === 'user' && msg.author.kind === 'agent'
+      && msg.mentions.some((m) => m.toLowerCase() === this.settings.profile.handle.toLowerCase())) this.resolveLater(slug, room, msg, prev)
     // Everyone who speaks or is addressed becomes a member.
     const mem = new Set(room.members)
     if (author.kind === 'agent') mem.add(author.name)

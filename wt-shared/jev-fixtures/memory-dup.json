@@ -1,0 +1,14 @@
+[
+  {"state": {"note": "Run web tests prior to each commit", "existing": ["Always run the web tests before committing"]}, "expect": ["duplicate"]},
+  {"state": {"note": "Never run tests before committing, CI does it", "existing": ["Always run the web tests before committing"]}, "expect": ["conflicts"]},
+  {"state": {"note": "Use pnpm, not npm", "existing": ["Always run the web tests before committing"]}, "expect": ["unrelated"]},
+  {"state": {"note": "No draft PRs: merge to main after review", "existing": ["wt-pack: no draft PRs needed; after code review, merge to main directly"]}, "expect": ["duplicate"]},
+  {"state": {"note": "Always open a draft PR first and wait for review", "existing": ["wt-pack: no draft PRs needed; after code review, merge to main directly"]}, "expect": ["conflicts"]},
+  {"state": {"note": "Browser checks use agent-browser first", "existing": ["For any test or check that needs a browser, use the agent-browser skill first"]}, "expect": ["duplicate"]},
+  {"state": {"note": "Use Claude-in-Chrome for every browser check, never agent-browser", "existing": ["For any test or check that needs a browser, use the agent-browser skill first"]}, "expect": ["conflicts"]},
+  {"state": {"note": "Answer in English", "existing": ["Keep commit messages under 72 characters"]}, "expect": ["unrelated"]},
+  {"state": {"note": "Reply to the user in Indonesian", "existing": ["Always answer in English"]}, "expect": ["conflicts"]},
+  {"state": {"note": "Don't restart the dashboard server repeatedly", "existing": ["Restart the wt-dashboard service at most once per change"]}, "expect": ["duplicate"]},
+  {"state": {"note": "Name worktrees after the ticket id", "existing": ["Push after every commit"]}, "expect": ["unrelated"]},
+  {"state": {"note": "Commit with -a to include everything", "existing": ["Commit only your own paths, never -a"]}, "expect": ["conflicts"]}
+]

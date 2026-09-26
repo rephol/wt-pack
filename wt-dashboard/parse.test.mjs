@@ -711,3 +711,146 @@ test('config: WT_AGENTS_MCP is full|lean only, written to the env file', async (
   assert.match(rfs(f, 'utf8'), /^WT_AGENTS_MCP=lean$/m)
   await assert.rejects(cfg.setValue('WT_AGENTS_MCP', 'x'), (e) => e.status === 400)
 })
+
+test('config: WT_JEV_* switches are on|off with per-feature defaults', async () => {
+  const { cfg, f } = tmpCfg(''); await cfg.load()
+  assert.equal(cfg.get('WT_JEV_ROOM_RESOLVE'), 'on')
+  assert.equal(cfg.get('WT_JEV_NEEDS_YOU'), 'off')
+  assert.equal(cfg.source('WT_JEV_NEEDS_YOU'), 'default')
+  await cfg.setValue('WT_JEV_ROOM_RESOLVE', 'off')
+  assert.match(rfs(f, 'utf8'), /^WT_JEV_ROOM_RESOLVE=off$/m)
+  assert.equal(cfg.get('WT_JEV_ROOM_RESOLVE'), 'off')
+  await assert.rejects(cfg.setValue('WT_JEV_STALL', 'yes'), (e) => e.status === 400)
+  assert.equal(cfg.publicState().filter((i) => i.key.startsWith('WT_JEV_')).length, 9)
+})
+
+import { healthSummary } from './jevlog.mjs'
+test('jevlog: health summary counts the last 24h and its errors', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z')
+  const calls = [{ ts: '2026-09-26T11:00:00Z', err: null }, { ts: '2026-09-26T10:00:00Z', err: 'timeout' }, { ts: '2026-09-24T10:00:00Z', err: 'timeout' }]
+  assert.deepEqual(healthSummary(calls, now), { today: 2, errors: 1 })
+})
+
+import { featureStats, recentCalls, tailLines } from './jevlog.mjs'
+import { serverLogTail } from './server.mjs'
+test('jevlog: per-feature stats — p50/p95 over live calls, cache hits and fail-opens counted', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z')
+  const t = '2026-09-26T11:00:00Z'
+  const calls = [
+    ...[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000].map((ms) => ({ ts: t, feature: 'a', outcome: 'picked', ms, cache: false, err: null })),
+    { ts: t, feature: 'a', outcome: 'picked', ms: 0, cache: true, err: null },
+    { ts: t, feature: 'a', outcome: 'failopen', ms: 2000, cache: false, err: 'timeout' },
+    { ts: t, feature: 'b', outcome: 'failopen', ms: 1, cache: false, err: 'nokey' },
+    { ts: '2026-09-20T11:00:00Z', feature: 'a', outcome: 'picked', ms: 5, cache: false, err: null },
+  ]
+  const [a, b] = featureStats(calls, 86_400_000, now)
+  assert.deepEqual({ ...a }, { feature: 'a', calls: 12, cacheHits: 1, failOpen: 1, picked: 11, errorRate: 0.09, timeoutRate: 0.09, p50ms: 600, p95ms: 2000 })
+  assert.equal(b.failOpen, 1)
+  assert.equal(featureStats(calls, 7 * 86_400_000, now)[0].calls, 13)
+  assert.equal(recentCalls(calls, { feature: 'a', err: 'timeout' }).length, 1)
+  assert.equal(recentCalls(calls, { err: 'none' }, 3)[0].ts, '2026-09-20T11:00:00Z')
+  assert.deepEqual(tailLines('1\n2\n3\n', 2), ['2', '3'])
+  assert.equal(tailLines('x\n'.repeat(3000), 99999).length, 2000)
+})
+
+test('logs: /api/logs/server reads only the fixed server log, whatever the query says', async () => {
+  const seen = []
+  const r = await serverLogTail(new URLSearchParams('lines=../../etc/passwd&path=/etc/passwd&file=/etc/hosts'), async (f) => (seen.push(f), 'a\nb\n'))
+  assert.equal(seen.length, 1)
+  assert.match(seen[0], /Library\/Logs\/wt-dashboard\/server\.log$/)
+  assert.deepEqual(r.lines, ['a', 'b'])
+})
+
+test('rooms: Jev resolve — answered → cleared, unanswered without ? → kept, null → heuristic, late answer after a newer post ignored', async () => {
+  const R = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const setup = async (answer) => {
+    const dir = await mkdtemp((await import('node:os')).tmpdir() + '/rooms-jev-')
+    let release; const gate = new Promise((r) => { release = r })
+    const rooms = new R.Rooms({ dir, agents: async () => [{ key: 'A', name: 'a', status: 'working', local: true }], prompt: async () => {}, log: () => {},
+      judge: async () => { await gate; return answer } })
+    await rooms.load()
+    await rooms.create({ title: 'r' })
+    return { rooms, release }
+  }
+  const user = { kind: 'user', name: 'me', handle: 'user' }
+  const agent = { kind: 'agent', name: 'a', key: 'A' }
+  const settle = () => new Promise((r) => setTimeout(r, 20))
+  // answered, though with a '?' the heuristic kept it: Jev clears
+  let { rooms, release } = await setup(false)
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user done — deployed. Anything else?' })
+  assert.equal(rooms.room('r').needsYou.length, 1)
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 0)
+  // unanswered without '?': heuristic cleared it, Jev keeps it
+  ;({ rooms, release } = await setup(true))
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user tell me which environment' })
+  assert.equal(rooms.room('r').needsYou.length, 0)
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 1)
+  // judge null → heuristic stands
+  ;({ rooms, release } = await setup(null))
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user tell me which environment' })
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 0)
+  // a second message arrives before Jev answers: the late answer is dropped
+  ;({ rooms, release } = await setup(true))
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user tell me which environment' })
+  await rooms.post('r', { author: user, text: 'never mind' })
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 0)
+})
+
+import { TailCache, mergeNeedsYou, needsYouJudge } from './server.mjs'
+test('jev tail cache: asks once per tail, async, answer read on a later tick; a changed tail asks again', async () => {
+  const c = new TailCache()
+  let n = 0
+  const ask = async (t) => (n++, t.includes('?'))
+  assert.equal(c.get('k', 'which env?', ask), undefined) // first tick: fired, not awaited
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(c.get('k', 'which env?', ask), true)
+  assert.equal(n, 1)
+  assert.equal(c.get('k', 'done.', ask), undefined)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual([c.get('k', 'done.', ask), n], [false, 2])
+  assert.equal(c.get('x', 't', async () => { throw new Error('x') }), undefined) // a failing ask stays undefined
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(c.get('x', 't', ask), undefined)
+})
+
+test('pane needs-you merge: picker wins, Jev yes asks with the tail, Jev no clears the regex, no answer = regex', () => {
+  const tail = 'Should I deploy to prod or staging\n\n❯ '
+  assert.deepEqual(mergeNeedsYou({ asks: false, question: null, tail }, true), { asks: true, question: 'Should I deploy to prod or staging\n❯' })
+  assert.deepEqual(mergeNeedsYou({ asks: true, question: 'Do you want to', tail }, false), { asks: false, question: null })
+  assert.deepEqual(mergeNeedsYou({ asks: true, question: 'Do you want to', tail }, undefined), { asks: true, question: 'Do you want to' })
+  assert.deepEqual(mergeNeedsYou({ picker: {}, asks: false, question: null, tail }, false), { asks: false, question: null })
+  assert.equal(needsYouJudge.decide({ waiting: { noul: 0.8 } }), true)
+  assert.equal(needsYouJudge.decide(null), false)
+})
+
+test('deriveTasks: Jev stall class — stuck/looping stalled, finished not, waiting_on_user needs you, none = 20-min rule', () => {
+  const old = Date.now() - 30 * 60_000
+  const a = (status, stall) => ({ key: 'm/p1', id: 'p1', name: 'w-01', machine: 'm', local: true, pool: 'worker', status, statusSince: old,
+    cwd: '/nowhere', tags: { task: 'UMK-9 x' }, asks: false, question: null, project: 'p', recap: 'waiting on your call', lastPrompt: null, stall })
+  const st = (status, stall) => deriveTasks({ agents: [a(status, stall)], worktrees: [], prs: [], issues: [] })[0].state
+  assert.equal(st('idle', undefined), 'stalled')
+  assert.equal(st('idle', 'stuck'), 'stalled')
+  assert.equal(st('idle', 'looping'), 'stalled')
+  assert.equal(st('idle', 'finished'), 'queued')
+  assert.equal(st('idle', 'waiting_on_user'), 'needs_you')
+  assert.equal(st('working', 'looping'), 'stalled')
+  assert.equal(st('working', undefined), 'building')
+  assert.equal(deriveTasks({ agents: [a('idle', 'waiting_on_user')], worktrees: [], prs: [], issues: [] })[0].question, 'waiting on your call')
+})
+
+import { inboxRank } from './inbox.mjs'
+test('inbox rank: score → urgency 0-3; no answer → none (sorts as FYI)', () => {
+  assert.equal(inboxRank.decide({ urgency: { score: 2.45 } }), 2)
+  assert.equal(inboxRank.decide({ urgency: { score: 3.6 } }), 3)
+  assert.equal(inboxRank.decide(null), null)
+  assert.deepEqual(Object.keys(inboxRank.state({ kind: 'question', title: 't', body: 'b', target: {}, id: 'x' })), ['kind', 'title', 'body'])
+})

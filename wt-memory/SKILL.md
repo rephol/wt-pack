@@ -20,10 +20,14 @@ Plain markdown, one file per scope, merged global → role → project:
   Never fails loudly: it runs in hooks.
 - `hash [same flags]` — 16-hex hash of that output, for change detection.
 - `path [global | role R | project P]` — the store dir, or one file.
-- `remember "<note>" [--scope role|project|global] [--role R] [--project P]` — agents maintain memory
+- `remember "<note>" [--scope role|project|global] [--role R] [--project P] [--strict]` — agents maintain memory
   themselves. Default scope: project if inferable, else role. Appends one bullet
   `- <note> <!-- wtm:id=ab12cd by=<agent> at=YYYY-MM-DD -->` (author = herdr agent name of `$HERDR_PANE_ID`);
   `context` strips the trailer. Near-identical notes (same words ignoring case/punctuation) are skipped.
+  With `WT_JEV_MEMORY_DUP` on (default), Jev compares the note with the scope's newest 40 entries and prints
+  `similar to: …` / `conflicts with: …`; the note is still written unless `--strict`, which refuses (exit 1).
+  With `WT_JEV_MEMORY_SUGGEST` on (default off) the plugin's UserPromptSubmit hook adds a remember hint when
+  Jev judges the prompt a standing preference (≥ 0.8, 1.5s cap, in parallel with the context read).
   **Global is never written directly**: it lands in `pending/<id>.json` and prints "proposed (awaiting
   approval)" until the user accepts it in the dashboard inbox (or `accept <id>` / `reject <id>`).
 - `forget <id>` — remove an entry (or a pending proposal). `list [--scope S] [--json]` — agent entries and

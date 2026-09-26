@@ -17,6 +17,15 @@ export const KEYS = {
   WT_DASHBOARD_REPO: { legacy: 'UMKMALL_REPO', label: 'Default repo', restart: true },
   // Read by the shell scripts too (wt-shared/scripts/mcp-mode.sh): lean | full (default).
   WT_AGENTS_MCP: { oneOf: ['full', 'lean'], label: 'Lean agent MCP' },
+  // Jev integrations (read by the server via cfg.get, by the CLIs via typesafe.mjs enabled()). ON where calls are
+  // rare and event-driven, OFF where they scale with poll ticks or every prompt.
+  ...Object.fromEntries([
+    ['ROOM_RESOLVE', 'Room needs-you resolve', 'on'], ['MEMORY_DUP', 'Memory near-duplicate check', 'on'],
+    ['BABYSIT_TRIAGE', 'Babysit comment triage', 'on'], ['ROUTE', 'Handoff routing', 'on'],
+    ['NEEDS_YOU', 'Pane needs-you', 'off'], ['STALL', 'Stalled vs thinking', 'off'],
+    ['INBOX_RANK', 'Inbox urgency', 'off'], ['MEMORY_SUGGEST', 'Memory suggestions', 'off'],
+    ['LOG_SNIPPETS', 'Log input snippets', 'off'],
+  ].map(([k, label, d]) => [`WT_JEV_${k}`, { oneOf: ['on', 'off'], label, default: d, jev: true }])),
 }
 const SERVICE = 'wt-dashboard'
 const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/
@@ -86,7 +95,7 @@ export class Config {
     return 'default'
   }
   get(k) {
-    return this.override(k) ?? (KEYS[k].secret ? this.secrets[k] : null) ?? this.fileVals[k] ?? (KEYS[k].legacy ? this.fileVals[KEYS[k].legacy] : null) ?? null
+    return this.override(k) ?? (KEYS[k].secret ? this.secrets[k] : null) ?? this.fileVals[k] ?? (KEYS[k].legacy ? this.fileVals[KEYS[k].legacy] : null) ?? KEYS[k].default ?? null
   }
   list(k) { return (this.get(k) ?? '').split(KEYS[k].list).map((s) => s.trim()).filter(Boolean) }
 

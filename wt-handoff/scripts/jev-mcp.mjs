@@ -4,12 +4,12 @@
 //   {"picks":["figma"],"p":{"figma":0.93,"railway":0.02,...},"ms":640}
 // Only picks at or above WT_HANDOFF_JEV_MIN (default 0.7). Any failure — no key, timeout (2s), HTTP
 // error, bad JSON — prints {"picks":[],"error":"…"} and exits 0: a handoff never blocks on this.
-// The key comes from $TYPESAFE_API_KEY, else the Keychain entry wt-dashboard keeps (never printed).
-import { execFileSync } from 'node:child_process'
+// Calls go through wt-shared typesafe.mjs judge(): key from env, the wt-dashboard Keychain entry or ~/.claude/.env.
 import { readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { judge } from '../../wt-shared/scripts/typesafe.mjs'
 
 // What each catalog server is FOR, in the words Jev judges against. A catalog name without an
 // entry here is never picked.
@@ -32,14 +32,6 @@ export function picksFrom(answers, min) {
   return { picks: Object.keys(p).filter((k) => p[k] >= min), p }
 }
 
-function key() {
-  if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY
-  try {
-    return execFileSync('security', ['find-generic-password', '-s', 'wt-dashboard', '-a', 'TYPESAFE_API_KEY', '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-  } catch { return '' }
-}
-
 async function main() {
   const t0 = Date.now()
   const out = (o) => console.log(JSON.stringify({ ...o, ms: Date.now() - t0 }))
@@ -48,18 +40,11 @@ async function main() {
     const catalog = process.env.WT_AGENTS_CATALOG ?? join(homedir(), '.claude/skills/wt-agents/mcp/catalog.json')
     const names = Object.keys(JSON.parse(readFileSync(catalog, 'utf8')).mcpServers ?? {})
     const qs = questions(names)
-    const k = key()
     if (!prompt || !Object.keys(qs).length) return out({ picks: [], error: 'nothing to ask' })
-    if (!k) return out({ picks: [], error: 'no TYPESAFE_API_KEY' })
-    const r = await fetch('https://api.typesafe.ai/v1/systemone', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${k}` },
-      body: JSON.stringify({ model: 'jev-latest', state: { task: prompt.slice(0, 4000) }, questions: qs }),
-      signal: AbortSignal.timeout(Number(process.env.WT_HANDOFF_JEV_TIMEOUT_MS ?? 2000)),
-    })
-    if (!r.ok) return out({ picks: [], error: `HTTP ${r.status}` })
-    const j = await r.json()
-    out(picksFrom(j.answers, Number(process.env.WT_HANDOFF_JEV_MIN ?? 0.7)))
+    const answers = await judge('mcp', { task: prompt.slice(0, 4000) }, qs,
+      { timeoutMs: Number(process.env.WT_HANDOFF_JEV_TIMEOUT_MS ?? 2000) })
+    if (!answers) return out({ picks: [], error: 'jev unavailable (no key, timeout or HTTP error)' })
+    out(picksFrom(answers, Number(process.env.WT_HANDOFF_JEV_MIN ?? 0.7)))
   } catch (e) {
     out({ picks: [], error: e?.name === 'TimeoutError' ? 'timeout' : String(e?.message ?? e).slice(0, 80) })
   }

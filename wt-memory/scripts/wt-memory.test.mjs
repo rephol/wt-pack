@@ -22,7 +22,8 @@ chmodSync(join(fakeBin, 'herdr'), 0o755)
 // Run it once now: macOS scans a new executable on its first launch (~0.7s), past the CLI's 500ms herdr timeout.
 execFileSync(join(fakeBin, 'herdr'))
 
-const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, ...env } }).trimEnd()
+// Jev off unless a test turns it on with a stub judge: tests never call the real API.
+const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', WT_JEV_MEMORY_SUGGEST: 'off', ...env } }).trimEnd()
 
 test('merges global → role → project with headings', () => {
   assert.equal(run(['context', '--role', 'planner', '--project', 'demo']),
@@ -86,7 +87,7 @@ test('MCP server: initialize, tools/list, remember, list, error', () => {
   ]
   const out = execFileSync(new URL('../mcp/server.mjs', import.meta.url).pathname, {
     input: reqs.map((r) => JSON.stringify(r)).join('\n') + '\n', encoding: 'utf8',
-    env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: h },
+    env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: h, WT_JEV_MEMORY_DUP: 'off' },
   }).trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(out.map((m) => m.id), [1, 2, 3, 4, 5])
   assert.equal(out[0].result.protocolVersion, '2025-06-18')
@@ -94,4 +95,43 @@ test('MCP server: initialize, tools/list, remember, list, error', () => {
   assert.match(out[2].result.content[0].text, /^remembered \(project demo\)/)
   assert.equal(JSON.parse(out[3].result.content[0].text)[0].text, 'Use pnpm')
   assert.equal(out[4].result.isError, true)
+})
+
+// ---- Jev (stub judge through WT_TYPESAFE_MODULE) ----
+const stub = (body) => { const f = join(mkdtempSync(join(tmpdir(), 'ts-stub-')), 'typesafe.mjs'); writeFileSync(f, body); return f }
+const stubAnswers = (answers) => stub(`export const enabled = (f, d) => { const v = process.env['WT_JEV_' + f.toUpperCase()]; return v == null ? d : v === 'on' }
+export const minFor = (_f, d) => d
+export const judge = async () => (${JSON.stringify(answers)})`)
+test('remember + Jev: similar/conflict printed and still written; --strict refuses; null judge = unchanged', () => {
+  const h = mkdtempSync(join(tmpdir(), 'wt-memory-jev-'))
+  const r = (args, ans) => run(args, { WT_MEMORY_HOME: h, WT_JEV_MEMORY_DUP: 'on', WT_TYPESAFE_MODULE: stubAnswers(ans) })
+  r(['remember', 'Always run web tests before committing', '--scope', 'project', '--project', 'demo'], null)
+  assert.match(r(['remember', 'Run web tests prior to each commit', '--scope', 'project', '--project', 'demo'], { e0: { choice: 'duplicate' } }),
+    /^similar to: Always run web tests before committing\nremembered \(project demo\)/)
+  assert.throws(() => r(['remember', 'Never run tests before committing', '--scope', 'project', '--project', 'demo', '--strict'], { e0: { choice: 'conflicts' }, e1: { choice: 'unrelated' } }),
+    (e) => e.status === 1 && /conflicts with: Always run web tests/.test(e.stdout) && /refused/.test(e.stderr))
+  assert.match(r(['remember', 'Use pnpm', '--scope', 'project', '--project', 'demo'], null), /^remembered \(project demo\)/)
+  assert.equal(JSON.parse(run(['list', '--json'], { WT_MEMORY_HOME: h })).length, 3)
+})
+
+const HOOK = new URL('../claude-plugin/hooks/inject.mjs', import.meta.url).pathname
+const hook = (input, env) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(input), encoding: 'utf8',
+  env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_MEMORY_BIN: BIN, HOME: mkdtempSync(join(tmpdir(), 'hook-home-')), ...env } })
+test('hook + Jev suggest: a standing preference adds the remember hint; off or no answer adds nothing', () => {
+  const ev = { hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'from now on always answer in English', cwd: '/' }
+  const on = hook(ev, { WT_JEV_MEMORY_SUGGEST: 'on', WT_TYPESAFE_MODULE: stubAnswers({ standing: { noul: 0.93 } }) })
+  assert.match(JSON.parse(on).hookSpecificOutput.additionalContext, /looks like a standing preference/)
+  const off = hook(ev, { WT_JEV_MEMORY_SUGGEST: 'off', WT_TYPESAFE_MODULE: stubAnswers({ standing: { noul: 0.93 } }) })
+  assert.doesNotMatch(off, /standing preference/)
+})
+test('hook + Jev suggest: returns within 4s when the network hangs (1.5s cap)', () => {
+  const real = new URL('../../wt-shared/scripts/typesafe.mjs', import.meta.url).pathname
+  const hang = stub(`import * as t from ${JSON.stringify(real)}
+export const enabled = () => true; export const minFor = t.minFor
+const hang = (_u, o) => new Promise((_r, rej) => { const k = setTimeout(() => {}, 60000); o.signal.addEventListener('abort', () => { clearTimeout(k); rej(o.signal.reason) }) })
+export const judge = (f, s, q, o) => t.judge(f, s, q, { ...o, key: 'k', fetchImpl: hang })`)
+  const t0 = Date.now()
+  hook({ hook_event_name: 'UserPromptSubmit', session_id: 's2', prompt: 'always use pnpm', cwd: '/' }, { WT_TYPESAFE_MODULE: hang, WT_JEV_LOG: join(tmpdir(), 'hook-jev.jsonl') })
+  const ms = Date.now() - t0
+  assert.ok(ms < 4000 && ms >= 1400, `took ${ms}ms`)
 })
