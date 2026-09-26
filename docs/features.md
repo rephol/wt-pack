@@ -212,7 +212,7 @@ Terminals, Usage, Observability, Server, About.
   Spacious), link previews (**on**).
 - **Notifications**: see [Inbox](#inbox).
 - **Rooms**, **Roles**: see above.
-- **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries, Accept/Reject pending
+- **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries (the list scrolls in its own box as it grows), Accept/Reject pending
   global proposals, **Preview for agent…** shows what an agent receives. Warns when the plugin is missing.
 - **Integrations**: precedence is process env › Keychain (secrets) › `~/.config/wt-dashboard/env` › default;
   applies without restart except `WT_DASHBOARD_REPO` and `WT_LINEAR_TEAMS`.
