@@ -177,8 +177,12 @@ from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
 Handed off by ${from_name:-$from_pane} (pane $from_pane). To reach it: herdr agent prompt $from_pane \"...\""
 
 # The task label starts with the ticket when there is one, and is cut to herdr's 80 characters here.
+# A ticket is UMK-N (Linear) or <KEY>-N for a local board key (wt-ticket keys; empty when the server is down).
+T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+keys=$( [ -x "$T" ] && "$T" keys 2>/dev/null | tr '\n' '|' || true)
 ticket=$(printf '%s\n%s\n' "$task" "$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)" \
-  | grep -oiE 'umk-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+  | grep -oiE "(^|[^a-z])(umk${keys:+|${keys%|}})-[0-9]+" | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]' || true)
+local_ticket=$ticket; case "$ticket" in UMK-*) local_ticket= ;; esac
 case "$(printf '%s' "$task" | tr '[:lower:]' '[:upper:]')" in
   "$ticket"*) ;;
   *) task=$(printf '%s %s' "$ticket" "$task" | sed 's/^ *//; s/ *$//') ;;
@@ -218,6 +222,11 @@ finish() {  # <first output line> <target pane>
   if [ -n "$from_pane" ] && [ "$(herdr pane get "$from_pane" 2>/dev/null | jq -r '.result.pane.tokens.role // empty')" = planner ]; then
     tag "$from_pane" --token "task_state=handed to ${to_name:-$to}"
   fi
+  # A local board ticket handed to a worker moves to Building, assigned to it (never blocks the handoff).
+  if [ -n "$local_ticket" ] && [ "$role" = worker ]; then
+    if [ -x "$T" ]; then "$T" move "$local_ticket" building >/dev/null || true; [ -n "$to_name" ] && { "$T" assign "$local_ticket" "$to_name" >/dev/null || true; }
+    else echo "wt-ticket missing" >&2; fi
+  fi
   echo "$line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
   echo "reach: herdr agent prompt $to \"...\""
@@ -226,6 +235,8 @@ finish() {  # <first output line> <target pane>
 
 dry() {  # <what would happen>
   echo "dry-run: $1"
+  echo "ticket=${ticket:-none}"
+  [ -n "$local_ticket" ] && [ "$role" = worker ] && echo "board: would move $local_ticket building + assign the worker"
   echo "mcp: ${mcp:-none}${jev:+ (jev: $jev)}"
   [ -z "$routed" ] || echo "$routed"
   exit 0

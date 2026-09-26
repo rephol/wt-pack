@@ -47,7 +47,10 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
   probabilities, and sends, tags and spawns nothing.
 - `--task` labels the target: herdr pane token `task` (source `wt-dashboard`), shown in the dashboard's agent
   list, detail header and switcher. It always **starts with the ticket**; without `--task` the label is just
-  the ticket from `<cwd>`'s branch (`UMK-NNN`), and with neither nothing is set. Cut to 80 characters.
+  the ticket from `<cwd>`'s branch (`UMK-NNN`, or `<KEY>-N` for a local board key from `wt-ticket keys`), and with
+  neither nothing is set. Cut to 80 characters.
+- A local board ticket (`WP-12`) handed to a worker moves to **building** and is assigned to the worker
+  (`wt-ticket move` + `assign`, best effort; `--dry-run` prints `ticket=` and the move instead).
 - Target tokens: `task`, `ticket`, `handoff_from`, `handoff_from_pane`, `handoff_at`. Sender tokens (only
   inside herdr, from `$HERDR_PANE_ID`): `handoff_to`, `handoff_to_pane`.
 - The prompt gets a footer: `Handed off by <sender> (pane <id>). To reach it: herdr agent prompt <id> "..."`.
