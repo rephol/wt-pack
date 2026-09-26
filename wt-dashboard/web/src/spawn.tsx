@@ -79,7 +79,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
         <ScrollableArea label="New agent" style={{ flex: 1, minHeight: 0, padding: '8px 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
           <VStack gap={4}>
             <VStack gap={1}>
-              <SegmentedControl label="Role" value={kind} onChange={(v) => { setKind(v); setPrompt(roles.find((r) => r.id === v)?.spawn?.prompt ?? '') }}>
+              <SegmentedControl label="Role" value={kind} onChange={setKind}>
                 {roles.map((r) => <SegmentedControlItem key={r.id} value={r.id} label={r.name} />)}
               </SegmentedControl>
               <Text type="supporting" size="sm">{start === 'main' ? 'Starts in the main checkout.' : start === 'worktree' ? 'Starts inside an existing worktree.' : 'Starts in the main checkout, or a worktree you choose.'}{allowed ? '' : ` Not allowed in ${proj?.name}.`}</Text>
@@ -93,7 +93,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
                   description: w.agents.length ? `occupied by ${w.agents.join(', ')}` : short(w.path) }))}
                 onChange={setCwd} />
             )}
-            <TextArea label="First prompt (optional)" value={prompt} onChange={setPrompt} placeholder={role?.spawn?.prompt || 'Optional'} rows={3} />
+            <TextArea label="First prompt (optional)" value={prompt} onChange={setPrompt} placeholder="Optional" rows={3} />
             {free && (
               <Banner status="info" title={`${free.name} is free — use it instead?`} description="Panes pile up and nothing reaps them; reuse a free agent when you can."
                 endContent={<Button label={`Use ${free.name}`} size="sm" variant="secondary" onClick={reuse} />} />

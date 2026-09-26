@@ -8,12 +8,12 @@ import { dirname } from 'node:path'
 export const DEFAULT_ROLES = [
   { id: 'orchestrator', name: 'Orchestrator', color: 'purple', letter: 'O', match: { workspace: '*-orchestrator', name: '*orchestrator*' }, spawn: null },
   { id: 'planner', name: 'Planner', color: 'blue', letter: 'P', match: { workspace: '*-planners', name: '*planner*' },
-    spawn: { start: 'main', workspace: '<repo>-planners', prompt: '/wt-plan ', projects: [] } },
+    spawn: { start: 'main', workspace: '<repo>-planners', projects: [] } },
   { id: 'worker', name: 'Worker', color: 'green', letter: 'W', match: { workspace: '*-workers', name: '*worker*' },
-    spawn: { start: 'worktree', workspace: '<repo>-workers', prompt: '/wt-work', projects: [] } },
+    spawn: { start: 'worktree', workspace: '<repo>-workers', projects: [] } },
   // PM+QA: audits the running apps and posts ranked proposals; read-only, so it stays in the main checkout.
   { id: 'auditor', name: 'Auditor', color: 'orange', letter: 'A', match: { workspace: '*-auditors', name: '*auditor*' },
-    spawn: { start: 'main', workspace: '<repo>-auditors', prompt: '/wt-audit', projects: [] } },
+    spawn: { start: 'main', workspace: '<repo>-auditors', projects: [] } },
 ]
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
@@ -54,7 +54,6 @@ export function validateRoles(list) {
       spawn: s ? {
         start: ['main', 'worktree', 'choose'].includes(s.start) ? s.start : 'main',
         workspace: str(s.workspace, 64) || `<repo>-${id}s`,
-        prompt: typeof s.prompt === 'string' ? s.prompt.slice(0, 2000) : '',
         projects: Array.isArray(s.projects) ? s.projects.filter((p) => typeof p === 'string').slice(0, 50) : [],
       } : null,
     }

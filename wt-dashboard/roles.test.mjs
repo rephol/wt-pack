@@ -25,7 +25,7 @@ test('validateRoles: ids, duplicates, defaults for spawn', () => {
   assert.throws(() => validateRoles([{ id: 'other' }]), /bad role id/)
   assert.throws(() => validateRoles([{ id: 'a' }, { id: 'a' }]), /duplicate/)
   const [r] = validateRoles([{ id: 'reviewer', color: 'nope', spawn: { start: 'x' } }])
-  assert.deepEqual(r, { id: 'reviewer', name: 'reviewer', color: 'gray', letter: 'R', match: { workspace: '', name: '' }, spawn: { start: 'main', workspace: '<repo>-reviewers', prompt: '', projects: [] } })
+  assert.deepEqual(r, { id: 'reviewer', name: 'reviewer', color: 'gray', letter: 'R', match: { workspace: '', name: '' }, spawn: { start: 'main', workspace: '<repo>-reviewers', projects: [] } })
   assert.deepEqual(validateRoles(DEFAULT_ROLES), DEFAULT_ROLES) // defaults round-trip
 })
 

@@ -9,7 +9,6 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { TextArea } from '@astryxdesign/core/TextArea'
 import { Selector } from '@astryxdesign/core/Selector'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -20,7 +19,7 @@ import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 export interface Role {
   id: string; name: string; color: string; letter: string
   match: { workspace: string; name: string }
-  spawn: { start: 'main' | 'worktree' | 'choose'; workspace: string; prompt: string; projects: string[] } | null
+  spawn: { start: 'main' | 'worktree' | 'choose'; workspace: string; projects: string[] } | null
 }
 export const OTHER: Role = { id: 'other', name: 'Other', color: 'gray', letter: '?', match: { workspace: '', name: '' }, spawn: null }
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
@@ -100,7 +99,7 @@ export function RolesSection() {
   if (!q.data) return q.isError ? <LoadError what="roles" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={3} /></Delayed>
   const edit = (i: number, patch: Partial<Role>) => setDraft(roles.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   const move = (i: number, d: number) => { const x = roles.slice(); const [r] = x.splice(i, 1); x.splice(i + d, 0, r); setDraft(x) }
-  const add = () => setDraft([...roles, { id: `role${roles.length + 1}`, name: 'New role', color: 'teal', letter: 'N', match: { workspace: '', name: '' }, spawn: { start: 'main', workspace: '<repo>-<role>s', prompt: '', projects: [] } }])
+  const add = () => setDraft([...roles, { id: `role${roles.length + 1}`, name: 'New role', color: 'teal', letter: 'N', match: { workspace: '', name: '' }, spawn: { start: 'main', workspace: '<repo>-<role>s', projects: [] } }])
   return (
     <VStack gap={4}>
       <Text type="supporting" size="sm">An agent&apos;s role: its <code>role</code> tag first, then the first role whose workspace pattern matches, then name pattern, else Other. Order matters; * is a wildcard.</Text>
@@ -128,10 +127,9 @@ export function RolesSection() {
           <Selector label="New agents" value={r.spawn ? r.spawn.start : 'off'} options={[
             { value: 'off', label: 'Cannot be spawned from the dashboard' }, { value: 'main', label: 'Start in the main checkout' },
             { value: 'worktree', label: 'Start in a worktree' }, { value: 'choose', label: 'Choose (main checkout or a worktree)' }]}
-            onChange={(v) => edit(i, { spawn: v === 'off' ? null : { start: v as 'main', workspace: r.spawn?.workspace ?? '<repo>-<role>s', prompt: r.spawn?.prompt ?? '', projects: r.spawn?.projects ?? [] } })} />
+            onChange={(v) => edit(i, { spawn: v === 'off' ? null : { start: v as 'main', workspace: r.spawn?.workspace ?? '<repo>-<role>s', projects: r.spawn?.projects ?? [] } })} />
           {r.spawn && <>
             <TextInput label="Workspace name" value={r.spawn.workspace} description="<repo> and <role> are filled in" onChange={(v) => edit(i, { spawn: { ...r.spawn!, workspace: v } })} />
-            <TextArea label="Default first prompt" value={r.spawn.prompt} rows={2} onChange={(v) => edit(i, { spawn: { ...r.spawn!, prompt: v } })} />
             <TextInput label="Allowed projects" value={r.spawn.projects.join(', ')} description="Comma-separated; empty = all" onChange={(v) => edit(i, { spawn: { ...r.spawn!, projects: v.split(',').map((x) => x.trim()).filter(Boolean) } })} />
           </>}
         </VStack>
