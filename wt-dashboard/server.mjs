@@ -1079,7 +1079,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     ag.forEach((a) => linked.add(a.key))
     // Jev's stall class, when there is one, decides: finished → not stalled, waiting_on_user → needs you,
     // stuck/looping → stalled (also a working agent found looping). No class → the idle-for-20-min rule.
-    const asker = ag.find((a) => ((a.status === 'idle' || a.status === 'blocked') && a.asks) || a.stall === 'waiting_on_user')
+    const asker = ag.find(waitsOnUser)
     const idleLong = ag.find((a) => (a.status === 'idle' && now - a.statusSince > STALL_MS && !['finished', 'waiting_on_user'].includes(a.stall)) || a.stall === 'looping')
     const worker = ag.find((a) => a.pool === 'worker')
     const planner = ag.find((a) => a.pool === 'planner')
@@ -1292,13 +1292,16 @@ async function overview() {
   })
 }
 
+// One needs-you rule for the task state and the inbox snapshot, so every needs-you task has an inbox item.
+export const waitsOnUser = (a) => ((a.status === 'idle' || a.status === 'blocked') && a.asks) || a.stall === 'waiting_on_user'
+
 // ---- transition events (desktop notifications + tray) ----
 // Per-agent state + per-PR CI, so successive overviews can be diffed. Pure: tested in parse.test.mjs.
 export function snapshot(o) {
   const stalled = new Set(o.tasks.filter((t) => t.state === 'stalled' && t.agent).map((t) => t.agent.key))
   const agents = new Map(o.agents.map((a) => [a.key, {
     key: a.key, name: a.name, project: a.project, machine: a.machine, id: a.id,
-    state: a.asks && a.status !== 'working' ? 'needs_you' : stalled.has(a.key) ? 'stalled' : a.status === 'done' ? 'done' : a.status,
+    state: waitsOnUser(a) ? 'needs_you' : stalled.has(a.key) ? 'stalled' : a.status === 'done' ? 'done' : a.status,
     question: a.question ?? null, recap: a.recap ?? null,
   }]))
   // An agent that @mentioned the user in a room needs you until you reply there.
@@ -1328,7 +1331,7 @@ const inbox = new Inbox(join(DATA, 'notifications.jsonl'))
 const subs = new Set()
 let lastSnap = null
 const trayOfInbox = () => ({
-  needs: inbox.open().filter((it) => it.kind !== 'room-suggestion').map((it) => ({ key: it.target.agent ?? (it.target.room ? `room:${it.target.room}` : `memory:${it.target.memory}`), name: it.title, question: it.body })),
+  needs: inbox.open().map((it) => ({ key: it.target.agent ?? (it.target.room ? `room:${it.target.room}` : `memory:${it.target.memory}`), name: it.title, question: it.body })),
   working: lastSnap ? [...lastSnap.agents.values()].filter((a) => a.state === 'working').map((a) => ({ key: a.key, name: a.name })) : [],
 })
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }

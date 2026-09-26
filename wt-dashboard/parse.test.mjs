@@ -1,6 +1,7 @@
 // Run: node --test
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { itemFromTransition } from './inbox.mjs'
 import { parsePane , snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName } from './server.mjs'
 
 const rule = '─'.repeat(40)
@@ -116,6 +117,11 @@ test('transitions: baseline is silent, then one event per transition into needs/
   assert.deepEqual(transitions(s2, s3).map((x) => [x.type, x.text]), [['done', 'did it']])
   const s4 = snapshot(ov([a('idle')], [{ state: 'stalled', agent: { key: 'm|p1' } }]))
   assert.deepEqual(transitions(s3, s4).map((x) => x.type), ['stalled'])
+  // A stall-classified waiting agent (no `asks`) is a needs-you task, so it must produce an inbox question too.
+  const s5 = snapshot(ov([a('idle', { stall: 'waiting_on_user', question: 'Go?' })]))
+  const [q] = transitions(s4, s5)
+  assert.equal(q.type, 'needs_you')
+  assert.equal(itemFromTransition(q).kind, 'question')
 })
 
 test('normalizeEntry: tool_result images surface as assistant rows; SendUserFile becomes file cards', async () => {
