@@ -870,11 +870,12 @@ async function prs() {
       await run(
         'gh',
         ['pr', 'list', '--state', 'all', '--limit', '50', '--json',
-          'number,title,headRefName,state,isDraft,baseRefName,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit,mergeStateStatus'],
+          'number,title,headRefName,state,isDraft,baseRefName,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit,mergeStateStatus,author'],
         REPO,
       ),
     )
     await git(REPO, 'fetch', '--quiet', 'origin', 'main').catch(() => {})
+    const me = await ghUser()
     const threads = await unresolvedThreads(list.filter((p) => p.state === 'OPEN').map((p) => p.number))
     return Promise.all(
       list.map(async (p) => {
@@ -901,6 +902,7 @@ async function prs() {
           updatedAt: p.updatedAt,
           shipped,
           ticket: ticketOf(p.headRefName),
+          mine: Boolean(me) && p.author?.login === me,
         }
       }),
     )
@@ -916,6 +918,10 @@ async function unresolvedThreads(numbers) {
     return Object.fromEntries(numbers.map((n) => [n, j.data.repository[`p${n}`]?.reviewThreads.nodes.filter((t) => !t.isResolved).length ?? null]))
   }).catch((e) => (console.error('threads:', e.message), null))
 }
+
+// The gh active user, for PR authorship. Cached for the process; null if gh can't say.
+let ghLogin
+const ghUser = async () => (ghLogin ??= await run('gh', ['api', 'user', '--jq', '.login'], REPO).then((s) => s.trim() || null, () => null))
 
 function ciOf(checks) {
   if (!checks.length) return null
@@ -1003,6 +1009,9 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       pr: pr ?? null,
       updatedAt: [issue?.updatedAt, pr?.updatedAt, agent && new Date(agent.statusSince).toISOString()]
         .filter(Boolean).sort().at(-1) ?? null,
+      // The user's own: Linear-assigned to the API key's user (assignee.isMe is the viewer), a PR they
+      // authored, or work on this machine (a worktree, or one of their local agents).
+      mine: Boolean(issue?.mine || pr?.mine || wt || ag.length),
       adHoc: false,
     })
   }
@@ -1023,6 +1032,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       question: a.question,
       branch: null, worktree: null, plan: null, pr: null,
       updatedAt: new Date(a.statusSince).toISOString(),
+      mine: true,
       adHoc: true,
     })
   }

@@ -513,7 +513,7 @@ export class Rooms {
     return this.index.filter((r) => !r.archived).flatMap((r) => (r.needsYou ?? []).map((n) => ({
       id: `room:${r.slug}:${n.agent}`, roomNeed: r.slug, title: `#${r.slug}: ${n.text}`.slice(0, 120), url: null, priority: null, linearState: null,
       state: 'needs_you', agent: { key: `room:${r.slug}`, id: null, name: n.agent, machine: null }, project: r.project ?? null,
-      question: n.text, branch: null, worktree: null, plan: null, pr: null, updatedAt: n.ts, adHoc: true,
+      question: n.text, branch: null, worktree: null, plan: null, pr: null, updatedAt: n.ts, mine: true, adHoc: true,
     })))
   }
   pending() { return Object.fromEntries([...this.queue].map(([k, v]) => [k, v.length])) }

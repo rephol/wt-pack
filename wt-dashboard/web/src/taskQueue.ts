@@ -13,6 +13,7 @@ export interface QTask {
   pr: QPR | null
   updatedAt: string | null
   roomNeed?: string
+  mine?: boolean
 }
 
 export const SECTIONS = [

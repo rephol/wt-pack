@@ -681,3 +681,10 @@ test('handoffArgs: worker/reassign, never --mcp, state-gated', async () => {
   assert.throws(() => handoffArgs(t, 'reassign'), (e) => e.status === 409)
   assert.throws(() => handoffArgs({ ...t, plan: null }, 'worker'), (e) => e.status === 400)
 })
+
+test('deriveTasks: mine = assigned to the viewer, my PR, or local work', () => {
+  const issue = (identifier, mine) => ({ identifier, title: identifier, url: null, priority: 2, updatedAt: '2026-09-26T00:00:00Z', state: 'In Review', stateType: 'started', mine })
+  const pr = (n, ticket, mine) => ({ number: n, title: ticket, branch: ticket.toLowerCase(), state: 'OPEN', url: 'u', ticket, mine, updatedAt: '2026-09-26T00:00:00Z' })
+  const t = deriveTasks({ agents: [], worktrees: [], prs: [pr(1, 'UMK-1', false), pr(2, 'UMK-2', true), pr(3, 'UMK-3', false)], issues: [issue('UMK-1', true), issue('UMK-2', false), issue('UMK-3', false)] })
+  assert.deepEqual(t.map((x) => [x.id, x.mine]), [['UMK-1', true], ['UMK-2', true], ['UMK-3', false]])
+})

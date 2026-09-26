@@ -1,6 +1,7 @@
 // The Tasks page: an action queue. Every action runs only on a click, through a server endpoint.
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Card } from '@astryxdesign/core/Card'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -25,10 +26,15 @@ const promptKey = (key: string, text: string) => {
 }
 
 export function TaskQueue({ tasks, onOpen, showProject, suggested }: { tasks: QTask[]; onOpen: (key: string) => void; showProject: boolean; suggested?: Set<string> }) {
-  const secs = sections(tasks)
-  if (!secs.length) return <EmptyState title="Nothing to act on" description="No task needs you, is ready to hand off, in review, stalled or up next." />
+  const [who, setWho] = useState('mine')
+  const secs = sections(who === 'mine' ? tasks.filter((t) => t.mine !== false) : tasks)
   return (
     <VStack gap={5}>
+      <SegmentedControl label="Whose tasks" value={who} onChange={setWho} size="sm">
+        <SegmentedControlItem value="mine" label="Mine" />
+        <SegmentedControlItem value="all" label="Everyone" />
+      </SegmentedControl>
+      {!secs.length && <EmptyState title="Nothing to act on" description="No task needs you, is ready to hand off, in review, stalled or up next." />}
       {secs.map((s) => {
         const rows = <VStack gap={2}>{s.tasks.map((t) => <Row key={t.id} t={t} section={s.key} onOpen={onOpen} showProject={showProject} suggested={suggested?.has(t.id)} />)}</VStack>
         return s.key === 'shipped'
