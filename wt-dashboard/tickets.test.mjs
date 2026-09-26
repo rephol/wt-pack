@@ -117,3 +117,30 @@ test('list never creates a board', async () => {
   assert.deepEqual(await t.list('typo-proj'), { key: null, tickets: [] })
   assert.deepEqual(await t.keys(), {})
 })
+
+// The pane is verified before the body is parsed or the board touched: an unknown pane gets 403 even for a bad body.
+test('server: unknown pane → 403 before body parsing, board file unchanged', async () => {
+  const { spawn } = await import('node:child_process')
+  const root = await tmp()
+  await mkdir(join(root, 'data', 'tickets'), { recursive: true })
+  const file = join(root, 'data', 'tickets', 'wt-pack.json')
+  const board = JSON.stringify({ key: 'WP', next: 2, tickets: [{ id: 'WP-1', title: 'x', column: 'backlog', history: [] }] })
+  await writeFile(file, board)
+  const port = 20000 + Math.floor(Math.random() * 20000)
+  const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
+    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: 'ignore' })
+  try {
+    const call = async (method, path, body) => {
+      for (let i = 0; ; i++) {
+        try {
+          return await fetch(`http://127.0.0.1:${port}${path}`, { method, body, headers: { 'x-herdr-pane': 'w999:p999', 'content-type': 'application/json' } })
+        } catch (e) { if (i > 50) throw e; await new Promise((r) => setTimeout(r, 100)) }
+      }
+    }
+    assert.equal((await call('PATCH', '/api/tickets/WP-1', '{"column":"done"}')).status, 403)
+    assert.equal((await call('PATCH', '/api/tickets/WP-1', '{not json')).status, 403)
+    assert.equal((await call('POST', '/api/tickets', '{"title":"t","project":"wt-pack"}')).status, 403)
+    assert.equal((await call('POST', '/api/tickets/WP-1/claim', '{}')).status, 403)
+    assert.equal(await readFile(file, 'utf8'), board)
+  } finally { srv.kill() }
+})
