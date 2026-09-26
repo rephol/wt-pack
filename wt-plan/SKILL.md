@@ -55,6 +55,11 @@ Jira / GitHub MCP tool, `gh issue view`, the API. Read the **whole** description
 an active ticket often carries re-prioritisation notes that change what the work is. No tracker tool available
 → ask for a paste. Never invent a ticket's contents.
 
+**Local board ticket** (`<KEY>-N` whose prefix is not `UMK`, e.g. `WP-12`; `~/.claude/skills/wt-ticket/scripts/wt-ticket keys` lists the keys): the
+board is the tracker. `~/.claude/skills/wt-ticket/scripts/wt-ticket show <ID>` is the ticket (its body and comments are the description), then take it
+and mark it — `~/.claude/skills/wt-ticket/scripts/wt-ticket claim <ID> || true` and `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> planning || true`. The branch starts with the lowercase
+id: `wp-12-<slug>`, so the dashboard and wt-handoff join the worktree to the card.
+
 **Described work**: that description is the input. Do not invent a ticket id.
 
 **Base branch.** Branch from the repository's integration branch, never local `HEAD` — a worktree cut from
