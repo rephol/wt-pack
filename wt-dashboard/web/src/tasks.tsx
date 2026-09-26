@@ -55,7 +55,8 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
   const [confirm, setConfirm] = useState(false)
   useEffect(() => { if (!confirm) return; const id = setTimeout(() => setConfirm(false), 5000); return () => clearTimeout(id) }, [confirm])
   const resp = t.responder
-  const noResp = resp ? undefined : 'No live worker or planner on this task'
+  // No live worker/planner on this machine: say so where the button would be, not a silent disabled button.
+  const noAgent = <Text type="supporting" size="sm">no agent to {section === 'in_review' ? 'babysit' : section === 'stalled' ? 'nudge' : 'finish'} it</Text>
   const handoff = (mode: 'worker' | 'reassign') => act.mutate(() => post(`/api/tasks/${encodeURIComponent(t.id)}/handoff`, { mode }))
   const busy = act.isPending || sent
   const babysitting = isBabysitting(t)
@@ -74,13 +75,13 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
     actions = <Button label="Hand to worker" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy} onClick={() => handoff('worker')} />
   } else if (section === 'in_review' && t.pr) {
     actions = <>
-      <Button label="Babysit" size="sm" variant="primary" isLoading={act.isPending} isDisabled={!resp || busy || babysitting} tooltip={noResp ?? (babysitting ? resp?.taskState ?? undefined : undefined)}
-        onClick={() => act.mutate(() => promptKey(resp!.key, `/wt-babysit ${t.pr!.url}`))} />
+      {resp ? <Button label="Babysit" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || babysitting} tooltip={babysitting ? resp.taskState ?? undefined : undefined}
+        onClick={() => act.mutate(() => promptKey(resp.key, `/wt-babysit ${t.pr!.url}`))} /> : noAgent}
           </>
   } else if (section === 'stalled') {
     actions = <>
-      <Button label="Nudge" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !resp} tooltip={noResp}
-        onClick={() => act.mutate(() => promptKey(resp!.key, `You've been idle 20+ min on ${t.id}. Continue ${t.plan ?? t.title}; if blocked, say what you need.`))} />
+      {resp ? <Button label="Nudge" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy}
+        onClick={() => act.mutate(() => promptKey(resp.key, `You've been idle 20+ min on ${t.id}. Continue ${t.plan ?? t.title}; if blocked, say what you need.`))} /> : noAgent}
       <Button label={confirm ? 'Confirm reassign' : 'Reassign'} size="sm" variant={confirm ? 'secondary' : 'ghost'} isDisabled={busy || !t.plan}
         tooltip={t.plan ? undefined : 'No plan to hand to a new worker'}
         onClick={() => { if (!confirm) return setConfirm(true); setConfirm(false); handoff('reassign') }} />
@@ -89,8 +90,8 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
     actions = <Button label="Plan it" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !t.project}
       onClick={() => act.mutate(() => post('/api/agents/spawn', { kind: 'planner', project: t.project, prompt: `/wt-plan ${t.id}` }))} />
   } else if (section === 'shipped') {
-    actions = <Button label="Finish" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !resp} tooltip={noResp}
-      onClick={() => act.mutate(() => promptKey(resp!.key, '/wt-finish'))} />
+    actions = resp ? <Button label="Finish" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy}
+      onClick={() => act.mutate(() => promptKey(resp.key, '/wt-finish'))} /> : noAgent
   }
 
   const dot = <Text type="supporting" size="sm" aria-hidden>·</Text>
