@@ -71,3 +71,11 @@ test('wt-judge triage --classes fails open: switch off or no key → exit 3 (bab
   const nokey = spawnSync(process.execPath, [judgeBin, 'triage', '--classes', f], { env: { ...process.env, WT_JEV_BABYSIT_TRIAGE: 'on', TYPESAFE_API_KEY: '', HOME: dir } })
   assert.equal(nokey.status, 3)
 })
+
+test('eval/probe calls are logged with test: true; real features are not (WP-30)', async () => {
+  const fail = { key: 'k', fetchImpl: async () => ({ ok: false, status: 500 }) }
+  await judge('eval:route', { a: 90 }, Q, fail)
+  assert.equal(lines().at(-1).test, true)
+  await judge('route', { a: 91 }, Q, fail)
+  assert.equal(lines().at(-1).test, undefined)
+})

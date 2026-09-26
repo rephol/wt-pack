@@ -115,6 +115,9 @@ export const JEV_DIR = join(homedir(), '.local', 'share', 'wt-dashboard');
 // WT_JEV_LOG overrides the path (tests).
 export const jevLog = () => process.env.WT_JEV_LOG || join(JEV_DIR, 'jev-calls.jsonl');
 const ROTATE_BYTES = 5 * 1024 * 1024;
+// Eval runs (jev-eval.mjs → eval:<feature>), manual probes and WT_JEV_TEST=1 are logged with test: true, so the
+// dashboard's health summary ignores them (WP-30); Settings › Observability still counts them.
+export const isTestCall = (feature) => /^(eval:|probe$)/.test(feature) || process.env.WT_JEV_TEST === '1';
 const DASH_ENV = () => process.env.WT_DASHBOARD_ENV || join(homedir(), '.config', 'wt-dashboard', 'env');
 
 // Same lookup as mcp-mode.sh: env wins, else the dashboard env file's last KEY= line.
@@ -177,7 +180,7 @@ export async function judge(feature, state, questions, { timeoutMs = 2000, key, 
     let outcome = 'failopen';
     if (answers != null) try { outcome = !pick || pick(answers) ? 'picked' : 'not'; } catch { outcome = 'not'; }
     logCall({ ts: new Date().toISOString(), feature, outcome, p: headline(answers), ms: Date.now() - t0, cache: cached, err,
-      in: h.slice(0, 12), ...(envSetting('WT_JEV_LOG_SNIPPETS') === 'on' ? { snippet: JSON.stringify(state).slice(0, 120) } : {}) });
+      in: h.slice(0, 12), ...(isTestCall(feature) ? { test: true } : {}), ...(envSetting('WT_JEV_LOG_SNIPPETS') === 'on' ? { snippet: JSON.stringify(state).slice(0, 120) } : {}) });
     return answers;
   };
   const hit = cache.get(ck);
