@@ -5,12 +5,12 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { Dispatch, mergeIds } from './dispatch.mjs'
+import { Dispatch, mergeIds, dispatchPrompt } from './dispatch.mjs'
 
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
 
-async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn } = {}) {
+async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn, room = null } = {}) {
   const tickets = new Tickets({ dir: await mkdtemp(join(tmpdir(), 'dispatch-')) })
   await tickets.board('wt-pack')
   await tickets.setSettings('wt-pack', { dispatch: true })
@@ -19,7 +19,7 @@ async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merge
     tickets, log: () => {},
     deps: {
       agents: async () => agents, host: async () => ({ pressure }), maxWorking: () => max, pending: () => pending,
-      repoOf: async () => '/repo', ticketOf: tagTicket, triageOn: () => triageOn,
+      repoOf: async () => '/repo', roomOf: async (p) => (room && p === 'wt-pack' ? room : null), ticketOf: tagTicket, triageOn: () => triageOn,
       git: async (repo, ...a) => a[0] === 'log' ? merges : a[0] === 'rev-parse' ? 'abc123\n' : '',
       handoff: async (args, prompt, cwd) => {
         calls.push({ args, prompt, cwd })
@@ -247,4 +247,19 @@ test('Jev triage pending: skipped for up to 60s, dispatched once triaged; nothin
   await ready(off.tickets, 'no jev')
   await off.d.tick()
   assert.equal(off.calls.length, 1)
+})
+
+test('dispatchPrompt: worker and planner report to the project room when there is one (WP-74)', () => {
+  const t = { id: 'WP-9', title: 'x' }
+  for (const role of ['worker', 'planner']) {
+    assert.match(dispatchPrompt(t, role, 'wt-pack'), /post a one-line result in #wt-pack with `room post wt-pack "…"`, and still reply to the sender/)
+    assert.doesNotMatch(dispatchPrompt(t, role), /room post/)
+  }
+})
+
+test('dispatch: the handoff prompt names the room of the board project (WP-74)', async () => {
+  const { tickets, d, calls } = await setup({ room: 'wt-pack' })
+  await ready(tickets, 'a')
+  await d.tick()
+  assert.match(calls[0].prompt, /room post wt-pack/)
 })

@@ -2414,6 +2414,8 @@ const dispatcher = new Dispatch({
     triageOn: () => jevOn('TICKET_TRIAGE'),
     pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
+    // The project's room is the one named after it (WP-74); archived rooms don't count.
+    roomOf: async (project) => { await rooms.list(); const r = rooms.room(project); return r && !r.archived ? r.slug : null },
     git: (repo, ...args) => git(repo, ...args),
     ticketOf: tagTicket,
     handoff: async (args, prompt, cwd) => {
