@@ -55,3 +55,16 @@ test('groupInbox: groups sort by their most urgent row (absent = 1), stable othe
   assert.deepEqual(keys([r('1', { agent: 'a' }, 0), r('2', { agent: 'b' }), r('3', { agent: 'c' }, 3)]), ['agent:c', 'agent:b', 'agent:a'])
   assert.deepEqual(keys([r('1', { agent: 'a' }, 1), r('2', { agent: 'b' }, 0), r('3', { agent: 'b' }, 2)]), ['agent:b', 'agent:a'])
 })
+
+test('needsYou: unresolved actionable items only — FYIs and resolved questions do not count', async () => {
+  const { needsYou } = await import('./notifyGate.ts')
+  const e = (kind: Kind, resolvedAt: string | null = null): InboxItem => ({ id: kind, ts: '', kind, key: kind, title: 't', body: 'b', read: false, resolvedAt, target: {} })
+  const items = [e('agent-done'), e('agent-done'), e('agent-done'), e('server'), e('question'), e('question', '2026-01-01'), e('room-suggestion')]
+  assert.equal(items.filter(needsYou).length, 2)
+})
+
+test('ACTIONABLE_KINDS matches the server inbox ACTIONABLE set', async () => {
+  const { ACTIONABLE_KINDS } = await import('./notifyGate.ts')
+  const { ACTIONABLE } = await import('../../inbox.mjs')
+  assert.deepEqual([...ACTIONABLE_KINDS].sort(), [...ACTIONABLE].sort())
+})

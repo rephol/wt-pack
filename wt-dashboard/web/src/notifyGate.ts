@@ -25,6 +25,8 @@ export function gate(e: InboxItem, s: { prefs: Prefs; focused: boolean; openKey:
   return true
 }
 export const ACTIONABLE_KINDS: Kind[] = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'memory-proposal']
+// "Needs you" everywhere (badge, Inbox section, Overview tile): unresolved and actionable. Read/unread does not matter.
+export const needsYou = (it: InboxItem) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)
 
 // Repeats of the same non-actionable event (an agent "is done" three times) show as one row with a count.
 // The newest item stands for the group; `ids` carries every member so read/clear act on all of them.

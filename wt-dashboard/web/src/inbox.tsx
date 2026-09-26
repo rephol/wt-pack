@@ -15,7 +15,7 @@ import { Heading } from '@astryxdesign/core/Heading'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { useToast } from '@astryxdesign/core/Toast'
-import { ACTIONABLE_KINDS, collapseRepeats, groupInbox, shortAgo, type InboxGroup, type InboxItem, type InboxRow, type Kind } from './notifyGate'
+import { collapseRepeats, needsYou, groupInbox, shortAgo, type InboxGroup, type InboxItem, type InboxRow, type Kind } from './notifyGate'
 import { loadPrefs } from './desktop'
 import { api } from './rooms'
 import { Delayed, LoadError, Rows } from './skeletons'
@@ -30,21 +30,21 @@ export function useInbox() {
   const q = useQuery({ queryKey: ['inbox'], queryFn: () => api<{ items: InboxItem[] }>('/api/notifications'), refetchInterval: 5000, refetchIntervalInBackground: true })
   const prefs = loadPrefs()
   const items = (q.data?.items ?? []).filter((it) => prefs.inbox[it.kind] !== false)
-  return { items, loaded: Boolean(q.data), error: q.isError ? q.error : null, retry: () => q.refetch(), unread: items.filter((it) => !it.read).length, open: items.filter((it) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)) }
+  return { items, loaded: Boolean(q.data), error: q.isError ? q.error : null, retry: () => q.refetch(), open: items.filter(needsYou) }
 }
 
-// Sidebar footer row: bell + unread count (a dot on the icon when the nav is collapsed).
+// Sidebar footer row: bell + needs-you count (a dot on the icon when the nav is collapsed).
 export function InboxButton({ collapsed }: { collapsed: boolean }) {
-  const { unread } = useInbox()
+  const n = useInbox().open.length
   return (
     <SideNavItem label="Inbox" onClick={() => openInbox()}
       icon={<span style={{ position: 'relative', display: 'inline-flex' }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
         </svg>
-        {collapsed && unread > 0 && <span style={{ position: 'absolute', top: -3, right: -3 }}><StatusDot variant="error" label={`${unread} unread`} /></span>}
+        {collapsed && n > 0 && <span style={{ position: 'absolute', top: -3, right: -3 }}><StatusDot variant="error" label={`${n} need you`} /></span>}
       </span>}
-      endContent={unread > 0 ? <Badge variant="error" label={String(unread)} /> : undefined} />
+      endContent={n > 0 ? <Badge variant="error" label={String(n)} /> : undefined} />
   )
 }
 
@@ -116,9 +116,8 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
   })
   const shown = items.filter((it) => filter === 'all' || it.kind === filter)
-  const isPinned = (it: InboxItem) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)
-  const pinned = collapseRepeats(shown.filter(isPinned))
-  const recent = groupInbox(collapseRepeats(shown.filter((it) => !isPinned(it))).slice(0, 150))
+  const pinned = collapseRepeats(shown.filter(needsYou))
+  const recent = groupInbox(collapseRepeats(shown.filter((it) => !needsYou(it))).slice(0, 150))
   const go = (it: InboxRow) => {
     if (it.anyUnread) read.mutate({ ids: it.ids })
     if ((it.kind === 'room-suggestion' || it.kind === 'memory-proposal') && !it.resolvedAt) return
