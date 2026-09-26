@@ -1166,7 +1166,7 @@ const jev = async () => ({
     const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
     return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
   })),
-  calls: healthSummary(await readCalls()),
+  calls: await cached('jev-calls', 60_000, async () => healthSummary(await readCalls())), // the log can reach ~10 MB
 })
 
 async function health() {
