@@ -216,6 +216,10 @@ dirs() {
     [ -z "$(tail -c1 "$env")" ] || echo >> "$env"
     printf 'WT_DASHBOARD_REPO=%s\n' "$r" >> "$env"; ok "WT_DASHBOARD_REPO=$r written to $env"
   fi
+  # Before WP-82 the UMK Linear team was built in for an umkmall checkout; keep it for installs that use one.
+  if ! grep -qs '^[[:space:]]*WT_LINEAR_TEAMS=' "$env" && grep -qs '^[[:space:]]*\(WT_DASHBOARD_REPO\|UMKMALL_REPO\)=.*/umkmall/*$' "$env"; then
+    printf 'WT_LINEAR_TEAMS=UMK=umkmall\n' >> "$env"; ok "WT_LINEAR_TEAMS=UMK=umkmall written to $env (kept from the old built-in default)"
+  fi
 }
 
 plugin() {
