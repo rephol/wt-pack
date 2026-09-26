@@ -498,6 +498,7 @@ export class Rooms {
   // Called with every fresh task list: system posts into existing ticket rooms; auto-create in 'auto' mode.
   async syncTickets(tasks) {
     await this.load()
+    tasks = tasks.filter((t) => !t.local) // local board tickets live on the board, not in #wp-12 rooms
     const prev = this.taskPrev
     this.taskPrev = new Map(tasks.filter((t) => TICKET.test(t.id)).map((t) => [t.id, t]))
     if (this.settings.ticketRooms === 'off' || !prev) return // first snapshot is the baseline

@@ -853,7 +853,12 @@ async function unfurlImage(res, url) {
 }
 
 // ---- git / gh / linear ----
-const ticketOf = (s) => (s?.match(/umk-(\d+)/i) ? `UMK-${s.match(/umk-(\d+)/i)[1]}` : null)
+// A ticket id is <KEY>-<N>: UMK (Linear) or a local board key (refreshed by overview()).
+let boardKeys = []
+export const ticketOf = (s, keys = boardKeys) => {
+  const m = s?.match(new RegExp(`(?:^|[/_-])(${['UMK', ...keys].join('|')})-(\\d+)(?=\\D|$)`, 'i'))
+  return m ? `${m[1].toUpperCase()}-${m[2]}` : null
+}
 
 // ---- spawn / remove agents: always through the wt-agents skill's script (naming, pools, trust seed) ----
 const AGENTS_SH = join(homedir(), '.claude', 'skills', 'wt-agents', 'scripts', 'agents.sh')
@@ -1054,6 +1059,8 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     // In the ticket's worktree, or tagged with the ticket by wt-agents/wt-handoff (a worker can sit in the
     // main checkout: its cwd alone made it an ad-hoc task that contradicted its own ticket).
     const ag = agents.filter((a) => a.local && ((wt && inside(a.cwd, wt.path)) || (tagTicket(a) === id && !worktrees.some((w) => w.path !== REPO && inside(a.cwd, w.path)))))
+    // A local board ticket is a task once it is Ready or has live work; Backlog/Done alone stay on the board.
+    if (issue?.local && ['backlog', 'done'].includes(issue.column) && !wt && !pr && !ag.length) continue
     ag.forEach((a) => linked.add(a.key))
     // Jev's stall class, when there is one, decides: finished → not stalled, waiting_on_user → needs you,
     // stuck/looping → stalled (also a working agent found looping). No class → the idle-for-20-min rule.
@@ -1083,7 +1090,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       agent: agent ? { key: agent.key, id: agent.id, name: agent.name, machine: agent.machine } : null,
       // Who answers the ticket's room: the worker, else the planner.
       responder: (worker ?? planner) ? { key: (worker ?? planner).key, name: (worker ?? planner).name, taskState: (worker ?? planner).tags?.task_state ?? null } : null,
-      project: agent?.project ?? (issue ? PROJECT_BY_TEAM[id.split('-')[0]] ?? id.split('-')[0].toLowerCase() : REPO_PROJECT),
+      project: agent?.project ?? issue?.project ?? (issue ? PROJECT_BY_TEAM[id.split('-')[0]] ?? id.split('-')[0].toLowerCase() : REPO_PROJECT),
       question: asker ? asker.question ?? asker.recap ?? null : null,
       branch: wt?.branch ?? pr?.branch ?? null,
       worktree: wt?.path ?? null,
@@ -1095,6 +1102,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       // authored, or work on this machine (a worktree, or one of their local agents).
       mine: Boolean(issue?.mine || pr?.mine || wt || ag.length),
       adHoc: false,
+      ...(issue?.local ? { local: true, column: issue.column } : {}),
     })
   }
   for (const a of agents) {
@@ -1220,14 +1228,26 @@ async function host() {
   })
 }
 
+// Local board tickets, issue-shaped for deriveTasks: Ready is "mine, unstarted", so it lands in Up next.
+async function localIssues() {
+  const keys = await tickets.keys()
+  boardKeys = Object.values(keys)
+  const out = []
+  for (const project of Object.keys(keys)) for (const t of (await tickets.list(project)).tickets)
+    out.push({ identifier: t.id, title: t.title, url: null, priority: t.priority, updatedAt: t.updated, state: t.column,
+      mine: t.column === 'ready', stateType: t.column === 'ready' ? 'unstarted' : 'backlog', local: true, project, column: t.column })
+  return out
+}
 async function overview() {
   return cached('overview', 3000, async () => {
-    const [ag, wt, pr, issues] = await Promise.all([
+    const local = await localIssues().catch((e) => (console.error('tickets:', e.message), []))
+    const [ag, wt, pr, linearIssues] = await Promise.all([
       track('herdr', agents()),
       track('git', worktrees()),
       track('gh', prs()).catch((e) => (console.error(e.message), [])),
       (cfg.get('LINEAR_API_KEY') ? track('linear', linear()) : linear()).catch((e) => (console.error(e.message), [])),
     ])
+    const issues = [...(linearIssues ?? []), ...local]
     const tasks = [...deriveTasks({ agents: ag, worktrees: wt, prs: pr, issues }), ...(await rooms.needsTasks())]
     const taskOf = new Map(tasks.filter((t) => t.agent).map((t) => [t.agent.key, t.id]))
     const n = (s) => tasks.filter((t) => t.state === s).length

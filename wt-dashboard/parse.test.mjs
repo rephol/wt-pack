@@ -883,3 +883,30 @@ test('Rooms.withLast: newest non-system line, not persisted to the index', async
   assert.ok(l.lastAt)
   assert.equal(rooms.index[0].lastAt, undefined)
 })
+
+test('ticketOf: UMK plus local board keys, anchored', async () => {
+  const { ticketOf } = await import('./server.mjs')
+  assert.equal(ticketOf('wp-12-board', ['WP']), 'WP-12')
+  assert.equal(ticketOf('/wt/umk-759', ['WP']), 'UMK-759')
+  assert.equal(ticketOf('wp-12-board', []), null) // unknown key
+  assert.equal(ticketOf('node-20-utf-8', ['WP']), null)
+  assert.equal(ticketOf('swp-3', ['WP']), null)
+})
+
+test('deriveTasks: local Ready → up_next in its project; Backlog alone absent; worktree joins', () => {
+  const local = (identifier, column) => ({ identifier, title: identifier, url: null, priority: 0, updatedAt: '2026-09-26T00:00:00Z', state: column,
+    mine: column === 'ready', stateType: column === 'ready' ? 'unstarted' : 'backlog', local: true, project: 'wt-pack', column })
+  const wt = { path: '/wt/wp-3-x', branch: 'wp-3-x', ticket: 'WP-3', plan: null }
+  const t = deriveTasks({ agents: [], worktrees: [wt], prs: [], issues: [local('WP-1', 'ready'), local('WP-2', 'backlog'), local('WP-3', 'backlog'), local('WP-4', 'done')] })
+  assert.deepEqual(t.map((x) => [x.id, x.state, x.project, x.local, x.column]), [
+    ['WP-1', 'up_next', 'wt-pack', true, 'ready'], ['WP-3', 'planning', 'wt-pack', true, 'backlog']])
+})
+
+test('syncTickets ignores local board tasks', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp(pj(tmpdir(), 'rooms-'))
+  const r = new Rooms({ dir, agents: async () => [], prompt: async () => {}, log: () => {} })
+  await r.syncTickets([{ id: 'WP-1', local: true, state: 'building' }, { id: 'UMK-1', state: 'building' }])
+  assert.deepEqual([...r.taskPrev.keys()], ['UMK-1'])
+})
