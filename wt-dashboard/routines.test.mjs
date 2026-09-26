@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { open } from './store.mjs'
-import { Routines, parseSchedule, nextRun } from './routines.mjs'
+import { Routines, parseSchedule, nextRun, preview } from './routines.mjs'
 
 const tz = (zone, fn) => () => { const was = process.env.TZ; process.env.TZ = zone; try { fn() } finally { process.env.TZ = was } }
 const iso = (d) => d.toISOString()
@@ -225,3 +225,34 @@ test('validation: bad schedule, target and timeout → 400', () => {
     assert.throws(() => r.create(b), (e) => e.status === 400)
   assert.throws(() => r.setSettings({ maxWorking: -1 }), (e) => e.status === 400)
 })
+
+test('deliver (WP-54): defaults by kind for old rows; self → Inbox; room → one post; failure → Inbox too; skip → nothing', async () => {
+  const got = { notify: [], post: [] }
+  const { w, r } = setup({ notify: async (n) => { got.notify.push(n) }, post: async (room, text) => { got.post.push([room, text]) } })
+  const hk = r.create(HK)
+  assert.deepEqual(hk.target.deliver, { to: 'none' })
+  r.db.prepare('UPDATE routines SET target = ? WHERE id = ?').run(JSON.stringify({ kind: 'prompt', agent: 'orch', text: 'x' }), hk.id) // pre-WP-54 row
+  assert.deepEqual(r.get(hk.id).target.deliver, { to: 'self' })
+  r.update(hk.id, { target: { ...HK.target, deliver: { to: 'none' } } })
+  await r.runNow(hk.id); await r.idle()
+  assert.equal(got.notify.length + got.post.length, 0) // none + ok → silent
+  const x = r.create({ ...HK, name: 'toRoom', target: { ...HK.target, deliver: { to: 'room', room: 'wt-pack' } } })
+  await r.runNow(x.id); await r.idle()
+  assert.deepEqual(got.post, [['wt-pack', 'toRoom: ok — done']])
+  w.deps.actions.housekeeping = async () => { throw new Error('boom') }
+  await r.runNow(x.id); await r.idle()
+  assert.equal(got.post.length, 2); assert.equal(got.notify.length, 1); assert.equal(got.notify[0].error, true)
+  const p = r.create({ name: 'p', schedule: 'every 1h', target: { kind: 'prompt', agent: 'orch', text: 'x' } })
+  await r.runNow(p.id) // no agent → skipped, not reported
+  w.list = [{ id: 'p1', name: 'orch', status: 'idle' }]
+  await r.runNow(p.id); await r.idle()
+  assert.equal(got.notify.length, 2); assert.equal(got.notify[1].error, false)
+  r.update(x.id, { target: HK.target }) // no deliver → kept
+  assert.deepEqual(r.get(x.id).target.deliver, { to: 'room', room: 'wt-pack' })
+  for (const d of [{ to: 'room' }, { to: 'mail' }]) assert.throws(() => r.create({ ...HK, target: { ...HK.target, deliver: d } }), (e) => e.status === 400)
+})
+
+test('preview: next 3 slots', tz('UTC', () => {
+  assert.deepEqual(preview('0 9 * * 1', 3, new Date('2026-09-26T00:00:00Z')).map(iso), ['2026-09-28T09:00:00.000Z', '2026-10-05T09:00:00.000Z', '2026-10-12T09:00:00.000Z'])
+  assert.throws(() => preview('nope'), (e) => e.status === 400)
+}))
