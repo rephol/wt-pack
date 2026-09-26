@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Accuracy and latency of one Jev feature on its labelled fixture:
-//   node wt-shared/scripts/jev-eval.mjs <feature>
-// Fixture: wt-shared/jev-fixtures/<feature, _ as ->.json = [{state, expect}]. The feature's evaluator module
+//   node skills/wt-shared/scripts/jev-eval.mjs <feature>
+// Fixture: skills/wt-shared/jev-fixtures/<feature, _ as ->.json = [{state, expect}]. The feature's evaluator module
 // (EVALUATORS below) exports questions(state) + decide(answers) — the same pair production uses.
 // Exit 3 without a key (same contract as the rest of typesafe.mjs).
 import { readFileSync } from 'node:fs'
