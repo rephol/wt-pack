@@ -73,8 +73,9 @@ export function readyBatcher(send, log = console.error) {
 }
 
 // Which of a batch still deserve the prompt (WP-43), given each ticket's current state: still in Ready,
-// unassigned, and not moved there by the agent being prompted (it is already scheduling it).
-export const readyToNotify = (ts, agent) => ts.filter((t) => t?.column === 'ready' && !t.assignee
+// not held (busy(t): its assignee is a live agent working it — a stale assignee does not count, WP-49), and not
+// moved there by the agent being prompted (it is already scheduling it).
+export const readyToNotify = (ts, agent, busy = (t) => Boolean(t.assignee)) => ts.filter((t) => t?.column === 'ready' && !busy(t)
   && t.history?.findLast((h) => h.to === 'ready')?.author !== agent)
 
 // jev-eval compares with JSON equality: the type alone is the labelled field.

@@ -1702,9 +1702,11 @@ export function needsSession(method, path, headers) {
 // A ticket entering Ready on an 'Auto' board prompts that project's orchestrator agent, batched per minute (WP-39).
 const readyNotes = readyBatcher(async (project, ts) => {
   if (!(await tickets.auto(project))) return
-  const a = (await agents()).find((x) => x.pool === 'orchestrator' && x.project === project)
+  const ags = await agents()
+  const a = ags.find((x) => x.pool === 'orchestrator' && x.project === project)
   if (!a) return
-  ts = readyToNotify(await Promise.all(ts.map((t) => tickets.get(t.id).catch(() => null))), a.name)
+  const busy = (t) => ags.some((x) => x.name === t.assignee?.name && tagTicket(x) === t.id)
+  ts = readyToNotify(await Promise.all(ts.map((t) => tickets.get(t.id).catch(() => null))), a.name, busy)
   if (!ts.length) return
   const m = await machineBy(a.machine)
   if (!m) throw new Error(`machine ${a.machine} unavailable`)

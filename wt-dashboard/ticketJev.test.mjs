@@ -103,4 +103,6 @@ test('readyToNotify: skips tickets the prompted agent moved, assigned ones, and 
   const ts = [t('A', 'orch'), t('B', 'jev'), t('C', 'jev', { assignee: { name: 'w' } }), t('D', 'jev', { column: 'building' }), null,
     { id: 'E', column: 'ready', history: [{ kind: 'create', author: 'orch', to: 'ready' }] }]
   assert.deepEqual(readyToNotify(ts, 'orch').map((x) => x.id), ['B'])
+  // WP-49: only a live assignee working this ticket holds it back
+  assert.deepEqual(readyToNotify(ts, 'orch', () => false).map((x) => x.id), ['B', 'C'])
 })

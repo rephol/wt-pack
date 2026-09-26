@@ -149,6 +149,8 @@ export class Tickets {
   async patch(id, body, author, assignee) {
     const f = clean(body)
     return this.mutate(id, (t, at) => {
+      // Back to Backlog: nobody holds it any more, unless the same call names one (WP-49).
+      if (f.column === 'backlog' && t.column !== 'backlog' && assignee === undefined) assignee = null
       const { column, note, ...rest } = f
       if (column && column !== t.column) {
         if (column === 'blocked' && !note?.trim()) throw err(400, 'moving to blocked needs a note (the reason)')

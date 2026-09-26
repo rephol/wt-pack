@@ -236,3 +236,12 @@ test('board settings: minPriority defaults to High, partial updates, validated (
   await assert.rejects(t.setSettings('wt-pack', { minPriority: 5 }), (e) => e.status === 400)
   await assert.rejects(t.setSettings('nope', { minPriority: 3 }), (e) => e.status === 404)
 })
+
+test('moving back to Backlog clears the assignee (WP-49)', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const a = await t.create('wt-pack', { title: 'x', column: 'building' }, user)
+  await t.patch(a.id, {}, user, { name: 'w-01', pane: 'p' })
+  const b = await t.patch(a.id, { column: 'backlog' }, user)
+  assert.deepEqual([b.assignee, b.history.at(-1).kind], [null, 'assign'])
+  assert.equal((await t.patch(a.id, { column: 'ready' }, user)).assignee, null)
+})
