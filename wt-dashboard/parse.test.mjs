@@ -831,3 +831,18 @@ test('pane needs-you merge: picker wins, Jev yes asks with the tail, Jev no clea
   assert.equal(needsYouJudge.decide({ waiting: { noul: 0.8 } }), true)
   assert.equal(needsYouJudge.decide(null), false)
 })
+
+test('deriveTasks: Jev stall class — stuck/looping stalled, finished not, waiting_on_user needs you, none = 20-min rule', () => {
+  const old = Date.now() - 30 * 60_000
+  const a = (status, stall) => ({ key: 'm/p1', id: 'p1', name: 'w-01', machine: 'm', local: true, pool: 'worker', status, statusSince: old,
+    cwd: '/nowhere', tags: { task: 'UMK-9 x' }, asks: false, question: null, project: 'p', recap: 'waiting on your call', lastPrompt: null, stall })
+  const st = (status, stall) => deriveTasks({ agents: [a(status, stall)], worktrees: [], prs: [], issues: [] })[0].state
+  assert.equal(st('idle', undefined), 'stalled')
+  assert.equal(st('idle', 'stuck'), 'stalled')
+  assert.equal(st('idle', 'looping'), 'stalled')
+  assert.equal(st('idle', 'finished'), 'queued')
+  assert.equal(st('idle', 'waiting_on_user'), 'needs_you')
+  assert.equal(st('working', 'looping'), 'stalled')
+  assert.equal(st('working', undefined), 'building')
+  assert.equal(deriveTasks({ agents: [a('idle', 'waiting_on_user')], worktrees: [], prs: [], issues: [] })[0].question, 'waiting on your call')
+})

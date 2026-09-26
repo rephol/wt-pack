@@ -186,6 +186,17 @@ export function mergeNeedsYou(p, jev) {
   if (!jev) return { asks: false, question: null }
   return { asks: true, question: p.question ?? (p.tail ?? '').split('\n').filter((l) => l.trim()).slice(-6).join('\n').trim() }
 }
+// WT_JEV_STALL: what a long-idle (or long-working) agent is actually doing. Only stuck/looping stay 'stalled'.
+export const stallJudge = {
+  questions: () => ({ state: { type: 'choice', instructions: 'This coding agent has shown no progress for over 20 minutes. From its terminal tail, what is its state?',
+    criteria: {
+      finished: 'It completed its task and reported; nothing more is expected from it.',
+      stuck: 'It hit an error or obstacle and stopped without finishing or asking for help.',
+      looping: 'It keeps repeating the same actions or errors without progress.',
+      waiting_on_user: 'It asked the user a question or needs a decision before it can continue.',
+    } } }),
+  decide: (a) => a?.state?.choice ?? null,
+}
 const tails = new TailCache()
 
 // ---- machines ----
@@ -395,6 +406,11 @@ async function listAgents(m) {
         .then((x) => (x ? needsYouJudge.decide(x, minFor('needs_you')) : undefined)))
       : undefined
     const ny = mergeNeedsYou(p, jevAsks)
+    const long = Date.now() - since.get(k).at > STALL_MS && (a.agent_status === 'idle' || a.agent_status === 'working')
+    const stall = long && p.tail && jevOn('STALL')
+      ? tails.get(`stall:${k}`, p.tail, (t) => jevAsk('STALL', { pane: t }, stallJudge.questions(), (x) => ['stuck', 'looping'].includes(stallJudge.decide(x)))
+        .then((x) => stallJudge.decide(x) ?? undefined))
+      : undefined
     out.push({
       key: `${m.label}/${a.pane_id}`,
       id: a.pane_id,
@@ -421,6 +437,7 @@ async function listAgents(m) {
       asks: Boolean(pk) || ny.asks,
       question: pk ? (pk.review ? 'Review and submit your answers' : `${pk.tabs[pk.current]?.header ? pk.tabs[pk.current].header + ': ' : ''}${pk.question}`) : ny.question,
       picker: pk,
+      stall, // Jev's stall class (finished|stuck|looping|waiting_on_user) or undefined: today's rule
       lastPrompt: p.lastPrompt ?? null,
       session,
     })
@@ -1021,8 +1038,10 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     // main checkout: its cwd alone made it an ad-hoc task that contradicted its own ticket).
     const ag = agents.filter((a) => a.local && ((wt && inside(a.cwd, wt.path)) || (tagTicket(a) === id && !worktrees.some((w) => w.path !== REPO && inside(a.cwd, w.path)))))
     ag.forEach((a) => linked.add(a.key))
-    const asker = ag.find((a) => (a.status === 'idle' || a.status === 'blocked') && a.asks)
-    const idleLong = ag.find((a) => a.status === 'idle' && now - a.statusSince > STALL_MS)
+    // Jev's stall class, when there is one, decides: finished → not stalled, waiting_on_user → needs you,
+    // stuck/looping → stalled (also a working agent found looping). No class → the idle-for-20-min rule.
+    const asker = ag.find((a) => ((a.status === 'idle' || a.status === 'blocked') && a.asks) || a.stall === 'waiting_on_user')
+    const idleLong = ag.find((a) => (a.status === 'idle' && now - a.statusSince > STALL_MS && !['finished', 'waiting_on_user'].includes(a.stall)) || a.stall === 'looping')
     const worker = ag.find((a) => a.pool === 'worker')
     const planner = ag.find((a) => a.pool === 'planner')
     const state = asker ? 'needs_you'
@@ -1048,7 +1067,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       // Who answers the ticket's room: the worker, else the planner.
       responder: (worker ?? planner) ? { key: (worker ?? planner).key, name: (worker ?? planner).name, taskState: (worker ?? planner).tags?.task_state ?? null } : null,
       project: agent?.project ?? (issue ? PROJECT_BY_TEAM[id.split('-')[0]] ?? id.split('-')[0].toLowerCase() : REPO_PROJECT),
-      question: asker?.question ?? null,
+      question: asker ? asker.question ?? asker.recap ?? null : null,
       branch: wt?.branch ?? pr?.branch ?? null,
       worktree: wt?.path ?? null,
       plan: wt?.plan ?? null,
@@ -1064,7 +1083,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
   for (const a of agents) {
     if (linked.has(a.key)) continue
     // Only an agent asking something is a task; the rest are visible in Agents.
-    if (!a.asks || a.status === 'working') continue
+    if ((!a.asks || a.status === 'working') && a.stall !== 'waiting_on_user') continue
     const title = (a.recap ?? a.lastPrompt ?? a.name).slice(0, 120)
     tasks.push({
       id: `agent:${a.key}`,
@@ -1075,7 +1094,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       state: 'needs_you',
       agent: { key: a.key, id: a.id, name: a.name, machine: a.machine },
       project: a.project,
-      question: a.question,
+      question: a.question ?? a.recap ?? null,
       branch: null, worktree: null, plan: null, pr: null,
       updatedAt: new Date(a.statusSince).toISOString(),
       mine: true,
