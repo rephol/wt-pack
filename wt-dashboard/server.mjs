@@ -2353,7 +2353,7 @@ const server = http.createServer(async (req, res) => {
       send(res, 500, { error: String(e.message ?? e) })
     }
   })
-// ---- housekeeping (Settings › Server): hourly, and once a minute after start ----
+// ---- housekeeping (Settings › Observability): hourly, and once a minute after start ----
 const HK_FILE = join(DATA, 'housekeeping.json')
 const LOGS = join(homedir(), 'Library', 'Logs', 'wt-dashboard')
 const CACHE = join(homedir(), '.cache')
