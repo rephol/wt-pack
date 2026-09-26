@@ -117,7 +117,8 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-kb-toolbar, .hd-kb-toolbar-end { flex-wrap: wrap; row-gap: 8px; min-width: 0; }
 .hd-kb-page { flex: 1 1 0; min-height: 420px; } /* fills the page VStack (height 100% on board) down to the viewport bottom */
 .hd-kb-cols { overflow-x: auto; overflow-y: hidden; height: 100%; padding: 16px; align-items: stretch; }
-.hd-kb-col { flex: 1 1 260px; min-width: 260px; height: 100%; min-height: 0; }
+/* WP-27: all 7 columns share the width (1440 → ~145px each) instead of 260px minimums that pushed Review/Done/Blocked off-screen. */
+.hd-kb-col { flex: 1 1 0; min-width: 140px; height: 100%; min-height: 0; }
 .hd-kb-card { overflow-wrap: anywhere; }
 .hd-kb-cols-phone { padding: 12px 0; }
 .hd-kb-cols-phone .hd-kb-col { flex: 1 1 auto; min-width: 0; }
