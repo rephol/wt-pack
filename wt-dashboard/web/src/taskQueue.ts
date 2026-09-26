@@ -24,7 +24,7 @@ export const SECTIONS = [
   { key: 'in_review', label: 'In review' },
   { key: 'stalled', label: 'Stalled' },
   { key: 'up_next', label: 'Up next' },
-  { key: 'shipped', label: 'Recently shipped' },
+  { key: 'shipped', label: 'Merged this week' },
 ] as const
 export type SectionKey = (typeof SECTIONS)[number]['key']
 

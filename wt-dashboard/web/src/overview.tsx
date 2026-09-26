@@ -83,7 +83,7 @@ export function OverviewPage({ data, onProject }: { data: OverviewData; onProjec
         </Row>
         {/* ponytail: repo-wide PR counts; per-project needs project on each PR */}
         <Row title="Today (all projects)" href="#tasks">
-          <Text size="sm">{t ? `PRs ${t.prsOpened} opened · ${t.prsMerged} merged · ${t.shipped} shipped` : '—'}</Text>
+          <Text size="sm">{t ? `PRs ${t.prsOpened} opened · ${t.prsMerged} merged · ${t.shipped} reached main` : '—'}</Text>
         </Row>
         <Row title="Machine" href="#agents">
           <Line>
