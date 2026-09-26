@@ -1271,7 +1271,10 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     // "working" can lag the 4s poll right after a send, so a send within 30s of the last one counts as mid-turn too.
     const busy = agent.status === 'working' || Date.now() - lastSend.current < 30_000
     lastSend.current = Date.now()
-    send.mutate({ text }, { onSuccess: () => { if (busy) setQueued((q) => [...q, { id: crypto.randomUUID(), text }]) } })
+    // Optimistic: shown at once, until the transcript has it. Only a failed send leaves it marked.
+    const id = crypto.randomUUID()
+    setQueued((q) => [...q, { id, text, state: busy ? 'queued' : 'sending', at: Date.now() }])
+    send.mutate({ text }, { onError: () => setQueued((q) => q.map((x) => (x.id === id ? { ...x, state: 'failed' } : x))) })
   }
   const qc = useQueryClient()
   // Keyed on the session id: /clear or a restart gives a new transcript, so a new cache entry.
@@ -1289,7 +1292,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const streamErr = live && stream.error
   // Sent while the agent works: Claude Code takes it at its next step. Shown as "queued" until the
   // transcript has it (matched on its first line), or 15s after the agent is idle again.
-  const [queued, setQueued] = useState<{ id: string; text: string }[]>([])
+  const [queued, setQueued] = useState<{ id: string; text: string; state: 'sending' | 'queued' | 'failed' | 'unconfirmed'; at: number }[]>([])
   const lastSend = useRef(0)
   useEffect(() => {
     if (!queued.length) return
@@ -1299,7 +1302,8 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   }, [msgs]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (agent.status === 'working' || !queued.length) return
-    const t = setTimeout(() => setQueued([]), 15_000)
+    // Idle and still not in the transcript: flag it rather than silently dropping it.
+    const t = setTimeout(() => setQueued((q) => q.map((x) => (x.state === 'failed' ? x : { ...x, state: 'unconfirmed' }))), 15_000)
     return () => clearTimeout(t)
   }, [agent.status, queued.length])
   const rows = useMemo(() => toRows(msgs), [msgs])
@@ -1475,9 +1479,13 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
               {queued.length > 0 && (
                 <VStack gap={1} style={{ padding: '0 8px 8px', alignItems: 'flex-end' }}>
                   {queued.map((q) => (
-                    <HStack key={q.id} gap={1} align="center" style={{ opacity: 0.7, maxWidth: '85%' }}>
-                      <Badge label="queued" />
+                    <HStack key={q.id} gap={1} align="center" style={{ opacity: q.state === 'sending' || q.state === 'queued' ? 0.7 : 1, maxWidth: '85%' }}>
+                      <Badge label={q.state === 'unconfirmed' ? 'not seen yet' : q.state} variant={q.state === 'failed' ? 'error' : q.state === 'unconfirmed' ? 'warning' : undefined} />
                       <Text size="sm" maxLines={2}>{q.text}</Text>
+                      {(q.state === 'failed' || q.state === 'unconfirmed') && (<>
+                        <Button label="Retry" size="sm" variant="ghost" onClick={() => { setQueued((l) => l.filter((x) => x.id !== q.id)); submit(q.text) }} />
+                        <Button label="Dismiss" size="sm" variant="ghost" onClick={() => setQueued((l) => l.filter((x) => x.id !== q.id))} />
+                      </>)}
                     </HStack>
                   ))}
                 </VStack>
