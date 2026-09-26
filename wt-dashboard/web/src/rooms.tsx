@@ -47,7 +47,7 @@ import { useRoles } from './roles'
 import { roomRows, membersFirst, attMarker, orphanedAtts, numberMarkers } from './roomRows'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string; pool?: string }
-interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
+interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[]; lastAt?: string | null; lastFrom?: string | null; lastText?: string | null }
 export interface Profile { name: string; handle: string; avatar: string | null }
 interface Suggestion { ticket: string; slug: string; title: string; agent: string | null; reason: string }
 interface RoomMsg {

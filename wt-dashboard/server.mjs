@@ -1211,11 +1211,11 @@ export function todayCounts(prs, now = new Date()) {
 // RAM use + macOS memory pressure; pressure null when memory_pressure is unavailable.
 async function host() {
   return cached('host', 30_000, async () => {
-    const memUsedPct = Math.round((1 - freemem() / totalmem()) * 100)
+    // os.freemem() on macOS excludes reclaimable cache (reads ~99%), so memory_pressure's free % wins when present.
     const out = await run('memory_pressure', ['-Q'], homedir()).catch(() => '')
     const free = Number(out.match(/free percentage:\s*(\d+)%/)?.[1])
-    const pressure = Number.isFinite(free) ? (free < 10 ? 'critical' : free < 25 ? 'warn' : 'normal') : null
-    return { memUsedPct, pressure }
+    if (!Number.isFinite(free)) return { memUsedPct: Math.round((1 - freemem() / totalmem()) * 100), pressure: null }
+    return { memUsedPct: 100 - free, pressure: free < 10 ? 'critical' : free < 25 ? 'warn' : 'normal' }
   })
 }
 

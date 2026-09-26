@@ -62,7 +62,7 @@ export function useServerControl() {
 
 // One health poll shared by the nav item and the Settings › Server section.
 let misses = 0
-function useHealth() {
+export function useHealth() {
   const q = useQuery({
     queryKey: ['health'],
     queryFn: async () => {
