@@ -22,7 +22,7 @@ fmt() { [ $json = 1 ] && echo "" || echo "format=text"; }
 # call METHOD PATH [JSON]: prints the body; exit 1 on an HTTP error or an unreachable server.
 call() {
   local out code
-  out=$(curl -sS -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+  out=$(curl -sS --max-time 5 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ticket: $code $out" >&2; exit 1; fi
