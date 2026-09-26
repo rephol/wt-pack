@@ -135,6 +135,7 @@ interface Task extends Record<string, unknown> {
 interface Overview {
   at: string
   linearEnabled: boolean
+  sourceIssues?: string[]
   agents: Agent[]
   tasks: Task[]
   machines: Machine[]
@@ -519,6 +520,9 @@ export default function App() {
           <Delayed>{page === 'overview' ? <OverviewSkeleton /> : page === 'agents' ? <GroupedRows phone={phone} /> : <Rows n={8} />}</Delayed>
         )}
         {fullKey && !all && !q.isError && <Delayed><ChatSkeleton /></Delayed>}
+        {data?.sourceIssues?.length && (page === 'overview' || page === 'tasks' || page === 'agents') ? (
+          <Banner status="warning" title={data.sourceIssues[0]} description={data.sourceIssues.slice(1).join(' · ') || 'The cards that depend on it stay empty until it is back.'} />
+        ) : null}
         {data && !data.linearEnabled && !linearHidden && (page === 'overview' || page === 'tasks') && (
           <Banner status="info" title="Set LINEAR_API_KEY to show tickets" description="Tasks come from worktrees, PRs and agents only."
             endContent={<Button label="Dismiss" size="sm" variant="ghost" onClick={hideLinear} />} />

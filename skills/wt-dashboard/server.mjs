@@ -1264,12 +1264,22 @@ async function localIssues() {
       doneAt: t.column === 'done' ? t.history?.findLast((h) => h.to === 'done')?.at ?? null : null })
   return out
 }
+// A failed overview source (still tracked in SOURCES): one line for the page's banner (WP-79).
+export function sourceIssue(src, message) {
+  const m = String(message ?? '')
+  if (src === 'herdr' && /server_not_running|ENOENT|ECONNREFUSED/.test(m)) return 'herdr server not running — run herdr'
+  if (src === 'git' && /not a git repository/.test(m)) return 'WT_DASHBOARD_REPO is not a git checkout — set it in ~/.config/wt-dashboard/env'
+  return `${src}: ${m.split('\n').find((l) => l.trim()) ?? 'failed'}`.slice(0, 200)
+}
 async function overview() {
   return cached('overview', 3000, async () => {
     const local = await localIssues().catch((e) => (console.error('tickets:', e.message), []))
+    // herdr or git down degrades its own cards (empty lists + a banner line) instead of a 500 for the whole page.
+    const issues_ = []
+    const soft = (src, p) => track(src, p).catch((e) => (issues_.push(sourceIssue(src, e.message)), []))
     const [ag, wt, pr, linearIssues] = await Promise.all([
-      track('herdr', agents()),
-      track('git', worktrees()),
+      soft('herdr', agents()),
+      soft('git', worktrees()),
       track('gh', prs()).catch((e) => (console.error(e.message), [])),
       (cfg.get('LINEAR_API_KEY') ? track('linear', linear()) : linear()).catch((e) => (console.error(e.message), [])),
     ])
@@ -1280,6 +1290,7 @@ async function overview() {
     return {
       at: new Date().toISOString(),
       linearEnabled: Boolean(cfg.get('LINEAR_API_KEY')),
+      sourceIssues: issues_,
       roles: roleStore.roles,
       agents: ag.map((a) => ({ ...a, task: taskOf.get(a.key) ?? null })),
       machines: await track('machines', machineSummaries(ag).then((ms) => {
