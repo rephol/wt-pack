@@ -10,6 +10,7 @@ import { join, extname, normalize, basename, dirname, relative, isAbsolute } fro
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
+import { Routines } from './routines.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
@@ -1722,6 +1723,18 @@ const tickets = new Tickets({ dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM),
 // boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
 const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values(k) }, (e) => console.error('tickets:', e.message))
 const boardRuns = new Set() // projects with a 'Run now' in progress
+// Board 'Run now' (route and the jev-run routine): { skipped } or { queued, done } — done settles when triage ends.
+async function runBoard(project) {
+  if (!jevOn('TICKET_TRIAGE')) return { skipped: 'Ticket triage is off (Settings › Integrations)' }
+  if (boardRuns.has(project)) return { skipped: 'a run is already going on this board' }
+  boardRuns.add(project)
+  let backlog
+  try { ({ tickets: backlog } = await tickets.list(project, 'backlog')) } catch (e) { boardRuns.delete(project); throw e }
+  const done = (async () => {
+    try { for (const t of backlog) await triage(project, t, ['type', 'size', 'priority']) } finally { boardRuns.delete(project) } // ponytail: one at a time
+  })()
+  return { queued: backlog.length, done }
+}
 async function ticketsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
   const text = url.searchParams.get('format') === 'text'
@@ -1750,13 +1763,10 @@ async function ticketsApi(req, res, url, parts) {
   if (parts[2] === 'board') {
     if (req.method === 'PUT' && parts.length === 3) return send(res, 200, await tickets.setSettings(b.project, { auto: typeof b.auto === 'boolean' ? b.auto : undefined, minPriority: b.minPriority }))
     if (req.method === 'POST' && parts[3] === 'run') {
-      if (!jevOn('TICKET_TRIAGE')) return send(res, 409, { error: 'Ticket triage is off (Settings › Integrations)' })
-      if (boardRuns.has(b.project)) return send(res, 409, { error: 'a run is already going on this board' })
-      const { tickets: backlog } = await tickets.list(b.project, 'backlog')
-      send(res, 200, { queued: backlog.length })
-      boardRuns.add(b.project)
-      try { for (const t of backlog) await triage(b.project, t, ['type', 'size', 'priority']) } finally { boardRuns.delete(b.project) } // ponytail: one at a time
-      return
+      const r = await runBoard(b.project)
+      if (r.skipped) return send(res, 409, { error: r.skipped })
+      send(res, 200, { queued: r.queued })
+      return await r.done
     }
   }
   const id = parts[2]
@@ -2189,6 +2199,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -2286,14 +2297,8 @@ const server = http.createServer(async (req, res) => {
         if (req.method === 'DELETE') {
           if (!m.local) return send(res, 400, { error: 'removing remote agents is not supported yet' })
           const b = JSON.parse((await body(req)) || '{}')
-          store.delete('agents:local')
-          const a = (await agents()).find((x) => x.local && x.id === pane)
-          if (!a) return send(res, 404, { error: 'unknown agent' })
-          if (/orchestrator/i.test(a.name) && b.confirmName !== a.name) return send(res, 409, { error: 'type the orchestrator\'s name to remove it', needs: 'name' })
-          if (a.status === 'working' && b.force !== true) return send(res, 409, { error: `${a.name} is working; a turn in flight dies with it`, needs: 'force' })
-          const out = await run(AGENTS_SH, ['rm', pane, ...(b.force === true ? ['--force'] : [])], homedir(), 30_000)
-          store.delete('agents:local'); store.delete('overview')
-          return send(res, 200, { ok: true, message: out.trim() })
+          const [code, out] = await removeAgent(pane, { force: b.force === true, confirmName: b.confirmName }).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message, needs: e.needs }])
+          return send(res, code, out)
         }
         if (req.method === 'GET') {
           const lines = String(Math.min(2000, Number(url.searchParams.get('lines')) || 300))
@@ -2335,6 +2340,61 @@ const LOGS = join(homedir(), 'Library', 'Logs', 'wt-dashboard')
 const CACHE = join(homedir(), '.cache')
 let hk = { settings: { ...HK_DEFAULTS }, lastRun: null }
 const hkLoaded = readFile(HK_FILE, 'utf8').then((t) => { const j = JSON.parse(t); hk = { settings: cleanSettings(j.settings), lastRun: j.lastRun ?? null } }, () => {})
+// Remove = the wt-agents script's rm (closes the tab), local agents only. Refuses a working agent unless forced;
+// an orchestrator needs its name typed back.
+async function removeAgent(pane, { force = false, confirmName } = {}) {
+  const no = (status, error, needs) => Object.assign(new Error(error), { status, needs })
+  store.delete('agents:local')
+  const a = (await agents()).find((x) => x.local && x.id === pane)
+  if (!a) throw no(404, 'unknown agent')
+  if (/orchestrator/i.test(a.name) && confirmName !== a.name) throw no(409, 'type the orchestrator\'s name to remove it', 'name')
+  if (a.status === 'working' && !force) throw no(409, `${a.name} is working; a turn in flight dies with it`, 'force')
+  const out = await run(AGENTS_SH, ['rm', pane, ...(force ? ['--force'] : [])], homedir(), 30_000)
+  store.delete('agents:local'); store.delete('overview')
+  return { ok: true, message: out.trim() }
+}
+
+// ---- routines (routines.mjs, WP-48) ----
+const routines = new Routines({
+  dir: DATA,
+  deps: {
+    agents: () => agents(),
+    host: () => host(),
+    prompt: async (a, text) => {
+      const m = await machineBy(a.machine)
+      if (!m) throw new Error(`machine ${a.machine} unavailable`)
+      await herdrOn(m, 'agent', 'prompt', a.id, text)
+      store.delete('agents:local')
+    },
+    spawn: (b) => spawnAgent(b),
+    remove: (pane, o) => removeAgent(pane, o),
+    actions: {
+      housekeeping: async () => { const s = await runHousekeeping(); return { summary: `${s.actions.length} actions${s.errors.length ? `, ${s.errors.length} errors` : ''}` } },
+      'jev-run': async (t) => { const r = await runBoard(t.project); if (r.skipped) return r; await r.done; return { summary: `triaged ${r.queued}` } },
+    },
+  },
+})
+async function routinesApi(req, res, url, parts) {
+  const b = req.method === 'POST' || req.method === 'PUT' ? JSON.parse((await body(req)) || '{}') : {}
+  // A spawn target is checked like spawnAgent checks it, at save time.
+  const checkSpawn = async () => {
+    const t = b.target
+    if (t?.kind !== 'spawn') return
+    if (!roleStore.roles.find((r) => r.id === t.role && r.spawn)) throw Object.assign(new Error('unknown role, or it cannot be spawned (Settings › Roles)'), { status: 400 })
+    if (!(await projectRoots()).has(t.project)) throw Object.assign(new Error('unknown project'), { status: 400 })
+  }
+  const [, , id, sub] = parts
+  if (!id) {
+    if (req.method === 'GET') return send(res, 200, { routines: routines.list(), settings: routines.settings() })
+    if (req.method === 'POST') { await checkSpawn(); return send(res, 200, routines.create(b)) }
+  } else if (id === 'runs' && req.method === 'GET') return send(res, 200, routines.runs(url.searchParams.get('limit')))
+  else if (id === 'settings' && req.method === 'PUT') return send(res, 200, routines.setSettings(b))
+  else if (sub === 'run' && req.method === 'POST') return send(res, 200, await routines.runNow(id))
+  else if (!sub && req.method === 'PUT') { await checkSpawn(); return send(res, 200, routines.update(id, b)) }
+  else if (!sub && req.method === 'DELETE') return send(res, 200, routines.delete(id))
+  return send(res, 405, { error: 'method not allowed' })
+}
+
 async function runHousekeeping(dryRun = false) {
   await hkLoaded
   const local = await agents().then((l) => l.filter((a) => a.local), () => null)
@@ -2398,6 +2458,12 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     const hkRun = () => runHousekeeping().catch((e) => console.error('housekeeping:', e.message))
     setTimeout(hkRun, 60_000)
     setInterval(hkRun, 3_600_000)
+    // Routines: close runs a restart orphaned, then tick every 30s (a tick in flight makes the next a no-op).
+    routines.recover().catch((e) => console.error('routines:', e.message)).finally(() => {
+      const rt = () => routines.tick().catch((e) => console.error('routines:', e.message))
+      setTimeout(rt, 5000)
+      setInterval(rt, 30_000)
+    })
     recordStart().catch((e) => console.error('starts:', e.message))
     refreshKeys() // opens wt.db (and runs any import) only in a listening server
     inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${MANAGED_BY === 'app' ? 'app-managed' : MANAGED_BY})`, body: `pid ${process.pid}`, target: {}, quiet: true })
