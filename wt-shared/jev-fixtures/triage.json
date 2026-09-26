@@ -1,0 +1,14 @@
+[
+  {"state": {"comment": {"body": "This will crash when items is empty — please guard it."}}, "expect": "must_fix"},
+  {"state": {"comment": {"body": "Why a Map here instead of an object?"}}, "expect": "question"},
+  {"state": {"comment": {"body": "nit: rename tmp to next"}}, "expect": "nit"},
+  {"state": {"comment": {"body": "LGTM, nice cleanup!"}}, "expect": "no_action"},
+  {"state": {"comment": {"body": "The SQL here is built by string concatenation from user input — this is an injection risk, must be parameterised."}}, "expect": "must_fix"},
+  {"state": {"comment": {"body": "Is there a reason we poll every 4s rather than subscribe to events?"}}, "expect": "question"},
+  {"state": {"comment": {"body": "Optional: could use optional chaining here for brevity."}}, "expect": "nit"},
+  {"state": {"comment": {"body": "Thanks for adding the tests 🙏"}}, "expect": "no_action"},
+  {"state": {"comment": {"body": "This deletes the user's worktree without checking for unpushed commits. Blocking."}}, "expect": "must_fix"},
+  {"state": {"comment": {"body": "Does this still work when the Keychain is locked?"}}, "expect": "question"},
+  {"state": {"comment": {"body": "tiny style thing: trailing whitespace on line 40"}}, "expect": "nit"},
+  {"state": {"comment": {"body": "Agreed with the approach, let's do the follow-up in a separate PR."}}, "expect": "no_action"}
+]

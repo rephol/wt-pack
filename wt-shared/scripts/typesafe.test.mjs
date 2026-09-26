@@ -61,3 +61,13 @@ test('enabled/minFor read env then the dashboard env file', () => {
   process.env.WT_JEV_FOO = 'off'
   assert.equal(enabled('foo'), false)
 })
+
+test('wt-judge triage --classes fails open: switch off or no key → exit 3 (babysit reads every comment)', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const f = join(dir, 'c.json'); writeFileSync(f, '[{"body":"x"}]')
+  const judgeBin = new URL('./wt-judge.mjs', import.meta.url).pathname
+  const off = spawnSync(process.execPath, [judgeBin, 'triage', f, '--classes'], { env: { ...process.env, WT_JEV_BABYSIT_TRIAGE: 'off' } })
+  assert.equal(off.status, 3)
+  const nokey = spawnSync(process.execPath, [judgeBin, 'triage', '--classes', f], { env: { ...process.env, WT_JEV_BABYSIT_TRIAGE: 'on', TYPESAFE_API_KEY: '', HOME: dir } })
+  assert.equal(nokey.status, 3)
+})

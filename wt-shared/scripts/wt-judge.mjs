@@ -5,7 +5,8 @@
 //   wt-judge.mjs dedupe   <findings.json> [--t 0.6]   (a false merge loses a finding)
 //   wt-judge.mjs cite     <records.json> [--t 0.5]
 //   wt-judge.mjs learning <learning.md> --against <file> [--against <file>]
-//   wt-judge.mjs triage   <comments.json> [--t 0.5]
+//   wt-judge.mjs triage   <comments.json> [--t 0.5] [--classes]   (--classes: must_fix|question|nit|no_action;
+//                                          exit 3 when WT_JEV_BABYSIT_TRIAGE is off)
 //   wt-judge.mjs ci       <failure.json>
 //   wt-judge.mjs simplify <candidates.json> [--t 0.7]
 //   wt-judge.mjs relevance <candidates.json> --question <q> [--max 60]
@@ -30,6 +31,8 @@
 // 0.51 the same way it acts on 0.99 has thrown away the calibration.
 import { ask, noul, choice, readJson, readText, pct, requireKey,
          logJudgments, readLog, learnedThresholds, runId, LOG, THRESHOLDS } from './typesafe.mjs';
+import { enabled, judge } from './typesafe.mjs';
+import { triageClass } from './jev-triage.mjs';
 import { writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -55,7 +58,8 @@ const DEFAULT_T = { simplify: 0.7, dedupe: 0.6, lenses: 0.4, verify: 0.5 };
 // `calibrate --apply` has seen enough labelled outcomes to justify a change.
 const LEARNED = learnedThresholds();
 const RUN = runId();
-const positional = argv.slice(1).filter((a, i, arr) => !a.startsWith('--') && !arr[i - 1]?.startsWith('--'));
+const BOOL = ['--json', '--classes', '--apply'];
+const positional = argv.slice(1).filter((a, i, arr) => !a.startsWith('--') && (!arr[i - 1]?.startsWith('--') || BOOL.includes(arr[i - 1])));
 const t = Number(flag('t', String(LEARNED[cmd]?.t ?? DEFAULT_T[cmd] ?? 0.5)));
 
 function usage() {
@@ -228,6 +232,11 @@ async function learning() {
 
 // ── triage ───────────────────────────────────────────────────────────────────
 async function triage() {
+  const classes = argv.includes('--classes');
+  if (classes && !enabled('babysit_triage', true)) {
+    console.error('WT_JEV_BABYSIT_TRIAGE is off');
+    process.exit(3);
+  }
   const comments = readJson(positional[0] ?? usage());
   const questions = Object.fromEntries(comments.map((c, i) => [`c${i}`, noul({
     comment: c,
@@ -236,13 +245,21 @@ async function triage() {
     true: 'It requests a change, disputes a decision, or asks a question that blocks the reviewer from approving.',
     false: 'Acknowledgement, agreement, praise, a note for later, or a remark the author has already addressed.',
   })]));
+  // Same call: one choice per comment beside the yes/no.
+  if (classes) comments.forEach((c, i) => { questions[`k${i}`] = triageClass.question(c); });
 
-  const body = await ask({ comments }, questions);
-  const rows = comments.map((c, i) => ({ comment: c, actionable: body.answers[`c${i}`].noul }));
+  // --classes goes through judge() (logged in jev-calls.jsonl, shown in the dashboard's Observability): any
+  // failure there is exit 3, so babysit falls back to reading every comment.
+  const body = classes
+    ? { answers: await judge('babysit_triage', { comments }, questions, { timeoutMs: 10000 }) }
+    : await ask({ comments }, questions);
+  if (!body.answers) { console.error('Jev unavailable (no key, timeout or HTTP error)'); process.exit(3); }
+  const rows = comments.map((c, i) => ({ comment: c, actionable: body.answers[`c${i}`].noul,
+    ...(classes ? { class: body.answers[`k${i}`]?.choice ?? null, p: body.answers[`k${i}`]?.confidence ?? null } : {}) }));
   if (json) return console.log(JSON.stringify(rows, null, 2));
-  for (const { comment, actionable } of rows) {
+  for (const { comment, actionable, class: k } of rows) {
     const mark = actionable >= t ? '→' : ' ';
-    console.log(`  ${mark} ${pct(actionable).padStart(4)}  ${(comment.body ?? JSON.stringify(comment)).replace(/\s+/g, ' ').slice(0, 88)}`);
+    console.log(`  ${mark} ${pct(actionable).padStart(4)}  ${classes ? `${String(k).padEnd(9)} ` : ''}${(comment.body ?? JSON.stringify(comment)).replace(/\s+/g, ' ').slice(0, 88)}`);
   }
   console.log(`\n  ${rows.filter((r) => r.actionable >= t).length} of ${rows.length} actionable`);
   logged('triage', rows.map((r, i) => ({ p: r.actionable, item: String(i) })));

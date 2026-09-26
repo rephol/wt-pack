@@ -20,6 +20,7 @@ export const EVALUATORS = {
   route: 'wt-handoff/scripts/jev-route.mjs#route',
   memory_dup: 'wt-memory/scripts/jev-memory.mjs#memoryDup',
   memory_suggest: 'wt-memory/scripts/jev-memory.mjs#memorySuggest',
+  triage: 'wt-shared/scripts/jev-triage.mjs#triageClass',
 }
 
 const feature = process.argv[2]
