@@ -3,6 +3,7 @@
 #   wt-ticket new "<title>" [--type bug|ux|gap|debt|feature] [--size S|M|L] [--priority 0-4] [--label l]... [--link url]...
 #                           [--body text] [--column c] [--project p]
 #   wt-ticket list [--column c] [--mine] [--project p]
+#   wt-ticket search <text> [--column c] [--project p]  (id, title, body, labels, comments; all words must match)
 #   wt-ticket show <ID>
 #   wt-ticket move <ID> <column> [--note "…"]       (blocked needs --note)
 #   wt-ticket comment <ID> "text"
@@ -15,7 +16,7 @@
 # Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
-usage() { sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 json=0; args=()
 for a in "$@"; do [ "$a" = --json ] && json=1 || args+=("$a"); done
 set -- "${args[@]+"${args[@]}"}"
@@ -58,6 +59,12 @@ case "$cmd" in
       case "$1" in --column) q="$q&column=${2:?}"; shift ;; --project) proj=${2:?}; shift ;; --mine) q="$q&mine=1" ;; *) usage ;; esac; shift
     done
     call GET "/api/tickets?project=${proj:-$(project)}$q&$(fmt)" ;;
+  search)
+    [ $# -ge 1 ] && [ -n "$1" ] || usage; text=$1; shift; q=; proj=
+    while [ $# -gt 0 ]; do
+      case "$1" in --column) q="$q&column=${2:?}"; shift ;; --project) proj=${2:?}; shift ;; *) usage ;; esac; shift
+    done
+    call GET "/api/tickets?project=${proj:-$(project)}$q&q=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$text")&$(fmt)" ;;
   show) [ $# -eq 1 ] || usage; show "$1" ;;
   move)
     [ $# -ge 2 ] || usage; id=$1; kv=("column=$2"); shift 2
