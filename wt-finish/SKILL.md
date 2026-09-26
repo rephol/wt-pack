@@ -79,9 +79,11 @@ git -C <main> branch -d <branch>        # -D only after the user accepts the los
 `-d` refuses an unmerged branch. That refusal is a third gate and is load-bearing — reaching for `-D` to
 silence it is the failure this skill is written to prevent.
 
-Then drop the task label wt-handoff put on your pane (display-only; best effort, a no-op outside herdr):
+Then drop the task labels: the planner's that handed you this work (only while it is still on this ticket),
+then the one wt-handoff put on your pane (display-only; best effort, a no-op outside herdr):
 
 ```
+~/.claude/skills/wt-shared/scripts/task-state.sh planner --clear
 [ -n "${HERDR_PANE_ID:-}" ] && herdr pane report-metadata "$HERDR_PANE_ID" --source wt-dashboard --clear-token task >/dev/null 2>&1 || true
 ```
 
