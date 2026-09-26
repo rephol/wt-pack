@@ -727,7 +727,7 @@ test('config: WT_JEV_* switches are on|off with per-feature defaults', async () 
   assert.match(rfs(f, 'utf8'), /^WT_JEV_ROOM_RESOLVE=off$/m)
   assert.equal(cfg.get('WT_JEV_ROOM_RESOLVE'), 'off')
   await assert.rejects(cfg.setValue('WT_JEV_STALL', 'yes'), (e) => e.status === 400)
-  assert.equal(cfg.publicState().filter((i) => i.key.startsWith('WT_JEV_')).length, 9)
+  assert.equal(cfg.publicState().filter((i) => i.key.startsWith('WT_JEV_')).length, 10)
 })
 
 import { healthSummary } from './jevlog.mjs'

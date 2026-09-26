@@ -6,6 +6,7 @@ import { open, tx } from './store.mjs'
 export const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked']
 export const TYPES = ['bug', 'ux', 'gap', 'debt', 'feature']
 export const SIZES = ['S', 'M', 'L']
+const DEFAULTS = { type: 'feature', size: null, priority: 0 } // create()'s defaults; Jev only fills these
 const PROJECT = /^[\w.-]{1,64}$/
 const err = (status, m) => Object.assign(new Error(m), { status })
 
@@ -131,10 +132,37 @@ export class Tickets {
       const edited = Object.keys(rest).filter((k) => JSON.stringify(t[k]) !== JSON.stringify(rest[k]))
       if (edited.length) t.history.push({ at, author: author.name, kind: 'edit', text: edited.join(', ') })
       Object.assign(t, rest)
+      for (const k of edited) delete t.jev?.applied?.[k] // the user's value now, not Jev's
       if (assignee !== undefined && assignee?.name !== t.assignee?.name) {
         t.history.push({ at, author: author.name, kind: 'assign', from: t.assignee?.name ?? null, to: assignee?.name ?? null })
         t.assignee = assignee
       }
+      return t
+    })
+  }
+  // Jev's triage (ticketJev.mjs): fill each field in `empty` that is still at its create default and was never
+  // edited since; record what changed so the UI can offer undo. d = { type, size, priority, owner, dupes }.
+  async jevApply(id, d, empty) {
+    return this.mutate(id, (t, at) => {
+      const edited = new Set(t.history.filter((h) => h.kind === 'edit').flatMap((h) => h.text?.split(', ') ?? []))
+      const applied = {}
+      for (const k of empty) {
+        if (d[k] == null || edited.has(k) || t[k] !== DEFAULTS[k] || d[k] === t[k]) continue
+        applied[k] = { from: t[k], to: d[k] }
+        t[k] = d[k]
+      }
+      t.jev = { at, applied, owner: d.owner ?? null, dupes: d.dupes ?? [] }
+      if (Object.keys(applied).length) t.history.push({ at, author: 'jev', kind: 'edit', text: `jev: ${Object.keys(applied).join(', ')}` })
+      return t
+    })
+  }
+  async jevUndo(id, field, author) {
+    return this.mutate(id, (t, at) => {
+      const a = t.jev?.applied?.[field]
+      if (!a) throw err(400, `no Jev suggestion on ${field}`)
+      t[field] = a.from
+      delete t.jev.applied[field]
+      t.history.push({ at, author: author.name, kind: 'edit', text: field })
       return t
     })
   }

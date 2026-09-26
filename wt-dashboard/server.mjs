@@ -10,6 +10,7 @@ import { join, extname, normalize, basename, dirname, relative, isAbsolute } fro
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
+import { triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
@@ -1715,9 +1716,14 @@ async function ticketsApi(req, res, url, parts) {
   const me = () => { if (author.kind !== 'agent') throw Object.assign(new Error("'me' needs an agent pane (x-herdr-pane)"), { status: 400 }); return { name: author.name, pane: author.pane } }
   if (req.method === 'POST' && parts.length === 2) {
     const project = b.project ?? (author.kind === 'agent' ? (await agents()).find((a) => a.key === author.key)?.project : null)
+    // Left empty = absent in the request (the web always sends priority, 0 = unset); create() fills defaults.
+    const empty = ['type', 'size', 'priority'].filter((k) => b[k] === undefined || (k === 'priority' && b[k] === 0))
     const t = await tickets.create(project, b, author)
     if (!boardKeys.includes(t.id.split('-')[0])) await refreshKeys()
-    return send(res, 200, t)
+    send(res, 200, t)
+    if (jevOn('TICKET_TRIAGE')) triageTicket(project, t, empty, { tickets, min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
+      ask: (state, q, pick) => jevAsk('TICKET_TRIAGE', state, q, pick, { timeoutMs: 5000 }) })
+    return
   }
   const id = parts[2]
   if (req.method === 'PATCH' && parts.length === 3) {
@@ -1732,6 +1738,7 @@ async function ticketsApi(req, res, url, parts) {
     return send(res, 200, await tickets.patch(id, b, author, assignee))
   }
   if (req.method === 'POST' && parts[3] === 'comments') return send(res, 200, await tickets.comment(id, b.text, author))
+  if (req.method === 'POST' && parts[3] === 'jev-undo') return send(res, 200, await tickets.jevUndo(id, b.field, author))
   if (req.method === 'POST' && parts[3] === 'claim') return send(res, 200, await tickets.claim(id, me(), b.force === true))
   send(res, 404, { error: 'not found' })
 }
@@ -1739,7 +1746,7 @@ async function ticketsApi(req, res, url, parts) {
 // ---- rooms ----
 // Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
 const jevOn = (feature) => cfg.get(`WT_JEV_${feature}`) === 'on'
-const jevAsk = (feature, state, questions, pick) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick })
+const jevAsk = (feature, state, questions, pick, opts) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick, ...opts })
 const rooms = new Rooms({
   dir: DATA,
   judge: async (state) => {

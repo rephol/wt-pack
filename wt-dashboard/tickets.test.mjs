@@ -158,3 +158,23 @@ test('server: unknown pane → 403 before body parsing, board unchanged', async 
     assert.deepEqual((await new Tickets({ dir: join(root, 'data') }).list('wt-pack')).tickets, JSON.parse(board).tickets)
   } finally { srv.kill() }
 })
+
+test('jevApply / jevUndo', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const a = await t.create('wt-pack', { title: 'A' }, user)
+  await t.patch(a.id, { size: 'M' }, user) // edited before Jev answered: left alone
+  await t.patch(a.id, { size: null }, user) // back at the default, still the user's
+  const d = { type: 'bug', size: 'L', priority: 2, owner: 'worker', dupes: ['WP-9'] }
+  const j = await t.jevApply(a.id, d, ['type', 'size', 'priority'])
+  assert.deepEqual([j.type, j.size, j.priority], ['bug', null, 2])
+  assert.deepEqual(j.jev.applied, { type: { from: 'feature', to: 'bug' }, priority: { from: 0, to: 2 } })
+  assert.deepEqual([j.jev.owner, j.jev.dupes, j.history.at(-1).author], ['worker', ['WP-9'], 'jev'])
+  const u = await t.jevUndo(a.id, 'type', user)
+  assert.equal(u.type, 'feature')
+  assert.deepEqual(Object.keys(u.jev.applied), ['priority'])
+  await assert.rejects(t.jevUndo(a.id, 'type', user), /no Jev suggestion/)
+  const p = await t.patch(a.id, { priority: 3, jev: { applied: {} } }, user) // manual edit drops the badge; jev in a body is ignored
+  assert.deepEqual([p.priority, p.jev.applied, p.jev.dupes], [3, {}, ['WP-9']])
+  const b = await t.create('wt-pack', { title: 'B', type: 'ux' }, user) // set by the creator: never in `empty`, never changed
+  assert.equal((await t.jevApply(b.id, d, ['size'])).type, 'ux')
+})

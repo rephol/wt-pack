@@ -22,6 +22,7 @@ export const KEYS = {
   ...Object.fromEntries([
     ['ROOM_RESOLVE', 'Room needs-you resolve', 'on'], ['MEMORY_DUP', 'Memory near-duplicate check', 'on'],
     ['BABYSIT_TRIAGE', 'Babysit comment triage', 'on'], ['ROUTE', 'Handoff routing', 'on'],
+    ['TICKET_TRIAGE', 'Ticket triage', 'on'],
     ['NEEDS_YOU', 'Pane needs-you', 'off'], ['STALL', 'Stalled vs thinking', 'off'],
     ['INBOX_RANK', 'Inbox urgency', 'off'], ['MEMORY_SUGGEST', 'Memory suggestions', 'off'],
     ['LOG_SNIPPETS', 'Log input snippets', 'off'],
