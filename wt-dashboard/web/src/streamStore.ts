@@ -52,7 +52,7 @@ function open<T>(key: string, e: Live<T>) {
   connections.opened++
   e.es = es
   e.synced = false
-  es.addEventListener('open', () => { if (!e.synced) { e.synced = true; notify(e) } })
+  es.addEventListener('open', () => { if (!e.synced || e.error) { e.synced = true; e.error = false; notify(e) } })
   const apply = (fn: (items: T[]) => T[], cursor?: string | null) => {
     const next = fn(e.items)
     const moved = cursor !== undefined && cursor !== e.cursor
