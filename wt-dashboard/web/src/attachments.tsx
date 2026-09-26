@@ -172,21 +172,25 @@ export const uploadUrl = (p: string) => {
 export function useAttachments(blocked: string | null) {
   const [atts, setAtts] = useState<Attachment[]>([])
   const [attErr, setAttErr] = useState<string | null>(null)
-  const addFiles = (files: File[]) => {
+  // Returns the attachments it added (rooms mark their place in the text).
+  const addFiles = (files: File[]): Attachment[] => {
     setAttErr(null)
-    if (blocked) return setAttErr(blocked)
+    if (blocked) { setAttErr(blocked); return [] }
+    const added: Attachment[] = []
     const room = MAX_IMAGES - atts.length
     const ok = files.filter((f) => IMAGE_TYPES.includes(f.type) && f.size <= MAX_IMAGE)
     if (ok.length < files.length) setAttErr('Only png/jpeg/webp/gif up to 10MB')
     if (ok.length > room) setAttErr(`At most ${MAX_IMAGES} images per message`)
     for (const f of ok.slice(0, Math.max(0, room))) {
       const a: Attachment = { id: crypto.randomUUID(), preview: URL.createObjectURL(f), name: f.name }
+      added.push(a)
       setAtts((prev) => [...prev, a])
       uploadImage(f).then(
         (path) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, path } : x))),
         (e) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, error: String(e.message ?? e) } : x))),
       )
     }
+    return added
   }
   const removeAtt = (id: string) => setAtts((prev) => prev.filter((x) => (x.id === id ? (URL.revokeObjectURL(x.preview), false) : true)))
   const clear = () => { atts.forEach((a) => URL.revokeObjectURL(a.preview)); setAtts([]); setAttErr(null) }

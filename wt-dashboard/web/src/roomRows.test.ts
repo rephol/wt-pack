@@ -24,3 +24,13 @@ test('membersFirst: room members lead the @ menu, the rest keep their order', ()
   assert.deepEqual(membersFirst(A, ['wt-pack-worker-01', 'x']).map((a) => a.name), ['wt-pack-worker-01', 'x', 'umkmall-worker-01', 'umkmall-worker-02'])
   assert.deepEqual(membersFirst(A, []).map((a) => a.name), A.map((a) => a.name))
 })
+
+import { attMarker, orphanedAtts, numberMarkers } from './roomRows.ts'
+test('attachment markers: a deleted marker orphans its image; send numbers markers by sent order', () => {
+  const a = 'aaaaaaaa-1', b = 'bbbbbbbb-2', c = 'cccccccc-3'
+  const text = `see ${attMarker(b)} then ${attMarker(a)}`
+  assert.deepEqual(orphanedAtts(text, [a, b, c]), [c])
+  assert.equal(numberMarkers(text, [a, b]), 'see [image 2] then [image 1]')
+  // a marker whose image failed to upload (not sent) is dropped from the text
+  assert.equal(numberMarkers(`x ${attMarker(c)} ${attMarker(a)}`, [a]), 'x  [image 1]')
+})

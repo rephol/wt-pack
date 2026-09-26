@@ -38,3 +38,10 @@ export function roomRows<M extends StatusMsg>(msgs: M[], handle: string, working
 // @ menu order: the room's members first, then everyone else; each part keeps its incoming order.
 export const membersFirst = <A extends { name: string }>(agents: A[], members: string[]) =>
   [...agents.filter((a) => members.includes(a.name)), ...agents.filter((a) => !members.includes(a.name))]
+
+// Composer attachment markers: a chip [image:<id8>] sits where the image was added. A marker the user deleted
+// drops its attachment; on send each marker becomes [image N], N = its image's place among the sent attachments.
+export const attMarker = (id: string) => `[image:${id.slice(0, 8)}]`
+export const orphanedAtts = (text: string, ids: string[]) => ids.filter((id) => !text.includes(attMarker(id)))
+export const numberMarkers = (text: string, sentIds: string[]) =>
+  sentIds.reduce((t, id, i) => t.split(attMarker(id)).join(`[image ${i + 1}]`), text).replace(/\[image:[0-9a-f]{8}\]/g, '').trim()

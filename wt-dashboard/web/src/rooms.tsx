@@ -44,7 +44,7 @@ import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Token, type TokenColor } from '@astryxdesign/core/Token'
 import type { MarkdownInlinePlugin } from '@astryxdesign/core/Markdown'
 import { useRoles } from './roles'
-import { roomRows, membersFirst } from './roomRows'
+import { roomRows, membersFirst, attMarker, orphanedAtts, numberMarkers } from './roomRows'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string; pool?: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -206,7 +206,17 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   const [draft, setDraft] = useState('')
   const density = useChatDensity()
   const [confirm, setConfirm] = useState<string | null>(null)
-  const { atts, attErr, addFiles, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
+  const { atts, attErr, addFiles: addAtts, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
+  // Each added image leaves a [image:…] chip at the caret (as the @ menu inserts chips; insertToken emits no change,
+  // so an input event syncs the draft). Deleting a chip drops its image.
+  const addFiles = (files: File[]) => {
+    const h = inputRef.current, el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+    const added = addAtts(files)
+    if (!h || !el || !added.length) return
+    if (!el.contains(getSelection()?.anchorNode ?? null)) { el.focus(); getSelection()?.selectAllChildren(el); getSelection()?.collapseToEnd() }
+    for (const a of added) h.insertToken({ value: attMarker(a.id), label: `📎 ${a.name}`, variant: 'neutral' })
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
   const fileRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<ChatComposerInputHandle>(null)
   const [sendErr, setSendErr] = useState<string | null>(null)
@@ -241,7 +251,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   }, [])
   const post = useMutation({
     mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST',
-      body: JSON.stringify({ ...b, attachments: atts.filter((a) => a.path).map((a) => a.path), replyTo: replyTo?.id }) }),
+      body: JSON.stringify({ ...b, text: numberMarkers(b.text, atts.filter((a) => a.path).map((a) => a.id)), attachments: atts.filter((a) => a.path).map((a) => a.path), replyTo: replyTo?.id }) }),
     onSuccess: () => { setDraft(''); setConfirm(null); clearAtts(); setSendErr(null); setReplyTo(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
     onError: (e) => { const m = e instanceof Error ? e.message : String(e); if (/one agent/.test(m)) setSendErr(m); else toast({ body: `Could not post: ${m}`, type: 'error' }) },
   })
@@ -419,7 +429,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
         emptyState={syncing ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
           <VStack gap={1}>
-          <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null) }} onSubmit={submit} isDisabled={post.isPending || syncing} density="compact"
+          <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null); orphanedAtts(v, atts.map((a) => a.id)).forEach(removeAtt) }} onSubmit={submit} isDisabled={post.isPending || syncing} density="compact"
             status={sendErr ? { type: 'error', message: sendErr } : attErr ? { type: 'warning', message: attErr }
               : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}
             footerActions={<div style={{ display: 'grid', width: '100%', minWidth: 0, flex: 1 }}>{/* grid: the footer sizes to content; this lets the hint ellipsize */}<Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text></div>}
