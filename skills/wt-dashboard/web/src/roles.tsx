@@ -59,7 +59,7 @@ export function TagsDialog({ agent, mode, onClose }: { agent: AgentLite; mode: '
         {mode === 'role'
           ? <Selector label="Role" width="100%" value={role} options={[...roles, OTHER].map((r) => ({ value: r.id, label: r.name }))} onChange={setRole} />
           : <>
-              <TextInput label="Ticket" value={ticket} onChange={setTicket} placeholder="UMK-1177" />
+              <TextInput label="Ticket" value={ticket} onChange={setTicket} placeholder="ABC-123" />
               <TextInput label="Branch" value={branch} onChange={setBranch} placeholder="short branch name" />
             </>}
         <Text type="supporting" size="sm">Stored by the dashboard and shown in herdr as pane tokens (display only; herdr titles and status are not changed).</Text>

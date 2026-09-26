@@ -27,6 +27,7 @@ test('agentInitials: role letter + number without leading zeros', () => {
   assert.equal(agentInitials('worker-05'), 'W5')
   assert.equal(agentInitials('umkmall-worker-10'), 'W10')
   assert.equal(agentInitials('umkmall-orchestrator'), 'O')
+  assert.equal(agentInitials('acme-shop-worker-03'), 'W3') // any project prefix, not only umkmall (WP-82)
   assert.equal(agentInitials('code-reviewer/w5:p9'), 'CR')
   assert.equal(agentInitials('Code-reviewer agent startup command'), 'CR')
 })

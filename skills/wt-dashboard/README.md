@@ -1,6 +1,6 @@
 # wt-dashboard
 
-Local dashboard over herdr panes (planners, workers, orchestrator), the umkmall git worktrees, their PRs and Linear tickets.
+Local dashboard over herdr panes (planners, workers, orchestrator), your repo's git worktrees, their PRs and Linear tickets.
 
 ```sh
 npm --prefix web install      # once
@@ -10,7 +10,7 @@ npm test                      # pane-parser self-check
 ```
 
 - `LINEAR_API_KEY=lin_api_… npm run dev` shows Linear tickets (read-only GraphQL). Without it the board uses worktrees, PRs and agents only.
-- `WT_DASHBOARD_REPO` (legacy `UMKMALL_REPO`) overrides the checkout path (default `~/Work/projects/umkmall`). Needs `herdr`, `git` and an authenticated `gh` on PATH.
+- `WT_DASHBOARD_REPO` (legacy `UMKMALL_REPO`) overrides the checkout path (default: this wt-pack checkout). `WT_LINEAR_TEAMS=ENG=my-app` adds a Linear team's open tickets and recognises its ids. Needs `herdr`, `git` and an authenticated `gh` on PATH.
 - Refresh: agents/overview cached 3s, worktrees 10s, PRs 30s (GitHub rate limit), Linear 60s.
 
 **Security:** the server binds to 127.0.0.1 only and rejects non-local `Host`/`Origin` headers and non-JSON POSTs. It can type into agents that run with bypassed permissions — never expose or proxy it beyond your machine.

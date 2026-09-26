@@ -904,10 +904,11 @@ test('Rooms.withLast: newest non-system line, not persisted to the index', async
   assert.equal(rooms.index[0].lastAt, undefined)
 })
 
-test('ticketOf: UMK plus local board keys, anchored', async () => {
+test('ticketOf: Linear team keys plus local board keys, anchored', async () => {
   const { ticketOf } = await import('./server.mjs')
   assert.equal(ticketOf('wp-12-board', ['WP']), 'WP-12')
-  assert.equal(ticketOf('/wt/umk-759', ['WP']), 'UMK-759')
+  assert.equal(ticketOf('/wt/umk-759', ['UMK', 'WP']), 'UMK-759')
+  assert.equal(ticketOf('/wt/umk-759', ['WP']), null) // UMK is no longer built in (WP-82)
   assert.equal(ticketOf('wp-12-board', []), null) // unknown key
   assert.equal(ticketOf('node-20-utf-8', ['WP']), null)
   assert.equal(ticketOf('swp-3', ['WP']), null)
@@ -1077,4 +1078,15 @@ test('bindCheck: loopback always; anything else only with WT_ALLOW_REMOTE (WP-80
   assert.equal(LOOPBACK_BIND.test('127.0.0.10'), false)
   assert.equal(bindHostHeader('100.64.1.2', 7777), '100.64.1.2:7777')
   assert.equal(bindHostHeader('fd00::1', 7777), '[fd00::1]:7777')
+})
+
+test('parseTeams: WT_LINEAR_TEAMS "KEY=project,KEY" → team key → project (WP-82)', async () => {
+  const { parseTeams } = await import('./config.mjs')
+  assert.deepEqual(parseTeams(['UMK=umkmall', 'eng', ' OPS = ops-tools ', '', 'bad key=x']), { UMK: 'umkmall', ENG: 'eng', OPS: 'ops-tools' })
+  assert.deepEqual(parseTeams([]), {})
+  assert.deepEqual(parseTeams(['X=a"b', 'Y=../z']), {}) // quotes and slashes never reach the query or a path
+  const { cfg } = tmpCfg(''); await cfg.load()
+  await cfg.setValue('WT_LINEAR_TEAMS', ['umk = umkmall', 'ENG'])
+  assert.deepEqual(cfg.list('WT_LINEAR_TEAMS'), ['umk=umkmall', 'ENG'])
+  await assert.rejects(cfg.setValue('WT_LINEAR_TEAMS', ['E"}']), (e) => e.status === 400)
 })

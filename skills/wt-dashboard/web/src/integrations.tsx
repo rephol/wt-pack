@@ -55,6 +55,7 @@ export function IntegrationsSection() {
       <Text type="supporting" size="sm">Precedence: server env var › Keychain (secrets) › ~/.config/wt-dashboard/env › default.</Text>
       <SecretKey it={by.LINEAR_API_KEY} put={put} del={() => save.mutate({ key: 'LINEAR_API_KEY', del: true })} placeholder="lin_api_…" testable />
       <SecretKey it={by.TYPESAFE_API_KEY} put={put} del={() => save.mutate({ key: 'TYPESAFE_API_KEY', del: true })} placeholder="TypeSafe key (console.typesafe.ai/keys)" />
+      <ListEditor it={by.WT_LINEAR_TEAMS} put={put} placeholder="ENG=my-app" hint="Linear teams whose open tickets show up and whose ids (ENG-12) are recognised in branches: KEY=project, or just KEY. Takes effect after a server restart." />
       <ListEditor it={by.WT_DASHBOARD_PROJECTS} put={put} placeholder="/Users/me/Work/projects/repo" hint="Repo paths offered in New agent. Each must be a git repository." check />
       <HostsEditor it={by.WT_DASHBOARD_ALLOWED_HOSTS} loopback={q.data.loopback} put={put} />
       <RepoEditor it={by.WT_DASHBOARD_REPO} app={q.data.app} put={put} />
@@ -155,11 +156,11 @@ function RepoEditor({ it, app, put }: { it: Item; app: boolean; put: (k: string,
   const { busy, run } = useServerControl()
   const restart = 'restartNeeded' in it && it.restartNeeded
   return (
-    <Field label={it.label} inputID="umkmall-repo" isGroupLabel description="WT_DASHBOARD_REPO: the main checkout used for worktrees, PRs and the default project. Must be a git repository.">
+    <Field label={it.label} inputID="dashboard-repo" isGroupLabel description="WT_DASHBOARD_REPO: the main checkout used for worktrees, PRs and the default project. Must be a git repository.">
       <VStack gap={2}>
         <Source it={it} />
         <HStack gap={2} align="end" wrap="wrap">
-          <div style={{ flex: '1 1 260px' }}><TextInput label="Path" isLabelHidden placeholder="~/Work/projects/umkmall (default)" value={v} onChange={setV} isReadOnly={it.overridden} /></div>
+          <div style={{ flex: '1 1 260px' }}><TextInput label="Path" isLabelHidden placeholder="~/Work/projects/my-app (default: this wt-pack checkout)" value={v} onChange={setV} isReadOnly={it.overridden} /></div>
           {!it.overridden && <Button label="Save" size="sm" isDisabled={v.trim() === value} onClick={() => put(it.key, v.trim())} />}
         </HStack>
         {restart && (app

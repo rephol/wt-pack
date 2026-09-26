@@ -93,8 +93,8 @@ export function ticketItems(tickets: SwTicket[], query: string): SwItem[] {
 export function agentInitials(name: string, letter?: string) {
   const num = name.match(/-0*(\d+)$/)?.[1]
   if (letter && letter !== '?') return letter + (num ?? '')
-  const n = name.replace(/^umkmall-/i, '')
-  const role = n.match(/^(planner|worker|orchestrator)(?:-0*(\d+))?$/i)
+  const n = name
+  const role = n.match(/(?:^|-)(planner|worker|orchestrator)(?:-0*(\d+))?$/i) // after any project prefix
   if (role) return role[1][0].toUpperCase() + (role[2] ?? '')
   return n.split(/[^A-Za-z0-9]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
 }
