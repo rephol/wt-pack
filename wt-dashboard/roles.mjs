@@ -11,6 +11,9 @@ export const DEFAULT_ROLES = [
     spawn: { start: 'main', workspace: '<repo>-planners', prompt: '/wt-plan ', projects: [] } },
   { id: 'worker', name: 'Worker', color: 'green', letter: 'W', match: { workspace: '*-workers', name: '*worker*' },
     spawn: { start: 'worktree', workspace: '<repo>-workers', prompt: '/wt-work', projects: [] } },
+  // PM+QA: audits the running apps and posts ranked proposals; read-only, so it stays in the main checkout.
+  { id: 'auditor', name: 'Auditor', color: 'orange', letter: 'A', match: { workspace: '*-auditors', name: '*auditor*' },
+    spawn: { start: 'main', workspace: '<repo>-auditors', prompt: '/wt-audit', projects: [] } },
 ]
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane

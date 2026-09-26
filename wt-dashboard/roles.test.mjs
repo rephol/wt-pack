@@ -49,3 +49,8 @@ test('tags: a newer handoff adopts its ticket into the mirror; live keys are nev
   assert.equal(adoptHandoff(mirror, { ticket: 'UMK-9' }), null) // no handoff: the mirror wins as before
   assert.deepEqual(tokenDiff(pane, next), { set: [], clear: [] }) // task is not the mirror's to clear
 })
+
+test('resolveRole: auditors by pool or name', () => {
+  assert.deepEqual(resolveRole(DEFAULT_ROLES, { workspace: 'wt-pack-auditors', name: 'x' }), { id: 'auditor', by: 'workspace' })
+  assert.deepEqual(resolveRole(DEFAULT_ROLES, { workspace: 'misc', name: 'wt-pack-auditor-01' }), { id: 'auditor', by: 'name' })
+})
