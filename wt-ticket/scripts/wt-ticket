@@ -8,13 +8,14 @@
 #   wt-ticket comment <ID> "text"
 #   wt-ticket claim <ID> [--force]
 #   wt-ticket assign <ID> <agent|me|none>
+#   wt-ticket triage <ID>|--column c [--project p]  (Jev fills fields still unset and never edited; hint + dupes)
 #   wt-ticket keys                                  (known board keys, one per line)
 #   --json on any command prints the raw API body. Columns: backlog ready planning building review done blocked.
 #   Priority is Linear's scale: 0 none (default), 1 urgent, 2 high, 3 medium, 4 low.
 # Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
-usage() { sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 json=0; args=()
 for a in "$@"; do [ "$a" = --json ] && json=1 || args+=("$a"); done
 set -- "${args[@]+"${args[@]}"}"
@@ -23,7 +24,7 @@ fmt() { [ $json = 1 ] && echo "" || echo "format=text"; }
 # call METHOD PATH [JSON]: prints the body; exit 1 on an HTTP error or an unreachable server.
 call() {
   local out code
-  out=$(curl -sS --max-time 5 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+  out=$(curl -sS --max-time "${MAXT:-5}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ticket: $code $out" >&2; exit 1; fi
@@ -70,6 +71,14 @@ case "$cmd" in
     [ $# -eq 2 ] || usage
     if [ "$2" = none ]; then b='{"assignee":null}'; else b=$(obj "assignee=$2"); fi
     out=$(call PATCH "/api/tickets/$1" "$b") || exit 1; row "$out" ;;
+  triage)
+    if [ "${1:-}" = --column ]; then
+      col=${2:?}; shift 2; proj=; [ "${1:-}" = --project ] && proj=${2:?}
+      ids=$(call GET "/api/tickets?project=${proj:-$(project)}&column=$col" | node -e 'for (const t of JSON.parse(require("fs").readFileSync(0,"utf8")).tickets) console.log(t.id)') || exit 1
+    else [ $# -eq 1 ] || usage; ids=$1; fi
+    rc=0
+    for id in $ids; do out=$(MAXT=10 call POST "/api/tickets/$id/triage") && row "$out" || rc=1; done
+    exit $rc ;;
   keys) call GET "/api/tickets/keys?$(fmt)" ;;
   *) usage ;;
 esac
