@@ -191,7 +191,7 @@ function useServerSettings() {
   return { s: q.data, q, set, saved: set.isPending ? 'Saving…' : Date.now() - savedAt < 3000 ? 'Saved' : '' }
 }
 
-const Status = ({ text }: { text: string }) => (text ? <Text type="supporting" size="sm" role="status">{text}</Text> : null)
+const Status = ({ text }: { text: string }) => <span role="status"><Text type="supporting" size="sm">{text}</Text></span>
 
 function ProfileSection() {
   const { s, q, set, saved } = useServerSettings()
