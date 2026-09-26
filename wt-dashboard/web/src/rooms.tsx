@@ -419,10 +419,10 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
         emptyState={syncing ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
           <VStack gap={1}>
-          <Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text>
           <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null) }} onSubmit={submit} isDisabled={post.isPending || syncing} density="compact"
             status={sendErr ? { type: 'error', message: sendErr } : attErr ? { type: 'warning', message: attErr }
               : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}
+            footerActions={<div style={{ display: 'grid', width: '100%', minWidth: 0, flex: 1 }}>{/* grid: the footer sizes to content; this lets the hint ellipsize */}<Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text></div>}
             headerActions={<>
               <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={atts.length >= MAX_IMAGES} onClick={() => fileRef.current?.click()} />
               <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
