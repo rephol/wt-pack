@@ -235,6 +235,11 @@ Terminals, Usage, Observability, Server, About.
   data, to diagnose and file a ticket — only when clicked.
 - **Server**: state, pid, uptime, build time, per-source status; **Restart server** (or **Install as
   service** when not managed).
+- **Web build stays current** (WP-81): a server running from a checkout rebuilds `web/dist` itself when
+  `web/src` (or `web/index.html`/`package.json`) is newer than the build — 5s after start, then every 2 min,
+  one build at a time; the open page picks the new build up. A failed build leaves the previous one and posts a
+  `server` Inbox item. `/api/health` reports `webStale`. Not for the bundled Mac-app server or a custom
+  `WT_DASHBOARD_DIST`.
 - **About**: what the dashboard is, keyboard shortcuts, install.
 
 ## Keyboard and palette
