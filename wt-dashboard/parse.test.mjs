@@ -156,11 +156,11 @@ test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-o
   assert.deepEqual([stop.deliver, stop.pauseNote], [[], 'paused: waiting for a human'])
   assert.equal(R.planDelivery({ msg: user('@room-test-b ok'), room: r, settings: on, agents }).hops, 0)
   assert.deepEqual(R.planDelivery({ msg: user('@room-test-a'), room: { ...room, paused: true }, settings: S, agents }).deliver, [])
-  // rate limit: 6 per 10 min
+  // rate limit: 12 per 10 min
   const t0 = 1_000_000
-  assert.equal(R.rateOk(Array(5).fill(t0), t0 + 1, S), true)
-  assert.equal(R.rateOk(Array(6).fill(t0), t0 + 1, S), false)
-  assert.equal(R.rateOk(Array(6).fill(t0), t0 + 10 * 60_000, S), true)
+  assert.equal(R.rateOk(Array(11).fill(t0), t0 + 1, S), true)
+  assert.equal(R.rateOk(Array(12).fill(t0), t0 + 1, S), false)
+  assert.equal(R.rateOk(Array(12).fill(t0), t0 + 10 * 60_000, S), true)
   // idle-only delivery
   assert.equal(R.deliverable({ status: 'idle' }), true)
   assert.equal(R.deliverable({ status: 'working' }), false)

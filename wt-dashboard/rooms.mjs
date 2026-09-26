@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS = {
   ticketRooms: 'suggest', // 'off' | 'suggest' | 'auto' — rooms #umk-NNNN per ticket
   dismissedTickets: [], // suggestions the user dismissed
   profile: { name: 'user', handle: 'user', avatar: null }, // how agents address the human (@handle)
-  rateCount: 6, // agent posts…
+  rateCount: 12, // agent posts… (an ack-first reply is two posts)
   rateWindowMin: 10, // …per this many minutes
   agentsCreateRooms: false, // agents may create rooms (`room create`)
 }
