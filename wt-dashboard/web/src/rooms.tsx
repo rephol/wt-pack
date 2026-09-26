@@ -44,7 +44,7 @@ import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Token, type TokenColor } from '@astryxdesign/core/Token'
 import type { MarkdownInlinePlugin } from '@astryxdesign/core/Markdown'
 import { useRoles } from './roles'
-import { roomRows } from './roomRows'
+import { roomRows, membersFirst } from './roomRows'
 
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string; pool?: string }
 interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[] }
@@ -142,10 +142,10 @@ export function RoomsPage({ slug, agents, onSelect, onOpenAgent }: { slug: strin
   )
 }
 
-function mentionSource(agents: RoomAgent[], profile: Profile): SearchSource<SearchableItem> {
+function mentionSource(agents: RoomAgent[], profile: Profile, members: string[]): SearchSource<SearchableItem> {
   const items: SearchableItem[] = [{ id: 'all', label: 'all', auxiliaryData: { status: 'everyone in the room' } },
     { id: 'user', label: profile.handle, auxiliaryData: { status: `you (${profile.name})` } },
-    ...agents.map((a) => ({ id: a.key, label: a.name, auxiliaryData: a }))]
+    ...membersFirst(agents, members).map((a) => ({ id: a.key, label: a.name, auxiliaryData: a }))]
   return {
     bootstrap: () => items.slice(0, 50),
     search: (query) => items.filter((it) => it.label.toLowerCase().includes(query.toLowerCase().trim())).slice(0, 50),
@@ -268,13 +268,13 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
   })
   const mention = useMemo<ChatComposerTrigger>(() => ({
     character: '@',
-    searchSource: mentionSource(agents, profile),
+    searchSource: mentionSource(agents, profile, room.members),
     renderItem: (item) => {
       const a = item.auxiliaryData as RoomAgent
-      return <TypeaheadItem item={item} description={a.status} icon={item.id === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="xsm" /> : <StatusDot variant={dotOf(item.id === 'all' ? undefined : a)} label={a.status} />} />
+      return <TypeaheadItem item={item} description={room.members.includes(item.label) ? `in this room · ${a.status}` : a.status} icon={item.id === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="xsm" /> : <StatusDot variant={dotOf(item.id === 'all' ? undefined : a)} label={a.status} />} />
     },
     onSelect: (item) => ({ value: `@${item.label}`, label: `@${item.label}`, variant: 'blue' as const }),
-  }), [agents, profile])
+  }), [agents, profile, room.members])
   const submit = (v: string) => {
     const text = v.trim()
     if (!text && !atts.some((a) => a.path)) return

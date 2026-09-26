@@ -34,3 +34,7 @@ export function roomRows<M extends StatusMsg>(msgs: M[], handle: string, working
   }
   return out
 }
+
+// @ menu order: the room's members first, then everyone else; each part keeps its incoming order.
+export const membersFirst = <A extends { name: string }>(agents: A[], members: string[]) =>
+  [...agents.filter((a) => members.includes(a.name)), ...agents.filter((a) => !members.includes(a.name))]

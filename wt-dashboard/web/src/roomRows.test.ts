@@ -17,3 +17,10 @@ test('delivery state becomes status rows after its message, consecutive duplicat
   const other = roomRows([msg('a', { deliveredTo: ['x'] }), msg('b', { author: { kind: 'agent', name: 'z' }, deliveredTo: ['x'] })], 'me', new Map())
   assert.equal(other.length, 4) // a different author breaks the run
 })
+
+import { membersFirst } from './roomRows.ts'
+test('membersFirst: room members lead the @ menu, the rest keep their order', () => {
+  const A = ['umkmall-worker-01', 'umkmall-worker-02', 'wt-pack-worker-01', 'x'].map((name) => ({ name }))
+  assert.deepEqual(membersFirst(A, ['wt-pack-worker-01', 'x']).map((a) => a.name), ['wt-pack-worker-01', 'x', 'umkmall-worker-01', 'umkmall-worker-02'])
+  assert.deepEqual(membersFirst(A, []).map((a) => a.name), A.map((a) => a.name))
+})
