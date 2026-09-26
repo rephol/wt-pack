@@ -224,6 +224,15 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
       if (m.author.kind !== 'user' && h && !h.getValue().includes(at)) h.insertToken({ value: at, label: at, variant: 'blue' })
     }, 50)
   }, [])
+  // Dismiss the reply; drop the prefilled @author chip too, unless the user has typed more since.
+  const cancelReply = () => {
+    // insertToken doesn't fire onChange, so read the editor itself and clear it the way typing would.
+    const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+    if (replyTo && el && inputRef.current?.getValue().trim() === `@${replyTo.author.name}`) {
+      el.focus(); getSelection()?.selectAllChildren(el); document.execCommand('delete')
+    }
+    setReplyTo(null)
+  }
   const jumpTo = useCallback((id: string) => {
     setJump({ key: id })
     const flash = () => document.getElementById(`rm-${id}`)?.parentElement?.animate([{ background: 'var(--color-background-muted, rgba(127,127,127,.25))' }, { background: 'transparent' }], 1200)
@@ -422,14 +431,14 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
               <ChatComposerDrawer>
                 {replyTo && <HStack gap={1} align="center">
                   <Text type="supporting" size="sm" maxLines={1}>{`↪ Replying to ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text>
-                  <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={() => setReplyTo(null)} />
+                  <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={cancelReply} />
                 </HStack>}
                 {atts.length > 0 && <HStack gap={2} wrap="wrap">
                   {atts.map((a) => <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name} isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />)}
                 </HStack>}
               </ChatComposerDrawer>
             ) : undefined}
-            input={<ChatComposerInput handleRef={inputRef} triggers={[mention, slash]} onFiles={addFiles} onKeyDown={composerEnter} placeholder={`Message #${room.slug}`} />} />
+            input={<ChatComposerInput handleRef={inputRef} triggers={[mention, slash]} onFiles={addFiles} onKeyDown={(e) => { if (e.key === 'Escape' && replyTo && !e.defaultPrevented) { e.preventDefault(); cancelReply() } else composerEnter(e) }} placeholder={`Message #${room.slug}`} />} />
           </VStack>
         )}>
         {messageList}
