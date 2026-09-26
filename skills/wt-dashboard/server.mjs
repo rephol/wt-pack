@@ -1275,8 +1275,8 @@ async function overview() {
   return cached('overview', 3000, async () => {
     const local = await localIssues().catch((e) => (console.error('tickets:', e.message), []))
     // herdr or git down degrades its own cards (empty lists + a banner line) instead of a 500 for the whole page.
-    const issues_ = []
-    const soft = (src, p) => track(src, p).catch((e) => (issues_.push(sourceIssue(src, e.message)), []))
+    const down = []
+    const soft = (src, p) => track(src, p).catch((e) => (down.push(sourceIssue(src, e.message)), []))
     const [ag, wt, pr, linearIssues] = await Promise.all([
       soft('herdr', agents()),
       soft('git', worktrees()),
@@ -1290,7 +1290,7 @@ async function overview() {
     return {
       at: new Date().toISOString(),
       linearEnabled: Boolean(cfg.get('LINEAR_API_KEY')),
-      sourceIssues: issues_,
+      sourceIssues: down,
       roles: roleStore.roles,
       agents: ag.map((a) => ({ ...a, task: taskOf.get(a.key) ?? null })),
       machines: await track('machines', machineSummaries(ag).then((ms) => {
