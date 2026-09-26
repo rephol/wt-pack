@@ -68,6 +68,7 @@ import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
 import { TaskQueue } from './tasks'
+import { Board } from './board'
 
 // ---------- types (mirror server.mjs) ----------
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown'
@@ -306,6 +307,7 @@ const initialsIcon = (text: string, dot: boolean) =>
   ), dot, 'currentColor')
 
 const termFromHash = () => decodeURIComponent(location.hash.match(/^#terminals\/(.+)$/)?.[1] ?? '') || null
+const taskViewFromHash = () => (location.hash === '#tasks/board' ? 'board' : 'queue')
 const roomFromHash = () => decodeURIComponent(location.hash.match(/^#rooms\/(.+)$/)?.[1] ?? '') || null
 // Full-page conversation: #agents/<machine>/<pane> (hash route like #rooms/<slug>, so a reload or the tailnet
 // URL needs no server fallback). Returns the agent key `${machine}/${pane}`.
@@ -318,7 +320,7 @@ const agentHash = (key: string) => { const i = key.indexOf('/'); return `agents/
 let fullBack = false
 const pageFromHash = (): Page => {
   const h = location.hash.slice(1)
-  return h === 'tasks' ? h : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('terminals') ? 'terminals' : 'overview'
+  return h.startsWith('tasks') ? 'tasks' : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('terminals') ? 'terminals' : 'overview'
 }
 
 export default function App() {
@@ -326,6 +328,7 @@ export default function App() {
   const [linearHidden, setLinearHidden] = useState(() => { try { return localStorage.getItem('linear-banner-hidden') === '1' } catch { return false } })
   const hideLinear = () => { setLinearHidden(true); try { localStorage.setItem('linear-banner-hidden', '1') } catch { /* private mode */ } }
   const [roomSlug, setRoomSlug] = useState<string | null>(roomFromHash)
+  const [taskView, setTaskView] = useState(taskViewFromHash)
   const [fullKey, setFullKey] = useState<string | null>(agentFromHash)
   const [termPage, setTermPage] = useState<string | null>(termFromHash)
   const termSettings = useTermSettings()
@@ -334,7 +337,7 @@ export default function App() {
   const suggested = new Set((roomsQ.data?.suggestions ?? []).map((x) => x.ticket))
   const [openPane, setOpenPane] = useState<string | null>(null)
   useEffect(() => {
-    const on = () => { setPage(pageFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()); setTermPage(termFromHash()) }
+    const on = () => { setPage(pageFromHash()); setTaskView(taskViewFromHash()); setRoomSlug(roomFromHash()); setFullKey(agentFromHash()); setTermPage(termFromHash()) }
     addEventListener('hashchange', on)
     return () => removeEventListener('hashchange', on)
   }, [])
@@ -361,6 +364,7 @@ export default function App() {
   const openAgent = all?.agents.find((a) => a.key === openPane) ?? null
   const narrow = useNarrow()
   const phone = useNarrow('(max-width: 639px)')
+  const boardPhone = useNarrow('(max-width: 767px)')
   const mobileNav = useNarrow('(max-width: 1023px)') // AppShell mobileNav breakpoint 'lg'
   const panel = useResizable({ defaultSize: PANEL_DEFAULT, minSize: 380, maxSize: Math.max(400, Math.round(window.innerWidth / 2)), autoSaveId: 'agent-panel-width' })
   // The agent panel is shown or hidden (no rail); `]` / Esc / X hide it, selecting an agent shows it.
@@ -518,7 +522,13 @@ export default function App() {
 
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} />}
-        {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
+        {!fullKey && data && page === 'tasks' && <VStack gap={4}>
+          <SegmentedControl label="Tasks view" value={taskView} onChange={(v: string) => { location.hash = v === 'board' ? 'tasks/board' : 'tasks' }} size="sm">
+            <SegmentedControlItem value="queue" label="Queue" />
+            <SegmentedControlItem value="board" label="Board" />
+          </SegmentedControl>
+          {taskView === 'board' ? <Board project={project} phone={boardPhone} /> : <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
+        </VStack>}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />

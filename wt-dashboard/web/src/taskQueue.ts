@@ -14,6 +14,8 @@ export interface QTask {
   updatedAt: string | null
   roomNeed?: string
   mine?: boolean
+  local?: boolean // a ticket on the local board (WP-N), not Linear
+  column?: string
 }
 
 export const SECTIONS = [
