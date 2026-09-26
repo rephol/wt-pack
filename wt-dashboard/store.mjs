@@ -161,7 +161,7 @@ export const MIGRATIONS = [
   { sql: `CREATE TABLE routines (id TEXT PRIMARY KEY, name TEXT NOT NULL, schedule TEXT NOT NULL, target TEXT NOT NULL,
             timeout_min REAL NOT NULL DEFAULT 60, enabled INTEGER NOT NULL DEFAULT 0, next_run INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
           CREATE TABLE routine_runs (id INTEGER PRIMARY KEY, routine_id TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER,
-            status TEXT NOT NULL, reason TEXT, agent TEXT, name TEXT);
+            status TEXT NOT NULL, reason TEXT, agent TEXT, name TEXT, kind TEXT);
           CREATE INDEX routine_runs_routine ON routine_runs (routine_id, id);
           CREATE TABLE routine_settings (k TEXT PRIMARY KEY, v TEXT);
           INSERT INTO routines (id, name, schedule, target, created) VALUES

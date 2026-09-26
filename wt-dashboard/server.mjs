@@ -2376,6 +2376,7 @@ const routines = new Routines({
 })
 async function routinesApi(req, res, url, parts) {
   const b = req.method === 'POST' || req.method === 'PUT' ? JSON.parse((await body(req)) || '{}') : {}
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return send(res, 400, { error: 'JSON object body required' })
   // A spawn target is checked like spawnAgent checks it, at save time.
   const checkSpawn = async () => {
     const t = b.target

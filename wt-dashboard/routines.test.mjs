@@ -19,7 +19,7 @@ function world(over = {}) {
       agents: async () => w.list,
       host: async () => ({ pressure: w.pressure }),
       prompt: async (a, text) => { calls.prompt.push([a.name, text]) },
-      spawn: async (b) => { calls.spawn.push(b); w.list.push({ id: 'p9', name: 'aud-1', status: 'working' }); return { name: 'aud-1', pane: 'p9' } },
+      spawn: async (b) => { calls.spawn.push(b); w.list.push({ id: 'p9', name: 'aud-1', status: 'working' }); return { name: 'aud-1', pane: 'p9', prompted: true } },
       remove: async (pane, o) => { calls.remove.push([pane, o]); w.list = w.list.filter((a) => a.id !== pane) },
       actions: { housekeeping: async () => { calls.actions.push('hk'); return { summary: 'done' } }, 'jev-run': async () => ({ skipped: 'triage off' }) },
       ...over,
@@ -156,6 +156,20 @@ test('spawn: finishes → removed with force; timeout → removed with force, st
   assert.deepEqual(w.calls.remove[1][1], { force: true })
 })
 
+test('spawn: blocked is not finished; idle before ever working is not finished; prompt not delivered fails', async () => {
+  const { w, r } = setup()
+  const x = r.create({ name: 's', schedule: 'every 1h', timeout_min: 0.001, target: { kind: 'spawn', role: 'auditor', project: 'x', prompt: '/wt-audit' } })
+  w.deps.spawn = async () => { w.list.push({ id: 'p9', name: 'aud-1', status: 'blocked' }); return { name: 'aud-1', pane: 'p9', prompted: true } }
+  await r.runNow(x.id); await r.idle()
+  assert.equal(r.runs()[0].status, 'timeout')
+  w.list = []; w.deps.spawn = async () => { w.list.push({ id: 'p9', name: 'aud-1', status: 'idle' }); return { name: 'aud-1', pane: 'p9', prompted: true } }
+  await r.runNow(x.id); await r.idle()
+  assert.equal(r.runs()[0].status, 'timeout')
+  w.list = []; w.deps.spawn = async () => ({ name: 'aud-1', pane: 'p9', prompted: false })
+  await r.runNow(x.id); await r.idle()
+  assert.deepEqual([r.runs()[0].status, r.runs()[0].reason], ['failed', 'prompt not delivered'])
+})
+
 test('action: timeout, and a skipped result', async () => {
   const { r } = setup({ actions: { housekeeping: () => new Promise(() => {}), 'jev-run': async () => ({ skipped: 'triage off' }) } })
   const x = r.create({ ...HK, timeout_min: 0.0005 })
@@ -168,10 +182,10 @@ test('action: timeout, and a skipped result', async () => {
 
 test('startup cleanup: orphaned spawn run → agent removed, run failed', async () => {
   const { w, r } = setup()
-  r.db.prepare("INSERT INTO routine_runs (routine_id, started, status, agent) VALUES ('seed-audit', 1, 'running', 'p7')").run()
+  r.db.prepare("INSERT INTO routine_runs (routine_id, started, status, agent, kind) VALUES ('seed-audit', 1, 'running', 'p7', 'spawn'), ('seed-digest', 1, 'running', 'orch', 'prompt')").run()
   await r.recover()
   assert.deepEqual(w.calls.remove, [['p7', { force: true }]])
-  assert.deepEqual([r.runs()[0].status, r.runs()[0].reason], ['failed', 'server restarted'])
+  assert.ok(r.runs().every((u) => u.status === 'failed' && u.reason === 'server restarted'))
 })
 
 test('Run now leaves next_run alone; enabling resets it from now', async () => {

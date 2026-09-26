@@ -134,8 +134,8 @@ export class Routines {
 
   // Startup: runs left 'running' by a crash or restart. A spawn run's agent is removed so it does not hold the cap forever.
   async recover() {
-    for (const u of this.db.prepare("SELECT id, agent FROM routine_runs WHERE status = 'running'").all()) {
-      if (u.agent) await this.deps.remove(u.agent, { force: true }).catch((e) => this.log(`routines: remove ${u.agent}: ${e.message}`))
+    for (const u of this.db.prepare("SELECT id, agent, kind FROM routine_runs WHERE status = 'running'").all()) {
+      if (u.agent && u.kind === 'spawn') await this.deps.remove(u.agent, { force: true }).catch((e) => this.log(`routines: remove ${u.agent}: ${e.message}`))
       this.#close(u.id, 'failed', 'server restarted')
     }
   }
@@ -169,8 +169,8 @@ export class Routines {
   async fire(r, now = Date.now()) {
     const open = this.db.prepare("SELECT 1 FROM routine_runs WHERE routine_id = ? AND status = 'running'").get(r.id)
     // The name is copied so history still reads after the routine is deleted.
-    const runId = Number(this.db.prepare('INSERT INTO routine_runs (routine_id, name, started, status) VALUES (?, ?, ?, ?)')
-      .run(r.id, r.name, now, open ? 'skipped' : 'running').lastInsertRowid)
+    const runId = Number(this.db.prepare('INSERT INTO routine_runs (routine_id, name, kind, started, status) VALUES (?, ?, ?, ?, ?)')
+      .run(r.id, r.name, r.target.kind, now, open ? 'skipped' : 'running').lastInsertRowid)
     const get = () => this.db.prepare('SELECT * FROM routine_runs WHERE id = ?').get(runId)
     if (open) { this.#close(runId, 'skipped', 'previous run still going', now); return get() }
     const skip = (why) => { this.#close(runId, 'skipped', why); return get() }
@@ -183,7 +183,7 @@ export class Routines {
         const working = ags.filter((a) => a.status === 'working')
         const busy = new Set(working.map((a) => a.id))
         // Open spawn runs whose agent is not yet listed as working count too, so concurrent spawns cannot all pass.
-        const pending = this.db.prepare("SELECT agent FROM routine_runs u JOIN routines r ON r.id = u.routine_id WHERE u.status = 'running' AND u.id != ? AND r.target LIKE '%\"kind\":\"spawn\"%'")
+        const pending = this.db.prepare("SELECT agent FROM routine_runs WHERE status = 'running' AND id != ? AND kind = 'spawn'")
           .all(runId).filter((u) => !u.agent || !busy.has(u.agent)).length
         const max = this.settings().maxWorking
         if (working.length + pending >= max) return skip(`cap: ${working.length + pending} working ≥ ${max}`)
@@ -221,16 +221,23 @@ export class Routines {
     }
     const s = await this.deps.spawn({ kind: t.role, project: t.project, prompt: t.prompt })
     this.db.prepare('UPDATE routine_runs SET agent = ? WHERE id = ?').run(s.pane, runId)
-    // Done at the first poll that sees it not working (or gone); the timeout reaps a stuck one.
+    if (s.prompted === false) {
+      await this.deps.remove(s.pane, { force: true }).catch(() => {})
+      return this.#close(runId, 'failed', 'prompt not delivered')
+    }
+    // Done when idle after being seen working (or gone). Blocked (waiting on the user) keeps it; the timeout reaps it.
+    let seen = false
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, this.pollMs))
       const list = await this.deps.agents().catch(() => null)
       const a = list?.find((x) => x.id === s.pane)
       if (Date.now() - started >= ms) {
-        await this.deps.remove(s.pane, { force: true })
+        if (a || !list) await this.deps.remove(s.pane, { force: true }).catch((e) => this.log(`routines: remove ${s.pane}: ${e.message}`))
         return this.#close(runId, 'timeout', `after ${r.timeout_min} min; removed ${s.name}`)
       }
-      if (!list || a?.status === 'working') continue
+      if (!list) continue
+      if (a && (a.status === 'working' || a.status === 'blocked')) { seen = true; continue }
+      if (a && !seen) continue
       if (a) await this.deps.remove(s.pane, { force: true })
       return this.#close(runId, 'ok', `${s.name} finished`)
     }
