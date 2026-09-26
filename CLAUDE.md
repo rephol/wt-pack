@@ -10,6 +10,8 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
 - **Schedule only Ready tickets** on the local board (`wt-ticket list --column ready`); `claim` one before planning it.
 - **No draft PRs:** after code review (wt-review / wt-ship), merge to main directly, then push.
 - **Browser checks:** use the `agent-browser` skill first; other browser tooling only when it is not installed.
+  Always `--session <your agent name>`. `agent-browser screenshot` hangs (0.38.1, WP-1): capture with
+  `node wt-shared/scripts/screenshot.mjs --session <name> [--size 390x844] [--url <url>] <out.png>` (CDP).
 - **One commit per skill touched.** Commit only your own paths (`git commit <paths>`), never `-a`.
 - Keep every CLI backward compatible. Extending skills for dashboard needs is allowed.
 - The umkmall orchestrator (previous owner) is reachable via `herdr agent prompt wP:p1 "..."`.
