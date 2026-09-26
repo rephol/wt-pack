@@ -49,6 +49,7 @@ import { openInbox } from './inbox'
 import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
+import { taskLabel } from './switcherData'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
 import { Grid } from '@astryxdesign/core/Grid'
@@ -1070,7 +1071,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 {rows.map((a) => {
                   const t = taskOf(a)
                   const what = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap
-                  const line2 = [needsYou(a) ? 'needs you' : a.status, a.tags?.task ?? what, a.local ? null : a.machine, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
+                  const line2 = [needsYou(a) ? 'needs you' : a.status, taskLabel(a.tags) ?? what, a.local ? null : a.machine, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
                   return (
                     <div key={a.key} role="button" tabIndex={0} onClick={() => onOpen(a.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(a.key)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', minWidth: 0, cursor: 'pointer', borderBottom: '1px solid var(--color-border-default, rgba(128,128,128,.2))', background: selected === a.key ? 'var(--color-background-secondary, rgba(128,128,128,.12))' : undefined }}>
@@ -1112,7 +1113,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                     // A handoff's --task label wins; its ticket stays a link when it is the linked task's.
                     const label = a.tags?.task
                     const linked = t?.url && (!label || label.startsWith(t.id)) ? t : null
-                    const text = label ? (linked ? label.slice(linked.id.length).trim() : label) : t?.url ? t.title : summary
+                    const text = label ? [linked ? label.slice(linked.id.length).trim() : label, a.tags?.task_state].filter(Boolean).join(' · ') : t?.url ? t.title : summary
                     const cell = (id: string) => {
                       switch (id) {
                         case 'task': return (
@@ -1540,7 +1541,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                 <Text weight="semibold" maxLines={1}>{agent.name}</Text>
                 {agent.background > 0 && <Badge label={`${agent.background} background`} />}
               </HStack>
-              {agent.tags?.task && <Text size="sm" weight="medium" maxLines={1}>{agent.tags.task}</Text>}
+              {agent.tags?.task && <Text size="sm" weight="medium" maxLines={1}>{taskLabel(agent.tags)}</Text>}
               <Text type="supporting" size="sm" maxLines={1}>{narrow
                 ? `${agent.local ? '' : `${agent.machine} · `}${needsYou(agent) ? 'needs you' : agent.status} · ${lastActive(agent)}`
                 : `${agent.local ? '' : `${agent.machine} · `}${agent.pool} · ${needsYou(agent) ? 'needs you' : agent.status} for ${idleFor(agent)} · active ${lastActive(agent)}`}</Text>

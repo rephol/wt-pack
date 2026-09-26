@@ -41,3 +41,9 @@ test('switcher: a handoff task label leads the subtitle and is searchable', () =
   assert.equal(switcherItems(b, [], [])[0].auxiliaryData!.line, 'UMK-1192 Tailwind v4 · on it')
   assert.deepEqual(switcherItems(b, [], [], 'tailwind').map((x) => x.label), ['w-09'])
 })
+import { taskLabel } from './switcherData.ts'
+test('taskLabel: task · task_state; the state alone is never shown', () => {
+  assert.equal(taskLabel({ task: 'UMK-1 Button', task_state: 'handed to w-01' }), 'UMK-1 Button · handed to w-01')
+  assert.equal(taskLabel({ task: 'UMK-1 Button' }), 'UMK-1 Button')
+  assert.equal(taskLabel({ task_state: 'planning' }), undefined)
+})

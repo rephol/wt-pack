@@ -12,10 +12,12 @@ export interface SwAgent {
 export interface SwRoom { slug: string; title: string; needsYou?: { agent: string; text: string }[]; archived?: boolean }
 export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }>
 
+// The task label with its lifecycle state (planner: planning → handed to <worker> → done (PR #N) / blocked: …).
+export const taskLabel = (tags?: Record<string, string>) => (tags?.task ? [tags.task, tags.task_state].filter(Boolean).join(' · ') : undefined)
 export const needsYou = (a: SwAgent) => a.asks && a.status !== 'working'
 const activity = (a: SwAgent) => a.lastActivity || a.statusSince
 // Never empty, so every row has the same two lines.
-export const subtitle = (a: SwAgent) => (needsYou(a) && a.question) || [a.tags?.task, a.recap].filter(Boolean).join(' · ') || `${a.status} · no recent summary`
+export const subtitle = (a: SwAgent) => (needsYou(a) && a.question) || [taskLabel(a.tags), a.recap].filter(Boolean).join(' · ') || `${a.status} · no recent summary`
 
 // Best score across name (strong), ticket id and recap/question; -1 = no match.
 function score(q: string, a: SwAgent) {

@@ -16,7 +16,7 @@ export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink
 // MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
 // alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.
 export const MIRRORED_KEYS = ['role', 'project', 'ticket', 'branch', 'spawned_by', 'created', 'handoff_at']
-export const LIVE_KEYS = ['task', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane']
+export const LIVE_KEYS = ['task', 'task_state', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane']
 export const TAG_KEYS = [...MIRRORED_KEYS, ...LIVE_KEYS]
 const ID = /^[a-z][a-z0-9-]{0,20}$/
 
