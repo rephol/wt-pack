@@ -194,8 +194,8 @@ Recurring work the server runs itself (Routines page).
 - Checked every 30s. **Skipped** (reason in history) when the previous run is still going, working agents
   reach `maxWorking` (**default 4**, 0–100), memory pressure is critical, or the target agent is busy or
   missing. A run due during sleep fires once on wake; the next is computed from then.
-- Seeds, all **paused**: Nightly audit (wt-pack), Morning room digest, Babysit open PRs, Jev Auto Run now,
-  Weekly worktree cleanup.
+- A new install starts with no routines; create them with **New**. Installs from before WP-92 keep their five
+  paused wt-pack seeds (delete them if they do not fit).
 - History (30 days): Settings › Observability.
 
 ## Terminals
