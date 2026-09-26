@@ -37,6 +37,11 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
   worker is reused only if it already has every pick (full-set workers have them all); otherwise a new one
   is spawned with `--mcp <picks>`. The key is `$TYPESAFE_API_KEY` or the Keychain entry wt-dashboard keeps
   (service `wt-dashboard`, account `TYPESAFE_API_KEY`); it is never printed. `WT_HANDOFF_JEV=off` skips it.
+- **Routing** (auto mode only): with `WT_JEV_ROUTE` on (default; dashboard Settings › Integrations, or env),
+  `scripts/jev-route.mjs` asks Jev whether the prompt needs a plan before any code (≥ 0.75, `WT_JEV_ROUTE_MIN`).
+  Yes → the target is a **planner** from `<repo>-planners` (a free one reused, else spawned in the main checkout)
+  and `route: planner (p=…)` is printed after the target lines. A prompt starting `Use wt-work` (wt-plan's own
+  handoff) is never re-routed; Jev failing means a worker, as before. `--role worker|planner` forces the role.
 - `--dry-run` prints what would happen (reuse which worker, or spawn with which `--mcp`) and Jev's
   probabilities, and sends, tags and spawns nothing.
 - `--task` labels the target: herdr pane token `task` (source `wt-dashboard`), shown in the dashboard's agent
