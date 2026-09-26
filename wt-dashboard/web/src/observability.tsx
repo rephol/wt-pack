@@ -47,7 +47,6 @@ function Integrations() {
   const stats = q.data.stats[range]
   return (
     <VStack gap={4}>
-      <Heading level={3}>Integrations</Heading>
       <HStack gap={2} align="center" justify="between" wrap="wrap">
         <Heading level={4}>Jev calls by feature</Heading>
         <SegmentedControl label="Range" value={range} onChange={(v) => setRange(v as '24h' | '7d')} size="sm">
@@ -113,7 +112,7 @@ function ServerLogs() {
   return (
     <VStack gap={3}>
       <HStack gap={2} align="center" justify="between" wrap="wrap">
-        <Heading level={3}>Server logs</Heading>
+        <Heading level={4}>Server logs</Heading>
         <Button label="Refresh" size="sm" isLoading={q.isFetching} onClick={() => q.refetch()} />
       </HStack>
       <Text type="supporting" size="sm">{`Last 500 lines of ${q.data?.path ?? 'the server log'}, read-only.`}</Text>

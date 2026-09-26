@@ -18,6 +18,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { Card } from '@astryxdesign/core/Card'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
+import { SettingsCard, SettingsRow } from './settingsRows'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { termInput } from './termKeys'
@@ -204,12 +205,15 @@ export function TerminalsSection() {
   const s = q.data
   if (!s) return q.isError ? <LoadError what="terminal settings" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton /></Delayed>
   return (
-    <VStack gap={4}>
-      <Heading level={3}>Terminals</Heading>
+    <VStack gap={5}>
       <Banner status="warning" title="A terminal is a shell as you" description="Anyone who can open this dashboard with terminals on can run any command on this machine. Everything typed is logged below." />
       {!s.loopback && <Text size="sm">These switches can be changed only from http://127.0.0.1:7777 on this machine.</Text>}
-      <Switch label="Enable terminals" description="Shells in herdr's <project>-shells workspaces, mirrored and typed into from here." value={s.enabled} isDisabled={!s.loopback} onChange={(v) => set.mutate({ enabled: v })} />
-      <Switch label="Allow terminals over the tailnet" description="Off: only a browser on this machine (127.0.0.1) can use them." value={s.tailnet} isDisabled={!s.loopback || !s.enabled} onChange={(v) => set.mutate({ tailnet: v })} />
+      <SettingsCard title="Access">
+        <SettingsRow title="Enable terminals" description="Shells in herdr's <project>-shells workspaces, mirrored and typed into from here."
+          control={<Switch label="Enable terminals" isLabelHidden value={s.enabled} isDisabled={!s.loopback} onChange={(v) => set.mutate({ enabled: v })} />} />
+        <SettingsRow title="Allow terminals over the tailnet" description="Off: only a browser on this machine (127.0.0.1) can use them."
+          control={<Switch label="Allow terminals over the tailnet" isLabelHidden value={s.tailnet} isDisabled={!s.loopback || !s.enabled} onChange={(v) => set.mutate({ tailnet: v })} />} />
+      </SettingsCard>
       <VStack gap={1}>
         <Text weight="semibold">Audit log</Text>
         <Text type="supporting" size="sm">~/.local/share/wt-dashboard/data/terminal-audit.jsonl — newest first, last 100.</Text>

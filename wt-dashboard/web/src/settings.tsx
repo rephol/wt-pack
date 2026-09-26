@@ -1,17 +1,23 @@
-// Settings modal: Profile, Rooms, Notifications, Server, About. Opened from the sidebar (Settings / Server),
+// Settings dialog, laid out after Astryx's settings-dialog template
+// (@astryxdesign/cli/assets/templates/pages/settings-dialog/page.tsx): one registry (GROUPS) feeds a grouped side
+// nav and a content pane with the panel's title and one-line description; panels are cards of rows
+// (settingsRows.tsx). Phone: a section list, then the section full-screen with Back. Opened from the sidebar,
 // ⌘, in the app, or `openSettings(section)` from anywhere. Server-side settings save on change ("Saved");
 // the profile has an explicit Save because name/handle are typed.
-import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
-import { FormLayout } from '@astryxdesign/core/FormLayout'
-import { Field } from '@astryxdesign/core/Field'
+import { Layout, LayoutContent } from '@astryxdesign/core/Layout'
+import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
+import { Divider } from '@astryxdesign/core/Divider'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Switch } from '@astryxdesign/core/Switch'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Button } from '@astryxdesign/core/Button'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { Icon } from '@astryxdesign/core/Icon'
 import { Avatar } from '@astryxdesign/core/Avatar'
+import { Kbd } from '@astryxdesign/core/Kbd'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
@@ -31,56 +37,129 @@ import { useChatDensity, setChatDensity, useLinkPreviews, setLinkPreviews, type 
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
 import type { Kind } from './notifyGate'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
+import { SettingsCard, SettingsRow, CONTROL_WIDTH } from './settingsRows'
 
 export type Section = 'profile' | 'roles' | 'memory' | 'rooms' | 'notifications' | 'integrations' | 'observability' | 'usage' | 'terminals' | 'server' | 'about'
-const SECTIONS: [Section, string][] = [['profile', 'Profile'], ['roles', 'Roles'], ['memory', 'Memory'], ['rooms', 'Rooms'], ['notifications', 'Notifications'], ['integrations', 'Integrations'], ['observability', 'Observability'], ['usage', 'Usage'], ['terminals', 'Terminals'], ['server', 'Server'], ['about', 'About']]
-export const openSettings = (section: Section = 'profile') => dispatchEvent(new CustomEvent('open-settings', { detail: section }))
+type Panel = { id: Section; label: string; description: string }
+// The one list both shells read, as in the template: a panel can't drift out of the nav or the phone list.
+const GROUPS: { label: string; panels: Panel[] }[] = [
+  { label: 'You', panels: [
+    { id: 'profile', label: 'General', description: 'Your profile in rooms, and how chat looks in this browser.' },
+    { id: 'notifications', label: 'Notifications', description: 'What reaches the inbox and, in the desktop app, macOS notifications.' },
+  ] },
+  { label: 'Agents', panels: [
+    { id: 'rooms', label: 'Rooms', description: 'How agents talk to each other and to you in rooms.' },
+    { id: 'roles', label: 'Roles', description: 'How agents are classified, badged and spawned.' },
+    { id: 'memory', label: 'Memory', description: 'Standing preferences every agent receives at session start.' },
+  ] },
+  { label: 'System', panels: [
+    { id: 'integrations', label: 'Integrations', description: 'API keys, projects, hosts and Jev judgments.' },
+    { id: 'terminals', label: 'Terminals', description: 'Shells on this machine, mirrored into the dashboard.' },
+    { id: 'usage', label: 'Usage', description: 'Claude usage by agent, project and model.' },
+    { id: 'observability', label: 'Observability', description: 'Jev calls, outcomes and the server log.' },
+    { id: 'server', label: 'Server', description: 'The dashboard server, its data sources and housekeeping.' },
+    { id: 'about', label: 'About', description: 'What this is, keyboard shortcuts and install.' },
+  ] },
+]
+const PANELS = GROUPS.flatMap((g) => g.panels)
+const panel = (id: Section) => PANELS.find((p) => p.id === id)!
+
+// No section: the default — General on desktop, the section list on a phone.
+export const openSettings = (section?: Section) => dispatchEvent(new CustomEvent('open-settings', { detail: section }))
 
 const PHONE = '(max-width: 639px)'
 export function SettingsHost() {
-  const [section, setSection] = useState<Section | null>(null)
+  const [open, setOpen] = useState(false)
+  const [section, setSection] = useState<Section>('profile')
+  const [listing, setListing] = useState(false) // phone: the section list instead of a section
   useEffect(() => {
-    const on = (e: Event) => setSection((e as CustomEvent<Section>).detail)
-    const key = (e: KeyboardEvent) => { if (e.metaKey && e.key === ',') { e.preventDefault(); setSection('profile') } }
+    const show = (s?: Section) => { setOpen(true); setSection(s ?? 'profile'); setListing(!s) }
+    const on = (e: Event) => show((e as CustomEvent<Section | undefined>).detail)
+    const key = (e: KeyboardEvent) => { if (e.metaKey && e.key === ',') { e.preventDefault(); show() } }
     addEventListener('open-settings', on)
     addEventListener('keydown', key)
     return () => { removeEventListener('open-settings', on); removeEventListener('keydown', key) }
   }, [])
   const [phone, setPhone] = useState(() => matchMedia(PHONE).matches)
   useEffect(() => { const m = matchMedia(PHONE); const on = () => setPhone(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on) }, [])
-  if (!section) return null
-  const body = <SectionBody section={section} />
-  const close = <Button label="Close" size="sm" variant="ghost" onClick={() => setSection(null)} />
-  const tabs = SECTIONS.map(([id, label]) => (
-    <Button key={id} label={label} size="sm" variant={section === id ? 'secondary' : 'ghost'} onClick={() => setSection(id)} />
-  ))
-  // Phone: full-screen, section tabs as one scrolling row over the content.
+  if (!open) return null
+  const close = <IconButton label="Close settings" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={() => setOpen(false)} />
+  const pick = (id: Section) => { setSection(id); setListing(false) }
+  const onOpenChange = (o: boolean) => !o && setOpen(false)
+
   if (phone) return (
-    <Dialog isOpen onOpenChange={(o) => !o && setSection(null)} variant="fullscreen" padding={0}>
+    <Dialog isOpen onOpenChange={onOpenChange} variant="fullscreen" padding={0} aria-label="Settings">
       <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', minWidth: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <HStack justify="between" align="center" padding={3}><Heading level={3}>Settings</Heading>{close}</HStack>
-        <div style={{ display: 'flex', gap: 4, overflowX: 'auto', padding: '0 12px 8px', flexShrink: 0 }}>{tabs}</div>
-        <ScrollableArea label="Settings" style={{ flex: 1, minHeight: 0 }} padding={4}>{body}</ScrollableArea>
+        <HStack justify="between" align="center" gap={2} paddingInline={3} paddingBlock={2}>
+          {listing
+            ? <Heading level={3}>Settings</Heading>
+            : <Button label="Settings" size="sm" variant="ghost" icon={<span aria-hidden>‹</span>} onClick={() => setListing(true)} />}
+          {close}
+        </HStack>
+        <Divider />
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {listing
+            ? <nav aria-label="Settings sections">
+                {GROUPS.map((g) => (
+                  <div key={g.label} style={{ paddingBlock: 8 }}>
+                    <div style={{ padding: '8px 16px 4px' }}><Text type="supporting" weight="semibold" color="secondary">{g.label}</Text></div>
+                    {g.panels.map((p) => (
+                      <button key={p.id} type="button" className="hd-set-list" onClick={() => pick(p.id)}>
+                        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <Text type="label">{p.label}</Text>
+                          <Text type="supporting" color="secondary">{p.description}</Text>
+                        </span>
+                        <span aria-hidden style={{ opacity: 0.5 }}>›</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </nav>
+            : <div style={{ padding: 16 }}><PanelPane id={section} /></div>}
+        </div>
       </div>
     </Dialog>
   )
   return (
-    <Dialog isOpen onOpenChange={(o) => !o && setSection(null)} width={760} maxHeight="80vh" padding={0}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', height: 'min(80vh, 640px)', minWidth: 0 }}>
-        <nav style={{ flex: '0 0 170px', padding: 16, borderInlineEnd: '1px solid var(--color-border-default, rgba(128,128,128,.25))' }}>
-          <VStack gap={1}>
-            <Heading level={3}>Settings</Heading>
-            {tabs}
-          </VStack>
-        </nav>
-        <ScrollableArea label="Settings" style={{ flex: '1 1 320px', minWidth: 0, height: '100%' }} padding={6}>
-          <HStack justify="end">{close}</HStack>
-          {body}
-        </ScrollableArea>
+    <Dialog isOpen onOpenChange={onOpenChange} width={1040} padding={0} aria-label="Settings">
+      <div style={{ height: 'min(760px, calc(100dvh - 2rem))', display: 'flex', flexDirection: 'column' }}>
+        <Layout
+          start={
+            <SideNav aria-label="Settings sections" className="hd-set-nav"
+              header={<HStack align="center" paddingInline={2} minHeight={32}><Heading level={4}>Settings</Heading></HStack>}>
+              {GROUPS.map((g) => (
+                <SideNavSection key={g.label} title={g.label}>
+                  {g.panels.map((p) => <SideNavItem key={p.id} label={p.label} isSelected={p.id === section} onClick={() => pick(p.id)} />)}
+                </SideNavSection>
+              ))}
+            </SideNav>
+          }
+          content={
+            <LayoutContent isScrollable padding={6}>
+              <HStack justify="end" style={{ position: 'sticky', top: 0, height: 0, zIndex: 1 }}>{close}</HStack>
+              <PanelPane id={section} />
+            </LayoutContent>
+          }
+        />
       </div>
     </Dialog>
   )
 }
+
+// The panel's own title and one-line description (shell-owned, so every panel reads the same), then its body.
+function PanelPane({ id }: { id: Section }) {
+  const p = panel(id)
+  return (
+    <div className="hd-set-panel">
+      <VStack gap={0.5}>
+        <div style={{ paddingInlineEnd: 40 }}><Heading level={2}>{p.label}</Heading></div>
+        <Text type="supporting" color="secondary">{p.description}</Text>
+      </VStack>
+      <SectionBody section={id} />
+    </div>
+  )
+}
+
 function SectionBody({ section }: { section: Section }) {
   return (
     <>
@@ -90,10 +169,10 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
-          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><HousekeepingSection /></VStack>}
-          {section === 'usage' && <VStack gap={4}><SectionHead title="Usage" /><UsageBreakdown /></VStack>}
+          {section === 'observability' && <ObservabilitySection />}
+          {section === 'usage' && <UsageBreakdown />}
           {section === 'terminals' && <TerminalsSection />}
-          {section === 'server' && <ServerPanel />}
+          {section === 'server' && <VStack gap={6}><SettingsCard title="Status"><div className="hd-set-row"><ServerPanel /></div></SettingsCard><HousekeepingSection /></VStack>}
           {section === 'about' && <AboutSection />}
     </>
   )
@@ -112,14 +191,7 @@ function useServerSettings() {
   return { s: q.data, q, set, saved: set.isPending ? 'Saving…' : Date.now() - savedAt < 3000 ? 'Saved' : '' }
 }
 
-function SectionHead({ title, status }: { title: string; status?: string }) {
-  return (
-    <HStack justify="between" align="center">
-      <Heading level={3}>{title}</Heading>
-      {status ? <Text type="supporting" size="sm">{status}</Text> : null}
-    </HStack>
-  )
-}
+const Status = ({ text }: { text: string }) => (text ? <Text type="supporting" size="sm" role="status">{text}</Text> : null)
 
 function ProfileSection() {
   const { s, q, set, saved } = useServerSettings()
@@ -134,6 +206,7 @@ function ProfileForm({ profile, save, status, busy }: { profile: Profile; save: 
   const [name, setName] = useState(profile.name)
   const [handle, setHandle] = useState(profile.handle)
   const [avatar, setAvatar] = useState(profile.avatar)
+  const file = useRef<HTMLInputElement>(null)
   const dirty = name !== profile.name || handle !== profile.handle || avatar !== profile.avatar
   const upload = async (f: File | undefined) => {
     if (!f) return
@@ -145,32 +218,39 @@ function ProfileForm({ profile, save, status, busy }: { profile: Profile; save: 
     } catch (e) { console.error('avatar upload failed', e); toast({ body: `Avatar upload failed: ${e}`, type: 'error' }) }
   }
   return (
-    <VStack gap={4}>
-      <SectionHead title="Profile" status={status} />
-      <FormLayout>
-        <Field label="Chat density" inputID="chat-density" isGroupLabel description="Spacing in agent conversations and rooms. Remembered in this browser.">
-          <SegmentedControl label="Chat density" value={density} onChange={(v) => setChatDensity(v as ChatDensity)} size="sm">
-            <SegmentedControlItem value="compact" label="Compact" />
-            <SegmentedControlItem value="balanced" label="Balanced" />
-            <SegmentedControlItem value="spacious" label="Spacious" />
-          </SegmentedControl>
-        </Field>
-        <Switch label="Link previews" description="A card under messages with links: title, summary, image; PR, issue and Linear status. Pages are fetched by the server, never your browser." value={previews} onChange={setLinkPreviews} />
-        <Field label="Avatar" inputID="profile-avatar" description="png, jpeg, webp or gif">
-          <HStack gap={3} align="center">
-            <Avatar name={name} src={avatar ?? undefined} size="lg" />
-            <input id="profile-avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(e) => upload(e.target.files?.[0])} style={{ maxWidth: '100%' }} />
-            {avatar && <Button label="Remove" size="sm" variant="ghost" onClick={() => setAvatar(null)} />}
-          </HStack>
-        </Field>
-        <TextInput label="Display name" description="Shown on your messages in rooms." value={name} onChange={setName} />
-        <TextInput label="Handle" description="Agents write @handle to reach you. Letters, digits, _ and -." value={handle} onChange={setHandle} />
-      </FormLayout>
-      <HStack gap={2}>
-        <Button label="Save profile" variant="primary" isDisabled={!dirty || !name.trim()} isLoading={busy} onClick={() => save({ name, handle, avatar })} />
-        {dirty && <Button label="Revert" variant="ghost" onClick={() => { setName(profile.name); setHandle(profile.handle); setAvatar(profile.avatar) }} />}
-      </HStack>
-    </VStack>
+    <>
+      <VStack gap={3}>
+        <SettingsCard title="Profile — seen by agents and in rooms" end={<Status text={status} />}>
+          <SettingsRow title="Avatar" description="png, jpeg, webp or gif."
+            control={<>
+              <Avatar name={name} src={avatar ?? undefined} size="md" />
+              <input ref={file} id="profile-avatar" aria-label="Avatar image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(e) => upload(e.target.files?.[0])} hidden />
+              <Button label="Upload" size="sm" onClick={() => file.current?.click()} />
+              {avatar && <Button label="Remove" size="sm" variant="ghost" onClick={() => setAvatar(null)} />}
+            </>} />
+          <SettingsRow title="Display name" description="Shown on your messages in rooms."
+            control={<TextInput label="Display name" isLabelHidden size="sm" width={CONTROL_WIDTH} value={name} onChange={setName} />} />
+          <SettingsRow title="Handle" description="Agents write @handle to reach you. Letters, digits, _ and -."
+            control={<TextInput label="Handle" isLabelHidden size="sm" width={CONTROL_WIDTH} value={handle} onChange={setHandle} />} />
+        </SettingsCard>
+        <HStack gap={2}>
+          <Button label="Save profile" variant="primary" size="sm" isDisabled={!dirty || !name.trim()} isLoading={busy} onClick={() => save({ name, handle, avatar })} />
+          {dirty && <Button label="Revert" variant="ghost" size="sm" onClick={() => { setName(profile.name); setHandle(profile.handle); setAvatar(profile.avatar) }} />}
+        </HStack>
+      </VStack>
+      <SettingsCard title="This browser only">
+        <SettingsRow title="Chat density" description="Spacing in agent conversations and rooms."
+          control={
+            <SegmentedControl label="Chat density" value={density} onChange={(v) => setChatDensity(v as ChatDensity)} size="sm">
+              <SegmentedControlItem value="compact" label="Compact" />
+              <SegmentedControlItem value="balanced" label="Balanced" />
+              <SegmentedControlItem value="spacious" label="Spacious" />
+            </SegmentedControl>
+          } />
+        <SettingsRow title="Link previews" description="A card under messages with links: title, summary, image; PR, issue and Linear status. Pages are fetched by the server, never your browser."
+          control={<Switch label="Link previews" isLabelHidden value={previews} onChange={setLinkPreviews} />} />
+      </SettingsCard>
+    </>
   )
 }
 
@@ -181,7 +261,7 @@ function NumberBox({ label, value, onSave, width = 72 }: { label: string; value:
   const commit = () => { const n = Number(v); if (Number.isInteger(n) && n >= 0 && n <= 1000 && n !== value) onSave(n); else setV(String(value)) }
   return (
     <div style={{ width }}>
-      <TextInput label={label} isLabelHidden value={v} onChange={setV} onBlur={commit} onKeyDown={(e: import('react').KeyboardEvent) => e.key === 'Enter' && commit()} />
+      <TextInput label={label} isLabelHidden size="sm" value={v} onChange={setV} onBlur={commit} onKeyDown={(e: import('react').KeyboardEvent) => e.key === 'Enter' && commit()} />
     </div>
   )
 }
@@ -190,36 +270,35 @@ function RoomsSection() {
   const { s, q, set, saved } = useServerSettings()
   if (!s) return q.isError ? <LoadError what="settings" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={4} /></Delayed>
   return (
-    <VStack gap={4}>
-      <SectionHead title="Rooms" status={saved} />
-      <FormLayout>
-        <Switch label="Allow agents to @mention other agents" description="Off: an agent's @mention of another agent is shown but not delivered."
-          value={s.agentToAgent} onChange={(v) => set.mutate({ agentToAgent: v })} />
-        <Switch label="Agents can create rooms" description="Off: `room create` from an agent is refused. On: up to 3 rooms per agent per hour; you get an inbox notice with an Archive action. Agents can never archive or delete."
-          value={s.agentsCreateRooms} onChange={(v) => set.mutate({ agentsCreateRooms: v })} />
+    <>
+      <SettingsCard title="Agent to agent" end={<Status text={saved} />}>
+        <SettingsRow title="Allow agents to @mention other agents" description="Off: an agent's @mention of another agent is shown but not delivered."
+          control={<Switch label="Allow agents to @mention other agents" isLabelHidden value={s.agentToAgent} onChange={(v) => set.mutate({ agentToAgent: v })} />} />
         {s.agentToAgent && (
-          <Field label="Hops before a human reply" inputID="hops" description="Agent→agent deliveries in a row; then the room waits for you.">
-            <NumberBox label="Hops" value={s.maxHops} onSave={(n) => set.mutate({ maxHops: n })} />
-          </Field>
+          <SettingsRow title="Hops before a human reply" description="Agent→agent deliveries in a row; then the room waits for you."
+            control={<NumberBox label="Hops" value={s.maxHops} onSave={(n) => set.mutate({ maxHops: n })} />} />
         )}
-        <Field label="Rooms for tickets" inputID="ticket-rooms" isGroupLabel description="Suggest offers a room when a ticket gets activity; Auto-create makes one.">
-          <SegmentedControl label="Rooms for tickets" value={s.ticketRooms} onChange={(v) => set.mutate({ ticketRooms: v as RoomSettings['ticketRooms'] })} size="sm">
-            <SegmentedControlItem value="off" label="Off" />
-            <SegmentedControlItem value="suggest" label="Suggest" />
-            <SegmentedControlItem value="auto" label="Auto-create" />
-          </SegmentedControl>
-        </Field>
-        <Field label="Agent post rate limit" inputID="rate" isGroupLabel description="Per agent, across all rooms.">
-          <HStack gap={2} align="center" wrap="wrap">
-            <Text>Max</Text>
-            <NumberBox label="Posts" value={s.rateCount} onSave={(n) => set.mutate({ rateCount: n })} />
-            <Text>posts per</Text>
-            <NumberBox label="Minutes" value={s.rateWindowMin} onSave={(n) => set.mutate({ rateWindowMin: n })} />
-            <Text>minutes</Text>
-          </HStack>
-        </Field>
-      </FormLayout>
-    </VStack>
+        <SettingsRow title="Agents can create rooms" description="Off: `room create` from an agent is refused. On: up to 3 rooms per agent per hour; you get an inbox notice with an Archive action. Agents can never archive or delete."
+          control={<Switch label="Agents can create rooms" isLabelHidden value={s.agentsCreateRooms} onChange={(v) => set.mutate({ agentsCreateRooms: v })} />} />
+        <SettingsRow title="Agent post rate limit" description="Per agent, across all rooms."
+          control={<>
+            <NumberBox label="Posts" value={s.rateCount} onSave={(n) => set.mutate({ rateCount: n })} width={60} />
+            <Text size="sm">posts per</Text>
+            <NumberBox label="Minutes" value={s.rateWindowMin} onSave={(n) => set.mutate({ rateWindowMin: n })} width={60} />
+            <Text size="sm">min</Text>
+          </>} />
+      </SettingsCard>
+      <SettingsCard title="Tickets">
+        <SettingsRow title="Rooms for tickets" description="Suggest offers a room when a ticket gets activity; Auto-create makes one."
+          control={
+            <SegmentedControl label="Rooms for tickets" value={s.ticketRooms} onChange={(v) => set.mutate({ ticketRooms: v as RoomSettings['ticketRooms'] })} size="sm">
+              <SegmentedControlItem value="off" label="Off" />
+              <SegmentedControlItem value="suggest" label="Suggest" />
+              <SegmentedControlItem value="auto" label="Auto-create" />
+            </SegmentedControl>
+          } />
+      </SettingsCard>
+    </>
   )
 }
 
@@ -231,26 +310,28 @@ function NotificationsSection() {
     setPrefs(next)
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); setSavedAt(Date.now()) } catch { /* private mode */ }
   }
-  const LABELS: [Kind, string][] = [
-    ['question', 'An agent asks a question'], ['mention-user', 'An agent @mentions you in a room'], ['room-suggestion', 'Room suggestions for tickets'],
-    ['agent-done', 'Agent done'], ['agent-stalled', 'Agent stalled'], ['ci-failed', 'PR CI failing'], ['server', 'Server events'], ['usage', 'Claude usage at 80% / 95%'],
-    ['memory', 'An agent remembers a preference'], ['memory-proposal', 'An agent proposes a global preference'],
+  const GROUPS: [string, [Kind, string][]][] = [
+    ['Needs you', [['question', 'An agent asks a question'], ['mention-user', 'An agent @mentions you in a room'], ['memory-proposal', 'An agent proposes a global preference']]],
+    ['Agents', [['agent-done', 'Agent done'], ['agent-stalled', 'Agent stalled'], ['ci-failed', 'PR CI failing'], ['room-suggestion', 'Room suggestions for tickets'], ['memory', 'An agent remembers a preference']]],
+    ['System', [['server', 'Server events'], ['usage', 'Claude usage at 80% / 95%']]],
   ]
+  const cell = { width: 52, display: 'flex', justifyContent: 'center' } as const
+  const head = <HStack gap={0}><div style={cell}><Text type="supporting" size="sm">Inbox</Text></div><div style={cell}><Text type="supporting" size="sm">Native</Text></div></HStack>
   return (
-    <VStack gap={4}>
-      <SectionHead title="Notifications" status={Date.now() - savedAt < 3000 ? 'Saved' : ''} />
-      <Text type="supporting">Inbox: shown in the bell panel. Native: macOS notifications from the desktop app{isDesktop ? '' : ' (not this browser)'}. Native needs the inbox kind on.</Text>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: '10px 16px', alignItems: 'center' }}>
-        <Text size="sm" weight="semibold">Kind</Text><Text size="sm" weight="semibold">Inbox</Text><Text size="sm" weight="semibold">Native</Text>
-        {LABELS.map(([k, label]) => (
-          <Fragment key={k}>
-            <Text size="sm">{label}</Text>
-            <Switch label={`${label} in the inbox`} isLabelHidden value={prefs.inbox[k]} onChange={(v) => set('inbox', k, v)} />
-            <Switch label={`${label} as a native notification`} isLabelHidden value={prefs.native[k]} isDisabled={!prefs.inbox[k]} onChange={(v) => set('native', k, v)} />
-          </Fragment>
-        ))}
-      </div>
-    </VStack>
+    <>
+      <Text type="supporting">{`Inbox: shown in the bell panel. Native: macOS notifications from the desktop app${isDesktop ? '' : ' (not this browser)'}; needs the inbox kind on. Remembered in this browser.`}</Text>
+      {GROUPS.map(([title, kinds], gi) => (
+        <SettingsCard key={title} title={title} end={<HStack gap={3} align="center">{gi === 0 && <Status text={Date.now() - savedAt < 3000 ? 'Saved' : ''} />}{head}</HStack>}>
+          {kinds.map(([k, label]) => (
+            <SettingsRow key={k} title={label}
+              control={<HStack gap={0}>
+                <div style={cell}><Switch label={`${label} in the inbox`} isLabelHidden value={prefs.inbox[k]} onChange={(v) => set('inbox', k, v)} /></div>
+                <div style={cell}><Switch label={`${label} as a native notification`} isLabelHidden value={prefs.native[k]} isDisabled={!prefs.inbox[k]} onChange={(v) => set('native', k, v)} /></div>
+              </HStack>} />
+          ))}
+        </SettingsCard>
+      ))}
+    </>
   )
 }
 
@@ -260,13 +341,14 @@ function AboutSection() {
     [']', 'Show / hide the agent panel'], ['⌘K', 'Quick switcher (⌘↩ on a row: full page)'], ['⌘⇧↩', 'Open the agent panel as a full page'], ['Esc', 'Stop a working agent (in its composer); skip a question (on its card)'],
   ]
   return (
-    <VStack gap={3}>
-      <Heading level={3}>About</Heading>
-      <Text>wt-dashboard — a local control room for herdr-managed Claude Code agents.</Text>
-      <Text type="supporting">{isDesktop ? 'Desktop app (Tauri).' : 'Browser.'} Server details are under Server.</Text>
-      <InstallRow />
-      <Text weight="semibold">Shortcuts</Text>
-      {rows.map(([k, d]) => <HStack key={k} gap={3}><Text weight="medium" style={{ minWidth: 48 }}>{k}</Text><Text type="supporting">{d}</Text></HStack>)}
-    </VStack>
+    <>
+      <SettingsCard title="wt-dashboard">
+        <SettingsRow title="A local control room for herdr-managed Claude Code agents"
+          description={`${isDesktop ? 'Desktop app (Tauri).' : 'Browser.'} Server details are under Server.`} control={<InstallRow />} />
+      </SettingsCard>
+      <SettingsCard title="Keyboard shortcuts">
+        {rows.map(([k, d]) => <SettingsRow key={k} title={d} control={<Kbd keys={k} />} />)}
+      </SettingsCard>
+    </>
   )
 }

@@ -5,11 +5,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
-import { Heading } from '@astryxdesign/core/Heading'
 import { Button } from '@astryxdesign/core/Button'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
+import { SettingsCard, SettingsRow } from './settingsRows'
 
 type Settings = { uploadsDays: number; resolvedDays: number; rotateMB: number; rotateKeep: number; cacheDays: number }
 type Run = { at: string; files: number; bytes: number; actions: string[]; errors: string[] }
@@ -46,11 +46,13 @@ export function HousekeepingSection() {
   const dirty = Object.entries(q.data.settings).some(([k, v]) => draft[k] !== String(v))
   return (
     <VStack gap={3}>
-      <Heading level={3}>Housekeeping</Heading>
-      <Text size="sm" type="supporting">{`Runs hourly. Server memory: RSS ${mb(m.rss)} · heap ${mb(m.heapUsed)} of ${mb(m.heapTotal)}`}</Text>
-      {FIELDS.map(([k, label]) => (
-        <TextInput key={k} label={label} size="sm" value={draft[k] ?? ''} onChange={(v: string) => setDraft((d) => ({ ...d, [k]: v }))} placeholder={String(q.data.defaults[k])} />
-      ))}
+      <SettingsCard title="Housekeeping">
+        <SettingsRow title="Runs hourly" description={`Server memory: RSS ${mb(m.rss)} · heap ${mb(m.heapUsed)} of ${mb(m.heapTotal)}`} />
+        {FIELDS.map(([k, label]) => (
+          <SettingsRow key={k} title={label}
+            control={<TextInput label={label} isLabelHidden size="sm" width={88} value={draft[k] ?? ''} onChange={(v: string) => setDraft((d) => ({ ...d, [k]: v }))} placeholder={String(q.data.defaults[k])} />} />
+        ))}
+      </SettingsCard>
       <HStack gap={2}>
         <Button label="Save" size="sm" variant="primary" isDisabled={!dirty} isLoading={save.isPending} onClick={() => save.mutate()} />
         <Button label="Run now" size="sm" isLoading={run.isPending} onClick={() => run.mutate()} />
