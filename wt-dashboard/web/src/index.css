@@ -117,19 +117,19 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-kb-toolbar, .hd-kb-toolbar-end { flex-wrap: wrap; row-gap: 8px; min-width: 0; }
 .hd-kb-page { flex: 1 1 0; min-height: 420px; } /* fills the page VStack (height 100% on board) down to the viewport bottom */
 .hd-kb-cols { overflow-x: auto; overflow-y: hidden; height: 100%; padding: 16px; align-items: stretch; }
-/* WP-27/WP-58: non-empty columns share the width with a 280px floor; empty ones collapse to a labelled rail
-   (expanded on hover and while dragging, so it is still a real drop target). Scrolls only if still too wide. */
-.hd-kb-col { flex: 1 1 0; min-width: 280px; height: 100%; min-height: 0; transition: min-width 120ms ease; }
-.hd-kb-col-empty { flex: 0 0 auto; min-width: 52px; width: 52px; }
-.hd-kb-col-empty .hd-kb-colhead { writing-mode: vertical-rl; justify-content: flex-start; gap: 8px; }
+/* WP-27/WP-58: non-empty columns share the width with a 260px floor; empty ones collapse to a labelled rail
+   (expanded on hover — also while dragging, the floating clone is pointer-events: none). Scrolls only if still too wide. */
+.hd-kb-col { flex: 1 1 0; min-width: 260px; height: 100%; min-height: 0; transition: min-width 120ms ease; }
+.hd-kb-col-empty { flex: 0 0 auto; min-width: 44px; width: 44px; }
+.hd-kb-col-empty .hd-kb-colhead { writing-mode: vertical-rl; margin-inline: -4px; justify-content: flex-start; gap: 8px; }
 .hd-kb-col-empty .hd-kb-empty { display: none; }
-.hd-kb-col-empty:hover, .hd-kb-dragging .hd-kb-col-empty { flex: 1 1 0; width: auto; min-width: 200px; }
-.hd-kb-col-empty:hover .hd-kb-colhead, .hd-kb-dragging .hd-kb-col-empty .hd-kb-colhead { writing-mode: horizontal-tb; justify-content: space-between; }
-.hd-kb-col-empty:hover .hd-kb-empty, .hd-kb-dragging .hd-kb-col-empty .hd-kb-empty { display: flex; }
+.hd-kb-col-empty:hover { flex: 1 1 0; width: auto; min-width: 200px; }
+.hd-kb-col-empty:hover .hd-kb-colhead { writing-mode: horizontal-tb; justify-content: space-between; }
+.hd-kb-col-empty:hover .hd-kb-empty { display: flex; }
 .hd-kb-card { overflow-wrap: anywhere; }
 .hd-kb-cols-phone { padding: 12px 0; }
 .hd-kb-cols-phone .hd-kb-col { flex: 1 1 auto; min-width: 0; width: auto; }
-.hd-kb-cols-phone .hd-kb-colhead { writing-mode: horizontal-tb; }
+.hd-kb-cols-phone .hd-kb-colhead { writing-mode: horizontal-tb; justify-content: space-between; margin-inline: 0; }
 .hd-kb-cols-phone .hd-kb-empty { display: flex; }
 .hd-kb-card { cursor: pointer; user-select: none; transition: box-shadow 120ms ease; }
 .hd-kb-drag { cursor: grab; touch-action: none; }

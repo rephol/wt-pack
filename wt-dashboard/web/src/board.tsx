@@ -219,7 +219,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
         content={
           <LayoutContent padding={0}>
             {move.error && <Banner status="error" title={`Move failed: ${move.error.message}`} />}
-            <HStack gap={phone ? 0 : 4} className={phone ? 'hd-kb-cols hd-kb-cols-phone' : drag ? 'hd-kb-cols hd-kb-dragging' : 'hd-kb-cols'}>
+            <HStack gap={phone ? 0 : 4} className={phone ? 'hd-kb-cols hd-kb-cols-phone' : 'hd-kb-cols'}>
               {shown.map((c) => (
                 <BoardColumn key={c} c={c} count={cols[c].length}
                   contentRef={(el) => { if (el) columnEls.current.set(c, el); else columnEls.current.delete(c) }}>
