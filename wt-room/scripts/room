@@ -45,5 +45,10 @@ case "$cmd" in
     if [ "$code" != 200 ]; then die "$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"; fi
     case "$body" in *'"existing":true'*) echo "#$slug already exists — post there" ;; *) echo "created #$slug (you are its responder)" ;; esac
     case "$body" in *'"unknown":["'*) echo "not invited (unknown agents): $(printf '%s' "$body" | sed -n 's/.*"unknown":\[\([^]]*\)\].*/\1/p')" ;; esac ;;
-  *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <image>]... | room create <slug> "title" [--invite a,b]' ;;
+  delete)
+    [ $# -ge 1 ] || die 'usage: room delete <tmp-slug>'
+    out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -X DELETE -w '\n%{http_code}' "$API/api/rooms/$1") || die "server unreachable at $API"
+    [ "$(printf '%s' "$out" | tail -n1)" = 200 ] || die "$(printf '%s' "$out" | sed '$d' | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"
+    echo "deleted #$1" ;;
+  *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <image>]... | room create <slug> "title" [--invite a,b] | room delete <tmp-slug>' ;;
 esac

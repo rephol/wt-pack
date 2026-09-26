@@ -54,7 +54,11 @@ Rules:
 "Agents can create rooms" (otherwise it prints why it was refused). The slug is lowercase letters, digits and
 dashes (`umk-1177`, `release-plan`). You become the room's responder and a member; invitees become members
 only — an invite delivers nothing to them. If an active room with that slug exists, you get it back (post
-there); an archived one is refused. At most 3 rooms per agent per hour. You cannot archive or delete rooms.
+there); an archived one is refused. At most 3 rooms per agent per hour. You cannot archive or delete rooms —
+except a throwaway one.
+
+**Tests and verification:** never use a real room. Create `tmp-<ticket>-<your-name>` (e.g. `tmp-wp-42-wt-pack-worker-01`),
+and when done run `room delete <that slug>` — agents may delete only a `tmp-*` room they created.
 
 Create a room when the work needs its own thread: coordinating one ticket across several agents, or a long
 side-discussion that would bury an existing room. Otherwise post in the room that already exists (`room list`).
