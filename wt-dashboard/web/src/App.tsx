@@ -350,6 +350,7 @@ export default function App() {
   const openAgent = all?.agents.find((a) => a.key === openPane) ?? null
   const narrow = useNarrow()
   const phone = useNarrow('(max-width: 639px)')
+  const mobileNav = useNarrow('(max-width: 1023px)') // AppShell mobileNav breakpoint 'lg'
   const panel = useResizable({ defaultSize: PANEL_DEFAULT, minSize: 380, maxSize: Math.max(400, Math.round(window.innerWidth / 2)), autoSaveId: 'agent-panel-width' })
   // The agent panel is shown or hidden (no rail); `]` / Esc / X hide it, selecting an agent shows it.
   // ponytail: the old rail state is not carried over — the stored key is dropped and every load starts hidden.
@@ -430,7 +431,8 @@ export default function App() {
 
   const nav = (
     <SideNav
-      header={<VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading={phone ? undefined : 'herdr · umkmall'} />{projectPicker}</VStack>}
+      // Mobile top bar and drawer (below AppShell's lg breakpoint): the project picker alone, one row; the title is desktop-only.
+      header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr · umkmall" />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings('profile')} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'agents', 'rooms', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
