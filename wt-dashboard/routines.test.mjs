@@ -84,6 +84,8 @@ test('catch-up: next_run 5h in the past → exactly one run, next_run > now', as
   assert.equal(w.calls.actions.length, 1)
   assert.ok(r.get(x.id).next_run > now)
   assert.equal(r.runs()[0].status, 'ok')
+  r.delete(x.id)
+  assert.equal(r.runs()[0].name, 'hk') // history keeps the name
 })
 
 test('two concurrent ticks → one run', async () => {

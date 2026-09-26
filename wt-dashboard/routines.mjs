@@ -94,7 +94,7 @@ export class Routines {
     return this.settings()
   }
   runs(limit = 100) {
-    return this.db.prepare('SELECT u.*, r.name FROM routine_runs u LEFT JOIN routines r ON r.id = u.routine_id ORDER BY u.id DESC LIMIT ?')
+    return this.db.prepare('SELECT * FROM routine_runs ORDER BY id DESC LIMIT ?')
       .all(Math.min(500, Math.max(1, Number(limit) || 100)))
   }
 
@@ -168,8 +168,9 @@ export class Routines {
   // Guardrails in order (overlap, cap, memory), then the target is started without awaiting it. Returns the run row.
   async fire(r, now = Date.now()) {
     const open = this.db.prepare("SELECT 1 FROM routine_runs WHERE routine_id = ? AND status = 'running'").get(r.id)
-    const runId = Number(this.db.prepare('INSERT INTO routine_runs (routine_id, started, status) VALUES (?, ?, ?)')
-      .run(r.id, now, open ? 'skipped' : 'running').lastInsertRowid)
+    // The name is copied so history still reads after the routine is deleted.
+    const runId = Number(this.db.prepare('INSERT INTO routine_runs (routine_id, name, started, status) VALUES (?, ?, ?, ?)')
+      .run(r.id, r.name, now, open ? 'skipped' : 'running').lastInsertRowid)
     const get = () => this.db.prepare('SELECT * FROM routine_runs WHERE id = ?').get(runId)
     if (open) { this.#close(runId, 'skipped', 'previous run still going', now); return get() }
     const skip = (why) => { this.#close(runId, 'skipped', why); return get() }

@@ -26,6 +26,7 @@ import { useToast } from '@astryxdesign/core/Toast'
 import { api, type Profile, type RoomSettings } from './rooms'
 import { ServerPanel } from './status'
 import { HousekeepingSection } from './housekeeping'
+import { RoutinesHistorySection } from './routines'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
@@ -169,7 +170,7 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
-          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><HousekeepingSection /></VStack>}
+          {section === 'observability' && <VStack gap={6}><ObservabilitySection /><RoutinesHistorySection /><HousekeepingSection /></VStack>}
           {section === 'usage' && <UsageBreakdown />}
           {section === 'terminals' && <TerminalsSection />}
           {section === 'server' && <VStack gap={6}><SettingsCard title="Status"><div className="hd-set-row"><ServerPanel /></div></SettingsCard></VStack>}
