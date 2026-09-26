@@ -93,6 +93,16 @@ export class Tickets {
     await atomicWrite(this.file(project), JSON.stringify(b, null, 2))
     this.boards.set(project, b)
   }
+  // { key, next } scraped from <project>.json.corrupt-* text (not parseable as JSON, so by regex).
+  async salvage(project) {
+    let key = null, next = 1
+    for (const f of (await readdir(this.dir).catch(() => [])).filter((f) => f.startsWith(`${project}.json.corrupt-`))) {
+      const raw = await readFile(join(this.dir, f), 'utf8').catch(() => '')
+      key ??= raw.match(/"key"\s*:\s*"([A-Z]{2,5})"/)?.[1] ?? null
+      for (const m of raw.matchAll(/"next"\s*:\s*(\d+)|"id"\s*:\s*"[A-Z]+-(\d+)"/g)) next = Math.max(next, Number(m[1] ?? Number(m[2]) + 1))
+    }
+    return { key, next }
+  }
   async projects() {
     return (await readdir(this.dir).catch(() => [])).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).filter((p) => PROJECT.test(p))
   }
@@ -115,7 +125,9 @@ export class Tickets {
       const have = await this.read(project)
       if (have) return have
       const taken = new Set([...this.reserved, ...Object.values(await this.keys())])
-      const b = { key: deriveKey(project, taken), next: 1, tickets: [] }
+      // A quarantined board keeps its key and id range, so new ids never reuse ones already handed out.
+      const old = await this.salvage(project)
+      const b = { key: old.key && !taken.has(old.key) ? old.key : deriveKey(project, taken), next: old.next, tickets: [] }
       await this.save(project, b)
       return b
     })
