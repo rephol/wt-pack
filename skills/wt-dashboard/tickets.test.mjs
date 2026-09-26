@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Tickets, deriveKey, ticketRow } from './tickets.mjs'
+import { Tickets, deriveKey, ticketRow, ticketMatches } from './tickets.mjs'
 import { exportTo } from './store.mjs'
 
 const tmp = () => mkdtemp(join(tmpdir(), 'tickets-'))
@@ -308,4 +308,29 @@ test('board settings: Report to — defaults, slug, none, back to null, validate
   assert.deepEqual(await pick({ reportRoom: null }), [null, false])
   await assert.rejects(t.setSettings('wt-pack', { reportRoom: 'x'.repeat(65) }), (e) => e.status === 400)
   await assert.rejects(t.setSettings('wt-pack', { reportRoom: 5 }), (e) => e.status === 400)
+})
+
+test('ticketMatches: id, title, body, label, comment and move note; never authors or edits; AND of words (WP-90)', () => {
+  const t = {
+    id: 'WP-3', title: 'Dispatch report target', body: 'Pick the room', labels: ['needs-plan'],
+    history: [
+      { kind: 'create', author: 'jev' },
+      { kind: 'edit', author: 'Rep', text: 'priority, size' },
+      { kind: 'comment', author: 'Quinn', text: 'Workers stopped posting' },
+      { kind: 'move', author: 'w', to: 'blocked', text: 'waiting on herdr' },
+    ],
+  }
+  for (const q of ['wp-3', 'DISPATCH', 'the room', 'needs-plan', 'stopped posting', 'herdr', '', '  ', 'report  room']) assert.equal(ticketMatches(t, q), true, q)
+  for (const q of ['jev', 'quinn', 'priority', 'dispatch nowhere']) assert.equal(ticketMatches(t, q), false, q)
+  assert.equal(ticketMatches({ id: 'WP-4', title: 'x' }, 'x'), true) // no body, labels or history
+})
+
+test('list: column and query combine (WP-90)', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  await t.create('wt-pack', { title: 'foo ready', column: 'ready' }, user)
+  await t.create('wt-pack', { title: 'foo backlog' }, user)
+  await t.create('wt-pack', { title: 'bar ready', column: 'ready' }, user)
+  assert.deepEqual((await t.list('wt-pack', 'ready', 'foo')).tickets.map((x) => x.title), ['foo ready'])
+  assert.deepEqual((await t.list('wt-pack', undefined, 'foo')).tickets.map((x) => x.title), ['foo ready', 'foo backlog'])
+  assert.equal((await t.list('wt-pack')).tickets.length, 3)
 })

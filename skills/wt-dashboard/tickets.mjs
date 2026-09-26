@@ -58,6 +58,16 @@ export function clean(b, { create = false } = {}) {
   return out
 }
 
+// WP-90 board search. Kept in step with web/src/boardData.ts ticketMatches (parity test in boardData.test.ts).
+// History contributes comments and move notes only: edit/assign text is field names, and authors never match.
+export function ticketMatches(t, q) {
+  const terms = String(q ?? '').toLowerCase().split(/\s+/).filter(Boolean)
+  if (!terms.length) return true
+  const notes = (t.history ?? []).filter((h) => (h.kind === 'comment' || h.kind === 'move') && h.text).map((h) => h.text)
+  const hay = [t.id, t.title, t.body ?? '', (t.labels ?? []).join(' '), ...notes].join('\n').toLowerCase()
+  return terms.every((w) => hay.includes(w))
+}
+
 export class Tickets {
   // reserved: keys owned by Linear (PROJECT_BY_TEAM), never given to a board.
   // onReady(project, ticket): a ticket entered Ready (created there or moved in, by anyone).
@@ -107,12 +117,14 @@ export class Tickets {
     })
   }
   // A read never creates a board (a typo'd project must not take a key); the first create does.
-  async list(project, column) {
+  // q (WP-90): ticketMatches — every whitespace-separated term somewhere in id/title/body/labels/comments.
+  async list(project, column, q = '') {
     if (!PROJECT.test(project ?? '')) throw err(400, 'project required')
     if (column && !COLUMNS.includes(column)) throw err(400, `column: ${COLUMNS.join('|')}`)
     const key = this.db.prepare('SELECT key FROM boards WHERE project = ?').get(project)?.key ?? null
     const tickets = this.db.prepare('SELECT json FROM tickets WHERE project = ? ORDER BY seq').all(project).map((r) => JSON.parse(r.json))
-    return { key, ...(await this.settings(project)), tickets: column ? tickets.filter((t) => t.column === column) : tickets }
+    // ponytail: JS filter over the parsed rows (92 tickets today); FTS5 if a board grows to thousands.
+    return { key, ...(await this.settings(project)), tickets: tickets.filter((t) => (!column || t.column === column) && ticketMatches(t, q)) }
   }
   row(id) {
     const r = this.db.prepare('SELECT json FROM tickets WHERE id = ?').get(String(id).toUpperCase())
