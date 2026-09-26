@@ -9,6 +9,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { api, useRoomsList } from './rooms'
+import { openInbox, useInbox } from './inbox'
 import { useHealth } from './status'
 import { openSettings } from './settings'
 import { UsageBars } from './usage'
@@ -30,9 +31,9 @@ export interface OverviewData {
 }
 type ObsStats = { stats: Record<'24h', { calls: number; errorRate: number }[]> }
 
-function Tile({ label, value, loud, href }: { label: string; value: number; loud?: 'red' | 'orange'; href: string }) {
+function Tile({ label, value, loud, href, onClick }: { label: string; value: number; loud?: 'red' | 'orange'; href?: string; onClick?: () => void }) {
   return (
-    <ClickableCard label={`${label}: ${value}`} variant={loud && value > 0 ? loud : 'default'} href={href} padding={3}>
+    <ClickableCard label={`${label}: ${value}`} variant={loud && value > 0 ? loud : 'default'} href={href} onClick={onClick} padding={3}>
       <VStack gap={1}>
         <Text type="supporting">{label}</Text>
         <Text type="display-2" weight="bold">{String(value)}</Text>
@@ -60,10 +61,11 @@ export function OverviewPage({ data, onProject }: { data: OverviewData; onProjec
   const rooms = recentRooms(useRoomsList().data?.rooms ?? [])
   const workers = data.agents.filter((a) => a.pool === 'worker' && a.status === 'working').length
   const t = c.today
+  const needs = useInbox().open.length // same count as the sidebar badge and the Inbox "Needs you" section
   return (
     <VStack gap={4}>
       <Grid columns={{ minWidth: 100 }} gap={3}>
-        <Tile label="Needs you" value={c.needsYou} loud="red" href="#tasks" />
+        <Tile label="Needs you" value={needs} loud="red" onClick={() => openInbox()} />
         <Tile label="Stalled" value={c.stalled} loud="orange" href="#tasks" />
         <Tile label="In review" value={c.inReview} href="#tasks" />
       </Grid>
