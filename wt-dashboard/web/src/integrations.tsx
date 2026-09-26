@@ -31,7 +31,8 @@ function Source({ it }: { it: Item }) {
   )
 }
 
-export function IntegrationsSection() {
+// /api/config read + write, shared with Settings › Observability (its log-snippets switch).
+export function useConfig() {
   const qc = useQueryClient()
   const toast = useToast()
   const q = useQuery({ queryKey: ['config'], queryFn: () => api<State>('/api/config') })
@@ -41,9 +42,14 @@ export function IntegrationsSection() {
     onSuccess: (s) => { qc.setQueryData(['config'], s); qc.invalidateQueries({ queryKey: ['projects'] }); toast({ body: 'Saved' }) },
     onError: (e) => toast({ body: `Could not save: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
-  if (!q.data) return q.isError ? <LoadError what="integrations" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={5} /></Delayed>
-  const by = Object.fromEntries(q.data.items.map((i) => [i.key, i])) as Record<string, Item>
+  const by = Object.fromEntries((q.data?.items ?? []).map((i) => [i.key, i])) as Record<string, Item>
   const put = (key: string, value: unknown) => save.mutateAsync({ key, value }).then(() => true, () => false)
+  return { q, save, by, put }
+}
+
+export function IntegrationsSection() {
+  const { q, save, by, put } = useConfig()
+  if (!q.data) return q.isError ? <LoadError what="integrations" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={5} /></Delayed>
   return (
     <VStack gap={5}>
       <Heading level={3}>Integrations & environment</Heading>

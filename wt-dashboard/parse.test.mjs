@@ -730,3 +730,33 @@ test('jevlog: health summary counts the last 24h and its errors', () => {
   const calls = [{ ts: '2026-09-26T11:00:00Z', err: null }, { ts: '2026-09-26T10:00:00Z', err: 'timeout' }, { ts: '2026-09-24T10:00:00Z', err: 'timeout' }]
   assert.deepEqual(healthSummary(calls, now), { today: 2, errors: 1 })
 })
+
+import { featureStats, recentCalls, tailLines } from './jevlog.mjs'
+import { serverLogTail } from './server.mjs'
+test('jevlog: per-feature stats — p50/p95 over live calls, cache hits and fail-opens counted', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z')
+  const t = '2026-09-26T11:00:00Z'
+  const calls = [
+    ...[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000].map((ms) => ({ ts: t, feature: 'a', outcome: 'picked', ms, cache: false, err: null })),
+    { ts: t, feature: 'a', outcome: 'picked', ms: 0, cache: true, err: null },
+    { ts: t, feature: 'a', outcome: 'failopen', ms: 2000, cache: false, err: 'timeout' },
+    { ts: t, feature: 'b', outcome: 'failopen', ms: 1, cache: false, err: 'nokey' },
+    { ts: '2026-09-20T11:00:00Z', feature: 'a', outcome: 'picked', ms: 5, cache: false, err: null },
+  ]
+  const [a, b] = featureStats(calls, 86_400_000, now)
+  assert.deepEqual({ ...a }, { feature: 'a', calls: 12, cacheHits: 1, failOpen: 1, picked: 11, errorRate: 0.09, timeoutRate: 0.09, p50ms: 600, p95ms: 2000 })
+  assert.equal(b.failOpen, 1)
+  assert.equal(featureStats(calls, 7 * 86_400_000, now)[0].calls, 13)
+  assert.equal(recentCalls(calls, { feature: 'a', err: 'timeout' }).length, 1)
+  assert.equal(recentCalls(calls, { err: 'none' }, 3)[0].ts, '2026-09-20T11:00:00Z')
+  assert.deepEqual(tailLines('1\n2\n3\n', 2), ['2', '3'])
+  assert.equal(tailLines('x\n'.repeat(3000), 99999).length, 2000)
+})
+
+test('logs: /api/logs/server reads only the fixed server log, whatever the query says', async () => {
+  const seen = []
+  const r = await serverLogTail(new URLSearchParams('lines=../../etc/passwd&path=/etc/passwd&file=/etc/hosts'), async (f) => (seen.push(f), 'a\nb\n'))
+  assert.equal(seen.length, 1)
+  assert.match(seen[0], /Library\/Logs\/wt-dashboard\/server\.log$/)
+  assert.deepEqual(r.lines, ['a', 'b'])
+})

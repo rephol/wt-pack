@@ -14,7 +14,7 @@ import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
-import { readCalls, healthSummary } from './jevlog.mjs'
+import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -1716,6 +1716,28 @@ async function repoRoot(p) {
   if (!c) throw Object.assign(new Error(`not a git repository: ${p}`), { status: 400 })
   return dirname(c.trim())
 }
+// Settings › Observability: Jev call stats from jev-calls.jsonl, the existing source health, and a read-only tail
+// of the server log. The log path is fixed here — nothing from the query is used as a path.
+async function observabilityApi(req, res, url) {
+  if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
+  if (req.method !== 'GET') return send(res, 405, { error: 'GET only' })
+  if (url.pathname === '/api/logs/server') return send(res, 200, await serverLogTail(url.searchParams))
+  const calls = await readCalls()
+  const q = Object.fromEntries(['feature', 'outcome', 'err'].map((k) => [k, url.searchParams.get(k) || undefined]))
+  return send(res, 200, {
+    stats: { '24h': featureStats(calls, 86_400_000), '7d': featureStats(calls, 7 * 86_400_000) },
+    recent: recentCalls(calls, q),
+    features: [...new Set(calls.map((c) => c.feature))].sort(),
+    sources: SOURCES,
+  })
+}
+
+// Only `lines` is read from the query; the file is always CRASH_LOG.
+export async function serverLogTail(params, read = (f) => readFile(f, 'utf8')) {
+  const text = await read(CRASH_LOG).catch(() => '')
+  return { path: '~/Library/Logs/wt-dashboard/server.log', lines: tailLines(text, params.get('lines')) }
+}
+
 async function configApi(req, res, parts) {
   const state = () => ({ items: cfg.publicState(), loopback: isLoopbackRequest(req), app: process.env.WT_DASHBOARD_APP === '1' })
   if (req.method === 'GET' && parts.length === 2) return send(res, 200, state())
@@ -1911,6 +1933,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (url.pathname === '/api/observability' || url.pathname === '/api/logs/server') return await observabilityApi(req, res, url)
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
       if (url.pathname === '/api/uploads' && req.method === 'POST') {
