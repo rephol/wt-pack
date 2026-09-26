@@ -40,11 +40,19 @@ settings changes, no messages to other agents. The orchestrator reads your list 
 
 ## 3. Post the findings
 
-One post to the project room (`~/.claude/skills/wt-room/scripts/room post wt-pack "…" --attach …`), with the
-**top 5–10 items ranked by impact ÷ size**, most valuable first. Each item:
+File each finding as a Backlog ticket on the project's board, then make **one** post to the project room
+(`~/.claude/skills/wt-room/scripts/room post wt-pack "…" --attach …`) listing the new ids with the
+**top 5–10 items ranked by impact ÷ size**, most valuable first. Filing is not scheduling: the user moves what
+they want done to Ready.
 
 ```
-N. [bug|UX|gap|debt] <one-line title>
+~/.claude/skills/wt-ticket/scripts/wt-ticket new "<title>" --column backlog --type bug|ux|gap|debt --size S|M|L --body "<evidence, impact, owner>"
+```
+
+Each item in the post:
+
+```
+N. WP-<n> [bug|UX|gap|debt] <one-line title>
    Evidence: <steps to reproduce, or screenshot #k, or file:line / commit>
    Impact: <who it hurts and how often — one line>
    Owner: planner (needs a plan: cross-cutting, ambiguous, >1 unit) | worker (clear, one unit)
