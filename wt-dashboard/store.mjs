@@ -156,6 +156,21 @@ export const MIGRATIONS = [
   { sql: `ALTER TABLE boards ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;`, legacy: () => [], import: () => {}, export: () => {} },
   // WP-46: the lowest priority 'Auto' promotes (1 urgent … 4 low; 0 = any, unprioritised too). Default 2 = High.
   { sql: `ALTER TABLE boards ADD COLUMN min_priority INTEGER NOT NULL DEFAULT 2;`, legacy: () => [], import: () => {}, export: () => {} },
+  // WP-48 routines. Seeds ship disabled, inserted once here so a user delete sticks; next_run 0 is reset on enable.
+  // Not exported: a rollback to JSON loses routines and their history (README).
+  { sql: `CREATE TABLE routines (id TEXT PRIMARY KEY, name TEXT NOT NULL, schedule TEXT NOT NULL, target TEXT NOT NULL,
+            timeout_min REAL NOT NULL DEFAULT 60, enabled INTEGER NOT NULL DEFAULT 0, next_run INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
+          CREATE TABLE routine_runs (id INTEGER PRIMARY KEY, routine_id TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER,
+            status TEXT NOT NULL, reason TEXT, agent TEXT);
+          CREATE INDEX routine_runs_routine ON routine_runs (routine_id, id);
+          CREATE TABLE routine_settings (k TEXT PRIMARY KEY, v TEXT);
+          INSERT INTO routines (id, name, schedule, target, created) VALUES
+            ('seed-audit', 'Nightly audit (wt-pack)', '0 2 * * *', '{"kind":"spawn","role":"auditor","project":"wt-pack","prompt":"/wt-audit"}', 1),
+            ('seed-digest', 'Morning room digest', '0 8 * * *', '{"kind":"prompt","role":"orchestrator","project":"wt-pack","text":"post a digest of the last 24h in #wt-pack"}', 2),
+            ('seed-babysit', 'Babysit open PRs', 'every 30m', '{"kind":"prompt","role":"orchestrator","project":"wt-pack","text":"run wt-babysit on open PRs, if any"}', 3),
+            ('seed-jev', 'Jev Auto Run now', 'every 1h', '{"kind":"action","action":"jev-run","project":"wt-pack"}', 4),
+            ('seed-finish', 'Weekly worktree cleanup', '0 9 * * 1', '{"kind":"prompt","role":"orchestrator","project":"wt-pack","text":"run wt-finish on merged worktrees"}', 5);`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
