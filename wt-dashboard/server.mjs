@@ -1673,6 +1673,9 @@ export function needsSession(method, path, headers) {
 
 // ---- local ticket boards (tickets.mjs) ----
 const tickets = new Tickets({ dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM) })
+// boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
+const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values(k) }, (e) => console.error('tickets:', e.message))
+refreshKeys()
 async function ticketsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
   const text = url.searchParams.get('format') === 'text'
@@ -1689,7 +1692,9 @@ async function ticketsApi(req, res, url, parts) {
   const me = () => { if (author.kind !== 'agent') throw Object.assign(new Error("'me' needs an agent pane (x-herdr-pane)"), { status: 400 }); return { name: author.name, pane: author.pane } }
   if (req.method === 'POST' && parts.length === 2) {
     const project = b.project ?? (author.kind === 'agent' ? (await agents()).find((a) => a.key === author.key)?.project : null)
-    return send(res, 200, await tickets.create(project, b, author))
+    const t = await tickets.create(project, b, author)
+    if (!boardKeys.includes(t.id.split('-')[0])) await refreshKeys()
+    return send(res, 200, t)
   }
   const id = parts[2]
   if (req.method === 'PATCH' && parts.length === 3) {
