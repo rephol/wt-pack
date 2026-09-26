@@ -2,13 +2,12 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
-import { Card } from '@astryxdesign/core/Card'
+import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Link } from '@astryxdesign/core/Link'
@@ -29,14 +28,14 @@ export function TaskQueue({ tasks, onOpen, showProject, suggested }: { tasks: QT
   const [who, setWho] = useState('mine')
   const secs = sections(who === 'mine' ? tasks.filter((t) => t.mine !== false) : tasks)
   return (
-    <VStack gap={5}>
+    <VStack gap={5} className="hd-tq">
       <SegmentedControl label="Whose tasks" value={who} onChange={setWho} size="sm">
         <SegmentedControlItem value="mine" label="Mine" />
         <SegmentedControlItem value="all" label="Everyone" />
       </SegmentedControl>
       {!secs.length && <EmptyState title="Nothing to act on" description="No task needs you, is ready to hand off, in review, stalled or up next." />}
       {secs.map((s) => {
-        const rows = <VStack gap={2}>{s.tasks.map((t) => <Row key={t.id} t={t} section={s.key} onOpen={onOpen} showProject={showProject} suggested={suggested?.has(t.id)} />)}</VStack>
+        const rows = <div className="hd-tq-list">{s.tasks.map((t) => <Row key={t.id} t={t} section={s.key} onOpen={onOpen} showProject={showProject} suggested={suggested?.has(t.id)} />)}</div>
         return s.key === 'shipped'
           ? <Collapsible key={s.key} defaultIsOpen={false} chevronPosition="start" trigger={<Text weight="semibold">{s.label} ({s.tasks.length})</Text>}>{rows}</Collapsible>
           : <VStack key={s.key} gap={2}><Heading level={3}>{s.label} ({s.tasks.length})</Heading>{rows}</VStack>
@@ -77,8 +76,7 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
     actions = <>
       <Button label="Babysit" size="sm" variant="primary" isLoading={act.isPending} isDisabled={!resp || busy || babysitting} tooltip={noResp ?? (babysitting ? resp?.taskState ?? undefined : undefined)}
         onClick={() => act.mutate(() => promptKey(resp!.key, `/wt-babysit ${t.pr!.url}`))} />
-      <Link href={t.pr.url} target="_blank">Open PR</Link>
-    </>
+          </>
   } else if (section === 'stalled') {
     actions = <>
       <Button label="Nudge" size="sm" variant="primary" isLoading={act.isPending} isDisabled={busy || !resp} tooltip={noResp}
@@ -95,29 +93,34 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
       onClick={() => act.mutate(() => promptKey(resp!.key, '/wt-finish'))} />
   }
 
+  const dot = <Text type="supporting" size="sm" aria-hidden>·</Text>
+  const meta = [
+    t.agent && (t.agent.id || t.roomNeed) && <Link key="a" href="#" onClick={(e: React.MouseEvent) => { e.preventDefault(); onOpen(t.agent!.key) }}>{t.agent.name}</Link>,
+    showProject && t.project && <Text key="p" type="supporting" size="sm">{t.project}</Text>,
+    t.plan && <Tooltip key="pl" content={t.plan}><Text type="supporting" size="sm" tabIndex={0} className="hd-tq-plan">plan</Text></Tooltip>,
+    suggested && <Link key="r" href="#rooms">room suggested</Link>,
+    t.updatedAt && <Text key="u" type="supporting" size="sm"><Timestamp value={t.updatedAt} format="relative" /></Text>,
+  ].filter(Boolean) as React.ReactElement[]
+  const review = section === 'in_review' && t.pr
   return (
-    <Card>
-      <VStack gap={2}>
-        <HStack gap={2} align="center" wrap="wrap">
+    <div className="hd-tq-row">
+      <div className="hd-tq-main">
+        <div className="hd-tq-title">
           {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
-          <Text weight="semibold">{t.title}</Text>
-        </HStack>
-        <HStack gap={2} align="center" wrap="wrap">
-          {t.agent && (t.agent.id || t.roomNeed) && <Button label={t.agent.name} size="sm" variant="ghost" onClick={() => onOpen(t.agent!.key)} />}
-          {showProject && t.project && <Text type="supporting" size="sm">{t.project}</Text>}
-          {t.plan && <Text type="code" size="sm">{t.plan}</Text>}
-          {t.pr && <Link href={t.pr.url} target="_blank">#{t.pr.number}</Link>}
-          {section === 'in_review' && t.pr?.ci && <Badge label={`CI ${t.pr.ci}`} variant={t.pr.ci === 'pass' ? 'success' : t.pr.ci === 'fail' ? 'error' : 'warning'} />}
-          {section === 'in_review' && t.pr?.unresolved ? <Badge label={`${t.pr.unresolved} unresolved`} variant="warning" /> : null}
-          {section === 'in_review' && (babysitting || (sent && !act.error)) && <Badge label="Babysitting" variant="info" />}
-          {section === 'in_review' && t.pr?.behind && <Badge label="behind base" variant="warning" />}
-          {suggested && <Link href="#rooms">room suggested</Link>}
-          {t.updatedAt && <Text type="supporting" size="sm"><Timestamp value={t.updatedAt} format="relative" /></Text>}
-        </HStack>
-        {t.question && section === 'needs_you' && <Text maxLines={3}>{t.question}</Text>}
-        {actions && <HStack gap={2} align="center" wrap="wrap">{actions}</HStack>}
-        {act.error && <Banner status="error" title={act.error.message} />}
-      </VStack>
-    </Card>
+          <Text weight="semibold" maxLines={2}>{t.title}</Text>
+        </div>
+        {meta.length > 0 && <div className="hd-tq-meta">{meta.flatMap((m, i) => (i ? [<span key={`d${i}`}>{dot}</span>, m] : [m]))}</div>}
+      </div>
+      <div className="hd-tq-side">
+        {t.pr && <Link href={t.pr.url} target="_blank">PR #{t.pr.number}</Link>}
+        {review && t.pr!.ci && <Badge label={`CI ${t.pr!.ci}`} variant={t.pr!.ci === 'pass' ? 'success' : t.pr!.ci === 'fail' ? 'error' : 'warning'} />}
+        {review && t.pr!.unresolved ? <Badge label={`${t.pr!.unresolved} unresolved`} variant="warning" /> : null}
+        {review && t.pr!.behind && <Badge label="behind base" variant="warning" />}
+        {review && (babysitting || (sent && !act.error)) && <Badge label="Babysitting" variant="info" />}
+        {actions}
+      </div>
+      {t.question && section === 'needs_you' && <div className="hd-tq-wide"><Text maxLines={3}>{t.question}</Text></div>}
+      {act.error && <div className="hd-tq-wide"><Banner status="error" title={act.error.message} /></div>}
+    </div>
   )
 }

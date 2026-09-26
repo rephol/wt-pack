@@ -66,3 +66,19 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 
 /* Desktop agent table: scroll sideways inside its container instead of clipping; actions column stays pinned right. */
 .agent-table table { min-width: var(--agent-min); }
+
+/* Tasks queue: one bordered list per section; two columns once the list is wide enough, stacked below. */
+.hd-tq { max-width: 1120px; }
+.hd-tq-list { container-type: inline-size; border: 1px solid var(--color-border-default, rgba(128,128,128,.22)); border-radius: 10px; overflow: hidden; }
+.hd-tq-row { display: grid; gap: 8px; padding: 12px 16px; }
+.hd-tq-row + .hd-tq-row { border-top: 1px solid rgba(128,128,128,.14); }
+.hd-tq-main { display: grid; gap: 4px; min-width: 0; }
+.hd-tq-title { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.hd-tq-title > :first-child { flex: none; }
+.hd-tq-meta, .hd-tq-side { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hd-tq-plan { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+@container (min-width: 720px) {
+  .hd-tq-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 24px; }
+  .hd-tq-side { justify-content: flex-end; flex-wrap: nowrap; }
+  .hd-tq-wide { grid-column: 1 / -1; }
+}
