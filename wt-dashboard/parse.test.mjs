@@ -910,3 +910,8 @@ test('syncTickets ignores local board tasks', async () => {
   await r.syncTickets([{ id: 'WP-1', local: true, state: 'building' }, { id: 'UMK-1', state: 'building' }])
   assert.deepEqual([...r.taskPrev.keys()], ['UMK-1'])
 })
+
+test('parsePane: a truncated cwd is dropped (herdr cwd wins)', () => {
+  assert.equal(parsePane(pane.replace('/tmp/wt/umk-12', '/Users/x/Work/projects/umkmall...')).cwd, undefined)
+  assert.equal(parsePane(pane).cwd, '/tmp/wt/umk-12')
+})

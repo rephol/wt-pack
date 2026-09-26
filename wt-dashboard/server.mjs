@@ -105,7 +105,8 @@ export function parsePane(text, raw = '') {
   const footer = lines.slice(cut).join('\n')
 
   const ctx = footer.match(/Context:.*?(\d+(?:\.\d+)?[kM]?)\/(\d+[kM]?)\s*\((\d+)%\)/)
-  const cwd = footer.match(/^\s*cwd:\s*(\S.*?)\s*$/m)?.[1]
+  // A cwd the status line cut short ('…/umkmall...') is dropped, so herdr's own cwd is used instead.
+  const cwd = footer.match(/^\s*cwd:\s*(\S.*?)\s*$/m)?.[1]?.replace(/^.*(\.\.\.|…)$/, '') || undefined
 
   // Turns: ❯ = user, ⏺ = assistant; continuation lines belong to the current turn.
   const turns = []
