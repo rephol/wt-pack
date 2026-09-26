@@ -50,7 +50,7 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
     <div data-switcher style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 12, minHeight: phone ? 44 : 52, padding: '0 4px', minWidth: 0, width: '100%' }}>
       <div style={{ position: 'relative', flex: `0 0 ${av}px`, width: av, height: av, borderRadius: av / 2, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 600, background: 'var(--color-background-secondary, rgba(128,128,128,.18))' }}>
         {a ? agentInitials(a.name, a.local ? byId(a.pool).letter : undefined) : d.kind === 'ticket' ? 'T' : '#'}
-        {(a || line) && <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
+        {(a || (d.kind === 'room' && line)) && <span style={{ position: 'absolute', right: -2, bottom: -2, lineHeight: 0 }}>
           <StatusDot variant={!a || needsYou(a) ? 'error' : DOT[a.status]} label={a ? (needsYou(a) ? 'needs you' : a.status) : 'waiting on you'} isPulsing={a?.status === 'working'} />
         </span>}
       </div>
