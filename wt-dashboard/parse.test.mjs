@@ -760,3 +760,47 @@ test('logs: /api/logs/server reads only the fixed server log, whatever the query
   assert.match(seen[0], /Library\/Logs\/wt-dashboard\/server\.log$/)
   assert.deepEqual(r.lines, ['a', 'b'])
 })
+
+test('rooms: Jev resolve — answered → cleared, unanswered without ? → kept, null → heuristic, late answer after a newer post ignored', async () => {
+  const R = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const setup = async (answer) => {
+    const dir = await mkdtemp((await import('node:os')).tmpdir() + '/rooms-jev-')
+    let release; const gate = new Promise((r) => { release = r })
+    const rooms = new R.Rooms({ dir, agents: async () => [{ key: 'A', name: 'a', status: 'working', local: true }], prompt: async () => {}, log: () => {},
+      judge: async () => { await gate; return answer } })
+    await rooms.load()
+    await rooms.create({ title: 'r' })
+    return { rooms, release }
+  }
+  const user = { kind: 'user', name: 'me', handle: 'user' }
+  const agent = { kind: 'agent', name: 'a', key: 'A' }
+  const settle = () => new Promise((r) => setTimeout(r, 20))
+  // answered, though with a '?' the heuristic kept it: Jev clears
+  let { rooms, release } = await setup(false)
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user done — deployed. Anything else?' })
+  assert.equal(rooms.room('r').needsYou.length, 1)
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 0)
+  // unanswered without '?': heuristic cleared it, Jev keeps it
+  ;({ rooms, release } = await setup(true))
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user tell me which environment' })
+  assert.equal(rooms.room('r').needsYou.length, 0)
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 1)
+  // judge null → heuristic stands
+  ;({ rooms, release } = await setup(null))
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user tell me which environment' })
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 0)
+  // a second message arrives before Jev answers: the late answer is dropped
+  ;({ rooms, release } = await setup(true))
+  await rooms.post('r', { author: user, text: 'deploy web please' })
+  await rooms.post('r', { author: agent, text: '@user tell me which environment' })
+  await rooms.post('r', { author: user, text: 'never mind' })
+  release(); await settle()
+  assert.equal(rooms.room('r').needsYou.length, 0)
+})

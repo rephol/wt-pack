@@ -8,12 +8,13 @@ import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs
 import { homedir, hostname, tmpdir } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Rooms, ticketSuggestions } from './rooms.mjs'
+import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
 import { Inbox, itemFromTransition, toResolve } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile } from './config.mjs'
+import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -1542,8 +1543,17 @@ export function needsSession(method, path, headers) {
 }
 
 // ---- rooms ----
+// Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
+const jevOn = (feature) => cfg.get(`WT_JEV_${feature}`) === 'on'
+const jevAsk = (feature, state, questions, pick) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick })
 const rooms = new Rooms({
   dir: DATA,
+  judge: async (state) => {
+    if (!jevOn('ROOM_RESOLVE')) return null
+    const min = minFor('room_resolve')
+    const a = await jevAsk('ROOM_RESOLVE', state, roomResolve.questions(), (x) => roomResolve.decide(x, min))
+    return a && roomResolve.decide(a, min)
+  },
   agents: () => agents(),
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
