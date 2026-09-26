@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { candidates, ticketTriage, ticketType, triageTicket } from './ticketJev.mjs'
+import { candidates, readyBatcher, shouldPromote, ticketTriage, ticketType, triageTicket } from './ticketJev.mjs'
 
 const user = { name: 'Rep' }
 const answers = {
@@ -14,12 +14,12 @@ const answers = {
 }
 
 test('decide maps answers, thresholds per field', () => {
-  assert.deepEqual(ticketTriage.decide(answers), { type: 'bug', size: null, priority: 2, owner: 'planner', dupes: ['WP1'] })
+  assert.deepEqual(ticketTriage.decide(answers), { type: 'bug', size: null, priority: 2, owner: 'planner', ready: null, dupes: ['WP1'] })
   assert.equal(ticketTriage.decide(answers, 0.6, 0.95).owner, 'worker')
-  assert.deepEqual(ticketTriage.decide(null), { type: null, size: null, priority: null, owner: null, dupes: [] })
+  assert.deepEqual(ticketTriage.decide(null), { type: null, size: null, priority: null, owner: null, ready: null, dupes: [] })
   assert.equal(ticketType.decide(answers), 'bug')
   const q = ticketTriage.questions({ title: 't', body: '', candidates: [{ id: 'WP-3', title: 'x' }] })
-  assert.deepEqual(Object.keys(q), ['type', 'size', 'priority', 'plan', 'dup_WP-3'])
+  assert.deepEqual(Object.keys(q), ['type', 'size', 'priority', 'plan', 'ready', 'dup_WP-3'])
 })
 
 test('candidates: overlap order, skips done and self', () => {
@@ -42,4 +42,47 @@ test('triageTicket: fail-open leaves the ticket as created; answers fill only em
   assert.deepEqual([out.type, out.size, out.priority], ['bug', 'M', 2])
   assert.deepEqual(Object.keys(out.jev.applied), ['type', 'priority'])
   assert.equal(await triageTicket('wt-pack', t, [], { ask: async () => { throw new Error('boom') }, tickets, log: () => {} }), null)
+})
+
+test('shouldPromote: Backlog, priority ≥ High, S/M at p ≥ 0.6; L or planner-hinted only at p ≥ 0.8', () => {
+  const t = { column: 'backlog', priority: 2, size: 'S' }
+  const d = { ready: 0.7, owner: 'worker' }
+  assert.equal(shouldPromote(t, d), 0.7)
+  assert.equal(shouldPromote(t, { ...d, ready: 0.5 }), null)
+  assert.equal(shouldPromote({ ...t, priority: 3 }, d), null) // medium
+  assert.equal(shouldPromote({ ...t, priority: 0 }, d), null) // unset
+  assert.equal(shouldPromote({ ...t, column: 'ready' }, d), null)
+  assert.equal(shouldPromote({ ...t, size: 'L' }, d), null)
+  assert.equal(shouldPromote({ ...t, size: 'L' }, { ...d, ready: 0.85 }), 0.85)
+  assert.equal(shouldPromote({ ...t, size: null }, d), null) // unsized counts as not small
+  assert.equal(shouldPromote(t, { ...d, owner: 'planner' }), null)
+  assert.equal(shouldPromote(t, { ...d, owner: 'planner', ready: 0.9 }), 0.9)
+  assert.equal(shouldPromote(t, { ...d, ready: null }), null) // fail-open: no move
+})
+
+test('readyBatcher: one send per project per flush, deduped by id; a failing send is dropped', async () => {
+  const sent = []
+  const b = readyBatcher(async (p, ts) => { if (p === 'bad') throw new Error('x'); sent.push([p, ts.map((t) => t.id)]) }, () => {})
+  b.add('wt-pack', { id: 'WP-1' }); b.add('wt-pack', { id: 'WP-2' }); b.add('wt-pack', { id: 'WP-1' }); b.add('bad', { id: 'B-1' }); b.add(null, { id: 'X-1' })
+  await b.flush()
+  assert.deepEqual(sent, [['wt-pack', ['WP-1', 'WP-2']]])
+  await b.flush()
+  assert.equal(sent.length, 1)
+})
+
+test('triageTicket with Auto: promotes, notifies onReady once, undo moves back', async () => {
+  const ready = []
+  const tickets = new Tickets({ dir: await mkdtemp(join(tmpdir(), 'tj-')), onReady: (p, t) => ready.push([p, t.id]) })
+  const t = await tickets.create('wt-pack', { title: 'Fix it', size: 'S', priority: 2 }, user)
+  await tickets.setAuto('wt-pack', true)
+  assert.equal((await tickets.list('wt-pack')).auto, true)
+  const a = { ...answers, ready: { noul: 0.9 }, plan: { noul: 0.1 } }
+  const off = await triageTicket('wt-pack', t, [], { ask: async () => a, tickets, auto: false })
+  assert.equal(off.column, 'backlog')
+  const on = await triageTicket('wt-pack', t, [], { ask: async () => a, tickets, auto: true })
+  assert.deepEqual([on.column, on.history.at(-1).text, ready], ['ready', 'Jev auto-promoted (p=0.90)', [['wt-pack', t.id]]])
+  const u = await tickets.jevUndo(t.id, 'column', user)
+  assert.equal(u.column, 'backlog')
+  await tickets.patch(t.id, { column: 'ready' }, user) // by hand: notifies again
+  assert.equal(ready.length, 2)
 })

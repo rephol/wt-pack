@@ -60,8 +60,16 @@ export function clean(b, { create = false } = {}) {
 
 export class Tickets {
   // reserved: keys owned by Linear (PROJECT_BY_TEAM), never given to a board.
-  constructor({ dir, reserved = [], log = console.error }) {
-    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log })
+  // onReady(project, ticket): a ticket entered Ready (created there or moved in, by anyone).
+  constructor({ dir, reserved = [], log = console.error, onReady = () => {} }) {
+    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log, onReady })
+  }
+  // Board 'Auto' (WP-39): Jev may promote Backlog → Ready. Off for a board that does not exist yet.
+  async auto(project) { return !!this.db.prepare('SELECT auto FROM boards WHERE project = ?').get(project)?.auto }
+  async setAuto(project, on) {
+    if (!this.db.prepare('SELECT 1 FROM boards WHERE project = ?').get(project ?? '')) throw err(404, `no board ${project}`) // never creates one
+    this.db.prepare('UPDATE boards SET auto = ? WHERE project = ?').run(on ? 1 : 0, project)
+    return on
   }
   get db() { return open(this.file, { log: this.log }) } // lazy: server.mjs is imported by tests
   // { project: key } for every board.
@@ -85,7 +93,7 @@ export class Tickets {
     if (!PROJECT.test(project ?? '')) throw err(400, 'project required')
     const key = this.db.prepare('SELECT key FROM boards WHERE project = ?').get(project)?.key ?? null
     const tickets = this.db.prepare('SELECT json FROM tickets WHERE project = ? ORDER BY seq').all(project).map((r) => JSON.parse(r.json))
-    return { key, tickets: column ? tickets.filter((t) => t.column === column) : tickets }
+    return { key, auto: await this.auto(project), tickets: column ? tickets.filter((t) => t.column === column) : tickets }
   }
   row(id) {
     const r = this.db.prepare('SELECT json FROM tickets WHERE id = ?').get(String(id).toUpperCase())
@@ -97,7 +105,7 @@ export class Tickets {
   async create(project, body, author) {
     const f = clean(body, { create: true })
     await this.board(project)
-    return tx(this.db, () => {
+    const t = tx(this.db, () => {
       const b = this.db.prepare('SELECT key, next FROM boards WHERE project = ?').get(project)
       const at = new Date().toISOString()
       const t = { id: `${b.key}-${b.next}`, title: f.title, body: f.body ?? '', type: f.type ?? 'feature', size: f.size ?? null,
@@ -107,19 +115,26 @@ export class Tickets {
       this.db.prepare('UPDATE boards SET next = ? WHERE project = ?').run(b.next + 1, project)
       return t
     })
+    if (t.column === 'ready') this.ready(project, t)
+    return t
   }
   // fn(ticket, at) → mutated copy; read, apply and write in one transaction.
   async mutate(id, fn) {
-    return tx(this.db, () => {
+    let entered = false
+    const t = tx(this.db, () => {
       const old = this.row(id)
       const at = new Date().toISOString()
       const t = fn(structuredClone(old), at)
       if (JSON.stringify(t) === JSON.stringify(old)) return t // no-op: no write, no updated bump
       t.updated = at
       this.db.prepare('UPDATE tickets SET json = ? WHERE id = ?').run(JSON.stringify(t), old.id)
+      if (t.column === 'ready' && old.column !== 'ready') entered = true
       return t
     })
+    if (entered) this.ready(await this.project(t.id), t)
+    return t
   }
+  ready(project, t) { try { this.onReady(project, t) } catch (e) { this.log('tickets onReady:', e.message) } }
   // assignee: already resolved by the caller ({name,pane} | null) or undefined.
   async patch(id, body, author, assignee) {
     const f = clean(body)
@@ -129,6 +144,7 @@ export class Tickets {
         if (column === 'blocked' && !note?.trim()) throw err(400, 'moving to blocked needs a note (the reason)')
         t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: column, ...(note ? { text: note } : {}) })
         t.column = column
+        delete t.jev?.applied?.column // moved by hand: no longer Jev's promotion to undo
       } else if (note?.trim()) t.history.push({ at, author: author.name, kind: 'comment', text: note })
       const edited = Object.keys(rest).filter((k) => JSON.stringify(t[k]) !== JSON.stringify(rest[k]))
       if (edited.length) t.history.push({ at, author: author.name, kind: 'edit', text: edited.join(', ') })
@@ -157,13 +173,24 @@ export class Tickets {
       return t
     })
   }
+  // Board 'Auto': Backlog → Ready with Jev's p in the history note; undone like a field (jevUndo 'column').
+  async jevPromote(id, p) {
+    return this.mutate(id, (t, at) => {
+      if (t.column !== 'backlog') return t
+      t.history.push({ at, author: 'jev', kind: 'move', from: 'backlog', to: 'ready', text: `Jev auto-promoted (p=${p.toFixed(2)})` })
+      t.column = 'ready'
+      t.jev = { ...t.jev, applied: { ...t.jev?.applied, column: { from: 'backlog', to: 'ready' } } }
+      return t
+    })
+  }
   async jevUndo(id, field, author) {
     return this.mutate(id, (t, at) => {
-      const a = Object.hasOwn(DEFAULTS, field) && Object.hasOwn(t.jev?.applied ?? {}, field) ? t.jev.applied[field] : null
+      const a = (Object.hasOwn(DEFAULTS, field) || field === 'column') && Object.hasOwn(t.jev?.applied ?? {}, field) ? t.jev.applied[field] : null
       if (!a) throw err(400, `no Jev suggestion on ${field}`)
+      if (field === 'column') t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: a.from, text: 'undo Jev auto-promote' })
+      else t.history.push({ at, author: author.name, kind: 'edit', text: field })
       t[field] = a.from
       delete t.jev.applied[field]
-      t.history.push({ at, author: author.name, kind: 'edit', text: field })
       return t
     })
   }

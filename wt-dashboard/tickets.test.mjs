@@ -85,7 +85,7 @@ const legacy = async (files) => {
 test('import: legacy board keeps ids, next and history; files move to pre-sqlite-*; no re-import', async () => {
   const dir = await legacy({ 'wt-pack.json': JSON.stringify(board) })
   const t = new Tickets({ dir, log: () => {} })
-  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', tickets: board.tickets })
+  assert.deepEqual(await t.list('wt-pack'), { key: 'WPK', auto: false, tickets: board.tickets })
   assert.equal((await t.create('wt-pack', { title: 'after' }, user)).id, 'WPK-8')
   const [backup] = (await readdir(dir)).filter((f) => f.startsWith('pre-sqlite-'))
   assert.deepEqual(JSON.parse(await readFile(join(dir, backup, 'tickets', 'wt-pack.json'), 'utf8')), board)
@@ -128,7 +128,7 @@ test('needsSession: pane exempts ticket POST/PATCH only', async () => {
 test('list never creates a board', async () => {
   const dir = await tmp()
   const t = new Tickets({ dir })
-  assert.deepEqual(await t.list('typo-proj'), { key: null, tickets: [] })
+  assert.deepEqual(await t.list('typo-proj'), { key: null, auto: false, tickets: [] })
   assert.deepEqual(await t.keys(), {})
 })
 
@@ -190,4 +190,22 @@ test('jevApply re-triage (wt-ticket triage): keeps earlier undoable fields, neve
   const j = await t.jevApply(a.id, { type: 'ux', size: 'S', priority: 3, owner: 'planner', dupes: ['WP-2'] }, all)
   assert.deepEqual([j.type, j.size, j.priority, j.jev.owner], ['bug', 'S', 0, 'planner']) // Jev's own edit entry does not block size
   assert.deepEqual(Object.keys(j.jev.applied).sort(), ['size', 'type'])
+})
+
+test('Auto defaults off; manual move drops a pending promotion undo', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const a = await t.create('wt-pack', { title: 'A' }, user)
+  assert.equal(await t.auto('wt-pack'), false)
+  assert.equal(await t.auto('nope'), false)
+  await t.jevPromote(a.id, 0.7)
+  const m = await t.patch(a.id, { column: 'building' }, user)
+  assert.equal(m.jev.applied.column, undefined)
+  await assert.rejects(t.jevUndo(a.id, 'column', user), /no Jev suggestion/)
+  assert.equal((await t.jevPromote(a.id, 0.9)).column, 'building') // only from Backlog
+})
+
+test('setAuto never creates a board', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  await assert.rejects(t.setAuto('typo-proj', true), (e) => e.status === 404)
+  assert.deepEqual(await t.keys(), {})
 })

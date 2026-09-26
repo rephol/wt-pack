@@ -31,6 +31,7 @@ export const ticketTriage = {
     size: { type: 'choice', instructions: 'How much work is this ticket?', criteria: SIZE_CRITERIA },
     priority: { type: 'score', instructions: 'How urgent is this ticket for the team shipping this project?', criteria: ['urgent', 'high', 'medium', 'low'] },
     ...route.questions(),
+    ready: { type: 'noul', instructions: 'Is this ticket clear and actionable enough for someone to start work on it now, without asking the author anything?' },
     ...Object.fromEntries((state.candidates ?? []).map((c) => [`dup_${c.id}`, { type: 'noul',
       instructions: `Is this ticket a duplicate of the existing ticket ${c.id} "${c.title}" (same problem or request)?` }])),
   }),
@@ -42,20 +43,47 @@ export const ticketTriage = {
       type: pick('type'), size: pick('size'),
       priority: typeof s?.score === 'number' && (s.confidence ?? 0) >= 0.6 ? Math.max(0, Math.min(3, Math.round(s.score))) + 1 : null,
       owner: a?.plan ? route.decide(a, routeMin) : null,
+      ready: typeof a?.ready?.noul === 'number' ? a.ready.noul : null,
       dupes: Object.keys(a ?? {}).filter((k) => k.startsWith('dup_') && (a[k]?.noul ?? 0) >= 0.8).map((k) => k.slice(4)),
     }
   },
 }
+// Board 'Auto' promote rule (WP-39), on the ticket after jevApply: Backlog only, priority High or Urgent, and Jev
+// judges it ready (p ≥ min); a Large or planner-hinted ticket needs p ≥ sure. Returns p to promote with, else null.
+export function shouldPromote(t, d, { min = 0.6, sure = 0.8 } = {}) {
+  const p = d.ready
+  if (t.column !== 'backlog' || typeof p !== 'number' || !(t.priority >= 1 && t.priority <= 2)) return null
+  const easy = (t.size === 'S' || t.size === 'M') && d.owner !== 'planner'
+  return p >= (easy ? min : sure) ? p : null
+}
+
+// "Entered Ready" prompts to the project's orchestrator, at most one per project per flush (the server flushes
+// every minute). send(project, tickets) does the prompting; a failed send is logged and dropped.
+export function readyBatcher(send, log = console.error) {
+  const q = new Map()
+  return {
+    add(project, t) { if (!project) return; const m = q.get(project) ?? new Map(); m.set(t.id, t); q.set(project, m) },
+    async flush() {
+      const all = [...q]; q.clear()
+      for (const [project, m] of all) await Promise.resolve().then(() => send(project, [...m.values()])).catch((e) => log('ready notify:', e.message))
+    },
+  }
+}
+
 // jev-eval compares with JSON equality: the type alone is the labelled field.
 export const ticketType = { questions: ticketTriage.questions, decide: (a) => ticketTriage.decide(a).type }
 
 // Fire-and-forget after create. empty: the fields the creator left unset. Never throws.
-export async function triageTicket(project, t, empty, { ask, tickets, min, routeMin, log = console.error }) {
+// auto: the board's 'Auto' toggle — when on, a ticket that passes shouldPromote moves to Ready.
+export async function triageTicket(project, t, empty, { ask, tickets, min, routeMin, auto = false, log = console.error }) {
   try {
     const { tickets: all } = await tickets.list(project)
     const state = { title: t.title, body: t.body.slice(0, 4000), candidates: candidates(t, all) }
     const a = await ask(state, ticketTriage.questions(state), (x) => ticketTriage.decide(x, min, routeMin))
     if (!a) return null
-    return await tickets.jevApply(t.id, ticketTriage.decide(a, min, routeMin), empty)
+    const d = ticketTriage.decide(a, min, routeMin)
+    const out = await tickets.jevApply(t.id, d, empty)
+    const p = auto ? shouldPromote(out, d, { min }) : null
+    return p == null ? out : await tickets.jevPromote(t.id, p)
   } catch (e) { log('ticket triage:', e.message); return null }
 }
