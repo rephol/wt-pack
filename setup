@@ -204,7 +204,7 @@ secrets_step() {
   if [ -n "${TYPESAFE_API_KEY:-}" ] || grep -qs 'TYPESAFE_API_KEY=' "$env"; then ok "already: TypeSafe key"
   elif [ -t 0 ]; then
     printf '  TypeSafe API key (optional, Enter to skip): '; stty -echo 2>/dev/null; read -r k; stty echo 2>/dev/null; echo
-    if [ -n "$k" ]; then mkdir -p "$HOME/.claude"; touch "$env"; chmod 600 "$env"; printf 'TYPESAFE_API_KEY=%s\n' "$k" >> "$env"; ok "TypeSafe key saved to $env"; else opt "TypeSafe key skipped"; fi
+    if [ -n "$k" ]; then mkdir -p "$HOME/.claude"; touch "$env"; chmod 600 "$env"; [ -z "$(tail -c1 "$env")" ] || echo >> "$env"; printf 'TYPESAFE_API_KEY=%s\n' "$k" >> "$env"; ok "TypeSafe key saved to $env"; else opt "TypeSafe key skipped"; fi
   else opt "TypeSafe key: run ./setup secrets in a terminal"; fi
   opt "Linear key: dashboard Settings › Integrations (stored in the Keychain)"
 }
