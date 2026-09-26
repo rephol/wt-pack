@@ -105,6 +105,12 @@ spawn)
   pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus \
     | jq -r .result.root_pane.pane_id)
 
+  # Tags go on the pane BEFORE claude starts: wt-memory's SessionStart hook reads the
+  # role token from this pane, and a tag set after start arrives too late for it.
+  # (Best effort: an older herdr has no report-metadata.)
+  herdr pane report-metadata "$pane" --source wt-dashboard --token "role=$role" --token "project=$repo" \
+    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" >/dev/null 2>&1 || true
+
   # A fresh pane is not at its shell prompt the instant `tab create` returns.
   n=0
   # Two names, two layers: `agent start <NAME>` names the agent to HERDR, while
@@ -116,9 +122,6 @@ spawn)
     sleep 3
   done
   herdr agent rename "$pane" "$label" >/dev/null 2>&1 || true
-  # Display-only tags for dashboards (best effort: an older herdr has no report-metadata).
-  herdr pane report-metadata "$pane" --source wt-dashboard --token "role=$role" --token "project=$repo" \
-    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" >/dev/null 2>&1 || true
   echo "$label $pane"
   ;;
 
