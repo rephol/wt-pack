@@ -39,7 +39,7 @@ From the repo itself, work out — and write down before auditing:
   to the user in your final answer.
 
 Examples. wt-pack itself: project `wt-pack`, UI wt-dashboard at http://127.0.0.1:7777, checks
-`cd wt-dashboard && npm test` and `./setup doctor`, local board `WP-*`, room `wt-pack`.
+`cd skills/wt-dashboard && npm test` and `./setup doctor`, local board `WP-*`, room `wt-pack`.
 `~/Work/projects/marketing-studio-poc`: project `umkmall` (a worktree of it), turbo `dev`/`test`/`typecheck`,
 Linear (`UMK-*` in commits) so nothing is filed, room `marketing-studio-poc`.
 
