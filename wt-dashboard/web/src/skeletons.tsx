@@ -42,13 +42,9 @@ export function Rows({ n = 5, height = 44, avatar = 0, lines = 1 }: { n?: number
 
 export function OverviewSkeleton() {
   return (
-    <VStack gap={6}>
-      <HStack gap={4} wrap="wrap">
-        {[0, 1].map((i) => <HStack key={i} gap={3} align="center"><Skeleton width={56} height={56} radius="rounded" index={i} /><VStack gap={1}><Line w={90} /><Line w={60} h={10} /></VStack></HStack>)}
-      </HStack>
-      <HStack gap={3} wrap="wrap">{[0, 1, 2, 3].map((i) => <Skeleton key={i} width={160} height={72} radius={2} index={i} />)}</HStack>
-      <VStack gap={2}><Line w={120} h={16} /><Rows n={3} avatar={28} lines={2} height={52} /></VStack>
-      <VStack gap={2}><Line w={100} h={16} /><Rows n={4} /></VStack>
+    <VStack gap={4}>
+      <HStack gap={3} wrap="wrap">{[0, 1, 2].map((i) => <Skeleton key={i} width={160} height={72} radius={2} index={i} />)}</HStack>
+      <HStack gap={3} wrap="wrap">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} width="100%" height={96} radius={2} index={i} />)}</HStack>
     </VStack>
   )
 }

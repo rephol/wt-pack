@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
 import { existsSync, watch, realpathSync, statSync, readFileSync } from 'node:fs'
-import { homedir, hostname, tmpdir } from 'node:os'
+import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Rooms, ticketSuggestions, roomResolve } from './rooms.mjs'
@@ -948,7 +948,7 @@ async function prs() {
       await run(
         'gh',
         ['pr', 'list', '--state', 'all', '--limit', '50', '--json',
-          'number,title,headRefName,state,isDraft,baseRefName,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit,mergeStateStatus,author'],
+          'number,title,headRefName,state,isDraft,baseRefName,createdAt,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit,mergeStateStatus,author'],
         REPO,
       ),
     )
@@ -976,6 +976,7 @@ async function prs() {
           ci: ciOf(p.statusCheckRollup ?? []),
           behind: p.mergeStateStatus === 'BEHIND',
           unresolved: p.state === 'OPEN' ? threads?.[p.number] ?? null : null,
+          createdAt: p.createdAt,
           mergedAt: p.mergedAt,
           updatedAt: p.updatedAt,
           shipped,
@@ -1195,6 +1196,29 @@ async function health() {
   }
 }
 
+// Throughput since local midnight. Pure: tested in parse.test.mjs.
+// ponytail: from the last 50 PRs only (prs() --limit 50) — enough for one day.
+export function todayCounts(prs, now = new Date()) {
+  const midnight = new Date(now).setHours(0, 0, 0, 0)
+  const today = (iso) => Boolean(iso) && Date.parse(iso) >= midnight
+  return {
+    prsOpened: prs.filter((p) => today(p.createdAt)).length,
+    prsMerged: prs.filter((p) => today(p.mergedAt)).length,
+    shipped: prs.filter((p) => p.shipped && today(p.mergedAt)).length,
+  }
+}
+
+// RAM use + macOS memory pressure; pressure null when memory_pressure is unavailable.
+async function host() {
+  return cached('host', 30_000, async () => {
+    // os.freemem() on macOS excludes reclaimable cache (reads ~99%), so memory_pressure's free % wins when present.
+    const out = await run('memory_pressure', ['-Q'], homedir()).catch(() => '')
+    const free = Number(out.match(/free percentage:\s*(\d+)%/)?.[1])
+    if (!Number.isFinite(free)) return { memUsedPct: Math.round((1 - freemem() / totalmem()) * 100), pressure: null }
+    return { memUsedPct: 100 - free, pressure: free < 10 ? 'critical' : free < 25 ? 'warn' : 'normal' }
+  })
+}
+
 async function overview() {
   return cached('overview', 3000, async () => {
     const [ag, wt, pr, issues] = await Promise.all([
@@ -1225,7 +1249,9 @@ async function overview() {
         building: n('building'),
         inReview: n('in_review'),
         idleAgents: ag.filter((a) => a.status === 'idle').length,
+        today: todayCounts(pr),
       },
+      host: await host(),
     }
   })
 }
@@ -1728,7 +1754,7 @@ async function roomsApi(req, res, url, parts) {
     if (req.method === 'GET') {
       if (url.searchParams.get('format') === 'text') return send(res, 200, rooms.index.filter((r) => !r.archived).map((r) => `${r.slug}\t${r.title}${r.paused ? ' (paused)' : ''}`).join('\n') + '\n', 'text/plain')
       const tasks = rooms.settings.ticketRooms === 'suggest' ? (await overview()).tasks : []
-      return send(res, 200, { rooms: rooms.index, settings: rooms.settings, pending: rooms.pending(),
+      return send(res, 200, { rooms: await rooms.withLast(), settings: rooms.settings, pending: rooms.pending(),
         suggestions: ticketSuggestions(tasks, rooms.index.map((r) => r.slug), rooms.settings) })
     }
     if (req.method === 'POST') {

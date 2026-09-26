@@ -1,7 +1,7 @@
 // Run: node --test
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parsePane , snapshot, transitions, jevState, deriveTasks } from './server.mjs'
+import { parsePane , snapshot, transitions, jevState, deriveTasks, todayCounts } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -853,4 +853,33 @@ test('inbox rank: score → urgency 0-3; no answer → none (sorts as FYI)', () 
   assert.equal(inboxRank.decide({ urgency: { score: 3.6 } }), 3)
   assert.equal(inboxRank.decide(null), null)
   assert.deepEqual(Object.keys(inboxRank.state({ kind: 'question', title: 't', body: 'b', target: {}, id: 'x' })), ['kind', 'title', 'body'])
+})
+
+test('todayCounts: local-midnight cutoff', () => {
+  const now = new Date(2026, 8, 26, 0, 30)
+  const at = (h, m = 0, d = 26) => new Date(2026, 8, d, h, m).toISOString()
+  const prs = [
+    { createdAt: at(0, 10), mergedAt: at(0, 20), shipped: true },
+    { createdAt: at(23, 50, 25), mergedAt: at(0, 5), shipped: false },
+    { createdAt: at(23, 59, 25), mergedAt: at(23, 59, 25), shipped: true },
+    { createdAt: at(0, 1), mergedAt: null, shipped: false },
+  ]
+  assert.deepEqual(todayCounts(prs, now), { prsOpened: 2, prsMerged: 2, shipped: 1 })
+})
+
+test('Rooms.withLast: newest non-system line, not persisted to the index', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const rooms = new Rooms({ dir: mkdtempSync(join(tmpdir(), 'wtd-rooms-')), agents: async () => [], prompt: async () => {}, log: () => {} })
+  const r = await rooms.create({ title: 'Last', slug: 'last' })
+  assert.equal((await rooms.withLast())[0].lastAt, null)
+  await rooms.post(r.slug, { author: { kind: 'user', name: 'you' }, text: 'x'.repeat(200) })
+  await rooms.system(r.slug, 'noise')
+  const [l] = await rooms.withLast()
+  assert.equal(l.lastFrom, 'you')
+  assert.equal(l.lastText.length, 120)
+  assert.ok(l.lastAt)
+  assert.equal(rooms.index[0].lastAt, undefined)
 })

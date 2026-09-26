@@ -1,4 +1,4 @@
-// Overview: Claude plan limits (ccstatusline's cache) and notional spend from Claude Code transcripts.
+// Claude plan limits (ccstatusline's cache) → Overview tile; notional spend from Claude Code transcripts → Settings › Usage.
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '@astryxdesign/core/Card'
@@ -46,11 +46,39 @@ function Gauge({ label, pct, resetAt }: { label: string; pct: number | null; res
   )
 }
 
-export function UsagePanel() {
-  const q = useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/usage'), refetchInterval: 30_000, refetchIntervalInBackground: true })
+const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/usage'), refetchInterval: 30_000, refetchIntervalInBackground: true })
+// the first transcript scan takes ~1.6s
+const Loading = ({ h }: { h: number }) => <Delayed><VStack gap={2}><Skeleton width={120} height={16} radius={1} /><Skeleton width="100%" height={h} radius={2} /></VStack></Delayed>
+
+// Overview: just the 5-hour and weekly bars.
+export function UsageBars() {
+  const q = useUsage()
+  // No Retry button here: this renders inside a clickable Overview card.
+  if (!q.data) return q.isError ? <Text type="supporting" size="sm">Claude usage unavailable</Text> : <Loading h={40} />
+  const l = q.data.limits
+  if (!l) return <Text type="supporting" size="sm">No plan limits file (~/.cache/ccstatusline/usage.json)</Text>
+  return (
+    <VStack gap={2}>
+      {([['5-hour', l.session, l.sessionResetAt], ['Weekly', l.weekly, l.weeklyResetAt]] as const).map(([label, pct, at]) => (
+        <VStack key={label} gap={0.5}>
+          <HStack justify="between" gap={2}>
+            <Text size="sm">{label}</Text>
+            <Text size="sm" type="supporting">{`${pct == null ? '—' : `${pct}%`}${at ? ` · resets in ${until(at)}` : ''}`}</Text>
+          </HStack>
+          <ProgressBar label={`${label} usage`} isLabelHidden value={pct ?? 0} max={100} variant={(pct ?? 0) >= 90 ? 'error' : (pct ?? 0) >= 70 ? 'warning' : 'accent'} />
+        </VStack>
+      ))}
+      {l.stale && <Badge variant="warning" label={`stale — updated ${ago(l.ageSec)}`} />}
+    </VStack>
+  )
+}
+
+// Settings › Usage: limits with reset times, plus the Agent/Project/Model token breakdown.
+export function UsageBreakdown() {
+  const q = useUsage()
   const [range, setRange] = useState<'today' | 'week'>('today')
   const [by, setBy] = useState<By>('agent')
-  if (!q.data) return q.isError ? <LoadError what="Claude usage" error={q.error} retry={() => q.refetch()} /> : <Delayed><VStack gap={2}><Skeleton width={120} height={16} radius={1} /><Skeleton width="100%" height={120} radius={2} /></VStack></Delayed> // the first transcript scan takes ~1.6s
+  if (!q.data) return q.isError ? <LoadError what="Claude usage" error={q.error} retry={() => q.refetch()} /> : <Loading h={120} />
   const l = q.data.limits
   const s = q.data[range][by]
   return (
@@ -66,7 +94,8 @@ export function UsagePanel() {
       <Grid columns={{ minWidth: 220 }} gap={3}>
         {l && <Gauge label="5-hour" pct={l.session} resetAt={l.sessionResetAt} />}
         {l && <Gauge label="Weekly" pct={l.weekly} resetAt={l.weeklyResetAt} />}
-        <Card padding={3}>
+      </Grid>
+      <Card padding={3}>
           <VStack gap={2}>
             <HStack justify="between" align="center" wrap="wrap" gap={2}>
               <SegmentedControl label="Range" value={range} onChange={(v) => setRange(v as 'today' | 'week')} size="sm">
@@ -97,8 +126,7 @@ export function UsagePanel() {
             })}
             {!s.groups.length && <Text type="supporting" size="sm">No Claude Code activity in this range.</Text>}
           </VStack>
-        </Card>
-      </Grid>
+      </Card>
     </VStack>
   )
 }

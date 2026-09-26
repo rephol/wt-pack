@@ -24,7 +24,7 @@ import { InboxButton, InboxHost } from './inbox'
 import { RoomsPage, useRoomsList } from './rooms'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
-import { UsagePanel } from './usage'
+import { OverviewPage } from './overview'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
 import { Stepper, Step } from '@astryxdesign/core/Stepper'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
@@ -134,7 +134,8 @@ interface Overview {
   agents: Agent[]
   tasks: Task[]
   machines: Machine[]
-  counts: { needsYou: number; stalled: number; building: number; inReview: number; idleAgents: number }
+  counts: { needsYou: number; stalled: number; building: number; inReview: number; idleAgents: number; today?: { prsOpened: number; prsMerged: number; shipped: number } }
+  host?: { memUsedPct: number; pressure: string | null }
 }
 interface Machine {
   label: string
@@ -197,7 +198,6 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
   shipped: { label: 'Shipped', dot: 'success', group: 'done' },
   done: { label: 'Done', dot: 'neutral', group: 'done' },
 }
-const STATE_ORDER = Object.keys(STATE) as TaskState[]
 const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'accent', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral' }
 
 const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
@@ -263,7 +263,7 @@ function scopeToProject(o: Overview, project: string): Overview & { allProjects:
       const mine = agents.filter((a) => a.machine === m.label)
       return { ...m, total: mine.length, working: mine.filter((a) => a.status === 'working').length, idle: mine.filter((a) => a.status === 'idle').length }
     }),
-    counts: { needsYou: n('needs_you'), stalled: n('stalled'), building: n('building'), inReview: n('in_review'), idleAgents: agents.filter((a) => a.status === 'idle').length },
+    counts: { needsYou: n('needs_you'), stalled: n('stalled'), building: n('building'), inReview: n('in_review'), idleAgents: agents.filter((a) => a.status === 'idle').length, today: o.counts.today },
   }
 }
 const activeTasks = (ts: Task[]) => ts.filter((t) => STATE[t.state].group !== 'done')
@@ -517,7 +517,7 @@ export default function App() {
         )}
 
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
-        {!fullKey && data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
+        {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} />}
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
@@ -552,68 +552,6 @@ export default function App() {
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} loading={!all} phone={phone} hidden={fabHidden}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
-  )
-}
-
-// ---------- overview ----------
-function Kpi({ label, value, loud }: { label: string; value: number; loud?: 'red' | 'orange' }) {
-  return (
-    <Card variant={loud && value > 0 ? loud : 'default'}>
-      <VStack gap={1}>
-        <Text type="supporting">{label}</Text>
-        <Text type="display-2" weight="bold">{String(value)}</Text>
-      </VStack>
-    </Card>
-  )
-}
-
-function OverviewPage({ data, onOpen, selected }: { data: Overview & { allProjects: boolean }; onOpen: (p: string) => void; selected: string | null }) {
-  const inbox = data.tasks.filter((t) => t.state === 'needs_you')
-  const c = data.counts
-  return (
-    <VStack gap={6}>
-      <MachinesStrip machines={data.machines} />
-      <UsagePanel />
-      <Grid columns={{ minWidth: 160 }} gap={3}>
-        <Kpi label="Needs you" value={c.needsYou} loud="red" />
-        <Kpi label="Stalled" value={c.stalled} loud="orange" />
-        <Kpi label="Building" value={c.building} />
-        <Kpi label="In review" value={c.inReview} />
-        <Kpi label="Idle agents" value={c.idleAgents} />
-      </Grid>
-
-      <VStack gap={3}>
-        <Heading level={2}>Needs you</Heading>
-        {inbox.length === 0 ? (
-          <Card variant="muted">
-            <EmptyState isCompact title="Nothing waiting on you" description="No agent is asking a question right now." />
-          </Card>
-        ) : (
-          inbox.map((t) => (
-            <Card key={t.id}>
-              <HStack justify="between" align="start" gap={4}>
-                <VStack gap={1}>
-                  <HStack gap={2} align="center">
-                    <StatusDot variant="error" label="Needs you" isPulsing />
-                    <Text weight="semibold">{t.agent?.name ?? '—'}</Text>
-                    {t.agent && <Badge label={t.agent.machine} />}
-                    <Text type="supporting">{t.adHoc ? 'ad-hoc' : t.id}</Text>
-                  </HStack>
-                  <Text maxLines={1}>{t.title}</Text>
-                  {t.question && <Text type="supporting" maxLines={3}>{t.question}</Text>}
-                </VStack>
-                {t.agent && <Button label="Open" variant="primary" onClick={() => onOpen(t.agent!.key)} />}
-              </HStack>
-            </Card>
-          ))
-        )}
-      </VStack>
-
-      <VStack gap={3}>
-        <Heading level={2}>Task board</Heading>
-        <TaskBoard tasks={data.tasks} onOpen={onOpen} selected={selected} showProject={data.allProjects} />
-      </VStack>
-    </VStack>
   )
 }
 
@@ -728,84 +666,6 @@ function PrCell({ pr }: { pr: PR | null }) {
   )
 }
 
-function TaskBoard({ tasks, onOpen, showProject, selected, suggested }: { tasks: Task[]; onOpen: (p: string) => void; showProject: boolean; selected: string | null; suggested?: Set<string> }) {
-  const [group, setGroup] = useState('active')
-  const [filter, setFilter] = useState('')
-  const rows = useMemo(() => {
-    const f = filter.toLowerCase()
-    return tasks
-      .filter((t) => group === 'all' || STATE[t.state].group === group)
-      .filter((t) => !f || [t.id, t.title, t.branch, t.agent?.name].some((s) => s?.toLowerCase().includes(f)))
-      .sort((a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state) || (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-  }, [tasks, group, filter])
-
-  return (
-    <VStack gap={3}>
-      <HStack justify="between" align="end" wrap="wrap" gap={3}>
-        <TabList value={group} onChange={setGroup}>
-          <Tab value="active" label="Active" />
-          <Tab value="review" label="Review" />
-          <Tab value="done" label="Done" />
-          <Tab value="all" label="All" />
-        </TabList>
-        <TextInput label="Filter tasks" isLabelHidden placeholder="Filter by id, title, branch, agent" value={filter} onChange={setFilter} hasClear size="sm" />
-      </HStack>
-      {rows.length === 0 ? (
-        <EmptyState isCompact title="No tasks here" />
-      ) : (
-        <Table<Task>
-          data={rows}
-          idKey="id"
-          density="compact"
-          hasHover
-          textOverflow="truncate"
-          columns={[
-            {
-              key: 'task',
-              header: 'Task',
-              renderCell: (t) => (
-                <VStack gap={0.5}>
-                  {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : <Text type="supporting">{t.adHoc ? 'ad-hoc' : t.id}</Text>}
-                  {suggested?.has(t.id) && <Link href="#rooms"><Text type="supporting" size="sm">room suggested</Text></Link>}
-                  <Text maxLines={1}>{t.title}</Text>
-                </VStack>
-              ),
-            },
-            {
-              key: 'state',
-              header: 'State',
-              renderCell: (t) => (
-                <HStack gap={2} align="center">
-                  <StatusDot variant={STATE[t.state].dot} label={STATE[t.state].label} isPulsing={t.state === 'needs_you'} />
-                  <Text>{STATE[t.state].label}</Text>
-                </HStack>
-              ),
-            },
-            {
-              key: 'agent',
-              header: 'Agent',
-              renderCell: (t) =>
-                t.agent ? (
-                  <HStack gap={1} align="center">
-                    <Button label={t.agent.name} size="sm" variant={selected === t.agent.key ? "secondary" : "ghost"} onClick={() => onOpen(t.agent!.key)} />
-                    <Text type="supporting" size="sm" maxLines={1}>{t.agent.machine}</Text>
-                  </HStack>
-                ) : <Text type="supporting">—</Text>,
-            },
-            ...(showProject ? [{ key: 'project', header: 'Project', renderCell: (t: Task) => <Text type="supporting" maxLines={1}>{t.project ?? '—'}</Text> }] : []),
-            { key: 'branch', header: <Tooltip content="Worktree/PR linking is local-only: remote cwd paths differ"><Text weight="semibold">Branch</Text></Tooltip>, renderCell: (t) => <Text type="code" maxLines={1}>{t.branch ?? '—'}</Text> },
-            { key: 'pr', header: 'PR', renderCell: (t) => <PrCell pr={t.pr} /> },
-            {
-              key: 'updatedAt',
-              header: 'Updated',
-              renderCell: (t) => (t.updatedAt ? <Timestamp value={t.updatedAt} format="relative" /> : <Text type="supporting">—</Text>),
-            },
-          ]}
-        />
-      )}
-    </VStack>
-  )
-}
 
 // ---------- images ----------
 // Upload paths inside a user message → served thumbnails; the paths themselves are hidden.
