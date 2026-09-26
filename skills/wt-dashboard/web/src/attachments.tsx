@@ -1,9 +1,10 @@
 // What an agent shows or sends: inline images (click → Lightbox) and file cards for SendUserFile.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { useToast } from '@astryxdesign/core/Toast'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { Lightbox } from '@astryxdesign/core/Lightbox'
+import { usePinchZoom } from './pinchZoom'
 import { Card } from '@astryxdesign/core/Card'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
@@ -101,6 +102,8 @@ function FilePreview({ f, onClose }: { f: SharedFile; onClose: () => void }) {
 
 export function ImageRow({ srcs }: { srcs: string[] }) {
   const [at, setAt] = useState<number | null>(null)
+  const box = useRef<HTMLDialogElement>(null)
+  usePinchZoom(box, at !== null, at)
   return (
     <HStack gap={2} wrap="wrap">
       {srcs.map((src, i) => (
@@ -109,7 +112,7 @@ export function ImageRow({ srcs }: { srcs: string[] }) {
         </div>
       ))}
       <Lightbox isOpen={at !== null} onOpenChange={(o) => !o && setAt(null)} media={srcs.map((src, i) => ({ src, alt: `Image ${i + 1}` }))}
-        index={at ?? 0} onIndexChange={setAt} hasZoom />
+        ref={box} index={at ?? 0} onIndexChange={setAt} />
     </HStack>
   )
 }
