@@ -174,12 +174,12 @@ export function Board({ project, phone }: { project: string; phone: boolean }) {
         height="fill"
         header={
           <LayoutHeader hasDivider padding={phone ? 3 : 4}>
-            <Toolbar label="Board actions" gap={2}
+            <Toolbar label="Board actions" gap={2} className="hd-kb-toolbar"
               startContent={phone
                 ? <Selector label="Column" isLabelHidden width={200} value={col} onChange={(v: string) => setCol(v as Column)}
                     options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
                 : <><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
-              endContent={<HStack gap={2} vAlign="center">
+              endContent={<HStack gap={2} vAlign="center" className="hd-kb-toolbar-end">
                 <Switch label="Auto" value={!!q.data.auto} isDisabled={setAuto.isPending} onChange={(on: boolean) => setAuto.mutate(on)} />
                 {q.data.auto && <Button label={runNow.data ? `Queued ${runNow.data.queued}` : 'Run now'} variant="secondary" size={phone ? 'sm' : 'md'} isLoading={runNow.isPending} onClick={() => runNow.mutate()} />}
                 <Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />
@@ -227,7 +227,7 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
           {t.size && <Badge label={t.size} variant="neutral" />}
           {jevChip(t) && <Badge label="Jev" variant="info" />}
         </HStack>
-        <MoreMenu label={`Actions for ${t.id}`} size="sm"
+        <MoreMenu label={`Actions for ${t.id}`} size="sm" alignment="end" presentation="adaptive"
           items={COLUMNS.filter((c) => c !== t.column).map((c) => ({ label: `Move to ${columnLabel(c)}`, onClick: () => onMove(t.id, c) }))} />
       </HStack>
       <VStack gap={1}>
