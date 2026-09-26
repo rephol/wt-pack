@@ -45,7 +45,12 @@ is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt
 skills() { for d in "$REPO"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
 node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)'; }
 service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
-market_path() { claude plugin marketplace list --json 2>/dev/null | jq -r '.[] | select(.name=="wt-pack") | .path // .installLocation // empty' 2>/dev/null; }
+# JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
+market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).find(x=>x.name==="wt-pack");if(m)console.log(m.path||m.installLocation||"")}catch{}})'; }
+# plugin_ok [enabled]: wt-memory@wt-pack is installed (and enabled).
+plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
+# Install hint for a missing package, for this OS.
+pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; then echo "sudo apt-get install -y $1"; elif has dnf; then echo "sudo dnf install -y $1"; else echo "install $1 with your package manager"; fi; }
 # The OTHER wt-pack checkout the existing skill links point into ("" when none, or when it is this one).
 link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(dirname "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
 built() { [ -f "$DASH/web/dist/index.html" ] && [ -z "$(find "$DASH/web/src" "$DASH/web/index.html" "$DASH/web/package.json" -newer "$DASH/web/dist/index.html" 2>/dev/null | head -1)" ]; }
@@ -54,10 +59,10 @@ built() { [ -f "$DASH/web/dist/index.html" ] && [ -z "$(find "$DASH/web/src" "$D
 doctor() {
   fails=0
   step "wt-pack doctor ($REPO)"
-  if node_ok; then ok "node $(node -v)"; else bad "node >= 22.12 (have: $(node -v 2>/dev/null || echo none)) — brew install node"; fi
-  for c in git curl; do if has $c; then ok "$c"; else bad "$c — install it (xcode-select --install on macOS)"; fi; done
-  if has jq; then ok "jq"; else bad "jq — brew install jq"; fi
-  if ! has gh; then bad "gh — brew install gh"
+  if node_ok; then ok "node $(node -v)"; else bad "node >= 22.12 (have: $(node -v 2>/dev/null || echo none)) — $(pkg node)"; fi
+  for c in git curl; do if has $c; then ok "$c"; elif [ "$OS" = Darwin ]; then bad "$c — xcode-select --install"; else bad "$c — $(pkg $c)"; fi; done
+  if has jq; then ok "jq"; else bad "jq — $(pkg jq)"; fi
+  if ! has gh; then bad "gh — $(pkg gh)"
   elif gh auth status >/dev/null 2>&1; then ok "gh (authenticated)"
   else bad "gh not logged in — run: ! gh auth login"; fi
   if has herdr; then ok "herdr"; else bad "herdr — needed for agents, handoffs and rooms; install it from its own docs"; fi
@@ -76,7 +81,7 @@ doctor() {
   if [ -z "$miss" ]; then ok "skills linked in $SKILLS ($n)${other:+ — from $other}"; else bad "skills not linked:$miss — ./setup install"; fi
 
   mp=$(market_path)
-  if claude plugin list --json 2>/dev/null | jq -e '.[] | select(.id=="wt-memory@wt-pack" and .enabled)' >/dev/null 2>&1; then
+  if plugin_ok enabled; then
     ok "plugin wt-memory@wt-pack${mp:+ (marketplace $mp)}"
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
 
@@ -127,9 +132,11 @@ deps() {
   node_ok || want="$want node"
   has jq || want="$want jq"
   has gh || want="$want gh"
+  has git || want="$want git"
+  has curl || want="$want curl"
   has herdr || opt "herdr is not on PATH — needed for agents, handoffs and rooms; install it from its own docs"
   if [ -z "$want" ]; then ok "already: node, jq, gh"; return 0; fi
-  if [ "$OS" != Darwin ]; then bad "missing:$want — install with your package manager (apt: nodejs jq gh)"; return 1; fi
+  if [ "$OS" != Darwin ]; then bad "missing:$want — $(pkg "$(echo $want | sed 's/node/nodejs/')")"; return 1; fi
   if ! has brew; then
     bad "missing:$want and no Homebrew — install Homebrew first (https://brew.sh), then re-run ./setup"; return 1
   fi
@@ -173,7 +180,7 @@ plugin() {
   elif [ "$mp" != "$REPO" ] && is_pack "$mp"; then opt "kept marketplace wt-pack → $mp (another wt-pack checkout)"
   elif [ "$mp" != "$REPO" ]; then bad "a marketplace named wt-pack points at $mp, which is not a wt-pack checkout"; return 1
   fi
-  if claude plugin list --json 2>/dev/null | jq -e '.[] | select(.id=="wt-memory@wt-pack")' >/dev/null 2>&1; then
+  if plugin_ok; then
     ok "already: wt-memory@wt-pack installed"
   else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
 }
