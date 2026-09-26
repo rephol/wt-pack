@@ -4,6 +4,8 @@
 // routines row, but shares their cap and memory guard. The server injects every side effect, so tests need no herdr.
 import { guard } from './routines.mjs'
 
+// Size L or the needs-plan label (set by hand or by Jev triage) → planner; anything else → worker.
+export const roleFor = (t) => (t.size === 'L' || t.labels?.includes('needs-plan') ? 'planner' : 'worker')
 const DAY = 86_400_000
 const FETCH_MS = 5 * 60_000
 const prio = (t) => t.priority || 5 // 1 urgent … 4 low; 0 (none) last
@@ -79,7 +81,7 @@ export class Dispatch {
     for (const id of ids) {
       const a = ags.find((x) => this.deps.ticketOf(x) === id)
       const t = await this.tickets.get(id)
-      if (a) await this.#sent(id, t.size === 'L' ? 'planner' : 'worker', { name: a.name, pane: a.id })
+      if (a) await this.#sent(id, roleFor(t), { name: a.name, pane: a.id })
       else await this.tickets.mutate(id, (t) => { if (t.dispatch?.state === 'dispatching') delete t.dispatch; return t })
     }
   }
@@ -116,7 +118,7 @@ export class Dispatch {
     s.waiting = null
     const claimed = await this.tickets.dispatchClaim(next.id, now)
     if (!claimed) return
-    const role = next.size === 'L' ? 'planner' : 'worker'
+    const role = roleFor(next)
     try {
       const out = await this.deps.handoff(['--role', role, '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role), repo)
       const [first = '', second = ''] = out.trim().split('\n')

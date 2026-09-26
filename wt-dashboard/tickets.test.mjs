@@ -206,7 +206,12 @@ test('jevApply re-triage (wt-ticket triage): keeps earlier undoable fields, neve
   await t.jevUndo(a.id, 'priority', user)
   const j = await t.jevApply(a.id, { type: 'ux', size: 'S', priority: 3, owner: 'planner', dupes: ['WP-2'] }, all)
   assert.deepEqual([j.type, j.size, j.priority, j.jev.owner], ['bug', 'S', 0, 'planner']) // Jev's own edit entry does not block size
-  assert.deepEqual(Object.keys(j.jev.applied).sort(), ['size', 'type'])
+  assert.deepEqual(Object.keys(j.jev.applied).sort(), ['labels', 'size', 'type'])
+  assert.deepEqual(j.labels, ['needs-plan']) // owner planner → the label Dispatch routes on
+  const u = await t.jevUndo(a.id, 'labels', user)
+  assert.deepEqual(u.labels, [])
+  const r = await t.jevApply(a.id, { owner: 'planner', dupes: [] }, all) // undone: never re-added
+  assert.deepEqual(r.labels, [])
 })
 
 test('Auto defaults off; manual move drops a pending promotion undo', async () => {
