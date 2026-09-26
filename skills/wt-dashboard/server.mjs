@@ -21,6 +21,7 @@ import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, bindCheck
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
+import { webStale, freshener } from './webfresh.mjs'
 import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
@@ -1219,12 +1220,25 @@ const jev = async () => ({
   calls: await cached('jev-calls', 60_000, async () => healthSummary(await readCalls())), // the log can reach ~10 MB
 })
 
+// WP-81: a checkout's server rebuilds web/dist itself when web/src is newer (a merge never ran the build).
+// Not for the bundled app or a custom WT_DASHBOARD_DIST: those ship their own dist.
+const WEB = new URL('./web/', import.meta.url).pathname
+const selfBuild = () => RUNTIME.kind === 'live' && !envOf('DIST') && existsSync(join(WEB, 'src')) // RUNTIME is declared below
+const freshenWeb = freshener({
+  web: WEB,
+  build: () => new Promise((resolve, reject) => execFile('npm', ['run', 'build'], { cwd: WEB, timeout: 180_000, maxBuffer: 4 << 20 },
+    (e, out, err) => (e ? reject(new Error(String(err || out || e.message).trim().split('\n').slice(-8).join('\n'))) : resolve()))),
+  onBuilt: () => console.log('web: rebuilt web/dist (sources were newer)'),
+  onFail: (e) => { console.error('web build failed:', e.message); inbox.add({ kind: 'server', key: `server|webbuild|${Date.now()}`, title: 'Web build failed — the dashboard serves the previous build', body: e.message.slice(0, 300), target: {} }) },
+})
+
 async function health() {
   const dist = await stat(join(DIST, 'index.html')).catch(() => null)
   return {
     ok: true, app: 'wt-dashboard', runtime: RUNTIME, pid: process.pid, startedAt: STARTED_AT,
     managedBy: MANAGED_BY,
     webBuiltAt: dist?.mtime.toISOString() ?? null,
+    webStale: selfBuild() ? await webStale(WEB) : null, // null: not this server's job (bundled app / custom dist)
     sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
     jev: await jev(), // outside `sources`: Jev being down doesn't degrade this server
   }
@@ -2603,6 +2617,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     setInterval(roomsLoop, 4000)
     setInterval(tick, 4000)
     setTimeout(tick, 500)
+    if (selfBuild()) { const fw = () => freshenWeb().catch((e) => console.error('web:', e.message)); setTimeout(fw, 5000); setInterval(fw, 120_000) }
     const hkRun = () => runHousekeeping().catch((e) => console.error('housekeeping:', e.message))
     setTimeout(hkRun, 60_000)
     setInterval(hkRun, 3_600_000)
