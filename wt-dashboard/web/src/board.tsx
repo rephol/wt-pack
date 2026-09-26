@@ -12,6 +12,8 @@ import { Switch } from '@astryxdesign/core/Switch'
 import { Badge, type BadgeVariant } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
+import { BottomSheet } from '@astryxdesign/core/BottomSheet'
+import { Popover } from '@astryxdesign/core/Popover'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Divider } from '@astryxdesign/core/Divider'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
@@ -190,6 +192,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const dragged = drag ? tickets.find((t) => t.id === drag.id) : undefined
   const opened = openId && openId !== 'new' ? tickets.find((t) => t.id === openId) ?? null : null
   const shown = phone ? [col] : COLUMNS
+  const automation = <AutomationButton phone={phone} board={q.data} busy={setBoard.isPending} onSet={(b) => setBoard.mutate(b)} runNow={runNow} />
 
   return (
     <Section className="hd-kb-page">
@@ -197,23 +200,21 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
         height="fill"
         header={
           <LayoutHeader hasDivider padding={phone ? 3 : 4}>
-            <Toolbar label="Board actions" gap={2} className="hd-kb-toolbar"
-              startContent={phone
-                ? <Selector label="Column" isLabelHidden width={200} value={col} onChange={(v: string) => setCol(v as Column)}
-                    options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
-                : <><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
-              endContent={<HStack gap={2} vAlign="center" className="hd-kb-toolbar-end">
-                <Switch label="Auto" value={!!q.data.auto} isDisabled={setBoard.isPending} onChange={(on: boolean) => setBoard.mutate({ auto: on })} />
-                {q.data.auto && <Selector label="Promote from priority" isLabelHidden width={phone ? 120 : 140} value={String(q.data.minPriority ?? 2)}
-                  onChange={(v: string) => setBoard.mutate({ minPriority: Number(v) })} options={MIN_PRIORITY_OPTIONS} />}
-                {q.data.auto && <Button label={runNow.data ? `Queued ${runNow.data.queued}` : 'Run now'} variant="secondary" size={phone ? 'sm' : 'md'} isLoading={runNow.isPending} onClick={() => runNow.mutate()} />}
-                <Tooltip content="Hand unassigned Ready tickets to free agents (L → planner, else worker), one per 30s, within the Routines cap">
-                  <Switch label="Dispatch" value={!!q.data.dispatch} isDisabled={setBoard.isPending} onChange={(on: boolean) => setBoard.mutate({ dispatch: on })} />
-                </Tooltip>
-                {q.data.dispatch && <StallMinutes value={q.data.stallMin ?? 45} onSave={(n) => setBoard.mutate({ stallMin: n })} />}
-                {q.data.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(q.data.dispatchStatus)}</Text>}
-                <Button label="New ticket" variant="primary" size={phone ? 'sm' : 'md'} onClick={() => setOpenId('new')} />
-              </HStack>} />
+            {phone ? (
+              // WP-64: two rows on phones — column picker, then automation status + New ticket.
+              <VStack gap={2}>
+                <Selector label="Column" isLabelHidden width="100%" value={col} onChange={(v: string) => setCol(v as Column)}
+                  options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
+                <HStack gap={2} vAlign="center" justify="between">
+                  {automation}
+                  <Button label="New ticket" variant="primary" size="sm" onClick={() => setOpenId('new')} />
+                </HStack>
+              </VStack>
+            ) : (
+              <Toolbar label="Board actions" gap={2} className="hd-kb-toolbar"
+                startContent={<><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
+                endContent={<HStack gap={2} vAlign="center">{automation}<Button label="New ticket" variant="primary" onClick={() => setOpenId('new')} /></HStack>} />
+            )}
           </LayoutHeader>
         }
         content={
@@ -243,17 +244,55 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   )
 }
 
+// WP-64: Auto and Dispatch settings live behind one status button — popover on desktop, bottom sheet on phones — so the header stays one row.
+type BoardSettings = { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number }
+function AutomationButton({ phone, board, busy, onSet, runNow }: {
+  phone: boolean; board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void
+  runNow: { data?: { queued: number }; isPending: boolean; mutate: () => void }
+}) {
+  const [open, setOpen] = useState(false)
+  const minLabel = MIN_PRIORITY_OPTIONS.find((o) => o.value === String(board.minPriority ?? 2))?.label
+  const status = [board.auto ? `Auto ${minLabel}` : 'Auto off', board.dispatch && 'Dispatch on'].filter(Boolean).join(' · ')
+  const on = board.auto || board.dispatch
+  const body = (
+    <VStack gap={3} style={{ padding: phone ? '16px 16px calc(env(safe-area-inset-bottom) + 16px)' : 12, width: phone ? undefined : 340 }}>
+      <Switch label="Auto — promote Backlog to Ready" value={!!board.auto} isDisabled={busy} onChange={(v: boolean) => onSet({ auto: v })} />
+      {board.auto && (
+        <HStack gap={2} vAlign="end">
+          <Selector label="Minimum priority" width={phone ? '100%' : 160} value={String(board.minPriority ?? 2)}
+            onChange={(v: string) => onSet({ minPriority: Number(v) })} options={MIN_PRIORITY_OPTIONS} />
+          <Button label={runNow.data ? `Queued ${runNow.data.queued}` : 'Run now'} variant="secondary" isLoading={runNow.isPending} onClick={() => runNow.mutate()} />
+        </HStack>
+      )}
+      <Divider />
+      <VStack gap={1}>
+        <Switch label="Dispatch" value={!!board.dispatch} isDisabled={busy} onChange={(v: boolean) => onSet({ dispatch: v })} />
+        <Text type="supporting" size="sm" color="secondary">Hand unassigned Ready tickets to free agents (L → planner, else worker), one per 30s, within the Routines cap.</Text>
+      </VStack>
+      {board.dispatch && <StallMinutes value={board.stallMin ?? 45} onSave={(n) => onSet({ stallMin: n })} />}
+      {board.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(board.dispatchStatus)}</Text>}
+    </VStack>
+  )
+  const trigger = <Button label={status} variant="secondary" size={phone ? 'sm' : 'md'} icon={<StatusDot variant={on ? 'success' : 'neutral'} label={on ? 'automation on' : 'automation off'} />}
+    onClick={phone ? () => setOpen(true) : undefined} />
+  return phone
+    ? <>{trigger}<BottomSheet label="Automation" isOpen={open} onOpenChange={setOpen} height="auto">{body}</BottomSheet></>
+    : <Popover label="Automation" placement="below" alignment="end" isOpen={open} onOpenChange={setOpen} content={body}>{trigger}</Popover>
+}
+
 // Reconcile flags a Building card whose agent sat idle this long (Dispatch boards only). Saved on blur or Enter.
 function StallMinutes({ value, onSave }: { value: number; onSave: (n: number) => void }) {
   const [v, setV] = useState(String(value))
   useEffect(() => setV(String(value)), [value])
   const save = () => { const n = Number(v); if (Number.isInteger(n) && n >= 1 && n <= 1440 && n !== value) onSave(n); else setV(String(value)) }
   return (
-    <Tooltip content="Flag a Building card whose agent has been idle this many minutes">
-      <div className="hd-kb-stall" onBlur={save} onKeyDown={(e) => e.key === 'Enter' && save()}>
+    <div className="hd-kb-stall" onBlur={save} onKeyDown={(e) => e.key === 'Enter' && save()}>
+      <HStack gap={2} vAlign="center">
+        <Text>Flag stalled after</Text>
         <TextInput label="Stall minutes" isLabelHidden value={v} onChange={setV} width={64} />
-      </div>
-    </Tooltip>
+        <Text>min idle</Text>
+      </HStack>
+    </div>
   )
 }
 
