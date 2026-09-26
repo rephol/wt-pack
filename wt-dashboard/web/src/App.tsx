@@ -67,6 +67,7 @@ import { TypeaheadItem } from '@astryxdesign/core/Typeahead'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
+import { TaskQueue } from './tasks'
 
 // ---------- types (mirror server.mjs) ----------
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown'
@@ -97,7 +98,7 @@ interface Agent {
 }
 type TaskState =
   | 'needs_you' | 'stalled' | 'shipped' | 'merged' | 'in_review'
-  | 'building' | 'plan_ready' | 'planning' | 'done' | 'queued'
+  | 'building' | 'plan_ready' | 'planning' | 'done' | 'queued' | 'up_next'
 interface PR {
   number: number
   url: string
@@ -105,6 +106,8 @@ interface PR {
   isDraft: boolean
   ci: 'pass' | 'fail' | 'pending' | null
   review: string | null
+  behind?: boolean
+  unresolved?: number | null
 }
 interface Task extends Record<string, unknown> {
   id: string
@@ -121,6 +124,9 @@ interface Task extends Record<string, unknown> {
   adHoc: boolean
   worktree?: string | null
   linearState?: string | null
+  mine?: boolean
+  responder?: { key: string; name: string } | null
+  roomNeed?: string
 }
 interface Overview {
   at: string
@@ -184,6 +190,7 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
   building: { label: 'Building', dot: 'accent', group: 'active' },
   plan_ready: { label: 'Plan ready', dot: 'success', group: 'active' },
   planning: { label: 'Planning', dot: 'accent', group: 'active' },
+  up_next: { label: 'Up next', dot: 'neutral', group: 'active' },
   queued: { label: 'Queued', dot: 'neutral', group: 'active' },
   in_review: { label: 'In review', dot: 'accent', group: 'review' },
   merged: { label: 'Merged', dot: 'success', group: 'done' },
@@ -511,7 +518,7 @@ export default function App() {
 
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onOpen={open} selected={openPane} />}
-        {!fullKey && data && page === 'tasks' && <TaskBoard tasks={data.tasks} onOpen={open} selected={openPane} showProject={data.allProjects} suggested={suggested} />}
+        {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />

@@ -870,11 +870,12 @@ async function prs() {
       await run(
         'gh',
         ['pr', 'list', '--state', 'all', '--limit', '50', '--json',
-          'number,title,headRefName,state,isDraft,baseRefName,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit'],
+          'number,title,headRefName,state,isDraft,baseRefName,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit,mergeStateStatus'],
         REPO,
       ),
     )
     await git(REPO, 'fetch', '--quiet', 'origin', 'main').catch(() => {})
+    const threads = await unresolvedThreads(list.filter((p) => p.state === 'OPEN').map((p) => p.number))
     return Promise.all(
       list.map(async (p) => {
         const sha = p.mergeCommit?.oid
@@ -894,6 +895,8 @@ async function prs() {
           url: p.url,
           review: p.reviewDecision || null,
           ci: ciOf(p.statusCheckRollup ?? []),
+          behind: p.mergeStateStatus === 'BEHIND',
+          unresolved: p.state === 'OPEN' ? threads?.[p.number] ?? null : null,
           mergedAt: p.mergedAt,
           updatedAt: p.updatedAt,
           shipped,
@@ -902,6 +905,16 @@ async function prs() {
       }),
     )
   })
+}
+
+// Unresolved review threads per open PR, one batched query; gh has no field for it. null on failure.
+async function unresolvedThreads(numbers) {
+  if (!numbers.length) return {}
+  return cached('prThreads', 60_000, async () => {
+    const q = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){${numbers.map((n) => `p${n}:pullRequest(number:${n}){reviewThreads(first:100){nodes{isResolved}}}`).join(' ')}}}`
+    const j = JSON.parse(await run('gh', ['api', 'graphql', '-f', `query=${q}`, '-F', 'owner={owner}', '-F', 'repo={repo}'], REPO))
+    return Object.fromEntries(numbers.map((n) => [n, j.data.repository[`p${n}`]?.reviewThreads.nodes.filter((t) => !t.isResolved).length ?? null]))
+  }).catch((e) => (console.error('threads:', e.message), null))
 }
 
 function ciOf(checks) {
@@ -916,7 +929,7 @@ const LINEAR_Q = `query {
   issues(first: 50, orderBy: updatedAt, filter: {
     state: { type: { nin: ["completed", "canceled"] } },
     or: [{ assignee: { isMe: { eq: true } } }, { team: { key: { eq: "UMK" } } }]
-  }) { nodes { identifier title priority url updatedAt state { name } } }
+  }) { nodes { identifier title priority url updatedAt assignee { isMe } state { name type } } }
 }`
 async function linear() {
   const key = cfg.get('LINEAR_API_KEY')
@@ -929,7 +942,7 @@ async function linear() {
     })
     const j = await r.json()
     if (!r.ok || j.errors) throw new Error(`linear: ${JSON.stringify(j.errors ?? r.status)}`)
-    return j.data.issues.nodes.map((i) => ({ ...i, state: i.state?.name }))
+    return j.data.issues.nodes.map(({ assignee, ...i }) => ({ ...i, state: i.state?.name, stateType: i.state?.type, mine: Boolean(assignee?.isMe) }))
   })
 }
 
@@ -967,6 +980,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       : worker?.status === 'working' ? 'building'
       : wt?.plan && !worker ? 'plan_ready'
       : planner?.status === 'working' || (wt && !wt.plan) ? 'planning'
+      : issue?.mine && ['unstarted', 'started'].includes(issue.stateType) && !wt && !pr && !ag.length ? 'up_next'
       : 'queued'
     // Old closed-unmerged PR with no live signal: skip, it's noise.
     if (!issue && !wt && pr?.state === 'CLOSED') continue
@@ -994,7 +1008,8 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
   }
   for (const a of agents) {
     if (linked.has(a.key)) continue
-    if (a.status === 'idle' && !a.asks) continue // idle with nothing to show
+    // Only an agent asking something is a task; the rest are visible in Agents.
+    if (!a.asks || a.status === 'working') continue
     const title = (a.recap ?? a.lastPrompt ?? a.name).slice(0, 120)
     tasks.push({
       id: `agent:${a.key}`,
@@ -1002,16 +1017,40 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
       url: null,
       priority: null,
       linearState: null,
-      state: a.asks && a.status !== 'working' ? 'needs_you' : a.status === 'done' ? 'done' : 'building',
+      state: 'needs_you',
       agent: { key: a.key, id: a.id, name: a.name, machine: a.machine },
       project: a.project,
-      question: a.asks ? a.question : null,
+      question: a.question,
       branch: null, worktree: null, plan: null, pr: null,
       updatedAt: new Date(a.statusSince).toISOString(),
       adHoc: true,
     })
   }
   return tasks
+}
+
+// The wt-plan handoff for a task, built only from server-derived fields. mode: 'worker' | 'reassign'.
+export function handoffArgs(t, mode) {
+  const err = (status, m) => Object.assign(new Error(m), { status })
+  if (mode !== 'worker' && mode !== 'reassign') throw err(400, 'mode must be worker or reassign')
+  if (t.state !== (mode === 'worker' ? 'plan_ready' : 'stalled')) throw err(409, `task is ${t.state}`)
+  if (!t.plan || !t.worktree) throw err(400, 'task has no plan or worktree')
+  const prompt = `Use wt-work to implement ${t.plan} to its Definition of Done.\n\nWork in ${t.worktree} on ${t.branch}. Do not cd to the main checkout.\n\nThen wt-ship.\n`
+  return { args: [...(mode === 'reassign' ? ['--new'] : []), '--task', `${t.id} ${t.title}`.slice(0, 80), t.worktree], prompt }
+}
+const HANDOFF_SH = join(homedir(), '.claude', 'skills', 'wt-handoff', 'scripts', 'handoff.sh')
+async function handoffTask(id, mode) {
+  const t = (await overview()).tasks.find((x) => x.id === id)
+  if (!t) throw Object.assign(new Error('unknown task'), { status: 404 })
+  const { args, prompt } = handoffArgs(t, mode)
+  const out = await new Promise((resolve, reject) => {
+    const child = execFile(HANDOFF_SH, args, { cwd: t.worktree, maxBuffer: 1 << 20, timeout: 120_000 }, (err, o, stderr) =>
+      err ? reject(new Error(stderr || err.message)) : resolve(o))
+    child.stdin.end(prompt)
+  })
+  store.delete('overview'); store.delete('agents:local')
+  const [kind, a, b] = out.trim().split('\n')[0].split(' ')
+  return kind === 'created' ? { target: a, pane: b } : { target: null, pane: a }
 }
 
 // Per-source health for /api/health: last success, last error. Filled by every overview.
@@ -1870,6 +1909,12 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/agents/spawn' && req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
         const [code, out] = await spawnAgent(JSON.parse((await body(req)) || '{}')).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
+        return send(res, code, out)
+      }
+      if (parts[0] === 'api' && parts[1] === 'tasks' && parts[3] === 'handoff' && parts.length === 4 && req.method === 'POST') {
+        if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
+        const b = JSON.parse((await body(req)) || '{}')
+        const [code, out] = await handoffTask(decodeURIComponent(parts[2]), b.mode).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
         return send(res, code, out)
       }
       if (parts[0] === 'api' && parts[1] === 'agents') {

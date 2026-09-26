@@ -659,5 +659,25 @@ test('deriveTasks: a worker in the main checkout joins its ticket through its ti
     cwd: '/nowhere/main', tags: { task: 'UMK-1186 Admin variants' }, asks: false, project: 'umkmall', recap: null, lastPrompt: null }
   const t = deriveTasks({ agents: [a], worktrees: [], prs: [], issues: [] })
   assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc, x.agent?.name]), [['UMK-1186', 'building', false, 'w-02']])
-  assert.equal(deriveTasks({ agents: [{ ...a, tags: {} }], worktrees: [], prs: [], issues: [] })[0].adHoc, true)
+  assert.equal(deriveTasks({ agents: [{ ...a, tags: {} }], worktrees: [], prs: [], issues: [] }).length, 0) // untagged working agent: no ad-hoc row
+})
+
+test('deriveTasks: up_next for my Todo issues only; ad-hoc rows only when an agent asks', () => {
+  const issue = (identifier, mine) => ({ identifier, title: identifier, url: null, priority: 2, updatedAt: '2026-09-26T00:00:00Z', state: 'Todo', stateType: 'unstarted', mine })
+  const ag = (id, status, asks) => ({ key: `m/${id}`, id, name: id, machine: 'm', local: true, pool: 'worker', status, statusSince: Date.now(), cwd: '/x', tags: {}, asks, question: asks ? 'ok?' : null, project: 'p', recap: 'r', lastPrompt: null })
+  const t = deriveTasks({ agents: [ag('p1', 'working', false), ag('p2', 'idle', true)], worktrees: [], prs: [], issues: [issue('UMK-1', true), issue('UMK-2', false)] })
+  assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc]), [['UMK-1', 'up_next', false], ['UMK-2', 'queued', false], ['agent:m/p2', 'needs_you', true]])
+})
+
+test('handoffArgs: worker/reassign, never --mcp, state-gated', async () => {
+  const { handoffArgs } = await import('./server.mjs')
+  const t = { id: 'UMK-9', title: 'Thing', state: 'plan_ready', plan: 'docs/plans/x.md', worktree: '/wt/umk-9', branch: 'umk-9' }
+  const w = handoffArgs(t, 'worker')
+  assert.deepEqual(w.args, ['--task', 'UMK-9 Thing', '/wt/umk-9'])
+  assert.match(w.prompt, /^Use wt-work to implement docs\/plans\/x.md .*\n\nWork in \/wt\/umk-9 on umk-9\. .*\n\nThen wt-ship\.\n$/s)
+  assert.deepEqual(handoffArgs({ ...t, state: 'stalled' }, 'reassign').args[0], '--new')
+  assert.ok(![w, handoffArgs({ ...t, state: 'stalled' }, 'reassign')].some((r) => r.args.includes('--mcp')))
+  assert.throws(() => handoffArgs({ ...t, state: 'building' }, 'worker'), (e) => e.status === 409)
+  assert.throws(() => handoffArgs(t, 'reassign'), (e) => e.status === 409)
+  assert.throws(() => handoffArgs({ ...t, plan: null }, 'worker'), (e) => e.status === 400)
 })
