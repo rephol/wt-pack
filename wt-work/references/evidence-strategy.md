@@ -18,6 +18,7 @@ enumerate — a plan's test list is rarely complete.
 | An existing test is over-mocked and misses the real chain | Strengthen it narrowly, then verify it fails for the right reason |
 | No existing test covers the behaviour | Add the smallest focused failing test that proves the slice |
 | Testing is genuinely inappropriate | Record the no-test exception **and** the replacement verification, before marking complete |
+| Needs a real browser (rendered UI, a flow, a screenshot) | Use the `agent-browser` skill; fall back to other browser tooling only when it is not installed, and say which you used |
 
 For behaviour-bearing changes, default to test-first or characterization-first whenever the current code and
 its tests make that practical — even when the plan says nothing about it.
