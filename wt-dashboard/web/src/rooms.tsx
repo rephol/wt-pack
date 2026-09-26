@@ -1,4 +1,5 @@
 // Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
+import { roomInProject } from './switcherData'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -73,7 +74,7 @@ export function useRoomsList() {
   return useQuery({ queryKey: ['rooms'], queryFn: () => api<{ rooms: Room[]; settings: RoomSettings; suggestions: Suggestion[]; pending: Record<string, number> }>('/api/rooms'), refetchInterval: 10_000 })
 }
 
-export function RoomsPage({ slug, agents, onSelect, onOpenAgent }: { slug: string | null; agents: RoomAgent[]; onSelect: (slug: string | null) => void; onOpenAgent: (key: string) => void }) {
+export function RoomsPage({ slug, project = 'all', agents, onSelect, onOpenAgent }: { slug: string | null; project?: string; agents: RoomAgent[]; onSelect: (slug: string | null) => void; onOpenAgent: (key: string) => void }) {
   const q = useRoomsList()
   const qc = useQueryClient()
   const toast = useToast()
@@ -91,8 +92,9 @@ export function RoomsPage({ slug, agents, onSelect, onOpenAgent }: { slug: strin
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
   })
   if (room && q.data) return <RoomView key={room.slug} room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} onOpenAgent={onOpenAgent} />
-  const live = (q.data?.rooms ?? []).filter((r) => !r.archived)
-  const archived = (q.data?.rooms ?? []).filter((r) => r.archived)
+  const mine = (q.data?.rooms ?? []).filter((r) => roomInProject(r, project))
+  const live = mine.filter((r) => !r.archived)
+  const archived = mine.filter((r) => r.archived)
   return (
     <VStack gap={4} isScrollable style={{ flex: 1, minHeight: 0 }}>
       {q.isError && <Banner status="error" title="Could not load rooms" description={String(q.error)} />}

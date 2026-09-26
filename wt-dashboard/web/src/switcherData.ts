@@ -9,7 +9,10 @@ export interface SwAgent {
   statusSince: number; lastActivity?: number; recap: string | null; question: string | null; task: string | null
   tags?: Record<string, string> // tags.task: the handoff label, "UMK-1192 Tailwind v4…"
 }
-export interface SwRoom { slug: string; title: string; needsYou?: { agent: string; text: string }[]; archived?: boolean }
+// The sidebar project selector applied to rooms: 'all' shows every room; a project shows only its own rooms
+// (a room without a project appears under All only). Shared by the sidebar list, Rooms page and switcher.
+export const roomInProject = (r: { project?: string | null }, project: string) => project === 'all' || r.project === project
+export interface SwRoom { slug: string; title: string; project?: string | null; needsYou?: { agent: string; text: string }[]; archived?: boolean }
 export type SwItem = SearchableItem<{ group: string; kind: 'agent'; agent: SwAgent; line: string } | { group: string; kind: 'room'; room: SwRoom; line: string }>
 
 // The task label with its lifecycle state (planner: planning → handed to <worker> → done (PR #N) / blocked: …).

@@ -47,3 +47,12 @@ test('taskLabel: task · task_state; the state alone is never shown', () => {
   assert.equal(taskLabel({ task: 'UMK-1 Button' }), 'UMK-1 Button')
   assert.equal(taskLabel({ task_state: 'planning' }), undefined)
 })
+
+test('roomInProject: All shows every room; a project shows only its rooms (projectless rooms under All only)', async () => {
+  const { roomInProject } = await import('./switcherData.ts')
+  const rs = [{ slug: 'a', project: 'umkmall' }, { slug: 'b', project: 'wt-pack' }, { slug: 'c', project: null }, { slug: 'd' }]
+  const pick = (p: string) => rs.filter((r) => roomInProject(r, p)).map((r) => r.slug)
+  assert.deepEqual(pick('all'), ['a', 'b', 'c', 'd'])
+  assert.deepEqual(pick('wt-pack'), ['b'])
+  assert.deepEqual(pick('umkmall'), ['a'])
+})

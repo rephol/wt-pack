@@ -50,7 +50,7 @@ import { openInbox } from './inbox'
 import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
-import { taskLabel } from './switcherData'
+import { taskLabel, roomInProject } from './switcherData'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
 import { Grid } from '@astryxdesign/core/Grid'
@@ -437,7 +437,7 @@ export default function App() {
     setSideListState(s)
     try { localStorage.setItem('nav-list', s) } catch { /* private mode */ }
   }
-  const sideRooms = (roomsQ.data?.rooms ?? []).filter((r) => !r.archived && (project === 'all' || r.project === project))
+  const sideRooms = (roomsQ.data?.rooms ?? []).filter((r) => !r.archived && roomInProject(r, project))
     .sort((x, y) => Number(Boolean(y.needsYou?.length)) - Number(Boolean(x.needsYou?.length)))
 
   const nav = (
@@ -523,7 +523,7 @@ export default function App() {
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
           : <Banner status="info" title="Terminals are off" description="Turn them on in Settings › Terminals, from http://127.0.0.1 on this machine." />)}
-        {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
+        {page === 'rooms' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><RoomsPage slug={roomSlug} project={project} agents={all?.agents ?? []} onSelect={(sl) => { location.hash = sl ? `rooms/${encodeURIComponent(sl)}` : 'rooms' }} onOpenAgent={open} /></div>}
       </VStack>
       </LayoutContent>
         }
@@ -549,7 +549,7 @@ export default function App() {
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
       <PwaHost openInbox={() => openInbox()} />
-      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} loading={!all} phone={phone} hidden={fabHidden}
+      <QuickSwitcher agents={all?.agents ?? []} rooms={(roomsQ.data?.rooms ?? []).filter((r) => roomInProject(r, project))} loading={!all} phone={phone} hidden={fabHidden}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }} />
     </AppShell>
   )
