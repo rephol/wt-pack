@@ -75,7 +75,7 @@ export function useRoomsList() {
   return useQuery({ queryKey: ['rooms'], queryFn: () => api<{ rooms: Room[]; settings: RoomSettings; suggestions: Suggestion[]; pending: Record<string, number> }>('/api/rooms'), refetchInterval: 10_000 })
 }
 
-export function RoomsPage({ slug, project = 'all', agents, onSelect, onOpenAgent }: { slug: string | null; project?: string; agents: RoomAgent[]; onSelect: (slug: string | null) => void; onOpenAgent: (key: string) => void }) {
+export function RoomsPage({ slug, project = 'all', projects = [], agents, onSelect, onOpenAgent, onProject }: { slug: string | null; project?: string; projects?: string[]; agents: RoomAgent[]; onSelect: (slug: string | null) => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void }) {
   const q = useRoomsList()
   const qc = useQueryClient()
   const toast = useToast()
@@ -92,7 +92,7 @@ export function RoomsPage({ slug, project = 'all', agents, onSelect, onOpenAgent
     mutationFn: (s: string) => api(`/api/rooms/${s}`, { method: 'PATCH', body: JSON.stringify({ archived: false }) }),
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
   })
-  if (room && q.data) return <RoomView key={room.slug} room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} onOpenAgent={onOpenAgent} />
+  if (room && q.data) return <RoomView key={room.slug} room={room} agents={agents} profile={q.data.settings.profile} projects={projects} onBack={() => onSelect(null)} onOpenAgent={onOpenAgent} onProject={onProject} />
   const mine = (q.data?.rooms ?? []).filter((r) => roomInProject(r, project))
   const live = mine.filter((r) => !r.archived)
   const archived = mine.filter((r) => r.archived)
@@ -192,7 +192,7 @@ function mentionPlugin(agents: RoomAgent[], profile: Profile, colorOf: (a: RoomA
   }
 }
 
-function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; agents: RoomAgent[]; profile: Profile; onBack: () => void; onOpenAgent: (key: string) => void }) {
+function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, onProject }: { room: Room; agents: RoomAgent[]; profile: Profile; projects?: string[]; onBack: () => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void }) {
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [typed, setTyped] = useState('')
@@ -377,6 +377,12 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
                 ...room.members.map((n) => byName.get(n)).filter((a): a is RoomAgent => Boolean(a)).map((a) => ({ value: a.key, label: a.name, description: a.status }))]}
               onChange={(v) => patch.mutate({ responder: v || null })} />
           )}
+          {!room.archived && (
+            <Selector label="Project" width="100%" value={room.project ?? ''} hasSearch
+              description="Which project's filter shows this room, and the project of its 'needs you' items. Dispatch reports go to the room named after the project, or the board's Report to."
+              options={[{ value: '', label: 'None' }, ...[...new Set([...projects, ...(room.project ? [room.project] : [])])].map((p) => ({ value: p, label: p }))]}
+              onChange={(v) => patch.mutate({ project: v || null })} />
+          )}
           {!room.archived && <Switch label="All members hear the user" description="Each message costs one turn per member." value={Boolean(room.broadcast)} onChange={(v) => patch.mutate({ broadcast: v })} />}
           {!room.archived && <Switch label="Paused" description="Agents receive nothing until resumed." value={room.paused} onChange={(v) => patch.mutate({ paused: v })} />}
           <Divider />
@@ -396,6 +402,8 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
       <HStack gap={1} align="center" style={{ minWidth: 0, flexWrap: 'nowrap' }}>
         <IconButton icon={<span aria-hidden style={{ fontSize: 20, lineHeight: 1 }}>‹</span>} label="Back to rooms" size="sm" variant="ghost" onClick={onBack} />
         <Heading level={3} maxLines={1} style={{ minWidth: 0 }}>{`#${room.slug}`}</Heading>
+        {/* WP-89: the linked project; the chip switches the dashboard to that project. */}
+        {room.project && <Button label={room.project} size="sm" variant="secondary" tooltip={`Linked project · switch the dashboard to ${room.project}`} onClick={() => onProject?.(room.project!)} style={{ flexShrink: 1, minWidth: 0 }} />}
         {room.paused && !room.archived && <Badge variant="warning" label="paused" />}
         {room.broadcast && !room.archived && <Badge variant="blue" label="broadcast" />}
         {room.archived && <Badge label="archived" />}
