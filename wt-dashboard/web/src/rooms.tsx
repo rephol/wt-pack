@@ -221,7 +221,7 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
       el.focus(); getSelection()?.selectAllChildren(el); getSelection()?.collapseToEnd()
       // An @author chip, as the @ menu would insert it; not for your own message, nor twice.
       const at = `@${m.author.name}`, h = inputRef.current
-      if (m.author.kind !== 'user' && h && !h.getValue().includes(at)) h.insertToken({ value: at, label: at, variant: 'blue' })
+      if (m.author.kind !== 'user' && h && !h.getValue().includes(at)) { h.insertToken({ value: at, label: at, variant: 'blue' }); el.dispatchEvent(new Event('input', { bubbles: true })) } // insertToken emits no change: sync the placeholder and draft
     }, 50)
   }, [])
   // Dismiss the reply; drop the prefilled @author chip too, unless the user has typed more since.
@@ -429,8 +429,8 @@ function RoomView({ room, agents, profile, onBack, onOpenAgent }: { room: Room; 
             </>}
             drawer={atts.length || replyTo ? (
               <ChatComposerDrawer>
-                {replyTo && <HStack gap={1} align="center">
-                  <Text type="supporting" size="sm" maxLines={1}>{`↪ Replying to ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text>
+                {replyTo && <HStack gap={1} align="center" style={{ width: 0, flex: '1 1 100%' }}>{/* width 0: the drawer sizes to content, so a long quote would push the x off-screen */}
+                  <div style={{ flex: 1, minWidth: 0 }}><Text type="supporting" size="sm" maxLines={1}>{`↪ Replying to ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text></div>
                   <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={cancelReply} />
                 </HStack>}
                 {atts.length > 0 && <HStack gap={2} wrap="wrap">
