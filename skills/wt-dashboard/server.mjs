@@ -2206,7 +2206,9 @@ const server = http.createServer(async (req, res) => {
       const parts = url.pathname.split('/').filter(Boolean)
       if (needsSession(req.method, url.pathname, req.headers) && !hasSession(req.headers.cookie)) {
         res.writeHead(403, { 'content-type': 'application/json', 'x-herdr-session': 'missing' })
-        return res.end(JSON.stringify({ error: 'session expired — reload the dashboard' }))
+        // A CLI (no cookie, no pane) gets told what it needs; the page keys on the header, not the text.
+        const cli = !req.headers.cookie && !req.headers['x-herdr-pane']
+        return res.end(JSON.stringify({ error: cli ? 'writes need the dashboard page or a herdr agent pane (HERDR_PANE_ID); run this from an agent' : 'session expired — reload the dashboard' }))
       }
       if (url.pathname === '/api/health') return send(res, 200, await health())
       if (url.pathname === '/api/events') return streamEvents(req, res)

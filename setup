@@ -55,7 +55,9 @@ market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let
 # plugin_ok [enabled]: wt-memory@wt-pack is installed (and enabled).
 plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
 # Install hint for a missing package, for this OS.
-pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; then echo "sudo apt-get install -y $1"; elif has dnf; then echo "sudo dnf install -y $1"; else echo "install $1 with your package manager"; fi; }
+# sudo only when needed: root (a container) often has no sudo at all.
+SUDO=$([ "$(id -u)" -eq 0 ] && echo "" || echo "sudo ")
+pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; then echo "${SUDO}apt-get install -y $1"; elif has dnf; then echo "${SUDO}dnf install -y $1"; else echo "install $1 with your package manager"; fi; }
 # The OTHER wt-pack checkout the existing skill links point into ("" when none, or when it is this one).
 link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(root_of "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
 # herdr: report, never install. $1 = bad|opt (how a missing herdr counts); $2 = 1 also runs `herdr config check`.
@@ -71,6 +73,8 @@ herdr_check() {
   esac
   [ "${2:-0}" = 1 ] || return 0
   if herdr config check >/dev/null 2>&1; then ok "herdr config"; else opt "herdr config check reports problems — run: herdr config check"; fi
+  # The dashboard reads agents from the herdr server; without one its Overview cannot load.
+  if herdr status server 2>/dev/null | grep -q '^status: running'; then ok "herdr server running"; else opt "herdr server not running — start it with: herdr (the dashboard needs it for agents)"; fi
 }
 built() { [ -f "$DASH/web/dist/index.html" ] && [ -z "$(find "$DASH/web/src" "$DASH/web/index.html" "$DASH/web/package.json" -newer "$DASH/web/dist/index.html" 2>/dev/null | head -1)" ]; }
 
@@ -84,7 +88,7 @@ doctor() {
   if has jq; then ok "jq"; else bad "jq — $(pkg jq)"; fi
   if ! has gh; then bad "gh — $(pkg gh)"
   elif gh auth status >/dev/null 2>&1; then ok "gh (authenticated)"
-  else bad "gh not logged in — run: ! gh auth login"; fi
+  else bad "gh not logged in — run: gh auth login"; fi
   herdr_check bad 1
   if has claude; then ok "claude"; else bad "claude (Claude Code) not on PATH"; fi
 
