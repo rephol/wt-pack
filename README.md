@@ -103,8 +103,19 @@ an install that belongs to another checkout, and running it again changes nothin
 ./setup uninstall    # service, plugin, links; keeps data and keys (--purge deletes dashboard data/config)
 ```
 
-Inside Claude Code, "set up wt-pack" runs the `wt-setup` skill, which drives the same script. Linux works
-without launchd, Keychain or the Tauri app; `doctor` lists what to do by hand.
+Inside Claude Code, "set up wt-pack" runs the `wt-setup` skill, which drives the same script.
+
+**On Linux** there is no launchd, Keychain or Tauri app; `doctor` lists what to do by hand. In short:
+
+```sh
+sudo apt-get install -y jq gh                                   # drop sudo when you are root
+curl -fsSL https://herdr.dev/install.sh | sh                    # then add ~/.local/bin to PATH
+gh auth login
+herdr                                                           # the herdr server must be running
+npm --prefix ~/Work/projects/wt-pack/skills/wt-dashboard start  # the dashboard, instead of launchd
+```
+
+`test/docker/` runs this install in a clean `node:22` container.
 
 ## Skills
 
