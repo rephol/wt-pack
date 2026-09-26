@@ -90,7 +90,7 @@ export function RoomsPage({ slug, agents, onSelect, onOpenAgent }: { slug: strin
     mutationFn: (s: string) => api(`/api/rooms/${s}`, { method: 'PATCH', body: JSON.stringify({ archived: false }) }),
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
   })
-  if (room && q.data) return <RoomView room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} onOpenAgent={onOpenAgent} />
+  if (room && q.data) return <RoomView key={room.slug} room={room} agents={agents} profile={q.data.settings.profile} onBack={() => onSelect(null)} onOpenAgent={onOpenAgent} />
   const live = (q.data?.rooms ?? []).filter((r) => !r.archived)
   const archived = (q.data?.rooms ?? []).filter((r) => r.archived)
   return (
