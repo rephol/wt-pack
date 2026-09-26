@@ -4,14 +4,16 @@
 //   wt-memory context [--role R] [--project P] [--cwd D]   # merged markdown: global → role → project
 //   wt-memory hash    [same flags]                         # short content hash of that output
 //   wt-memory path    [global | role R | project P]        # the store dir, or one file's path
+//   wt-memory remember "<note>" [--scope role|project|global] [--role R] [--project P]
+//   wt-memory forget <id> · accept <id> · reject <id> · list [--scope S] [--json]
 //
 // Store: $WT_MEMORY_HOME or ~/.config/wt-memory → global.md, roles/<role-id>.md, projects/<repo>.md.
 // Without flags the scope is inferred: $HERDR_PANE_ID → `herdr pane get` → tokens role/project and the pane's
 // cwd; project falls back to the git repo of the cwd (a worktree resolves to its MAIN repo, as the dashboard does).
 // Runs inside agent hooks, so `context`/`hash` never fail loudly: any error → exit 0 and empty output.
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { join, basename, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -25,11 +27,14 @@ const file = (kind, name) => {
 const read = (f) => { try { return readFileSync(f, 'utf8').trim() } catch { return '' } }
 // A file holding only HTML comments (the template) counts as empty.
 const body = (s) => (s.replace(/<!--[\s\S]*?-->/g, '').trim() ? s : '')
+// Agent-written entries are one bullet line each, with a trailer the injected text never shows.
+const TRAILER = / *<!-- wtm:([^>]*?) *-->/
+const strip = (s) => s.replace(/ *<!-- wtm:[^>]*?-->/g, '')
 
 function merge({ role, project }) {
-  const parts = [['Global preferences', body(read(file('global')))]]
-  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body(read(file('role', role)))])
-  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body(read(file('project', project)))])
+  const parts = [['Global preferences', body(strip(read(file('global'))))]]
+  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body(strip(read(file('role', role))))])
+  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body(strip(read(file('project', project))))])
   return parts.filter(([, t]) => t).map(([h, t]) => `## ${h}\n\n${t}`).join('\n\n')
 }
 
@@ -50,9 +55,90 @@ function infer({ role, project, cwd }) {
 }
 
 function flags(argv) {
-  const o = {}
-  for (let i = 0; i < argv.length; i++) if (/^--(role|project|cwd)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
+  const o = { _: [] }
+  for (let i = 0; i < argv.length; i++) {
+    if (/^--(role|project|cwd|scope)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
+    else if (argv[i] === '--json') o.json = true
+    else o._.push(argv[i])
+  }
   return o
+}
+
+// ---- agent-maintained entries ----
+const PENDING = join(HOME, 'pending')
+const atomic = (f, text) => { mkdirSync(dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; writeFileSync(t, text); renameSync(t, f) }
+const norm = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+const today = () => new Date().toISOString().slice(0, 10)
+function author() {
+  const pane = process.env.HERDR_PANE_ID
+  if (!pane) return process.env.USER || 'unknown'
+  try { return JSON.parse(sh('herdr', ['agent', 'list'])).result.agents.find((a) => a.pane_id === pane)?.name || pane } catch { return pane }
+}
+// Every scope file present: [{scope, name, file}].
+function files() {
+  const out = [{ scope: 'global', name: null, file: file('global') }]
+  for (const [scope, dir] of [['role', 'roles'], ['project', 'projects']])
+    try { for (const f of readdirSync(join(HOME, dir))) if (f.endsWith('.md') && NAME.test(f.slice(0, -3))) out.push({ scope, name: f.slice(0, -3), file: join(HOME, dir, f) }) } catch {}
+  return out
+}
+const attrs = (t) => Object.fromEntries(t.split(/\s+/).filter(Boolean).map((kv) => kv.split('=')))
+function entries() {
+  const out = []
+  for (const f of files()) for (const line of read(f.file).split('\n')) {
+    const m = line.match(TRAILER)
+    if (m) { const a = attrs(m[1]); out.push({ ...f, id: a.id, by: a.by, at: a.at, text: strip(line).replace(/^\s*[-*]\s*/, '') }) }
+  }
+  return out
+}
+function pending() {
+  try { return readdirSync(PENDING).filter((f) => f.endsWith('.json')).map((f) => { try { return { ...JSON.parse(readFileSync(join(PENDING, f), 'utf8')), scope: 'global', pending: true } } catch { return null } }).filter(Boolean) } catch { return [] }
+}
+const line = (e) => `- ${e.text} <!-- wtm:id=${e.id} by=${e.by} at=${e.at} -->`
+function append(f, e) {
+  const cur = read(f)
+  atomic(f, `${cur ? cur + '\n' : ''}${line(e)}\n`)
+}
+// Near-identical: same words ignoring case and punctuation, in the target file (any line) or pending.
+const dup = (f, text, extra = []) => [...read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')), ...extra].some((l) => norm(l) === norm(text))
+
+function remember(o) {
+  const text = o._.join(' ').replace(/\s+/g, ' ').trim()
+  if (!text) throw new Error('remember: a note is required')
+  if (text.includes('<!--') || text.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
+  const { role, project } = infer(o)
+  const scope = o.scope || (project ? 'project' : role ? 'role' : null)
+  if (!['role', 'project', 'global'].includes(scope)) throw new Error('remember: --scope role|project|global (none inferable)')
+  const name = scope === 'role' ? role : scope === 'project' ? project : null
+  if (scope !== 'global' && !name) throw new Error(`remember: no ${scope} inferable; pass --${scope}`)
+  const f = file(scope, name)
+  const e = { id: randomBytes(3).toString('hex'), by: author().replace(/\s+/g, '_'), at: today(), text }
+  if (scope === 'global') {
+    if (dup(f, text, pending().map((p) => p.text))) return console.log('already remembered (global)')
+    atomic(join(PENDING, `${e.id}.json`), JSON.stringify(e, null, 2) + '\n')
+    return console.log(`proposed (awaiting approval) ${e.id}: ${text}`)
+  }
+  if (dup(f, text)) return console.log(`already remembered (${scope} ${name})`)
+  append(f, e)
+  console.log(`remembered (${scope} ${name}) ${e.id}: ${text}`)
+}
+const ID = /^[0-9a-f]{6}$/
+function forget(id) {
+  if (!ID.test(id ?? '')) throw new Error('bad id')
+  for (const f of files()) {
+    const lines = read(f.file).split('\n')
+    const keep = lines.filter((l) => attrs(l.match(TRAILER)?.[1] ?? '').id !== id)
+    if (keep.length !== lines.length) { atomic(f.file, keep.join('\n').trim() ? keep.join('\n').trimEnd() + '\n' : ''); return console.log(`forgot ${id}`) }
+  }
+  try { unlinkSync(join(PENDING, `${id}.json`)); return console.log(`rejected ${id}`) } catch {}
+  throw new Error(`no entry ${id}`)
+}
+function accept(id) {
+  if (!ID.test(id ?? '')) throw new Error('bad id')
+  const p = join(PENDING, `${id}.json`)
+  const e = JSON.parse(readFileSync(p, 'utf8'))
+  if (!dup(file('global'), e.text)) append(file('global'), e)
+  unlinkSync(p)
+  console.log(`accepted ${id}: ${e.text}`)
 }
 
 {
@@ -62,10 +148,22 @@ function flags(argv) {
     try { out = merge(infer(flags(rest))) } catch {}
     if (cmd === 'hash') console.log(createHash('sha256').update(out).digest('hex').slice(0, 16))
     else if (out) console.log(out)
+  } else if (['remember', 'forget', 'accept', 'reject', 'list'].includes(cmd)) {
+    try {
+      const o = flags(rest)
+      if (cmd === 'remember') remember(o)
+      else if (cmd === 'forget' || cmd === 'reject') forget(o._[0])
+      else if (cmd === 'accept') accept(o._[0])
+      else {
+        const all = [...entries(), ...pending()].filter((e) => !o.scope || e.scope === o.scope)
+        if (o.json) console.log(JSON.stringify(all.map(({ file: _, ...e }) => e)))
+        else for (const e of all) console.log(`${e.id}  ${e.pending ? 'global (pending)' : e.scope + (e.name ? ' ' + e.name : '')}  ${e.by} ${e.at}  ${e.text}`)
+      }
+    } catch (e) { console.error(e.message); process.exit(1) }
   } else if (cmd === 'path') {
     try { console.log(rest[0] ? file(rest[0], rest[1]) : HOME) } catch (e) { console.error(e.message); process.exit(2) }
   } else {
-    console.error(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(2, 6).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
+    console.error(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(2, 8).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
     process.exit(2)
   }
 }

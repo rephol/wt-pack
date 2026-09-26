@@ -20,6 +20,22 @@ Plain markdown, one file per scope, merged global → role → project:
   Never fails loudly: it runs in hooks.
 - `hash [same flags]` — 16-hex hash of that output, for change detection.
 - `path [global | role R | project P]` — the store dir, or one file.
+- `remember "<note>" [--scope role|project|global] [--role R] [--project P]` — agents maintain memory
+  themselves. Default scope: project if inferable, else role. Appends one bullet
+  `- <note> <!-- wtm:id=ab12cd by=<agent> at=YYYY-MM-DD -->` (author = herdr agent name of `$HERDR_PANE_ID`);
+  `context` strips the trailer. Near-identical notes (same words ignoring case/punctuation) are skipped.
+  **Global is never written directly**: it lands in `pending/<id>.json` and prints "proposed (awaiting
+  approval)" until the user accepts it in the dashboard inbox (or `accept <id>` / `reject <id>`).
+- `forget <id>` — remove an entry (or a pending proposal). `list [--scope S] [--json]` — agent entries and
+  pending proposals. Free-form text you write by hand is never touched. Writes are tmp+rename.
+
+**When an agent should remember** (the plugin tells Claude this at SessionStart): the user states a standing
+preference or corrects a recurring behaviour ("always / never / from now on / stop doing") → a concise
+imperative, role or project scope; global only for what holds across every project and role. Not one-off
+task details. Tell the user in one line what was remembered.
+
+**Dashboard:** role/project entries raise an inbox notice with Undo (forget); global proposals raise one with
+Accept / Reject. Settings › Memory lists agent entries (author, date, remove) and pending proposals.
 
 **Claude Code:** the `wt-memory` plugin (`claude-plugin/`, marketplace `wt-pack` at the repo root) injects
 `context` at SessionStart and, on UserPromptSubmit, re-injects it prefixed "Preferences updated:" only when its

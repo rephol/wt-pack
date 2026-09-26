@@ -52,3 +52,23 @@ test('hash changes with content', () => {
   assert.notEqual(run(['hash', '--cwd', '/']), a)
   assert.match(a, /^[0-9a-f]{16}$/)
 })
+test('remember / dedupe / list / forget, and context hides trailers', () => {
+  const h = mkdtempSync(join(tmpdir(), 'wt-memory-r-'))
+  const r = (args) => run(args, { WT_MEMORY_HOME: h })
+  assert.match(r(['remember', 'Never push to main', '--project', 'demo']), /^remembered \(project demo\) [0-9a-f]{6}/)
+  assert.match(r(['remember', 'never push to MAIN!', '--project', 'demo']), /already remembered/)
+  const [e] = JSON.parse(r(['list', '--json']))
+  assert.equal(e.text, 'Never push to main')
+  assert.equal(r(['context', '--project', 'demo', '--cwd', '/']), '## Project preferences (demo)\n\n- Never push to main')
+  r(['forget', e.id])
+  assert.equal(r(['context', '--project', 'demo', '--cwd', '/']), '')
+})
+test('global is a proposal until accepted', () => {
+  const h = mkdtempSync(join(tmpdir(), 'wt-memory-g-'))
+  const r = (args) => run(args, { WT_MEMORY_HOME: h })
+  const id = r(['remember', 'Answer in English', '--scope', 'global']).match(/awaiting approval\) ([0-9a-f]{6})/)[1]
+  assert.equal(r(['context', '--cwd', '/']), '')
+  r(['accept', id])
+  assert.equal(r(['context', '--cwd', '/']), '## Global preferences\n\n- Answer in English')
+  assert.equal(JSON.parse(r(['list', '--json'])).filter((e) => e.pending).length, 0)
+})
