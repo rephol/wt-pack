@@ -81,8 +81,7 @@ You need macOS or Linux, Node ≥ 22.13, Git, [`gh`](https://cli.github.com),
 [herdr](https://herdr.dev) and Claude Code.
 
 ```sh
-gh auth login                                   # the repo is private
-gh repo clone rephol/wt-pack ~/Work/projects/wt-pack
+git clone https://github.com/rephol/wt-pack.git ~/Work/projects/wt-pack
 ~/Work/projects/wt-pack/setup
 ```
 
