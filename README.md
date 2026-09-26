@@ -15,6 +15,7 @@
   <img alt="Node 22.13+" src="https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white">
   <img alt="macOS first" src="https://img.shields.io/badge/macOS-first-000000?logo=apple&logoColor=white">
   <img alt="Linux works" src="https://img.shields.io/badge/Linux-works-FCC624?logo=linux&logoColor=black">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
@@ -22,7 +23,8 @@
   <a href="#the-dashboard">Dashboard</a> ·
   <a href="#skills">Skills</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="docs/features.md">Feature reference</a>
+  <a href="docs/features.md">Feature reference</a> ·
+  <a href="#contributing">Contributing</a>
 </p>
 
 ---
@@ -144,3 +146,13 @@ Each directory under `skills/` is one skill, linked as `~/.claude/skills/<name>`
 Everything else, including what every feature does, where it lives and its defaults, is in
 **[docs/features.md](docs/features.md)**. Operator detail (the service, data layout, rollback) is in
 [skills/wt-dashboard/README.md](skills/wt-dashboard/README.md).
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the repo layout, running
+the tests, and the rules a change follows (one commit per skill, backward-compatible CLIs, docs/features.md in
+the same change).
+
+## License
+
+[MIT](LICENSE) © 2026 rephol
