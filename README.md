@@ -8,8 +8,21 @@ the others invoke by path.
 
 ## Install
 
-    git clone <this repo> ~/Work/projects/wt-pack
-    for d in ~/Work/projects/wt-pack/wt-*; do ln -s "$d" ~/.claude/skills/; done
+The repo is private, so log in to GitHub first (`gh auth login`), then:
+
+    gh repo clone rephol/wt-pack ~/Work/projects/wt-pack && ~/Work/projects/wt-pack/setup
+
+`setup` links every `wt-*` skill into `~/.claude/skills`, installs the wt-memory plugin, builds the
+dashboard and runs it under launchd (macOS), then prints a doctor report. It asks once before installing
+missing Homebrew packages (`--yes` skips the question) and never repoints an install that belongs to
+another checkout. Re-running it changes nothing. Also:
+
+    ./setup doctor       # what is missing, one line each; exit 1 while a required check fails
+    ./setup secrets      # optional TypeSafe key (Linear: dashboard Settings › Integrations)
+    ./setup uninstall    # service, plugin, links; keeps data and keys (--purge deletes dashboard data/config)
+
+Inside Claude Code, "set up wt-pack" runs the `wt-setup` skill, which drives the same script. Linux works
+without launchd, Keychain or the Tauri app (doctor lists what to do by hand).
 
 ## The optional judgment layer
 

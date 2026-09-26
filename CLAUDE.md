@@ -22,6 +22,7 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
 | wt-room | rooms CLI: list/read/post/--attach/create |
 | wt-memory | store `~/.config/wt-memory`; Claude plugin via local marketplace `wt-pack` |
 | wt-shared | shared helpers |
+| wt-setup | `./setup` (install, doctor, secrets, uninstall) at repo root; the skill only runs it |
 | wt-dashboard | see below |
 
 ## wt-dashboard
