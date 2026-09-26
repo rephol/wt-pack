@@ -89,3 +89,16 @@ test('import stage 2: rooms fold delivered lines, skip torn ones, keep orphan fi
   assert.equal((await readFile(join(out, 'rooms', 'ops.jsonl'), 'utf8')).trim().split('\n').length, 2)
   assert.equal(JSON.parse(await readFile(join(out, 'notifications.jsonl'), 'utf8')).read, true)
 })
+
+test('migration 6 (WP-52) upgrades a v5 db: dispatch off on every board, stall_min 45, board_events', async () => {
+  const f = join(await tmp(), 'wt.db')
+  const { DatabaseSync } = process.getBuiltinModule('node:sqlite')
+  const old = new DatabaseSync(f)
+  MIGRATIONS.slice(0, 5).forEach((m) => old.exec(m.sql))
+  old.exec("PRAGMA user_version = 5; INSERT INTO boards (project, key, next, auto) VALUES ('wt-pack', 'WP', 3, 1)")
+  old.close()
+  const db = open(f)
+  assert.equal(version(db), 6)
+  assert.deepEqual({ ...db.prepare('SELECT auto, dispatch, stall_min FROM boards').get() }, { auto: 1, dispatch: 0, stall_min: 45 })
+  assert.equal(db.prepare('SELECT count(*) n FROM board_events').get().n, 0)
+})

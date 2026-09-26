@@ -19,11 +19,32 @@ export interface Ticket {
   updated?: string
   history?: HistoryEntry[]
   jev?: TicketJev | null
+  dispatch?: TicketDispatch | null
+}
+// Board Dispatch (WP-52, dispatch.mjs): claim state, failures, and reconcile's stall flag.
+export interface TicketDispatch { state?: 'dispatching' | 'sent' | 'failed' | 'held'; at?: string; agent?: string; fails?: number; reason?: string; stalled?: string }
+export interface DispatchStatus { last: { at: number; text: string } | null; waiting: string | null; inflight: number }
+// The card's dispatch badge, if any: [label, variant, tooltip].
+export function dispatchBadge(d?: TicketDispatch | null): [string, 'info' | 'warning' | 'error', string] | null {
+  if (!d) return null
+  if (d.stalled) return ['Stalled', 'warning', d.stalled]
+  if (d.state === 'dispatching') return ['Dispatching…', 'info', 'Handing off to a free agent']
+  if (d.state === 'held') return ['Dispatch held', 'error', `Failed ${d.fails ?? 3} times: ${d.reason ?? ''}`]
+  if (d.state === 'failed') return ['Dispatch failed', 'warning', `${d.reason ?? ''} (retries in 2 min)`]
+  return null
+}
+// The Board header's status line; null when there is nothing to say.
+export function dispatchLine(s?: DispatchStatus | null, now = Date.now()): string | null {
+  if (!s) return null
+  if (s.inflight) return `Dispatching ${s.inflight}…`
+  if (s.waiting) return `waiting: ${s.waiting}`
+  if (s.last) return `last: ${s.last.text} ${Math.max(0, Math.round((now - s.last.at) / 60_000))}m ago`
+  return 'idle'
 }
 // Server-owned Jev triage (ticketJev.mjs): fields it filled (undoable), advisory owner role, likely duplicates.
 export interface TicketJev { at: string; applied: Record<string, { from: unknown; to: unknown }>; owner: 'planner' | 'worker' | null; dupes: string[] }
 export const jevChip = (t: Ticket) => !!t.jev && (Object.keys(t.jev.applied).length > 0 || t.jev.dupes.length > 0)
-export interface Board { key: string | null; auto?: boolean; minPriority?: number; tickets: Ticket[] }
+export interface Board { key: string | null; auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number; dispatchStatus?: DispatchStatus; tickets: Ticket[] }
 
 export const columnLabel = (c: string) => c[0].toUpperCase() + c.slice(1)
 // Linear's scale: 0 none, 1 urgent … 4 low.

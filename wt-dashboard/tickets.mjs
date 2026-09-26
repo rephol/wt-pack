@@ -66,17 +66,21 @@ export class Tickets {
   }
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready. Off for a board that does not exist yet.
   async auto(project) { return (await this.settings(project)).auto }
-  // { auto, minPriority } — minPriority: the lowest priority 'Auto' promotes (1 urgent … 4 low, 0 = any).
+  // { auto, minPriority, dispatch, stallMin } — minPriority: the lowest priority 'Auto' promotes (1 urgent … 4 low, 0 = any);
+  // dispatch (WP-52): hand Ready tickets to free agents; stallMin: idle minutes before reconcile flags a card.
   async settings(project) {
-    const r = this.db.prepare('SELECT auto, min_priority FROM boards WHERE project = ?').get(project)
-    return { auto: !!r?.auto, minPriority: r?.min_priority ?? 2 }
+    const r = this.db.prepare('SELECT auto, min_priority, dispatch, stall_min FROM boards WHERE project = ?').get(project)
+    return { auto: !!r?.auto, minPriority: r?.min_priority ?? 2, dispatch: !!r?.dispatch, stallMin: r?.stall_min ?? 45 }
   }
   // Only the fields given change; never creates a board.
-  async setSettings(project, { auto, minPriority }) {
+  async setSettings(project, { auto, minPriority, dispatch, stallMin }) {
     if (!this.db.prepare('SELECT 1 FROM boards WHERE project = ?').get(project ?? '')) throw err(404, `no board ${project}`)
     if (minPriority !== undefined && !(Number.isInteger(minPriority) && minPriority >= 0 && minPriority <= 4)) throw err(400, 'minPriority: 0-4')
+    if (stallMin !== undefined && !(Number.isInteger(stallMin) && stallMin >= 1 && stallMin <= 1440)) throw err(400, 'stallMin: 1-1440')
     if (auto !== undefined) this.db.prepare('UPDATE boards SET auto = ? WHERE project = ?').run(auto ? 1 : 0, project)
     if (minPriority !== undefined) this.db.prepare('UPDATE boards SET min_priority = ? WHERE project = ?').run(minPriority, project)
+    if (dispatch !== undefined) this.db.prepare('UPDATE boards SET dispatch = ? WHERE project = ?').run(dispatch ? 1 : 0, project)
+    if (stallMin !== undefined) this.db.prepare('UPDATE boards SET stall_min = ? WHERE project = ?').run(stallMin, project)
     return this.settings(project)
   }
   async setAuto(project, on) { return (await this.setSettings(project, { auto: on })).auto }
@@ -157,6 +161,7 @@ export class Tickets {
         t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: column, ...(note ? { text: note } : {}) })
         t.column = column
         delete t.jev?.applied?.column // moved by hand: no longer Jev's promotion to undo
+        if (column === 'ready' || column === 'backlog') delete t.dispatch // back in the queue: dispatch starts over (held too)
       } else if (note?.trim()) t.history.push({ at, author: author.name, kind: 'comment', text: note })
       const edited = Object.keys(rest).filter((k) => JSON.stringify(t[k]) !== JSON.stringify(rest[k]))
       if (edited.length) t.history.push({ at, author: author.name, kind: 'edit', text: edited.join(', ') })
@@ -210,9 +215,36 @@ export class Tickets {
     if (typeof text !== 'string' || !text.trim() || text.length > 20_000) throw err(400, 'text: 1–20000 chars')
     return this.mutate(id, (t, at) => (t.history.push({ at, author: author.name, kind: 'comment', text }), t))
   }
+  // Dispatch's compare-and-set (WP-52): claims an unassigned Ready ticket, or one whose last dispatch failed over
+  // 2 min ago; null when anyone else holds it. The lock is on the row, so it survives a restart.
+  async dispatchClaim(id, now = Date.now()) {
+    let won = false
+    const t = await this.mutate(id, (t, at) => {
+      const d = t.dispatch
+      if (t.column !== 'ready' || t.assignee || (d && !(d.state === 'failed' && now - Date.parse(d.at) > 120_000))) return t
+      won = true
+      t.dispatch = { state: 'dispatching', at, ...(d?.fails ? { fails: d.fails } : {}) }
+      return t
+    })
+    return won ? t : null
+  }
+  // obj | null (null = clear, the Retry dispatch action).
+  async setDispatch(id, d) {
+    return this.mutate(id, (t) => { if (d) t.dispatch = d; else delete t.dispatch; return t })
+  }
+  // Retry dispatch: clears only a failure, a hold or a lone stall flag, never a claim in flight or a sent card.
+  async dispatchRetry(id) {
+    return this.mutate(id, (t) => {
+      const d = t.dispatch
+      if (d && !['failed', 'held'].includes(d.state) && d.state !== undefined) throw err(409, `${t.id} dispatch is ${d.state}`)
+      delete t.dispatch
+      return t
+    })
+  }
   async claim(id, who, force = false) {
     return this.mutate(id, (t, at) => {
       if (t.assignee && t.assignee.name !== who.name && !force) throw err(409, `${t.id} is held by ${t.assignee.name} (use force)`)
+      if (t.dispatch?.state === 'dispatching' && !force) throw err(409, `${t.id} is being dispatched (use force)`)
       if (t.assignee?.name !== who.name) t.history.push({ at, author: who.name, kind: 'assign', from: t.assignee?.name ?? null, to: who.name })
       t.assignee = who
       return t

@@ -171,6 +171,11 @@ export const MIGRATIONS = [
             ('seed-jev', 'Jev Auto Run now', 'every 1h', '{"kind":"action","action":"jev-run","project":"wt-pack"}', 4),
             ('seed-finish', 'Weekly worktree cleanup', '0 9 * * 1', '{"kind":"prompt","role":"orchestrator","project":"wt-pack","text":"run wt-finish on merged worktrees"}', 5);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-52 board Dispatch (default off) + reconcile's stall threshold and history. Not exported (like routines).
+  { sql: `ALTER TABLE boards ADD COLUMN dispatch INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE boards ADD COLUMN stall_min INTEGER NOT NULL DEFAULT 45;
+          CREATE TABLE board_events (id INTEGER PRIMARY KEY, project TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, ticket TEXT, text TEXT);`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

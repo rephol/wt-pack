@@ -164,3 +164,18 @@ export function RoutinesHistorySection({ project, agents }: Scope) {
     </SettingsCard>
   )
 }
+
+// Board Dispatch + reconcile history (WP-52): dispatches, failures, merges → done, returns, stalls. 30 days.
+interface BoardEvent { id: number; project: string; at: number; kind: string; ticket: string | null; text: string | null }
+export function BoardHistorySection() {
+  const q = useQuery({ queryKey: ['board-events'], queryFn: () => api<BoardEvent[]>('/api/board/events?limit=50'), refetchInterval: 15_000 })
+  if (!q.data) return null
+  return (
+    <SettingsCard title="Board history">
+      {q.data.length === 0 && <SettingsRow title="No board events yet" description="Dispatches and reconcile moves of the last 30 days show here." />}
+      {q.data.length > 0 && <div className="hd-obs-box" style={{ maxHeight: 320, overflow: 'auto' }}>
+        {q.data.map((e) => <SettingsRow key={e.id} title={`${e.ticket ?? e.project} — ${e.kind}`} description={`${when(e.at)} · ${e.project}${e.text ? ` · ${e.text}` : ''}`} />)}
+      </div>}
+    </SettingsCard>
+  )
+}

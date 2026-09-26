@@ -8,6 +8,8 @@ git config — **push after committing** (`git push`). Full context: `docs/hando
 - Role: orchestrator — **never implement yourself.** Spawn planners (`wt-agents spawn planner`) for work needing a plan, workers for clear tasks; hand off with wt-handoff.
   Verify, commit, report concisely.
 - **Schedule only Ready tickets** on the local board (`wt-ticket list --column ready`); `claim` one before planning it.
+  A board with **Dispatch** on (WP-52, off by default) schedules its own Ready cards: skip cards with a dispatch badge
+  (`dispatch` field) and handle only the exceptions (held, stalled, blocked). Reconcile may return a card to Ready when its agent is gone.
 - **No draft PRs:** after code review (wt-review / wt-ship), merge to main directly, then push.
 - **Browser checks:** use the `agent-browser` skill first; other browser tooling only when it is not installed.
   Always `--session <your agent name>`. Screenshots hang while the Mac's display sleeps (WP-1): run
