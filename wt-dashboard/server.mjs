@@ -342,8 +342,8 @@ const readPane = (m, pane, lines) =>
 // ---- agents ----
 const since = new Map() // machine|pane → { status, at }
 const parsed = new Map() // machine|pane → { p, seq, at }: last parse, reused until the pane changes
+// Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
 const roleStore = new RoleStore(DATA)
-await roleStore.load()
 // Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
 async function paneMeta(m) {
   if (!m.local) return { ws: new Map(), tokens: new Map() }
@@ -2333,7 +2333,7 @@ const crashed = (kind) => async (e) => {
 // Loopback only. Guarded so parse.test.mjs can import without listening.
 // WT_DASHBOARD_SERVE=1: the desktop app's single-executable build, where argv/import.meta differ.
 if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url))
-  Promise.all([cfg.load(), terms.load()]).catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
+  Promise.all([cfg.load(), terms.load(), roleStore.load()]).catch((e) => console.error('config:', e.message)).finally(() => server.listen(PORT, '127.0.0.1', () => {
     console.log(`agent control room api → http://127.0.0.1:${PORT}`)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
     process.on('uncaughtException', crashed('uncaughtException'))
