@@ -1,0 +1,245 @@
+#!/bin/sh
+# wt-pack setup: one command from a fresh clone to a working pack.
+#
+#   ./setup [install] [--yes] [--no-secrets] [--no-service]   # idempotent; ends with doctor
+#   ./setup doctor [--no-service]                             # one line per need; exit 1 if a required one fails
+#   ./setup secrets                                           # optional keys (TypeSafe; Linear via the dashboard)
+#   ./setup uninstall [--purge] [--yes]                       # links, plugin, service; keeps data unless --purge
+#
+# Never installs without asking: missing Homebrew packages are listed and installed after one y/N (--yes skips
+# it); a missing Homebrew or herdr is a printed hint, never a piped installer. Anything that already points at
+# ANOTHER wt-pack checkout (a skill link, the plugin marketplace, the launchd service) is reported and kept, so
+# running this from a worktree never repoints the live install. macOS-first; Linux gaps are printed by doctor.
+set -u
+
+REPO=$(cd "$(dirname "$0")" && pwd -P)
+SKILLS="$HOME/.claude/skills"
+DASH="$REPO/wt-dashboard"
+PLIST="$HOME/Library/LaunchAgents/id.local.wtdashboard.server.plist"
+PORT=${PORT:-7777}
+OS=$(uname -s)
+
+cmd=install; yes=0; secrets=1; service=1; purge=0
+for a in "$@"; do
+  case "$a" in
+    install|doctor|uninstall|secrets) cmd=$a ;;
+    --yes|-y) yes=1 ;;
+    --no-secrets) secrets=0 ;;
+    --no-service) service=0 ;;
+    --purge) purge=1 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "setup: unknown argument: $a (see ./setup --help)" >&2; exit 2 ;;
+  esac
+done
+
+ok()   { printf '  \342\234\223 %s\n' "$*"; }          # ✓
+bad()  { printf '  \342\234\227 %s\n' "$*"; fails=$((fails + 1)); }  # ✗ (required)
+opt()  { printf '  \342\200\223 %s\n' "$*"; }          # – (optional / note)
+step() { printf '%s\n' "$*"; }
+has()  { command -v "$1" >/dev/null 2>&1; }
+ask()  { [ "$yes" -eq 1 ] && return 0; [ -t 0 ] || return 1; printf '%s [y/N] ' "$1"; read -r r; [ "$r" = y ] || [ "$r" = Y ]; }
+fails=0
+
+# A wt-pack checkout: a directory with the pack's marketplace manifest.
+is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt-pack"' "$1/.claude-plugin/marketplace.json"; }
+skills() { for d in "$REPO"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
+node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)'; }
+service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
+market_path() { claude plugin marketplace list --json 2>/dev/null | jq -r '.[] | select(.name=="wt-pack") | .path // .installLocation // empty' 2>/dev/null; }
+# The OTHER wt-pack checkout the existing skill links point into ("" when none, or when it is this one).
+link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(dirname "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
+built() { [ -f "$DASH/web/dist/index.html" ] && [ -z "$(find "$DASH/web/src" "$DASH/web/index.html" "$DASH/web/package.json" -newer "$DASH/web/dist/index.html" 2>/dev/null | head -1)" ]; }
+
+# ---------------------------------------------------------------- doctor
+doctor() {
+  fails=0
+  step "wt-pack doctor ($REPO)"
+  if node_ok; then ok "node $(node -v)"; else bad "node >= 22.12 (have: $(node -v 2>/dev/null || echo none)) — brew install node"; fi
+  for c in git curl; do if has $c; then ok "$c"; else bad "$c — install it (xcode-select --install on macOS)"; fi; done
+  if has jq; then ok "jq"; else bad "jq — brew install jq"; fi
+  if ! has gh; then bad "gh — brew install gh"
+  elif gh auth status >/dev/null 2>&1; then ok "gh (authenticated)"
+  else bad "gh not logged in — run: ! gh auth login"; fi
+  if has herdr; then ok "herdr"; else bad "herdr — needed for agents, handoffs and rooms; install it from its own docs"; fi
+  if has claude; then ok "claude"; else bad "claude (Claude Code) not on PATH"; fi
+
+  n=0; miss=""; other=""; home=$(link_home); later=""
+  for s in $(skills); do
+    l="$SKILLS/$s"
+    t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P)
+    if [ "$t" = "$REPO/$s" ]; then n=$((n + 1))
+    elif [ -n "$t" ] && [ "$(basename "$t")" = "$s" ] && is_pack "$(dirname "$t")"; then n=$((n + 1)); other=$(dirname "$t")
+    elif [ -z "$t" ] && [ -n "$home" ] && [ ! -d "$home/$s" ]; then later="$later $s"
+    else miss="$miss $s"; fi
+  done
+  [ -n "$later" ] && opt "not linked yet:$later (new here; $home has none yet — run ./setup there after merging)"
+  if [ -z "$miss" ]; then ok "skills linked in $SKILLS ($n)${other:+ — from $other}"; else bad "skills not linked:$miss — ./setup install"; fi
+
+  mp=$(market_path)
+  if claude plugin list --json 2>/dev/null | jq -e '.[] | select(.id=="wt-memory@wt-pack" and .enabled)' >/dev/null 2>&1; then
+    ok "plugin wt-memory@wt-pack${mp:+ (marketplace $mp)}"
+  else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
+
+  if [ -f "$DASH/web/dist/index.html" ]; then
+    if built; then ok "dashboard web built"; else opt "dashboard web built, but older than web/src — npm --prefix wt-dashboard run build"; fi
+  else bad "dashboard web not built — ./setup install"; fi
+
+  if [ "$service" -eq 0 ]; then opt "service not checked (--no-service)"
+  elif [ "$OS" = Darwin ]; then
+    root=$(service_root)
+    if [ -z "$root" ]; then bad "launchd service not installed — ./setup install"
+    else
+      st=$(node "$DASH/scripts/service.mjs" status 2>/dev/null | head -1)
+      case "$st" in
+        *": running"*) ok "service ${st%%,*}${root:+ — runs $root}" ;;
+        *) bad "service: ${st:-unknown} — node $DASH/scripts/service.mjs install" ;;
+      esac
+    fi
+  else
+    opt "no launchd on $OS: run the dashboard with  npm --prefix $DASH start  (a systemd user unit is not provided)"
+  fi
+  code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null)
+  case "$code" in 2*|3*|401|403) ok "dashboard answers on http://127.0.0.1:$PORT ($code)" ;;
+    *) if [ "$OS" = Darwin ]; then bad "dashboard not answering on 127.0.0.1:$PORT (http ${code:-none})"; else opt "dashboard not running on 127.0.0.1:$PORT"; fi ;; esac
+
+  [ -f "$HOME/.config/wt-dashboard/env" ] && ok "config ~/.config/wt-dashboard/env" || opt "no ~/.config/wt-dashboard/env yet (./setup install creates it)"
+  [ -d "$HOME/.config/wt-memory" ] && ok "memory store ~/.config/wt-memory" || opt "no ~/.config/wt-memory yet (./setup install creates it)"
+
+  # optional
+  if [ -n "${TYPESAFE_API_KEY:-}" ] || grep -qs '^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=' "$HOME/.claude/.env" \
+     || { has security && security find-generic-password -s wt-dashboard -a TYPESAFE_API_KEY >/dev/null 2>&1; }; then ok "TypeSafe key (optional)"
+  else opt "TypeSafe key not set (optional: ./setup secrets)"; fi
+  if has security && security find-generic-password -s wt-dashboard -a LINEAR_API_KEY >/dev/null 2>&1; then ok "Linear key (optional)"
+  else opt "Linear key not set (optional: dashboard Settings › Integrations)"; fi
+  has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
+  has cargo && ok "cargo (optional, Tauri app)" || opt "cargo not installed (optional, only for the Tauri app)"
+  for c in codex gemini; do has $c && opt "$c found: wt-memory hookup is manual, see wt-memory/SKILL.md"; done
+  [ "$OS" = Darwin ] || opt "Linux: no launchd, no Keychain (keys go in ~/.config/wt-dashboard/env), no brew prompt (apt: nodejs jq gh git curl), no Tauri app"
+
+  if [ "$fails" -eq 0 ]; then step "doctor: all required checks pass"; return 0; fi
+  step "doctor: $fails required check(s) failing"; return 1
+}
+
+# ---------------------------------------------------------------- install
+deps() {
+  step "dependencies"
+  want=""
+  node_ok || want="$want node"
+  has jq || want="$want jq"
+  has gh || want="$want gh"
+  has herdr || opt "herdr is not on PATH — needed for agents, handoffs and rooms; install it from its own docs"
+  if [ -z "$want" ]; then ok "already: node, jq, gh"; return 0; fi
+  if [ "$OS" != Darwin ]; then bad "missing:$want — install with your package manager (apt: nodejs jq gh)"; return 1; fi
+  if ! has brew; then
+    bad "missing:$want and no Homebrew — install Homebrew first (https://brew.sh), then re-run ./setup"; return 1
+  fi
+  if ask "Install with Homebrew:$want?"; then brew install $want && ok "installed:$want"; else bad "missing:$want — brew install$want"; return 1; fi
+}
+
+link_skills() {
+  step "skills → $SKILLS"
+  mkdir -p "$SKILLS"
+  made=0; kept=0; elsewhere=""; home=$(link_home)
+  for s in $(skills); do
+    l="$SKILLS/$s"; want="$REPO/$s"
+    if [ -L "$l" ]; then
+      t=$(cd "$l" 2>/dev/null && pwd -P)
+      if [ "$t" = "$want" ]; then kept=$((kept + 1))
+      elif [ -n "$t" ] && is_pack "$(dirname "$t")"; then elsewhere=$(dirname "$t"); kept=$((kept + 1))
+      else bad "not touching $l: it links to ${t:-a missing path}, not a wt-pack checkout"; fi
+    elif [ -e "$l" ]; then bad "not touching $l: it is a real file/directory, not a link"
+    elif [ -n "$home" ]; then opt "not linking $s: the other skills come from $home, which has no $s yet — re-run ./setup there after merging"
+    else ln -s "$want" "$l" && made=$((made + 1)); fi
+  done
+  [ -n "$elsewhere" ] && opt "kept links into $elsewhere (another wt-pack checkout)"
+  if [ "$made" -eq 0 ]; then ok "already: $kept linked"; else ok "linked $made new (${kept} already)"; fi
+}
+
+dirs() {
+  step "config and data dirs"
+  changed=""
+  for d in "$HOME/.config/wt-memory" "$HOME/.config/wt-dashboard"; do [ -d "$d" ] || { mkdir -p "$d"; changed="$changed $d"; }; done
+  env="$HOME/.config/wt-dashboard/env"
+  [ -f "$env" ] || { : > "$env"; changed="$changed $env"; }
+  chmod 600 "$env"
+  if [ -z "$changed" ]; then ok "already: ~/.config/wt-memory, ~/.config/wt-dashboard/env"; else ok "created:$changed"; fi
+}
+
+plugin() {
+  step "plugin wt-memory"
+  if ! has claude; then bad "claude not on PATH — install Claude Code, then re-run"; return 1; fi
+  mp=$(market_path)
+  if [ -z "$mp" ]; then claude plugin marketplace add "$REPO" >/dev/null 2>&1 && ok "marketplace wt-pack added ($REPO)" || { bad "claude plugin marketplace add $REPO failed"; return 1; }
+  elif [ "$mp" != "$REPO" ] && is_pack "$mp"; then opt "kept marketplace wt-pack → $mp (another wt-pack checkout)"
+  elif [ "$mp" != "$REPO" ]; then bad "a marketplace named wt-pack points at $mp, which is not a wt-pack checkout"; return 1
+  fi
+  if claude plugin list --json 2>/dev/null | jq -e '.[] | select(.id=="wt-memory@wt-pack")' >/dev/null 2>&1; then
+    ok "already: wt-memory@wt-pack installed"
+  else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
+}
+
+web() {
+  step "dashboard (npm deps + web build)"
+  w="$DASH/web"
+  if [ -d "$w/node_modules" ] && [ "$w/node_modules/.package-lock.json" -nt "$w/package-lock.json" ] 2>/dev/null; then ok "already: web dependencies"
+  else (cd "$w" && npm ci --no-audit --no-fund >/dev/null 2>&1) && ok "installed web dependencies (npm ci)" || { bad "npm ci in $w failed (run it there to see why)"; return 1; }; fi
+  if built; then ok "already: web built"
+  else (npm --prefix "$DASH" run build >/dev/null 2>&1) && ok "built web (wt-dashboard/web/dist)" || { bad "npm --prefix $DASH run build failed"; return 1; }; fi
+}
+
+svc() {
+  step "service (launchd)"
+  if [ "$service" -eq 0 ]; then opt "skipped (--no-service)"; return 0; fi
+  if [ "$OS" != Darwin ]; then opt "no launchd on $OS — run: npm --prefix $DASH start"; return 0; fi
+  root=$(service_root)
+  running=$(node "$DASH/scripts/service.mjs" status 2>/dev/null | grep -c ': running')
+  if [ "$root" = "$DASH" ] && [ "$running" -eq 1 ]; then ok "already: running from $DASH"
+  elif [ -n "$root" ] && [ "$root" != "$DASH" ] && is_pack "$(dirname "$root")"; then opt "kept: the service runs $root (another wt-pack checkout)"
+  else node "$DASH/scripts/service.mjs" install >/dev/null && ok "installed and started ($PLIST)" || bad "service install failed — node $DASH/scripts/service.mjs install"; fi
+}
+
+secrets_step() {
+  step "optional keys"
+  env="$HOME/.claude/.env"
+  if [ -n "${TYPESAFE_API_KEY:-}" ] || grep -qs 'TYPESAFE_API_KEY=' "$env"; then ok "already: TypeSafe key"
+  elif [ -t 0 ]; then
+    printf '  TypeSafe API key (optional, Enter to skip): '; stty -echo 2>/dev/null; read -r k; stty echo 2>/dev/null; echo
+    if [ -n "$k" ]; then mkdir -p "$HOME/.claude"; touch "$env"; chmod 600 "$env"; printf 'TYPESAFE_API_KEY=%s\n' "$k" >> "$env"; ok "TypeSafe key saved to $env"; else opt "TypeSafe key skipped"; fi
+  else opt "TypeSafe key: run ./setup secrets in a terminal"; fi
+  opt "Linear key: dashboard Settings › Integrations (stored in the Keychain)"
+}
+
+install() {
+  step "wt-pack install ($REPO)"
+  deps; link_skills; dirs; plugin; web; svc
+  if [ "$secrets" -eq 1 ] && [ -t 0 ]; then secrets_step; else step "optional keys"; opt "skipped (--no-secrets or not a terminal): ./setup secrets"; fi
+  echo; doctor
+}
+
+# ---------------------------------------------------------------- uninstall
+uninstall() {
+  step "wt-pack uninstall ($REPO)"
+  if [ "$OS" = Darwin ] && [ "$(service_root)" = "$DASH" ]; then node "$DASH/scripts/service.mjs" uninstall >/dev/null && ok "service removed"
+  else opt "service: not installed from this checkout, left alone"; fi
+  if has claude && [ "$(market_path)" = "$REPO" ]; then
+    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
+    ok "plugin wt-memory@wt-pack and marketplace wt-pack removed"
+  else opt "plugin: not installed from this checkout, left alone"; fi
+  n=0
+  for l in "$SKILLS"/*; do
+    [ -L "$l" ] || continue
+    case "$(cd "$l" 2>/dev/null && pwd -P)" in "$REPO"/*) rm "$l" && n=$((n + 1)) ;; esac
+  done
+  ok "removed $n skill link(s) pointing into $REPO"
+  keep="$HOME/.local/share/wt-dashboard $HOME/.config/wt-dashboard $HOME/.config/wt-memory $HOME/Library/Logs/wt-dashboard"
+  if [ "$purge" -eq 1 ] && ask "Delete $HOME/.local/share/wt-dashboard and $HOME/.config/wt-dashboard?"; then
+    rm -rf "$HOME/.local/share/wt-dashboard" "$HOME/.config/wt-dashboard" && ok "purged dashboard data and config"
+  else opt "kept (delete by hand, or --purge): $keep; Keychain service wt-dashboard; ~/.claude/.env"; fi
+}
+
+case "$cmd" in
+  doctor) doctor ;;
+  install) install ;;
+  secrets) secrets_step ;;
+  uninstall) uninstall ;;
+esac
