@@ -54,7 +54,7 @@ board, shared rooms, and the moments that need you.
 | 🔔 **Needs you** | An inbox and native notifications when an agent is blocked on a question, stalled, or done. |
 | 🧠 **Shared memory** | `wt-memory` keeps global, per-role and per-project preferences, which a Claude Code plugin injects into every session. |
 | 📈 **Observability** | Call stats, outcomes, the server log and housekeeping for the optional judgment layer. |
-| 🖥️ **Mac app** | A Tauri shell around the dashboard with a tray menu that shows how many agents need you. |
+| 🖥️ **Mac app** | A Tauri shell around the same dashboard UI shown below, with a tray menu that shows how many agents need you. |
 
 ## The dashboard
 
@@ -138,7 +138,9 @@ Each directory under `skills/` is one skill, linked as `~/.claude/skills/<name>`
   cookie and a Host/Origin allowlist. **The Mac app** is a Tauri 2 shell around the same UI.
 - **The optional judgment layer** (`skills/wt-shared/scripts/wt-judge.mjs`) turns decisions the pack
   otherwise eyeballs into typed, logged judgments through the TypeSafe API. Unconfigured is the normal
-  case: every caller treats exit 3 (no `TYPESAFE_API_KEY`) as "do what the pack always did".
+  case: every caller treats exit 3 (no `TYPESAFE_API_KEY`) as "do what the pack always did". Its log
+  (`~/.claude/wt-judge-log.jsonl`) and any calibrated thresholds stay on the machine that made them. Two
+  subcommands ship ADVISORY: they rank what to read, but never shrink what gets read.
 
 Everything else, including what every feature does, where it lives and its defaults, is in
 **[docs/features.md](docs/features.md)**. Operator detail (the service, data layout, rollback) is in
