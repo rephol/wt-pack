@@ -88,7 +88,7 @@ export function OverviewPage({ data, onProject }: { data: OverviewData; onProjec
         <Row title="Machine" href="#agents">
           <Line>
             {data.host && <Dotted v={PRESSURE_DOT[data.host.pressure ?? ''] ?? 'neutral'} label={`RAM ${data.host.memUsedPct}%${data.host.pressure ? ` (${data.host.pressure})` : ''}`} />}
-            <Text size="sm">{`workers ${workers}/${WORKER_CAP}`}</Text>
+            <Text size="sm">{`${workers} of ${WORKER_CAP} worker slots busy`}</Text>
           </Line>
           <Line>{data.machines.map((m) => <Dotted key={m.label} v={MACHINE_DOT[m.status] ?? 'neutral'} label={m.label} />)}</Line>
         </Row>
