@@ -120,6 +120,7 @@ export function usePinchZoom(ref: RefObject<HTMLElement | null>, active: boolean
       apply()
     }
     const gesture = (e: Event) => e.preventDefault() // iOS Safari pinch
+    const resize = () => { if (z.s > 1) { z = { s: 1, x: 0, y: 0 }; apply() } } // the 1x geometry changed: start over
     el.addEventListener('pointerdown', pdown)
     el.addEventListener('pointermove', pmove)
     el.addEventListener('pointerup', pup)
@@ -127,6 +128,7 @@ export function usePinchZoom(ref: RefObject<HTMLElement | null>, active: boolean
     el.addEventListener('wheel', wheel, { passive: false })
     el.addEventListener('click', click, true)
     el.addEventListener('keydown', key, true)
+    addEventListener('resize', resize)
     for (const g of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(g, gesture)
     return () => {
       el.removeEventListener('pointerdown', pdown)
@@ -136,6 +138,7 @@ export function usePinchZoom(ref: RefObject<HTMLElement | null>, active: boolean
       el.removeEventListener('wheel', wheel)
       el.removeEventListener('click', click, true)
       el.removeEventListener('keydown', key, true)
+      removeEventListener('resize', resize)
       el.style.touchAction = ''
       if (stage) stage.style.touchAction = ''
       for (const g of ['gesturestart', 'gesturechange', 'gestureend']) document.removeEventListener(g, gesture)
