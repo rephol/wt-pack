@@ -95,7 +95,7 @@ name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pa
 # --reply: a plain answer to whoever sent us a wt-message — no /goal, no tokens, no worker selection.
 if [ -n "$reply" ]; then
   text=${1:-}
-  [ -n "$text" ] || text=$(cat)
+  [ -n "$text" ] || { [ -t 0 ] && { echo "--reply <pane> \"text\" (or text on stdin)" >&2; exit 2; }; text=$(cat); }
   [ -n "$text" ] || { echo "--reply: no text" >&2; exit 2; }
   me=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
   nm=$( [ -n "$me" ] && name_of "$me" || true)
