@@ -22,7 +22,6 @@ import { Link } from '@astryxdesign/core/Link'
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Selector } from '@astryxdesign/core/Selector'
-import { openProjectSettings } from './projects-settings'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
@@ -311,8 +310,6 @@ function AutomationButton({ project, phone, board, busy, onSet, runNow }: {
       {board.dispatch && <StallMinutes value={board.stallMin ?? 45} onSave={(n) => onSet({ stallMin: n })} />}
       {board.dispatch && <ReportTo board={board} busy={busy} onSet={onSet} phone={phone} />}
       {board.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(board.dispatchStatus)}</Text>}
-      <Divider />
-      <Button label="More project settings" variant="ghost" size="sm" onClick={() => { setOpen(false); openProjectSettings(project) }} />
     </VStack>
   )
   const trigger = <Button label={status} variant="secondary" size={phone ? 'sm' : 'md'} icon={<StatusDot variant={on ? 'success' : 'neutral'} label={on ? 'automation on' : 'automation off'} />}
