@@ -30,18 +30,18 @@ From the repo itself, work out — and write down before auditing:
   workspace roots fan out), `Makefile`, `pyproject.toml`, `Cargo.toml`, CI workflows in `.github/workflows/`.
 - **Where its UI lives:** a URL in CLAUDE.md/README, or a running dev server (`lsof -nP -iTCP -sTCP:LISTEN`).
   Do not start servers that need secrets or databases you would have to create; say so in the not-covered line.
-- **Its tracker:** tickets named `UMK-123`-style in CLAUDE.md, commits or branches mean the project uses
+- **Its tracker:** tickets named `ENG-123`-style in CLAUDE.md, commits or branches mean the project uses
   **Linear** — then you do **not** file tickets yourself (see §3). Otherwise the local board
   (`wt-ticket … --project $PROJECT`, created on the first ticket).
 - **Its room:** `room list` — the room whose slug is `$PROJECT` or `$(basename "$ROOT")` (they differ when the
-  checkout is a worktree of another repo, e.g. `marketing-studio-poc` → project `umkmall`), or whose title names it. None → report to the
+  checkout is a worktree of another repo, e.g. `my-app-poc` → project `my-app`), or whose title names it. None → report to the
   orchestrator (`herdr agent prompt <orchestrator pane> "…"`, from `wt-agents list --json`) or, failing that,
   to the user in your final answer.
 
 Examples. wt-pack itself: project `wt-pack`, UI wt-dashboard at http://127.0.0.1:7777, checks
 `cd skills/wt-dashboard && npm test` and `./setup doctor`, local board `WP-*`, room `wt-pack`.
-`~/Work/projects/marketing-studio-poc`: project `umkmall` (a worktree of it), turbo `dev`/`test`/`typecheck`,
-Linear (`UMK-*` in commits) so nothing is filed, room `marketing-studio-poc`.
+`~/Work/projects/my-app-poc`: project `my-app` (a worktree of it), turbo `dev`/`test`/`typecheck`,
+Linear (`ENG-*` in commits) so nothing is filed, room `my-app-poc`.
 
 ## 1. Read the context (≤ 10 minutes)
 
