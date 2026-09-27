@@ -1,6 +1,6 @@
 ---
 name: wt-ticket
-description: The local ticket board in wt-dashboard — per-project kanban tickets with ids like WP-12, stored on disk instead of Linear. Use to file, list, show, move, comment on, claim or assign a local ticket; when a ticket id's prefix is a local board key (not a Linear team key); when the auditor files findings; or when the orchestrator picks the next work. Linear (e.g. ENG-N) is unchanged.
+description: The local ticket board in wt-dashboard — per-project kanban tickets with ids like WP-12, stored on disk instead of Linear. Use to file, list, show, move, comment on, claim or assign a local ticket; when a ticket id's prefix is a local board key (not a Linear team key); when the auditor files findings; or when the orchestrator picks the next work. Linear (e.g. ENG-N) is unchanged. Needs wt-dashboard (the full ./setup install, not the plugin alone).
 ---
 
 # wt-ticket
