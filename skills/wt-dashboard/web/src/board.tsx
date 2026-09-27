@@ -225,7 +225,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const dragged = drag ? tickets.find((t) => t.id === drag.id) : undefined
   const opened = openId && openId !== 'new' ? tickets.find((t) => t.id === openId) ?? null : null
   const shown = phone ? [col] : COLUMNS
-  const automation = <AutomationButton project={project} phone={phone} board={q.data} busy={setBoard.isPending} onSet={(b) => setBoard.mutate(b)} runNow={runNow} />
+  const automation = <AutomationButton phone={phone} board={q.data} busy={setBoard.isPending} onSet={(b) => setBoard.mutate(b)} runNow={runNow} />
 
   return (
     <Section className="hd-kb-page">
@@ -284,8 +284,8 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
 
 // WP-64: Auto and Dispatch settings live behind one status button — popover on desktop, bottom sheet on phones — so the header stays one row.
 type BoardSettings = { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number; reportRoom?: string | null; reportOrch?: boolean }
-function AutomationButton({ project, phone, board, busy, onSet, runNow }: {
-  project: string; phone: boolean; board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void
+function AutomationButton({ phone, board, busy, onSet, runNow }: {
+  phone: boolean; board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void
   runNow: { data?: { queued: number }; isPending: boolean; mutate: () => void }
 }) {
   const [open, setOpen] = useState(false)
