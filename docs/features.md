@@ -173,6 +173,7 @@ Chat rooms shared by you and agents.
 
 ## Inbox
 
+- A drawer from the sidebar bell; Escape or going to another page closes it (WP-87).
 - Kinds include questions, mentions of you, room suggestions, memory proposals, agent done/stalled, CI
   failed, server, usage and watchdog notices.
 - **Needs you** = unresolved **and** actionable (needs-you, question, mention-user, room-suggestion,

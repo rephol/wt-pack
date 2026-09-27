@@ -1,6 +1,6 @@
 // Notifications inbox: a right-side panel over the feed at /api/notifications. "Needs you" (unresolved
 // actionables) pinned on top, then "Recent". Opened from the sidebar bell or openInbox(kind).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -89,6 +89,18 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const toast = useToast()
   const { items, loaded, error, retry } = useInbox()
   const [confirmAll, setConfirmAll] = useState(false)
+  // WP-87: the drawer closes on Escape (a real Escape never reaches the Dialog's own handler) and on page navigation,
+  // so it never covers the page you went to. The clear-all confirm keeps its own Escape. Subscribed once, reading refs:
+  // re-subscribing per render dropped the hashchange, because React re-renders between a real event's listeners.
+  const live = useRef({ onClose, confirmAll })
+  live.current = { onClose, confirmAll }
+  useEffect(() => {
+    const close = () => live.current.onClose()
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !live.current.confirmAll) close() }
+    addEventListener('keydown', key, true)
+    addEventListener('hashchange', close)
+    return () => { removeEventListener('keydown', key, true); removeEventListener('hashchange', close) }
+  }, [])
   const [open, setOpen] = useState<Set<string>>(new Set())
   const toggle = (k: string) => setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['inbox'] }); qc.invalidateQueries({ queryKey: ['rooms'] }) }
