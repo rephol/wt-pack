@@ -315,15 +315,24 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
   const byName = new Map(agents.map((a) => [a.name, a]))
   const narrow = useNarrow()
   const [sheet, setSheet] = useState(false)
+  const [membersOpen, setMembersOpen] = useState(false)
   const act = (f: () => void) => () => { setSheet(false); f() }
   const members = (
-    <VStack gap={2} padding={3} style={{ minWidth: 240 }}>
+    <VStack gap={2} padding={3} style={{ minWidth: 280 }}>
       <Text weight="semibold">Members</Text>
       {!room.members.length && <Text type="supporting" size="sm">Nobody yet — @mention an agent.</Text>}
-      {room.members.map((n) => (
-        <HStack key={n} gap={2} align="center"><StatusDot variant={dotOf(byName.get(n))} label={byName.get(n)?.status ?? 'offline'} /><Text size="sm">{n}</Text>
-          <Text size="sm" type="supporting">{byName.get(n)?.asks ? 'needs you' : byName.get(n)?.status ?? 'gone'}</Text></HStack>
-      ))}
+      {/* WP-106: a live member's row opens its chat (side panel on desktop, agent page on phones); gone ones are disabled. */}
+      {room.members.map((n) => {
+        const a = byName.get(n)
+        return (
+          <button key={n} type="button" className="member-row" disabled={!a} title={a ? `Open ${n}'s chat` : `${n} is not running`}
+            onClick={() => { if (!a) return; setMembersOpen(false); onOpenAgent(a.key) }}>
+            <StatusDot variant={dotOf(a)} label={a?.status ?? 'offline'} /><Text size="sm">{n}</Text>
+            <Text size="sm" type="supporting">{a?.asks ? 'needs you' : a?.status ?? 'not running'}</Text>
+            <span aria-hidden style={{ marginLeft: 'auto' }}>{a ? '›' : ''}</span>
+          </button>
+        )
+      })}
     </VStack>
   )
   const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
@@ -417,7 +426,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
         {room.broadcast && !room.archived && <Badge variant="blue" label="broadcast" />}
         {room.archived && <Badge label="archived" />}
         <div style={{ flex: 1 }} />
-        <Popover placement="below" alignment="end" content={members}>
+        <Popover placement="below" alignment="end" content={members} isOpen={membersOpen} onOpenChange={setMembersOpen}>
           <Button label={`${room.members.length}`} size="sm" variant="ghost" tooltip="Members" icon={<PeopleIcon />} />
         </Popover>
         {narrow ? (

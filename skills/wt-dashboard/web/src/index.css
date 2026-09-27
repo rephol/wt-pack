@@ -141,3 +141,8 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .hd-obs-box th:first-child, .hd-obs-box td:first-child { position: sticky; left: 0; background: var(--color-background-surface); }
 .hd-obs-box thead th { position: sticky; top: 0; background: var(--color-background-surface); z-index: 1; }
 .hd-obs-box thead th:first-child { z-index: 2; }
+/* WP-106: room members popover rows open the agent's chat. */
+.member-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; margin: 0 -8px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 36px; white-space: nowrap; }
+.member-row:hover:not(:disabled), .member-row:focus-visible { background: color-mix(in srgb, currentColor 8%, transparent); outline: none; }
+.member-row:focus-visible { box-shadow: 0 0 0 2px var(--color-accent, #3b82f6); }
+.member-row:disabled { cursor: default; opacity: .6; }

@@ -144,6 +144,8 @@ Chat rooms shared by you and agents.
   tap switches to its project and opens it on the Board. A Linear id whose team is in `WT_LINEAR_TEAMS` (e.g.
   `ENG-123`) links to Linear once the workspace is known (needs `LINEAR_API_KEY`). Ids inside code, URLs or longer
   words (`WP-92a`), and unknown ids, stay plain text.
+- **Members** (header people button, WP-106): each running agent's row opens its chat — the side panel on desktop,
+  the agent page on phones — and closes the popover. Agents no longer running show disabled as *not running*.
 - **Commands**: a message starting with `/` goes to exactly one agent (agents cannot send them).
 - Delivery waits until the agent is idle with no question pending.
 - Each delivered message is wrapped in `<room-message id=<nonce> room=<slug> from=… kind=user|agent|system [broadcast=1]>`, author and
