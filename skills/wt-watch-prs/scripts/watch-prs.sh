@@ -70,7 +70,7 @@ identity)
   [ -n "$who" ] || die "reviewer identity unresolved ($TOKSRC)"
   echo "$who $TOKSRC"
   ;;
-gh) rgh "$@" ;;
+gh) case "${1:-}" in auth|extension|ext|alias|config) die "gh $1 is refused here (it could print or keep the reviewer token)";; esac; rgh "$@" ;;
 claim|release)
   num "${1:-}"; sess "${2:-}"; setup; C="$CLAIMS/pr$1"
   if [ "$cmd" = release ]; then
@@ -89,9 +89,10 @@ record)
   note=$4; [ "$note" = - ] && note=$(cat)
   L="$SD/state.lock"; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir "$L" 2>/dev/null && break; sleep 1; done
   [ -d "$L" ] || die "state lock held (stale? check $L mtime and remove by hand)"
+  trap 'rmdir "$L" 2>/dev/null' EXIT
   jq --arg n "$1" --arg sha "$2" --arg st "$3" --arg note "$note" --arg s "$5" \
     '.reviewed[$n] = {sha: $sha, state: $st, outcome: $note, reviewer_session: $s}' "$STATE" > "$STATE.tmp" \
-    && mv "$STATE.tmp" "$STATE"; rc=$?; rmdir "$L"; exit $rc
+    && mv "$STATE.tmp" "$STATE"
   ;;
 gate)
   num "${1:-}"; setup
@@ -178,17 +179,20 @@ poll-replies)
   SINCE=$(date -u -v-15M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
   T=$(mktemp); trap 'rm -f "$T"' EXIT; i=0
   while :; do
+    # The next poll asks only for what is newer than this one's start (a minute of overlap; ids dedupe), so a busy
+    # held PR never pins the 50-comment page to its oldest replies.
+    next=$(date -u -v-1M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "$SINCE")
     for n in $(jq -r --arg me "$S" '.reviewed | to_entries[] | select(.value.state == "changes-requested" and .value.reviewer_session == $me) | .key' "$STATE" 2>/dev/null); do
       { gh api "repos/$REPO/issues/$n/comments?since=$SINCE&per_page=50" 2>/dev/null \
           | jq -r --arg self "$SELF" '.[] | select(.user.type != "Bot" and .user.login != $self) | "C\(.id)\t\(.user.login)\tREPLY\t\(.body | gsub("\\s+"; " ") | .[0:200])"' 2>/dev/null
-        gh api "repos/$REPO/pulls/$n/reviews?per_page=50" 2>/dev/null \
+        gh api --paginate "repos/$REPO/pulls/$n/reviews?per_page=100" 2>/dev/null | jq -s 'add // []' 2>/dev/null \
           | jq -r --arg self "$SELF" --arg since "$SINCE" '.[] | select(.user.type != "Bot" and .user.login != $self and .submitted_at > $since) | "R\(.id)\t\(.user.login)\tREVIEW (\(.state))\t\(.body // "" | gsub("\\s+"; " ") | .[0:160])"' 2>/dev/null
       } | while IFS=$'\t' read -r id who kind body; do
         [ -z "$id" ] && continue; grep -qx "$n $id" "$T" && continue; echo "$n $id" >> "$T"
         echo "PR #$n — $kind on a held PR — $who: $body"
       done
     done
-    i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
+    SINCE=$next; i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
     sleep "${WATCH_PRS_SLEEP:-90}"
   done
   ;;

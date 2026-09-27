@@ -21,6 +21,7 @@ case "$1 $2" in
   "repo view") echo acme/demo ;;
   "auth status") exit \${AUTH_FAIL:-0} ;;
   "auth token") [ "$4" = bot ] && { echo ${SECRET}; exit 0; }; exit 1 ;;
+  "api --paginate") shift; cat "${fx}/reviews.json"; exit ;;
   "api user") [ -n "\${NO_LOGIN:-}" ] && exit 1; [ "\$GH_TOKEN" = ${SECRET} ] && echo reviewer-bot || echo human ;;
   "pr list") c=$(cat "${fx}/n" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "${fx}/n"
     f="${fx}/list.$c.json"; [ -f "$f" ] || f="${fx}/list.json"; cat "$f" ;;
@@ -114,6 +115,8 @@ test('record: full SHA required; note with backticks and $ survives', () => {
   const e = JSON.parse(readFileSync(stateFile, 'utf8')).reviewed['12']
   assert.deepEqual(e, { sha: sha('c'), state: 'changes-requested', outcome: note, reviewer_session: 'sess-a' })
   assert.ok(!readFileSync(stateFile, 'utf8').includes(SECRET))
+  assert.ok(!existsSync(join(sd, 'state.lock')))
+  assert.equal(run(['gh', 'auth', 'token']).status, 1)
 })
 
 test('poll-replies: drops self and bots, only this session\'s holds, since is 15 min back', () => {
