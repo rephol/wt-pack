@@ -148,3 +148,15 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 .member-row:hover:not(:disabled), .member-row:focus-visible { background: color-mix(in srgb, currentColor 8%, transparent); outline: none; }
 .member-row:focus-visible { box-shadow: 0 0 0 2px var(--color-accent, #3b82f6); }
 .member-row:disabled { cursor: default; opacity: .6; }
+
+/* WP-111: a toast paints an inverted surface and marks its content data-astryx-media=light|dark, but the app's
+   dark-mode tokens (prefers-color-scheme, no ThemeProvider) re-declare the text tokens on inner nodes and win, so
+   dark mode showed light text on the white surface. Re-pin them on every node inside the scope. */
+.astryx-toast [data-astryx-media="light"], .astryx-toast [data-astryx-media="light"] * {
+  --color-text-primary: var(--color-on-light) !important; --color-text-secondary: color-mix(in srgb, var(--color-on-light) 70%, transparent) !important;
+  --color-icon-primary: var(--color-on-light) !important; --color-icon-secondary: color-mix(in srgb, var(--color-on-light) 70%, transparent) !important;
+}
+.astryx-toast [data-astryx-media="dark"], .astryx-toast [data-astryx-media="dark"] * {
+  --color-text-primary: var(--color-on-dark) !important; --color-text-secondary: color-mix(in srgb, var(--color-on-dark) 70%, transparent) !important;
+  --color-icon-primary: var(--color-on-dark) !important; --color-icon-secondary: color-mix(in srgb, var(--color-on-dark) 70%, transparent) !important;
+}
