@@ -21,6 +21,8 @@ div:has(> .hd-nav-footer) { margin-top: auto; position: sticky; bottom: 0; backg
 div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-direction: column; }
 .hd-nav-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .hd-project-picker button { justify-content: flex-start; }
+.hd-project-picker { display: flex; align-items: center; gap: 4px; }
+.hd-project-picker > :first-child { flex: 1; min-width: 0; }
 
 /* Phones: stable height as the URL bar shows/hides; composer clear of the home indicator. */
 .astryx-app-shell { height: 100dvh; }
