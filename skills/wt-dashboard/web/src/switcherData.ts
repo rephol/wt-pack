@@ -8,7 +8,7 @@ export interface SwAgent {
   status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown'; asks: boolean
   statusSince: number; lastActivity?: number; recap: string | null; question: string | null; task: string | null
   project?: string | null
-  tags?: Record<string, string> // tags.task: the handoff label, "UMK-1192 Tailwind v4…"
+  tags?: Record<string, string> // tags.task: the handoff label, "ENG-1192 Tailwind v4…"
 }
 // The sidebar project selector: 'all' shows everything; a project shows only its own agents/rooms (one without a
 // project appears under All only). Shared by the sidebar list, Rooms page and quick switcher.
