@@ -65,6 +65,12 @@ so clearly instead of failing with raw curl errors. The `./setup` symlink instal
   `../wt-handoff/scripts/handoff.sh` for siblings, both "(relative to this skill's base directory)". That works
   for symlinks and for the plugin cache alike.
   - Rejected: `${CLAUDE_PLUGIN_ROOT}`, which is empty in a symlink install.
+- *Add the marketplace from GitHub or a clean clone, never from a working checkout.* Review ran a real
+  local-path install and found that it ignores `.gitignore`. It copied `node_modules`, gitignored dirs and the
+  nested `.claude/worktrees/*`, and the main checkout is 2.5G, 603M of it worktrees. That would copy other
+  tickets' unmerged code and any local secrets into the cache. `rephol/wt-pack` from GitHub installs from git and
+  is fine. The README says this, and `./setup doctor` warns when a `wt-pack` marketplace is registered from a
+  local path that has `.claude/worktrees` or `node_modules` under it.
 - *The dashboard stays out of the plugin path.* Its gitignored `web/dist` (1.8M) and Tauri build output aren't in
   a git clone. The wt-dashboard SKILL.md says it needs `./setup`.
 
@@ -72,7 +78,8 @@ so clearly instead of failing with raw curl errors. The `./setup` symlink instal
 
 ### U1 — Root plugin + folded wt-memory (repo root, wt-memory)
 - `.claude-plugin/marketplace.json`: add the `wt-pack` plugin (`source: "./"`).
-- New `.claude-plugin/plugin.json`: `name` wt-pack, `version`, `description`,
+- New `.claude-plugin/plugin.json`: `name` wt-pack, `version`, `description`, `author` (review found that
+  `validate --strict` fails "No author information provided" without it),
   `hooks: "./hooks/hooks.json"`, and `mcpServers` wt-memory as above.
 - New `hooks/hooks.json`, mirroring `skills/wt-memory/claude-plugin/hooks/hooks.json` with root-relative
   commands.
@@ -106,8 +113,10 @@ so clearly instead of failing with raw curl errors. The `./setup` symlink instal
   `~/.claude/skills` outside a list of lines that name the symlink install on purpose.
 
 ### U4 — Clear dashboard dependency (wt-room, wt-ticket, wt-dashboard)
-- `room`: before curl, probe `$API/api/health` (or whatever `wt-ticket:29` probes — use the same call). On
-  failure, print `room: needs wt-dashboard running at $URL (see README › Install)` and exit 1.
+- `room`: copy wt-ticket's pattern. wt-ticket has no health probe: `wt-ticket:29` runs `curl … --max-time 5`
+  and prints "not reachable" when curl fails, with HTTP errors handled separately. `room` wraps its curl the same
+  way, so a connect failure prints `room: needs wt-dashboard running at $URL (see README › Install)` and exits 1,
+  and an HTTP error still shows its body.
 - `wt-ticket:29`: append the same README pointer.
 - The wt-room, wt-ticket and wt-dashboard SKILL.md descriptions each gain one line: "Needs wt-dashboard (full
   `./setup`)".
@@ -128,7 +137,8 @@ so clearly instead of failing with raw curl errors. The `./setup` symlink instal
 - `./setup doctor`: the both-enabled warning, using `opt`.
 - **End-to-end check** (run and paste the output):
   1. `T=$(mktemp -d)`.
-  2. `CLAUDE_CONFIG_DIR=$T claude plugin marketplace add "$PWD"`, then
+  2. `CLAUDE_CONFIG_DIR=$T claude plugin marketplace add "$PWD"` (this worktree is clean, about 4 MB; never
+     the main checkout), then
      `CLAUDE_CONFIG_DIR=$T claude plugin install wt-pack@wt-pack`.
   3. `ls $T/plugins/cache/wt-pack/wt-pack/*/skills` lists every `wt-*`.
   4. `sh $T/plugins/cache/wt-pack/wt-pack/*/skills/wt-handoff/scripts/handoff.sh --reply x "t" --dry-run` (or
@@ -136,8 +146,8 @@ so clearly instead of failing with raw curl errors. The `./setup` symlink instal
   5. `claude plugin validate --strict .`
   6. `rm -rf $T`.
 
-  [unsourced: that `CLAUDE_CONFIG_DIR` isolates plugin installs and that `plugin` subcommands need no auth. If
-  either fails, use `HOME=$T` instead, and say which one worked.]
+  Review ran this with `wt-memory@wt-pack`: `CLAUDE_CONFIG_DIR` isolates the install, the real
+  `installed_plugins.json` was untouched, and no auth was needed.
 
 ## Files
 
@@ -177,5 +187,11 @@ The transcript shows each command and its output:
   The README says so. Aliases are out of scope.
 - **The standalone wt-memory plugin still needs the symlinks for MCP.** It is kept only for `./setup` users.
   Retiring it (so setup installs the root plugin instead) is a follow-up.
+- **U3 rests on the "Base directory for this skill" header also appearing for plugin skills.** It is seen for
+  symlinked skills in this very session, but review couldn't verify it for plugin skills. That needs a live
+  session with the plugin loaded. The implementer checks it once with `claude --plugin-dir . -p "…invoke
+  wt-pack:wt-finish and print the base directory line…"` (their own authenticated config; `--plugin-dir` loads
+  without installing). If the header is absent, stop after U2 and report back rather than guessing a variable
+  syntax.
 - **The dashboard isn't installable as a plugin.** That is by design (gitignored build output, a launchd
   service).
