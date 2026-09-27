@@ -12,6 +12,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, Agent, AskUserQuestio
 
 # wt-ship
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Four steps, one diff read, in this order. **The order is the content of this skill** — it is why the caller
 invokes one name instead of four.
 
@@ -20,8 +23,8 @@ invokes one name instead of four.
 3. **`wt-compound`** — so the learning records what survived scrutiny, not what was merely believed
 4. **`wt-pr`** — last, because it is the only step that publishes
 
-**Local board ticket** (the branch starts with a `<KEY>-N` from `~/.claude/skills/wt-ticket/scripts/wt-ticket keys`, not a Linear team key): once the PR is open,
-`~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> review || true` and `~/.claude/skills/wt-ticket/scripts/wt-ticket comment <ID> "PR <url>" || true`. A merge-direct project (wt-pack: no PR)
+**Local board ticket** (the branch starts with a `<KEY>-N` from `../wt-ticket/scripts/wt-ticket keys`, not a Linear team key): once the PR is open,
+`../wt-ticket/scripts/wt-ticket move <ID> review || true` and `../wt-ticket/scripts/wt-ticket comment <ID> "PR <url>" || true`. A merge-direct project (wt-pack: no PR)
 moves it straight to `done` on the merge to main, with the merge commit as the comment.
 
 Each is its own skill and owns its own rules; this one owns **the order, the shared diff read, and the
@@ -80,7 +83,7 @@ Invoke each skill in turn. What this skill adds is what happens *between* them:
 planner has moved to another ticket):
 
 ```
-~/.claude/skills/wt-shared/scripts/task-state.sh planner "done (PR #<N>)"
+../wt-shared/scripts/task-state.sh planner "done (PR #<N>)"
 ```
 
 Not a fifth step — the four above are what `wt-ship` *does*. Both of these are the user's call, so offer
