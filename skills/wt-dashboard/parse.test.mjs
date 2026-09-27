@@ -1104,3 +1104,13 @@ test('rooms: the linked project can be set, cleared and survives a reload; bad v
   await assert.rejects(rooms.update('ops', { project: '../x' }), (e) => e.status === 400)
   await assert.rejects(rooms.update('ops', { project: 5 }), (e) => e.status === 400)
 })
+
+test('rooms: a new room takes its project at create (WP-96); none by default; the POST rejects bad values', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const rooms = new Rooms({ dir: mkdtempSync(pj(tmpdir(), 'wtd-rooms-new-')), agents: async () => [], prompt: async () => {}, log: () => {} })
+  assert.equal((await rooms.create({ title: 'a', project: 'wt-pack' })).project, 'wt-pack')
+  assert.equal((await rooms.create({ title: 'b' })).project, null)
+  const { checkProject } = await import('./rooms.mjs')
+  assert.throws(() => checkProject('../x'), (e) => e.status === 400) // POST /api/rooms checks it
+  assert.doesNotThrow(() => checkProject(null))
+})

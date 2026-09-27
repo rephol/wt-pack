@@ -221,6 +221,11 @@ export async function atomicWrite(file, data) {
 }
 export const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'room'
 
+// A room's linked project (WP-89/96): a project name or null.
+export const checkProject = (project) => {
+  if (project !== null && !(typeof project === 'string' && /^[\w.-]{1,64}$/.test(project))) throw Object.assign(new Error('project: a project name or null'), { status: 400 })
+}
+
 export class Rooms {
   // judge(state) → Promise<boolean|null>: optional Jev resolve (true = still needs the user, null = no answer).
   constructor({ dir, agents, prompt, log = console.error, judge = null }) {
@@ -333,7 +338,7 @@ export class Rooms {
     // WP-89: the linked project (null = none). It decides the project filter the room shows under and the
     // project of its 'needs you' items; Dispatch's report room is chosen by name or the board's Report to, not this.
     if (project !== undefined) {
-      if (project !== null && !(typeof project === 'string' && /^[\w.-]{1,64}$/.test(project))) throw Object.assign(new Error('project: a project name or null'), { status: 400 })
+      checkProject(project)
       r.project = project
     }
     if (responder !== undefined) {

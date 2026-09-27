@@ -8,7 +8,7 @@ import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync,
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Rooms, ticketSuggestions, roomResolve, agentMayDelete } from './rooms.mjs'
+import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport } from './dispatch.mjs'
@@ -1985,6 +1985,7 @@ async function roomsApi(req, res, url, parts) {
         return send(res, 200, await rooms.createForTicket(t))
       }
       if (typeof b.title !== 'string' || !b.title.trim()) return send(res, 400, { error: 'title required' })
+      checkProject(b.project ?? null)
       return send(res, 200, await rooms.create({ title: b.title.trim(), project: b.project ?? null, responder: typeof b.responder === 'string' ? b.responder : null }))
     }
   }

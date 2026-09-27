@@ -82,9 +82,12 @@ export function RoomsPage({ slug, project = 'all', projects = [], agents, onSele
   const toast = useToast()
   const [title, setTitle] = useState('')
   const [responder, setResponder] = useState<RoomAgent | null>(null)
+  // WP-96: a new room is linked to the project in the sidebar filter (none under All projects); changeable before Create.
+  const [newProject, setNewProject] = useState<string | null>(project === 'all' ? null : project)
+  useEffect(() => setNewProject(project === 'all' ? null : project), [project])
   const refresh = () => qc.invalidateQueries({ queryKey: ['rooms'] })
   const create = useMutation({
-    mutationFn: (b: { title?: string; ticket?: string; responder?: string }) => api<Room>('/api/rooms', { method: 'POST', body: JSON.stringify(b) }),
+    mutationFn: (b: { title?: string; ticket?: string; responder?: string; project?: string | null }) => api<Room>('/api/rooms', { method: 'POST', body: JSON.stringify(b) }),
     onSuccess: (r) => { setTitle(''); setResponder(null); refresh(); onSelect(r.slug) },
     onError: (e) => toast({ body: `Could not create the room: ${e}`, type: 'error' }),
   })
@@ -106,7 +109,11 @@ export function RoomsPage({ slug, project = 'all', projects = [], agents, onSele
           { label: 'None', onClick: () => setResponder(null) },
           ...agents.map((a) => ({ label: a.name, description: a.status, onClick: () => setResponder(a) })),
         ]} />
-        <Button label="Create" variant="primary" isDisabled={!title.trim()} isLoading={create.isPending} onClick={() => create.mutate({ title, responder: responder?.key })} />
+        <DropdownMenu button={{ label: `Project: ${newProject ?? 'none'}`, variant: 'ghost' }} items={[
+          { label: 'None', onClick: () => setNewProject(null) },
+          ...[...new Set([...projects, ...(newProject ? [newProject] : [])])].map((p) => ({ label: p, onClick: () => setNewProject(p) })),
+        ]} />
+        <Button label="Create" variant="primary" isDisabled={!title.trim()} isLoading={create.isPending} onClick={() => create.mutate({ title, responder: responder?.key, project: newProject })} />
       </HStack>
       {(q.data?.suggestions.length ?? 0) > 0 && (
         <Button label={`${q.data!.suggestions.length} room suggestion${q.data!.suggestions.length === 1 ? '' : 's'} →`} size="sm" variant="ghost" onClick={() => openInbox('room-suggestion')} />
