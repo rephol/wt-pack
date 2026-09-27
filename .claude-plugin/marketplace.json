@@ -1,8 +1,19 @@
 {
   "name": "wt-pack",
-  "owner": { "name": "wt-pack" },
+  "owner": {
+    "name": "wt-pack"
+  },
   "description": "Local plugins shipped with wt-pack.",
   "plugins": [
-    { "name": "wt-memory", "source": "./skills/wt-memory/claude-plugin", "description": "wt-memory preferences injected into Claude Code sessions." }
+    {
+      "name": "wt-pack",
+      "source": "./",
+      "description": "Every wt-* skill plus wt-memory's hooks and MCP server. Pick this OR ./setup, not both."
+    },
+    {
+      "name": "wt-memory",
+      "source": "./skills/wt-memory/claude-plugin",
+      "description": "wt-memory preferences injected into Claude Code sessions."
+    }
   ]
 }
