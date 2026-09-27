@@ -67,6 +67,14 @@ the second agent never starts.
 (`WT_AGENTS_MCP=lean` in `~/.config/wt-dashboard/env`); the env var `WT_AGENTS_MCP=full|lean` overrides it
 (`~/.claude/skills/wt-shared/scripts/mcp-mode.sh` resolves it). Off, agents start with claude's full set plus any `--mcp` picks.
 `agents.sh mcp-args <role> [cwd] [--mcp a,b]` prints the MCP args a spawn would use.
+A project's own Agent MCP (dashboard Settings › Projects) sits between the env var and the env file.
+
+## GitHub account per project
+
+When the project has a GitHub account (dashboard Settings › Projects), `spawn` puts `GH_TOKEN` for it
+(`gh auth token --user <acct>`) into the new pane's env via `herdr tab create --env`, and sets the checkout's
+`credential.https://github.com.username`. It never runs `gh auth switch`. No token for the account: a warning,
+and the agent spawns with gh's active account. The token is a snapshot: respawn after changing the account.
 
 When on, `spawn` starts claude with `--strict-mcp-config` and one merged `--mcp-config`, built per agent in
 `~/.cache/wt-agents/mcp-<name>.json` (removed by `rm`). Later sources win on a name clash:

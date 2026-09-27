@@ -122,7 +122,7 @@ spawn|mcp-args)
   # Only in lean mode (dashboard Settings switch, or WT_AGENTS_MCP=lean; default full). Full mode, or a role
   # without a file, keeps the full set (still adding any --mcp picks).
   mcp_file=; strict=; files=
-  if [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh")" = lean ] && [ -f "$dir/$role.json" ]; then
+  if [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh" --cwd "$cwd")" = lean ] && [ -f "$dir/$role.json" ]; then
     strict=--strict-mcp-config; files=$dir/$role.json
     top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
     for f in "$top/.mcp.json" "$main/.mcp.json"; do [ -f "$f" ] && { files="$files
@@ -153,7 +153,20 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   [ -f "$conf" ] || echo '{}' > "$conf"
   jq --arg d "$cwd" '.projects[$d].hasTrustDialogAccepted = true' "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
 
-  pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus \
+  # WP-107: a project with a GitHub account (dashboard Settings › Projects) gets that account's token in the pane
+  # env, so gh and git push inside it act as that account. From gh's keyring; never `gh auth switch` (global).
+  # The token is a snapshot: a changed account or rotated token needs a respawn.
+  set --
+  acct=$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get githubAccount --cwd "$main" 2>/dev/null)
+  if [ -n "$acct" ]; then
+    if tok=$(gh auth token --user "$acct" 2>/dev/null) && [ -n "$tok" ]; then
+      set -- --env "GH_TOKEN=$tok"
+      git -C "$main" config credential.https://github.com.username "$acct" 2>/dev/null || true
+    else
+      echo "warning: no gh token for $acct (gh auth login --hostname github.com, as $acct); spawning with gh's active account" >&2
+    fi
+  fi
+  pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@" \
     | jq -r .result.root_pane.pane_id)
 
   # Tags go on the pane BEFORE claude starts: wt-memory's SessionStart hook reads the
