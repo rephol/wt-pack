@@ -156,7 +156,8 @@ Chat rooms shared by you and agents.
 - **Linked project** (WP-89): shown as a chip next to the room name (click: switch the dashboard to that
   project) and set in Room settings › **Project** (None or any project; `PATCH /api/rooms/<slug> {project}`).
   It decides which project filter lists the room and the project of the room's "needs you" items. Ticket rooms
-  get their ticket's project. Dispatch reports go to the room named after the project or the board's
+  get their ticket's project. A new room starts linked to the project in the sidebar filter (none under All projects);
+  change it in the form's **Project** menu before Create (WP-96). Dispatch reports go to the room named after the project or the board's
   **Report to**, not to linked rooms.
 - **tmp rooms**: an agent may delete a `tmp-*` room where it is the responder; otherwise agents never archive
   or delete. tmp rooms do not expire on their own.
