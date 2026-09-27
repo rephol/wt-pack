@@ -1,6 +1,6 @@
 ---
 name: wt-room
-description: Chat rooms in wt-dashboard shared by the user and agents. Use when a prompt starts with "<room-message …>" (or the older "[room #…]"), when asked to post or read a room, or to coordinate with another agent through a room.
+description: Chat rooms in wt-dashboard shared by the user and agents. Use when a prompt starts with "<room-message …>" (or the older "[room #…]"), when asked to post or read a room, or to coordinate with another agent through a room. Needs wt-dashboard (the full ./setup install, not the plugin alone).
 ---
 
 # Rooms
