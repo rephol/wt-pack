@@ -5,6 +5,7 @@
 #   agents.sh spawn <role> [cwd] [--mcp a,b] # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
+#   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
 # A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
 # created on demand; $WT_AGENTS_WORKSPACE overrides the label. Any role name works
@@ -78,7 +79,7 @@ list)
   done
   ;;
 
-spawn|mcp-args)
+spawn|mcp-args|mcp-file)
   # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
   extra=; n=$#
   while [ "$n" -gt 0 ]; do
@@ -103,7 +104,7 @@ spawn|mcp-args)
   # handoff candidate filter can never see it again.
   cwd=$(cd "$cwd" && pwd)
 
-  [ "$cmd" = mcp-args ] || {
+  [ "$cmd" != spawn ] || {
   ws=$(pool_ws "$(role_label "$role" "$repo")" "$main")
   sync_names "$ws"
 
@@ -116,6 +117,10 @@ spawn|mcp-args)
   label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
   }
   [ "$cmd" = mcp-args ] && label=args-$$
+  if [ "$cmd" = mcp-file ]; then
+    label=${3:?label required}
+    case "$label" in *[!a-z0-9_-]*) echo "bad label: $label" >&2; exit 1 ;; esac
+  fi
 
   # Lean MCP: only the servers in mcp/<role>.json (--strict-mcp-config also drops plugin and claude.ai
   # servers — context-mode, claude-mem, railway, plan… — each a node process per session).
@@ -144,6 +149,10 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   fi
   if [ "$cmd" = mcp-args ]; then
     [ -n "$mcp_file" ] && { echo ${strict:+$strict }--mcp-config; jq -c '.mcpServers | keys' "$mcp_file"; rm -f "$mcp_file"; }
+    exit 0
+  fi
+  if [ "$cmd" = mcp-file ]; then
+    [ -n "$mcp_file" ] && echo ${strict:+$strict }--mcp-config "$mcp_file"
     exit 0
   fi
 
