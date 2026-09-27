@@ -143,6 +143,11 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   checkout or one of the project's worktrees.
 - Names: `<repo>-<role>-NN`, numbered across all pools (herdr names are global; repo slug cut to 20 chars). Numbers
   held by exited agents the watchdog still remembers are skipped, so their Resume stays possible (WP-120).
+- Kill shim (WP-120): every spawned pane gets `pkill`/`pgrep`/`killall` shims from `wt-agents/bin` first on PATH
+  (`--env PATH`, and `CLAUDE_ENV_FILE` so shell rc files cannot bury them). They refuse an option after the pattern
+  and a `-f`/`-m` pattern under 6 characters or starting with `-` (BSD matches those against every agent and Chrome
+  renderer), then run the real binary. Independent of the wt-memory plugin hook; `./setup doctor` counts agent
+  sessions without it (respawn them). Deliberate bypass: `/usr/bin/pkill` by full path.
 - **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
   closes; a worktree it used stays on disk.
 - CLI: `wt-agents spawn <role>`, `list --json`, `rm <name|pane> [--force]`.

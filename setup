@@ -148,6 +148,15 @@ doctor() {
       n=$(LC_ALL=C ps -axo lstart=,command= | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const g=+process.argv[1]*1000;console.log(s.split("\n").filter(l=>/^(\S*\/)?claude\s.*--name[ =]/.test(l.slice(25).trim())&&Date.parse(l.slice(4,24))<g).length)})' "${g:-0}")
       [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — restart them"
     fi
+    # WP-120: the PATH shim layer (wt-agents/bin, set at spawn) does not depend on the plugin cache.
+    nm=0; ns=0
+    for pid in $(pgrep -f 'claude .*--name ' 2>/dev/null); do
+      e=$(ps eww -o command= -p "$pid" 2>/dev/null) || continue
+      case "$e" in claude*|*/claude\ *) ;; *) continue ;; esac
+      nm=$((nm + 1)); case "$e" in *CLAUDE_ENV_FILE=*wt-agents/bin/env.sh*) ;; *) ns=$((ns + 1)) ;; esac
+    done
+    if [ "$nm" -gt 0 ] && [ "$ns" -eq 0 ]; then ok "kill shim active in all $nm agent sessions"
+    elif [ "$ns" -gt 0 ]; then opt "$ns of $nm agent sessions run without the pkill/pgrep/killall shim (spawned before WP-120) — respawn them"; fi
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
 
   # WP-98: commits here use a GitHub noreply identity (repo-local git config), so no personal/work email ships.
