@@ -14,9 +14,9 @@ sudo apt-get install -y git curl jq gh                          # plus Node ≥ 
 curl -fsSL https://herdr.dev/install.sh | sh                    # installs to ~/.local/bin
 npm i -g @anthropic-ai/claude-code && claude                    # log in once
 gh auth login
-git clone https://github.com/rephol/wt-pack.git ~/Work/projects/wt-pack
-~/Work/projects/wt-pack/setup
-~/Work/projects/wt-pack/setup doctor                            # every required line ✓
+git clone https://github.com/rephol/wt-pack.git ~/wt-pack
+~/wt-pack/setup
+~/wt-pack/setup doctor                            # every required line ✓
 ```
 
 `test/docker/` runs the same install in a clean `node:22` container, if you want to see it work first.
@@ -36,13 +36,13 @@ launchd is macOS only. On Linux, use the systemd user unit that ships with the d
 
 ```sh
 mkdir -p ~/.config/systemd/user
-cp ~/Work/projects/wt-pack/skills/wt-dashboard/scripts/wt-dashboard.service ~/.config/systemd/user/
+cp ~/wt-pack/skills/wt-dashboard/scripts/wt-dashboard.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now wt-dashboard
 loginctl enable-linger "$USER"          # keep it running when you log out
 journalctl --user -u wt-dashboard -f    # its log
 ```
 
-Edit the unit's paths if your checkout is not `~/Work/projects/wt-pack`, or if `node`, `gh`, `herdr` and
+Edit the unit's paths if your checkout is not `~/wt-pack`, or if `node`, `gh`, `herdr` and
 `claude` are not on its `PATH` line.
 
 ## 4. Reach it
@@ -72,7 +72,7 @@ tailnet address). With it:
 ## Updating
 
 ```sh
-cd ~/Work/projects/wt-pack && git pull && ./setup && systemctl --user restart wt-dashboard
+cd ~/wt-pack && git pull && ./setup && systemctl --user restart wt-dashboard
 ```
 
 `./setup` rebuilds the web UI when its sources changed. Data and config stay put:

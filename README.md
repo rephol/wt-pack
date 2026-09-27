@@ -83,8 +83,8 @@ You need macOS or Linux, Node ≥ 22.13, Git, [`gh`](https://cli.github.com),
 [herdr](https://herdr.dev) and Claude Code.
 
 ```sh
-git clone https://github.com/rephol/wt-pack.git ~/Work/projects/wt-pack
-~/Work/projects/wt-pack/setup
+git clone https://github.com/rephol/wt-pack.git ~/wt-pack
+~/wt-pack/setup
 ```
 
 `setup` does four things:
@@ -112,7 +112,7 @@ sudo apt-get install -y jq gh                                   # drop sudo when
 curl -fsSL https://herdr.dev/install.sh | sh                    # then add ~/.local/bin to PATH
 gh auth login
 herdr                                                           # the herdr server must be running
-npm --prefix ~/Work/projects/wt-pack/skills/wt-dashboard start  # the dashboard, instead of launchd
+npm --prefix ~/wt-pack/skills/wt-dashboard start  # the dashboard, instead of launchd
 ```
 
 `test/docker/` runs this install in a clean `node:22` container. To keep it running on a server, see

@@ -34,7 +34,7 @@ export function MemorySection() {
       {m.plugin.installed && m.plugin.enabled
         ? <Text size="sm">Claude Code plugin: installed{m.plugin.version ? ` (v${m.plugin.version})` : ''}, enabled.</Text>
         : <Banner status="warning" title={m.plugin.installed ? 'The wt-memory Claude Code plugin is disabled' : 'The wt-memory Claude Code plugin is not installed'}
-            description="claude plugin marketplace add ~/Work/projects/wt-pack && claude plugin install wt-memory@wt-pack" />}
+            description="claude plugin marketplace add <your wt-pack checkout> && claude plugin install wt-memory@wt-pack" />}
       <Entries entries={m.entries ?? []} />
       <SegmentedControl label="Scope" value={tab} onChange={(v) => setTab(v as Tab)} size="sm">
         <SegmentedControlItem value="global" label="Global" />

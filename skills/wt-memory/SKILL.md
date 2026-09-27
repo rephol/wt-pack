@@ -63,6 +63,6 @@ Add to your own configs (not done automatically):
   `"mcpServers":{"wt-memory":{"command":"node","args":["/Users/<you>/.claude/skills/wt-memory/mcp/server.mjs"]}}`
  .
 
-Install: `claude plugin marketplace add ~/Work/projects/wt-pack && claude plugin install wt-memory@wt-pack`.
+Install: `claude plugin marketplace add ~/wt-pack && claude plugin install wt-memory@wt-pack`.
 A change to the plugin needs `claude plugin marketplace update wt-pack && claude plugin update wt-memory@wt-pack`
 (installs are copies). Self-check: `node --test scripts/wt-memory.test.mjs`.

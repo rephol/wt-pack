@@ -6,8 +6,8 @@ FROM node:22
 RUN apt-get update -qq && apt-get install -y -qq jq gh >/dev/null && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://herdr.dev/install.sh | sh && npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
 ENV PATH=/root/.local/bin:$PATH
-COPY . /root/Work/projects/wt-pack
-WORKDIR /root/Work/projects/wt-pack
+COPY . /root/wt-pack
+WORKDIR /root/wt-pack
 RUN git init -q -b main 2>/dev/null; git -c user.email=t@t -c user.name=t add -A && git -c user.email=t@t -c user.name=t commit -qm snapshot || true
 RUN ./setup --no-secrets || true
 CMD ["sh", "test/docker/smoke.sh"]
