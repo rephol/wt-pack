@@ -42,7 +42,7 @@ You are not investigating. The material is in hand:
 ## Shape
 
 - **Name the failure in the domain's words, not the incident's.** "An unmount is cleanup nobody declared"
-  outlives the ticket; "the UMK-1073 bug" does not. The title is the search term.
+  outlives the ticket; "the ENG-1073 bug" does not. The title is the search term.
 - **Say what makes it invisible** — a green suite, a clean tree, a successful default, a typecheck that
   passes. If it announced itself, it needed no document.
 - **Say where the enforcement is.** Name the test. If nothing enforces it, say that plainly: an unenforced
