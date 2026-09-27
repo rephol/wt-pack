@@ -9,9 +9,9 @@ You need macOS or Linux, Node ≥ 22.13 (for `node:sqlite`), Git, [`gh`](https:/
 [herdr](https://herdr.dev) and Claude Code.
 
 ```sh
-git clone https://github.com/rephol/wt-pack.git ~/Work/projects/wt-pack
-~/Work/projects/wt-pack/setup            # links skills, installs the plugin, builds and starts the dashboard
-~/Work/projects/wt-pack/setup doctor     # what is missing, one line per check
+git clone https://github.com/rephol/wt-pack.git ~/wt-pack
+~/wt-pack/setup            # links skills, installs the plugin, builds and starts the dashboard
+~/wt-pack/setup doctor     # what is missing, one line per check
 ```
 
 `./setup uninstall` removes what it installed and keeps your data.
