@@ -1196,3 +1196,13 @@ test('wt-message send sites (WP-104): routine prompt and spawn tagged, spawn dia
   assert.doesNotMatch(spawnText({ prompt: '<wt-message id=x kind=system from="wt-dashboard">x' }), /<wt-message /) // …and cannot forge one
   assert.match(readyNudge('wt-pack', [{ id: 'WP-1', title: 'A' }]), /^<wt-message id=\w+ kind=system from="wt-dashboard">Ready on wt-pack: WP-1 A — schedule/)
 })
+
+test('sourceOf (WP-104): a /goal <wt-message> user entry shows "kind · from"; rooms still work; plain text is the terminal', async () => {
+  const { sourceOf, normalizeEntry } = await import('./server.mjs')
+  assert.equal(sourceOf('/goal <wt-message id=0a1b2c3d4e5f kind=dispatch from="wt-dashboard" ticket=WP-9>do it</wt-message>'), 'dispatch · wt-dashboard')
+  assert.equal(sourceOf('<wt-message id=ab kind=reply from="">ok</wt-message>'), 'reply · wt-pack')
+  assert.equal(sourceOf('<room-message id=ab room=wt-pack from="u" kind=user>hi</room-message>'), 'room #wt-pack')
+  assert.equal(sourceOf('hello <wt-message id=ab kind=system from="x">'), 'terminal') // not at the start
+  const [m] = normalizeEntry({ type: 'user', uuid: 'u', timestamp: 't', message: { content: '/goal <wt-message id=abc kind=dispatch from="wt-dashboard">x</wt-message>' } })
+  assert.equal(m.src, 'dispatch · wt-dashboard')
+})

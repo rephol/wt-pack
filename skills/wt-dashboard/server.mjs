@@ -605,9 +605,13 @@ export function recordSent(text) {
   sentHashes.add(h)
   appendFile(SENT_FILE, h + '\n').catch((e) => console.error('sent-hashes:', e.message))
 }
-function sourceOf(text) {
+export function sourceOf(text) {
+  // WP-104: wt-pack traffic, `<wt-message … kind=k from="x">` (after a slash command such as /goal) → "k · x".
+  // Display-only: the nonce is not checked, so text typed at a terminal could imitate it.
+  const wt = String(text).match(/^(?:\/\S+ )?<wt-message id=\w+ kind=(\w+) from="([^"]*)"/)
+  if (wt) return `${wt[1]} · ${wt[2] || 'wt-pack'}`
   // <room-message … room=slug> since WP-68; the `[room #slug]` header in older transcripts.
-  const room = String(text).match(/^<room-message id=\w+ room=([\w-]+)/) ?? String(text).match(/^\[room #([\w-]+)\]/)
+  const room = String(text).match(/^(?:\/\S+ )?<room-message id=\w+ room=([\w-]+)/) ?? String(text).match(/^\[room #([\w-]+)\]/)
   return room ? `room #${room[1]}` : sentHashes.has(hashOf(text)) ? 'dashboard' : 'terminal'
 }
 // ponytail: inline data URL, capped at ~1.5MB base64; bigger ones become a placeholder.
