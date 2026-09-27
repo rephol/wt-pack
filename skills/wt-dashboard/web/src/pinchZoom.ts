@@ -3,6 +3,9 @@
 // touch-action:none and iOS gesture* events are cancelled, so the page never zooms while the preview is open.
 // The Lightbox's own zoom (hasZoom) stays off: it has no pinch or wheel and would fight this for the transform; its
 // keyboard zoom is redone here.
+// WP-95: zoomed, the <img> leaves the Lightbox's image frame (max 100%, overflow hidden: it clipped the zoom to the
+// image's first box) as position:fixed over the whole overlay, and it is SIZED to picture × scale rather than
+// transform-scaled, so the browser lays out the full-resolution upload instead of magnifying a small raster.
 import { useEffect, type RefObject } from 'react'
 
 export interface Zoom { s: number; x: number; y: number }
@@ -16,18 +19,45 @@ export function zoomAt(z: Zoom, f: number, px: number, py: number): Zoom {
   return { s, x: px - (px - z.x) * k, y: py - (py - z.y) * k }
 }
 
+// Keep a zoomed picture on screen: larger than the viewport, its edges can't come inside it; smaller, it stays whole.
+// w/h: the picture at 1x; vw/vh: the viewport; ox/oy: the 1x picture centre's offset from the viewport centre.
+export interface Fit { w: number; h: number; vw: number; vh: number; ox: number; oy: number }
+export function clampPan(z: Zoom, f: Fit): Zoom {
+  if (z.s === 1) return z
+  const lim = (v: number, size: number, view: number, off: number) => { const h = Math.abs(size * z.s - view) / 2; return Math.min(h - off, Math.max(-h - off, v)) }
+  return { s: z.s, x: lim(z.x, f.w, f.vw, f.ox), y: lim(z.y, f.h, f.vh, f.oy) }
+}
+
 export function usePinchZoom(ref: RefObject<HTMLElement | null>, active: boolean, key: unknown) {
   useEffect(() => {
     const el = ref.current
     if (!active || !el) return
     let z: Zoom = { s: 1, x: 0, y: 0 }
     const img = () => el.querySelector('img')
-    const apply = () => { const i = img(); if (i) i.style.transform = z.s === 1 ? '' : `translate(${z.x}px, ${z.y}px) scale(${z.s})` }
-    const centre = (cx: number, cy: number) => { // pointer relative to the image's untransformed centre
-      const r = img()?.parentElement?.getBoundingClientRect()
-      return r ? [cx - (r.left + r.width / 2), cy - (r.top + r.height / 2)] : [0, 0]
+    // The picture at 1x (object-fit: contain inside the img box), measured when a zoom starts; null at 1x.
+    let base: { w: number; h: number; cx: number; cy: number; css: string } | null = null
+    const measure = () => {
+      const i = img(), r = i?.getBoundingClientRect()
+      if (!i || !r || !r.width) return null
+      const k = i.naturalWidth && i.naturalHeight ? Math.min(r.width / i.naturalWidth, r.height / i.naturalHeight) : 1
+      const w = i.naturalWidth ? i.naturalWidth * k : r.width, h = i.naturalHeight ? i.naturalHeight * k : r.height
+      return { w, h, cx: r.left + r.width / 2, cy: r.top + r.height / 2, css: i.style.cssText }
     }
-    const onImage = (t: EventTarget | null) => t instanceof Element && !!img()?.parentElement?.contains(t)
+    const apply = () => {
+      const i = img()
+      if (!i) return
+      if (z.s === 1 || !(base ??= measure())) { if (base) i.style.cssText = base.css; base = null; z = { s: 1, x: 0, y: 0 }; return }
+      const v = el.getBoundingClientRect()
+      z = clampPan(z, { w: base.w, h: base.h, vw: v.width, vh: v.height, ox: base.cx - (v.left + v.width / 2), oy: base.cy - (v.top + v.height / 2) })
+      const w = base.w * z.s, h = base.h * z.s
+      Object.assign(i.style, { position: 'fixed', left: `${base.cx - w / 2}px`, top: `${base.cy - h / 2}px`, width: `${w}px`, height: `${h}px`,
+        maxWidth: 'none', maxHeight: 'none', objectFit: 'contain', margin: '0', transform: `translate(${z.x}px, ${z.y}px)`, zIndex: '1' })
+    }
+    const centre = (cx: number, cy: number) => { // pointer relative to the picture's 1x centre
+      const b = base ?? measure()
+      return b ? [cx - b.cx, cy - b.cy] : [0, 0]
+    }
+    const onImage = (t: EventTarget | null) => t instanceof Element && (t === img() || !!img()?.parentElement?.contains(t))
     const stage = img()?.parentElement
     el.style.touchAction = 'none'
     if (stage) stage.style.touchAction = 'none'
@@ -109,7 +139,7 @@ export function usePinchZoom(ref: RefObject<HTMLElement | null>, active: boolean
       el.style.touchAction = ''
       if (stage) stage.style.touchAction = ''
       for (const g of ['gesturestart', 'gesturechange', 'gestureend']) document.removeEventListener(g, gesture)
-      const i = img(); if (i) i.style.transform = ''
+      const i = img(); if (i && base) i.style.cssText = base.css
     }
   }, [ref, active, key])
 }
