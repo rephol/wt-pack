@@ -14,14 +14,23 @@ allowed-tools: Bash
 ```bash
 ~/.claude/skills/wt-handoff/scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--dry-run] <cwd>
+  [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
+~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
 ```
+
+- **Every prompt is wrapped** (WP-104) as `<wt-message id=<nonce> kind=handoff|dispatch|routine|reply|system
+  from="<sender>" [ticket=<ID>]>…</wt-message>` — the sibling of rooms' `<room-message>` — so the target knows it
+  is wt-pack traffic, not its user. `--kind` (default `handoff`) and `--from` (default: your agent name) are for
+  server callers (Dispatch passes `--kind dispatch --from wt-dashboard`). The wrap counts toward the 4000 cap.
+- **`--reply <pane> "text"`** answers whoever sent you a wt-message: a plain `kind=reply` prompt, no `/goal`,
+  no tokens, no worker selection. Raw `herdr agent prompt` still works but arrives untagged — describe it only
+  as the fallback when `handoff.sh` is unavailable.
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. `--no-goal` sends a plain prompt instead of `/goal`
   (why a goal, and its one-line / 4000-character rules: `~/.claude/skills/wt-plan/references/handoff.md`).
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
-  `target <name> <pane> — <task>` and `reach: herdr agent prompt <pane> "..."`. Non-zero exit = nothing was
+  `target <name> <pane> — <task>` and `reach: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
   sent; print the prompt for a human instead.
 
 ## Task label and awareness
@@ -53,7 +62,7 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
   (`wt-ticket move` + `assign`, best effort; `--dry-run` prints `ticket=` and the move instead).
 - Target tokens: `task`, `ticket`, `handoff_from`, `handoff_from_pane`, `handoff_at`. Sender tokens (only
   inside herdr, from `$HERDR_PANE_ID`): `handoff_to`, `handoff_to_pane`.
-- The prompt gets a footer: `Handed off by <sender> (pane <id>). To reach it: herdr agent prompt <id> "..."`.
+- The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <id> "..."`.
 - `handoff_at` is what lets the dashboard adopt the new `ticket` over its own mirrored copy
   (`data/agent-tags.json`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
 - `wt-finish` clears `task` when the work is retired.
