@@ -138,7 +138,7 @@ The missing ones are added with
 `wt-memory remember "<rule>" --scope role` (role orchestrator; check the CLI's exact flag for naming the role
 in U3):
 claim before planning; skip cards with a dispatch badge and handle only the exceptions; verify, commit and
-report concisely; the umkmall orchestrator is reachable via `herdr agent prompt wP:p1`. "No draft PRs"
+report concisely; the myapp orchestrator is reachable via `herdr agent prompt wP:p1`. "No draft PRs"
 stays in CLAUDE.md, because it applies to any agent that ships here, and it is also in the project
 preferences. No `AGENTS.md` symlink: the reference needs one for its multi-agent converters, and this repo
 has no such consumer.
@@ -175,7 +175,7 @@ and plugin steps the scratch-HOME run must skip or report and not fail; check ho
 to wt-memory role orchestrator, and list them in the commit message.
 Files: `CLAUDE.md` (the memory store is outside the repo).
 Verify: `grep -c "orchestrator" CLAUDE.md` finds only the skill-map mentions. `wt-memory list` (role
-orchestrator) shows the claim-first, dispatch-badge, verify/commit/report and umkmall-contact rules.
+orchestrator) shows the claim-first, dispatch-badge, verify/commit/report and myapp-contact rules.
 
 **U3 — docs (S).** Update repo-relative paths: `README.md:6,31` ("Each directory is one skill" becomes
 "Each directory under `skills/`"; `wt-shared/scripts/wt-judge.mjs`), `docs/features.md:5,251`,

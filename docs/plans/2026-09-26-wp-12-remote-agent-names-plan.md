@@ -7,7 +7,7 @@ Remote herdr agents (machines from `herdr machine list`) show a readable, @menti
 ## What research corrected
 - **"code-reviewer" is not a role.** It is the machine label: `herdr machine list` gives
   `code-reviewer herdr-box default enabled`. Both remote agents (`w5:p8`, `w5:p9`) have no herdr `name`,
-  title `"Claude Code"`, cwd `/work/projects/umkmall`, and no pane tokens.
+  title `"Claude Code"`, cwd `/work/projects/myapp`, and no pane tokens.
 - The name is derived at `wt-dashboard/server.mjs:388-389`:
   `let name = a.name ?? a.terminal_title_stripped ?? a.pane_id` and
   `if (!m.local && (GENERIC.test(name.trim()) || name === a.pane_id)) name = \`${m.label}/${a.pane_id}\``
@@ -18,7 +18,7 @@ Remote herdr agents (machines from `herdr machine list`) show a readable, @menti
 ## Approach
 settled (planner assumption, no synchronous user): **display-only derivation in the server, no writes to
 remote herdr.** A remote agent with a herdr `name` keeps it. Otherwise the name is
-`slug(<machine label>-<cwd basename>-<pane index>)`, e.g. `code-reviewer-umkmall-p8`. The slug rule is the
+`slug(<machine label>-<cwd basename>-<pane index>)`, e.g. `code-reviewer-myapp-p8`. The slug rule is the
 same one as `wt-agents/scripts/agents.sh` `repo_slug`: lowercase, `[a-z0-9_-]`, ≤32 characters. The terminal
 title is **never** used as a remote name, because it is a session topic and changes.
 
@@ -43,7 +43,7 @@ with `-`, then slugged to ≤32 characters. Truncate the middle (cwd) part first
 distinct. Local agents are unchanged. The `key` (`:417` `${m.label}/${a.pane_id}`) is unchanged, so no cache
 or state migration is needed.
 Verify: a unit test in `parse.test.mjs` (or the file that hosts `remoteName`) covering
-`('code-reviewer','/work/projects/umkmall','w5:p8') → 'code-reviewer-umkmall-p8'`, a capitalised/spaced
+`('code-reviewer','/work/projects/myapp','w5:p8') → 'code-reviewer-myapp-p8'`, a capitalised/spaced
 label, a missing cwd, the 32-character cap with distinct panes, and a herdr `name` taking precedence, and a local agent getting
 `a.name ?? a.terminal_title_stripped ?? a.pane_id` unchanged (all through `agentName`).
 
@@ -54,7 +54,7 @@ label, a missing cwd, the 32-character cap with distinct panes, and a herdr `nam
 ## Verification
 - `cd wt-dashboard && npm test`.
 - Live: `npm run service:restart` once, then `curl -s localhost:7777/api/overview | jq '.agents[] | select(.local|not) | .name'` (there is no GET
-  `/api/agents`; agents are served in `/api/overview .agents`, `server.mjs:2115`) and check that the remote agents read `code-reviewer-umkmall-p8` / `-p9`. Check the sidebar with
+  `/api/agents`; agents are served in `/api/overview .agents`, `server.mjs:2115`) and check that the remote agents read `code-reviewer-myapp-p8` / `-p9`. Check the sidebar with
   agent-browser `--session <agent name>`, plus a screenshot via `wt-shared/scripts/screenshot.mjs`.
   Read only; **do not rename or prompt the remote agents** (they are the user's real ones).
 

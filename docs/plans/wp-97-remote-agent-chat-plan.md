@@ -13,10 +13,10 @@ agents use. When a transcript cannot be found or reached, the page says so and k
 
 - **The transcript cannot be found from `cwd + session id`, because herdr gives remote agents no session id.**
   A live `herdr --machine code-reviewer agent list` returns
-  `{'pane_id': 'w5:p8', 'cwd': '/work/projects/umkmall', 'agent_session': None}`. The server also nulls the
+  `{'pane_id': 'w5:p8', 'cwd': '/work/projects/myapp', 'agent_session': None}`. The server also nulls the
   session for any non-local agent: `server.mjs:428`
   `const session = m.local && a.agent_session?.kind === 'id' ? a.agent_session.value : null`. Both remote panes
-  share `/work/projects/umkmall`, and its project dir `~/.claude/projects/-work-projects-umkmall` holds 49
+  share `/work/projects/myapp`, and its project dir `~/.claude/projects/-work-projects-myapp` holds 49
   entries. → The transcript has to be **matched** to the pane (see Approach). A session id is used directly
   if herdr ever reports one.
 - **Line ~1566 is not the chat gate.** `server.mjs:1566` `if (!a?.local) return BUILTINS // remote: no filesystem access`
@@ -25,8 +25,8 @@ agents use. When a transcript cannot be found or reached, the page says so and k
   - the client, `App.tsx:1299` `const live = agent.local && Boolean(agent.session)`.
 - **Local lookup does not encode cwd.** It scans every project dir for `<session>.jsonl`
   (`server.mjs:517-526`, `for (const d of await readdir(PROJECTS)) { const f = join(PROJECTS, d, \`${id}.jsonl\`) …`).
-  On the remote side, the project dir name is the cwd with `/` replaced by `-` (`-work-projects-umkmall` for
-  `/work/projects/umkmall`), which is how the dir is picked there.
+  On the remote side, the project dir name is the cwd with `/` replaced by `-` (`-work-projects-myapp` for
+  `/work/projects/myapp`), which is how the dir is picked there.
 - **There is no saved SSH target in wt-dashboard config.** Machines come from `herdr machine list`, and the
   SSH target is its `host` field (`server.mjs:218-224`
   `.map(([id, label, host, session, state]) => ({ id, label, host, … }))`). `code-reviewer` maps to host
@@ -154,7 +154,7 @@ Verify: `cd skills/wt-dashboard/web && npx tsc --noEmit -p . && npm run build`, 
 `skills/wt-dashboard`. After one service restart, use agent-browser (`--session <agent name>`, with
 `caffeinate -u -t 60 &` first) on a code-reviewer agent at 1440 and at 390. Take screenshots showing
 transcript messages, or showing the `not matched` badge with pane-view content if matching fails. Never send
-a message to the user's real umkmall agents on that box: read-only viewing only.
+a message to the user's real myapp agents on that box: read-only viewing only.
 
 Order: U1 → U2 → U3.
 
