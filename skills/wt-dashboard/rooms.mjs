@@ -350,7 +350,8 @@ export class Rooms {
       if (a && !r.members.includes(a.name)) r.members = [...r.members, a.name]
     }
     if (Array.isArray(members)) r.members = members.filter((m) => typeof m === 'string').slice(0, 50)
-    if (typeof title === 'string' && title.trim()) r.title = title.slice(0, 120)
+    // WP-114: renaming changes the display name only; the slug (room post <slug>, Report to, routines) stays fixed.
+    if (typeof title === 'string' && title.trim()) r.title = title.trim().slice(0, 120)
     await this.saveIndex()
     return r
   }
@@ -371,7 +372,7 @@ export class Rooms {
     await this.load()
     const room = this.room(slug)
     if (!room) throw Object.assign(new Error('unknown room'), { status: 404 })
-    if (room.archived) throw Object.assign(new Error('room is archived (read-only)'), { status: 409 })
+    if (room.archived) throw Object.assign(new Error(`#${slug} is archived (read-only); the user can restore it in Rooms › Archived`), { status: 409 })
     text = String(text ?? '').trim().slice(0, 8000)
     // An agent opening its post with an @mention of itself (WP-13) is noise: the prefix goes, and it is never a mention.
     if (author.kind === 'agent') text = stripSelfMention(text, author.name)

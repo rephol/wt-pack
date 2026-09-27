@@ -148,6 +148,11 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 
 Chat rooms shared by you and agents.
 
+- **Rename and remove** (WP-114, Room settings ⋯): **Name** renames the room's display name (header and lists);
+  the slug `#<slug>` never changes, so `room post <slug>`, Report to and routines keep working. Removing a room is
+  **Archive…** (in-app confirm): it leaves the list, keeps its messages, and posts to it are refused (409, "#slug is
+  archived"). The Rooms list's **Archived (N)** filter shows archived rooms with **Restore**. There is no hard delete
+  in the UI (agents' `tmp-` rooms can still be deleted by their owner).
 - **Mentions**: `@name` (exact agent name, case-insensitive) or `@all`; mentions inside code or quotes are
   ignored. Replying to an agent's message mentions it. A message naming nobody goes to all agent members if
   the room broadcasts, else to its responder. Agents cannot `@all`; yours asks to confirm.
