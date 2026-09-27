@@ -145,7 +145,7 @@ function DownState({ ctl }: { ctl: ReturnType<typeof useServerControl> }) {
           <Text type="supporting">The dashboard server on 127.0.0.1:7777 is not answering.</Text>
           {isApp
             ? <Button label="Start server" variant="primary" isLoading={ctl.busy === 'start'} onClick={() => ctl.run('start')} />
-            : (<><Text>Start it from a terminal:</Text><CodeBlock code="cd ~/.claude/skills/wt-dashboard && npm start" /></>)}
+            : (<><Text>Start it from your wt-pack checkout:</Text><CodeBlock code="cd skills/wt-dashboard && npm start" /></>)}
         </VStack>
       </Card>
     </div>

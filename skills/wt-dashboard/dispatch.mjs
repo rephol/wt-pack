@@ -4,6 +4,9 @@
 // routines row, but shares their cap and memory guard. The server injects every side effect, so tests need no herdr.
 import { guard } from './routines.mjs'
 
+// WP-122: the agent runs this pack's own handoff.sh, not a ~/.claude/skills link that a plugin install lacks.
+const HANDOFF = new URL('../wt-handoff/scripts/handoff.sh', import.meta.url).pathname
+
 // Size L or the needs-plan label (set by hand or by Jev triage) → planner; anything else → worker.
 export const roleFor = (t) => (t.size === 'L' || t.labels?.includes('needs-plan') ? 'planner' : 'worker')
 const DAY = 86_400_000
@@ -26,7 +29,7 @@ export function mergeIds(subject, key) {
 export function reportLine(report) {
   const parts = [
     report?.room && `post a one-line result in #${report.room} with \`room post ${report.room} "…"\``,
-    report?.orch && `send a one-line result to ${report.orch.name} with \`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply ${report.orch.pane} "…"\``,
+    report?.orch && `send a one-line result to ${report.orch.name} with \`${HANDOFF} --reply ${report.orch.pane} "…"\``,
   ].filter(Boolean)
   return parts.length ? `When done, ${parts.join(' and ')}.\n` : ''
 }

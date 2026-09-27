@@ -1000,7 +1000,7 @@ export const ticketOf = (s, keys = [...TEAM_KEYS, ...boardKeys]) => {
 }
 
 // ---- spawn / remove agents: always through the wt-agents skill's script (naming, pools, trust seed) ----
-const AGENTS_SH = join(homedir(), '.claude', 'skills', 'wt-agents', 'scripts', 'agents.sh')
+const AGENTS_SH = fileURLToPath(new URL('../wt-agents/scripts/agents.sh', import.meta.url)) // sibling skill (WP-122)
 // Project name → main checkout: the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
 // and every repo a local agent is working in.
 async function projectRoots() {
@@ -1286,7 +1286,7 @@ export function handoffArgs(t, mode) {
   const prompt = `Use wt-work to implement ${t.plan} to its Definition of Done.\n\nWork in ${t.worktree} on ${t.branch}. Do not cd to the main checkout.\n\nThen wt-ship.\n`
   return { args: [...(mode === 'reassign' ? ['--new'] : []), '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.slice(0, 80), t.worktree], prompt }
 }
-const HANDOFF_SH = join(homedir(), '.claude', 'skills', 'wt-handoff', 'scripts', 'handoff.sh')
+const HANDOFF_SH = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import.meta.url)) // sibling skill (WP-122)
 async function handoffTask(id, mode) {
   const t = (await overview()).tasks.find((x) => x.id === id)
   if (!t) throw Object.assign(new Error('unknown task'), { status: 404 })
@@ -2705,8 +2705,8 @@ const WD_FILE = join(DATA, 'watchdog.json')
 let wd = { settings: cleanWatchdogSettings(), open: {}, resolved: [], lastRun: null, lastSeen: {} }
 const wdLoaded = readFile(WD_FILE, 'utf8').then((t) => { const j = JSON.parse(t); wd = { settings: cleanWatchdogSettings(j.settings), open: j.open ?? {}, resolved: j.resolved ?? [], lastRun: j.lastRun ?? null, lastSeen: j.lastSeen ?? {} } }, () => {})
 const serverErrors = [] // console.error timestamps, last hour (wrapped in the listening block)
-// The pack checkout, for Investigate's wt-handoff: skills are symlinks into it (…/wt-pack/skills/<name>).
-const packRoot = () => { try { return dirname(dirname(realpathSync(join(homedir(), '.claude', 'skills', 'wt-handoff')))) } catch { return null } }
+// The pack checkout, for Investigate's wt-handoff: the one this server runs from (<pack>/skills/wt-dashboard, WP-122).
+const packRoot = () => { try { return realpathSync(fileURLToPath(new URL('../..', import.meta.url))) } catch { return null } }
 // WP-120: pool agents whose claude started before the installed wt-memory version was installed run without its
 // hooks (the pkill guard): hooks load at session start. guardAt = that version's installPath birth time.
 async function staleHooks(ag) {
@@ -2772,7 +2772,7 @@ async function watchdogApi(req, res, sub) {
     if (!f) return send(res, 404, { error: 'no open finding with that key' })
     if (!['worker', 'auditor'].includes(role)) return send(res, 400, { error: 'role: worker|auditor' })
     const root = packRoot()
-    if (!root) return send(res, 409, { error: 'wt-pack checkout not found (~/.claude/skills/wt-handoff)' })
+    if (!root) return send(res, 409, { error: 'wt-pack checkout not found (the server runs from <pack>/skills/wt-dashboard)' })
     // handoff.sh --role takes worker|planner only; an auditor is a free auditor agent's pane.
     let target = ['--role', 'worker']
     if (role === 'auditor') {
