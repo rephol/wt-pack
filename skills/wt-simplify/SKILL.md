@@ -12,6 +12,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch
 
 # wt-simplify
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Behaviour-preserving cleanup of code that is **settled** — written, verified, and about to be reviewed.
 
 The point is not tidiness. It is that review is the expensive step, and every finding it spends on a shape
@@ -69,7 +72,7 @@ Step 2 states the constraint — behaviour must not change. This checks it per c
 it:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs simplify candidates.json
+node ../wt-shared/scripts/wt-judge.mjs simplify candidates.json
 ```
 
 Read the number, not the mark. The model is cautious on "could this change behaviour for **any** input" and
@@ -80,7 +83,7 @@ The threshold is 0.7 for that reason, and a genuine behaviour change scores far 
 **Exit 3 means no key: apply step 2's judgement as before.**
 
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
-`node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
+`node ../wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
 
 ## 3. Prove it
