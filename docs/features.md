@@ -294,7 +294,8 @@ Projects, Terminals, Usage, Observability, Server, About.
   dashboard's PR/issue calls for the default repo use it too; gh's active account is never switched; a token is
   a snapshot — respawn after changing it), **Reviewer GitHub account** (wt-watch-prs posts reviews as this
   account, token from gh's keyring per call, so it can approve PRs your agents opened; unset → the
-  `GH_REVIEWER_TOKEN_FILE` token, else the default identity, which only comments), **Base branch** (default `main`; wt-watch-prs diffs against it too; dispatch reconcile and the PR list's
+  `GH_REVIEWER_TOKEN_FILE` token, else the default identity, which only comments — unless it is declared with
+  `WT_REVIEWER_LOGIN` / `~/.config/gh-reviewer-login` and matches, for machines without a dashboard, WP-126), **Base branch** (default `main`; wt-watch-prs diffs against it too; dispatch reconcile and the PR list's
   shipped check), **Agent MCP** (`WT_AGENTS_MCP`), **Max working agents** (dispatch cap; global = Routines'), **Max reviewers** (`maxReviewers`, default 2,
   0–20: wt-watch-prs dispatch spawns a reviewer only below it — WP-121),
   **Ticket triage** (`WT_JEV_TICKET_TRIAGE`); plus the board's Auto and Dispatch switches. Stored in `wt.db`
