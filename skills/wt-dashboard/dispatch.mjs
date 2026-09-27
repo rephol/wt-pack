@@ -2,10 +2,11 @@
 // to a free agent through wt-handoff; reconcile (always on) moves a card to Done once its merge lands on origin/main,
 // returns a dispatched card to Ready when its agent is gone, and flags an idle assignee. Not a routine: it keeps no
 // routines row, but shares their cap and memory guard. The server injects every side effect, so tests need no herdr.
+import { fileURLToPath } from 'node:url'
 import { guard } from './routines.mjs'
 
 // WP-122: the agent runs this pack's own handoff.sh, not a ~/.claude/skills link that a plugin install lacks.
-const HANDOFF = new URL('../wt-handoff/scripts/handoff.sh', import.meta.url).pathname
+const HANDOFF = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import.meta.url))
 
 // Size L or the needs-plan label (set by hand or by Jev triage) → planner; anything else → worker.
 export const roleFor = (t) => (t.size === 'L' || t.labels?.includes('needs-plan') ? 'planner' : 'worker')
