@@ -123,6 +123,11 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
     onSuccess: (op) => { refresh(); qc.invalidateQueries({ queryKey: ['memory'] }); toast({ body: op === 'forget' ? 'Forgotten' : op === 'accept' ? 'Added to global preferences' : 'Proposal rejected' }) },
     onError: (e) => toast({ body: `Memory: ${e}`, type: 'error' }),
   })
+  // Watchdog `exited` (WP-109): restart the remembered session in its pane; the server refuses when that is unsafe.
+  const resume = useMutation({
+    mutationFn: (key: string) => api<{ message: string }>('/api/watchdog/resume', { method: 'POST', body: JSON.stringify({ key }) }),
+    onSuccess: (r) => { refresh(); toast({ body: r.message }) }, onError: (e) => toast({ body: `Could not resume: ${e}`, type: 'error' }),
+  })
   const dismiss = useMutation({
     mutationFn: (ticket: string) => api('/api/rooms/dismiss', { method: 'POST', body: JSON.stringify({ ticket }) }),
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
@@ -164,6 +169,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
           {it.kind === 'room-suggestion' && !it.resolvedAt && act('Create room', I.plus, () => createRoom.mutate(it.target.task!))}
           {it.kind === 'room-suggestion' && !it.resolvedAt && act('Dismiss suggestion', I.x, () => dismiss.mutate(it.target.task!))}
           {it.kind === 'room-created' && it.target.room && act('Archive room', I.x, () => archiveRoom.mutate({ slug: it.target.room!, ids: it.ids }))}
+          {it.kind === 'watchdog' && it.target.check === 'exited' && !it.resolvedAt && act('Resume session', I.undo, () => resume.mutate(it.target.watchdog!))}
           {it.kind === 'memory' && it.target.memory && act('Undo', I.undo, () => memory.mutate({ id: it.target.memory!, op: 'forget', ids: it.ids }))}
           {it.kind === 'memory-proposal' && !it.resolvedAt && act('Accept', I.check, () => memory.mutate({ id: it.target.memory!, op: 'accept', ids: it.ids }))}
           {it.kind === 'memory-proposal' && !it.resolvedAt && act('Reject', I.x, () => memory.mutate({ id: it.target.memory!, op: 'reject', ids: it.ids }))}

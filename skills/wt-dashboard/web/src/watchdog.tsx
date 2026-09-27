@@ -1,4 +1,5 @@
 // Settings › Observability › Watchdog (WP-70): per-check switch and threshold, open findings with Investigate
+// (and Resume for an exited pool agent, WP-109)
 // (hands the finding to a worker or auditor through wt-handoff — only on this click), and what resolved lately.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -16,7 +17,7 @@ import { SettingsCard, SettingsRow } from './settingsRows'
 type Check = { id: string; label: string; unit: string; threshold: number; severe?: boolean }
 type Finding = { check: string; key: string; severity: 'severe' | 'warn'; title: string; body: string; since: string; resolvedAt?: string }
 type Draft = Record<string, { on: boolean; threshold: string }>
-type State = { checks: Check[]; settings: Record<string, { on: boolean; threshold: number }>; open: Record<string, Finding>; resolved: Finding[]; lastRun: string | null }
+type State = { checks: Check[]; settings: Record<string, { on: boolean; threshold: number }>; open: Record<string, Finding>; resolved: Finding[]; lastRun: string | null; lastSeen?: Record<string, { name: string; session?: string }> }
 
 const when = (iso: string) => new Date(iso).toLocaleString()
 const err = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -40,8 +41,13 @@ export function WatchdogSection() {
     onSuccess: (r) => toast({ body: r.message || 'Handed off' }),
     onError: (e) => toast({ body: `Could not hand off: ${err(e)}`, type: 'error' }),
   })
+  const resume = useMutation({
+    mutationFn: (key: string) => api<{ message: string }>('/api/watchdog/resume', { method: 'POST', body: JSON.stringify({ key }) }),
+    onSuccess: (r) => { done(); toast({ body: r.message }) },
+    onError: (e) => toast({ body: `Could not resume: ${err(e)}`, type: 'error' }),
+  })
   if (!q.data) return null
-  const { checks, settings, open, resolved, lastRun } = q.data
+  const { checks, settings, open, resolved, lastRun, lastSeen } = q.data
   const findings = Object.values(open)
   const valid = Object.values(draft).every((v) => v.threshold.trim() !== '' && Number.isFinite(Number(v.threshold)) && Number(v.threshold) >= 0)
   const dirty = Object.entries(draft).some(([k, v]) => v.on !== settings[k]?.on || Number(v.threshold) !== settings[k]?.threshold || v.threshold.trim() === '')
@@ -54,6 +60,7 @@ export function WatchdogSection() {
           <SettingsRow key={f.key} title={<HStack gap={2} vAlign="center"><StatusDot variant={f.severity === 'severe' ? 'error' : 'warning'} label={f.severity} /><span>{f.title}</span></HStack>}
             description={`${f.body ? `${f.body} · ` : ''}since ${when(f.since)}`}
             control={<HStack gap={1}>
+              {f.check === 'exited' && <Button label="Resume" size="sm" variant="primary" isDisabled={!lastSeen?.[f.key.slice('exited|'.length)]?.session} isLoading={resume.isPending && resume.variables === f.key} onClick={() => resume.mutate(f.key)} tooltip="Restart this session in the same pane (claude --resume)" />}
               <Button label="Investigate" size="sm" isLoading={investigate.isPending && investigate.variables?.key === f.key} onClick={() => investigate.mutate({ key: f.key, role: 'worker' })} tooltip="Hand it to a free worker (wt-handoff)" />
               <Button label="Ask auditor" size="sm" variant="ghost" onClick={() => investigate.mutate({ key: f.key, role: 'auditor' })} tooltip="Hand it to an auditor instead" />
             </HStack>} />
