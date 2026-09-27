@@ -14,8 +14,11 @@ allowed-tools: Bash, Read, Grep, Glob, Skill, Agent, ToolSearch, Monitor, TaskLi
 
 # wt-watch-prs
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 A code reviewer, not a test runner: it reads pinned refs and CI's verdict, never checks out, installs or runs
-suites. The mechanics live in `scripts/watch-prs.sh` (call it as `W=~/.claude/skills/wt-watch-prs/scripts/watch-prs.sh`);
+suites. The mechanics live in `scripts/watch-prs.sh` (call it as `W=<this skill's base directory>/scripts/watch-prs.sh`);
 this file is the judgement. Run everything from the repo's main checkout (a reviewer starts there).
 
 ## Modes (WP-121)
@@ -46,7 +49,7 @@ mode — do not run `$W mode` on it), and the sender pane from its "Handed off b
 head, then stop — no claim (D holds it), no Monitors, no release (D releases on your reply):
 `$W describes N` → `$W gate N` → `$W diff N D --sha X` → wt-review → post (§3) → record under D with your own agent
 name, `$W record N <sha40> <state> - D --by <your name> < "$TMPDIR/noteN.txt"` (§4: the note on stdin), then
-`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <sender pane> "#N: <verdict> (<sha7>)"` and stop.
+`../wt-handoff/scripts/handoff.sh --reply <sender pane> "#N: <verdict> (<sha7>)"` and stop.
 The judgement is §2 (from Describes on), §3 and §4, unchanged.
 
 **Standalone** is §1–§5 below.
