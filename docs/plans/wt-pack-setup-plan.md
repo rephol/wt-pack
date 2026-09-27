@@ -40,7 +40,7 @@ macOS-first; Linux gaps listed, not solved.
 | Codex/Gemini | `wt-memory/SKILL.md:53-60` snippets | doctor prints "optional: see wt-memory/SKILL.md" if `codex`/`gemini` on PATH; no auto-edit |
 
 Hardcoded `~/Work/projects/wt-pack` appears in `wt-dashboard/web/src/memory.tsx:36` (install hint text) and
-`wt-memory/SKILL.md:62`; setup uses `$REPO` so those stay cosmetic. `UMKMALL_REPO` default is umkmall-specific
+`wt-memory/SKILL.md:62`; setup uses `$REPO` so those stay cosmetic. `MYAPP_REPO` default is myapp-specific
 (`config.mjs:17`) — out of scope, noted.
 
 ## Units
@@ -79,4 +79,4 @@ no Keychain (env file fallback exists in config.mjs:100), no brew prompt (apt na
 - Commits: one per skill touched (`setup`+README+CLAUDE.md, `wt-setup`), pushed to origin.
 
 ## Out of scope
-Auto-installing herdr/Homebrew, systemd unit, Tauri build, editing Codex/Gemini configs, UMKMALL_REPO default.
+Auto-installing herdr/Homebrew, systemd unit, Tauri build, editing Codex/Gemini configs, MYAPP_REPO default.

@@ -218,7 +218,7 @@ Dispatch is on, like the Auto-only selector at `board.tsx:207`. No native dialog
 Files: `web/src/board.tsx`, `web/src/boardData.ts`, `web/src/settings.tsx`, `web/src/routines.tsx` (only if
 the section lives beside RoutinesHistorySection), `wt-dashboard/server.mjs` (`/api/board/events`).
 Verify: `cd web && npx tsc --noEmit -p . && npm test`; `npm run build`; agent-browser at 1440 and 390 with
-`--session <agent name>` against a throwaway board (not a live umkmall board). Toggle Dispatch, check the
+`--session <agent name>` against a throwaway board (not a live myapp board). Toggle Dispatch, check the
 status line, and screenshot a card badge and the history section.
 
 **U5 — docs + rules (S).** CLAUDE.md "Working here", `wt-ticket/SKILL.md` orchestrator rule,
@@ -248,7 +248,7 @@ Order: U1 → U2 → U3 → U4 → U5. U3 extends U2's module, and U4 depends on
   Create a temp board or use a throwaway project with Dispatch on and one S ticket in Ready. Confirm the card
   goes to Building with a worker assignee within about 60 s, and that a spawned throwaway worker gets the
   prompt. Then `wt-agents rm` that worker and confirm the card returns to Ready after two ticks, with the
-  history note. Never test against real umkmall-* agents (CLAUDE.md Traps).
+  history note. Never test against real myapp-* agents (CLAUDE.md Traps).
 - Default-off check: after the migration, `SELECT dispatch FROM boards` is 0 for every board, and no card
   moves because of dispatch.
 

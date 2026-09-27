@@ -44,7 +44,7 @@ the server is down. No Claude API.
 - No error counter exists (grep: no console.error wrapper; only `SOURCES[*].lastError`), so the `errors` check
   counts `console.error` calls in-process (timestamps, pruned to 1 h).
 - `/api/health` needs no session: `server.mjs:1708` `if (method === 'GET' || method === 'HEAD' || !path.startsWith('/api/')) return false`.
-- No pack-root constant: `server.mjs:41` `const REPO = … join(homedir(), 'Work', 'projects', 'umkmall')` — REPO is not usable.
+- No pack-root constant: `server.mjs:41` `const REPO = … join(homedir(), 'Work', 'projects', 'myapp')` — REPO is not usable.
 - jev log rows: `{"ts":…,"feature":"ticket_triage",…,"err":null}`; `jevlog.mjs` `healthSummary` excludes
   `!c.test && !/^(eval:|probe$)/.test(c.feature ?? '')` — the `jev` check applies the same filter.
 - Web kind lists, all hand-written:

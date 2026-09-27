@@ -17,12 +17,12 @@ At 390px the page is machines + usage cards stacked; the KPIs start below the fo
 ## Target layout
 ```
 [ Needs you 2 → ] [ Stalled 1 → ] [ In review 3 → ]      tiles → #tasks
-Agents   umkmall  ●3 working ○5 idle ✕0 blocked          → #agents (project-scoped)
+Agents   myapp  ●3 working ○5 idle ✕0 blocked          → #agents (project-scoped)
          wt-pack  ●2 working ○1 idle
 Today    PRs 4 opened · 2 merged · 3 tasks shipped
 Machine  RAM 71% (normal) · workers 2/2 · per-machine online/stale dots (was MachinesStrip)
 Health   Linear ✓ GitHub ✓ herdr ✓ Jev ⚠ 3 errors/24h      → Settings › Observability
-Rooms    #wt-pack 2m ago — last line · #umkmall 14m ago   → #rooms/<slug>
+Rooms    #wt-pack 2m ago — last line · #myapp 14m ago   → #rooms/<slug>
 Usage    5h 22% · weekly 7%                              → Settings › Usage
 ```
 One column at 390px, in that order; two-column grid ≥ 900px.

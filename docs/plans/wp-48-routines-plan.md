@@ -192,7 +192,7 @@ dialog), and the history row appears.
 5. The Routines page and Observability › Routines history render at 390px and 1280px, with a screenshot of
    each.
 6. `/api/observability` response shape is unchanged.
-7. No real umkmall agent is prompted or spawned during verification. Spawn and prompt targets are tested only
+7. No real myapp agent is prompted or spawned during verification. Spawn and prompt targets are tested only
    with injected deps (U1) or throwaway agents that get cleaned up.
 8. The completion report quotes the output tail of 1–2, the `curl` JSON for 3–4, and the screenshot paths for 5,
    so the result can be judged from the report alone.

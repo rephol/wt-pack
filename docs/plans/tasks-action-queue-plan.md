@@ -19,7 +19,7 @@ behind the existing session cookie and Origin guard.
   `adHoc: true`, in the states needs_you, building or done. `rooms.mjs:503` `needsTasks()` also emits
   `adHoc: true` rows for room needs-you.
 - **Linear.** `LINEAR_Q` (`server.mjs:~913`) returns `identifier title priority url updatedAt state { name }`
-  for `assignee isMe OR team UMK`. It does not return the assignee or the state type, so "Up next" can't
+  for `assignee isMe OR team APP`. It does not return the assignee or the state type, so "Up next" can't
   tell which issues are the user's or which are Todo/In Progress.
 - **PRs.** `prs()` asks gh for `number,title,headRefName,state,isDraft,…,reviewDecision,statusCheckRollup`
   and no freshness field. `gh pr list --json` supports `mergeStateStatus` (checked in `gh pr list --help`).
@@ -57,7 +57,7 @@ behind the existing session cookie and Origin guard.
 
    Everything else reuses the existing endpoints.
 3. **Up next** = issues where `assignee.isMe` and `state.type ∈ {unstarted, started}`, with no worktree, no
-   PR and no agent. deriveTasks gives them the new state `up_next`. Other UMK-team issues with nothing
+   PR and no agent. deriveTasks gives them the new state `up_next`. Other APP-team issues with nothing
    attached stay `queued` and don't appear in the queue.
 4. **Plan it** calls the existing spawn endpoint with
    `{ kind: 'planner', project, prompt: '/wt-plan <ID>' }`.
@@ -143,7 +143,7 @@ behind the existing session cookie and Origin guard.
   - the Tasks page shows the sections;
   - no ad-hoc building rows;
   - a Plan ready or Up next row, if one exists, shows its button.
-- **Actions are not exercised against the user's real umkmall agents** (CLAUDE.md). U2 is verified with its
+- **Actions are not exercised against the user's real myapp agents** (CLAUDE.md). U2 is verified with its
   unit test, plus `handoff.sh --dry-run` if you wire one in for testing.
 - Commits: one per skill touched. Here that's only `wt-dashboard`, as one or more commits.
 

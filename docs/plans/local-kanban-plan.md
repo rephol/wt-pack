@@ -6,8 +6,8 @@ Branch `local-kanban`, base `origin/main` (0156b02). The user approved this in #
 
 Each project gets a local ticket board in wt-dashboard. Tickets are `<KEY>-N` (wt-pack → `WP-12`), stored on disk
 and not in Linear. The user drags cards on the web. Agents use a `wt-ticket` CLI. wt-plan, wt-handoff, wt-ship and
-wt-finish take a `WP-N` the same way they take `UMK-N`, and move the card. The auditor files findings as Backlog
-tickets. The orchestrator schedules only what sits in **Ready**. Linear is unchanged for umkmall.
+wt-finish take a `WP-N` the same way they take `APP-N`, and move the card. The auditor files findings as Backlog
+tickets. The orchestrator schedules only what sits in **Ready**. Linear is unchanged for myapp.
 
 ## What research corrected
 
@@ -16,13 +16,13 @@ tickets. The orchestrator schedules only what sits in **Ready**. Linear is uncha
   ticket file is read-modify-write, so it needs a real per-project promise-chain lock. The lock is safe because the server
   is the only writer (the CLI goes through the API).
 - **No project key exists.** A project is the basename of the repo root (`server.mjs:219-228`). The only key map is
-  `server.mjs:50 const PROJECT_BY_TEAM = { UMK: 'umkmall' }`. Keys are new (see Approach).
+  `server.mjs:50 const PROJECT_BY_TEAM = { APP: 'myapp' }`. Keys are new (see Approach).
 - **No DnD library is installed** (web deps: astryx, stylex, react-query, react-virtual, xterm, react). Use native
   HTML5 drag and drop. Do not add a dependency.
 - **The skills do not parse ticket ids with a regex. Two shell scripts and the server do, and all three are
-  UMK-only.** Each fails silently for `WP-12`:
-  `server.mjs:855 const ticketOf = (s) => (s?.match(/umk-(\d+)/i) ? …)` (worktrees :883, PRs :983, agents :364/:904);
-  `wt-handoff/scripts/handoff.sh:180-181 … grep -oiE 'umk-[0-9]+'`; `wt-shared/scripts/task-state.sh:41 … grep -oiE 'umk-[0-9]+'`.
+  APP-only.** Each fails silently for `WP-12`:
+  `server.mjs:855 const ticketOf = (s) => (s?.match(/app-(\d+)/i) ? …)` (worktrees :883, PRs :983, agents :364/:904);
+  `wt-handoff/scripts/handoff.sh:180-181 … grep -oiE 'app-[0-9]+'`; `wt-shared/scripts/task-state.sh:41 … grep -oiE 'app-[0-9]+'`.
   Only `server.mjs:1038 tagTicket … /^[A-Z]+-\d+/i` is already generic.
 - **'Up next' is Linear-only on the server, not a web hook.** `server.mjs:1070 : issue?.mine && ['unstarted','started'].includes(issue.stateType) && !wt && !pr && !ag.length ? 'up_next'`.
   Local tickets must be fed into `deriveTasks` as a source. If they are not, they never appear in Tasks, Overview
@@ -50,7 +50,7 @@ Columns are `backlog ready planning building review done blocked`. Moving to `bl
 initials of the project name split on `-`/`_`: `wt-pack → WP`. A one-letter result uses the first 3 letters instead.
 Keys are **letters only, 2–5 chars**, because `server.mjs:1038 /^[A-Z]+-\d+/i` and `rooms.mjs:143 /^[A-Z]+-\d+$/`
 reject digits. A key listed in `PROJECT_BY_TEAM` (Linear) or used by another board is refused, and the next letter
-of the name is added (`umkmall → UMK` is taken → `UMKM`). Creating a board and picking its key happens under one
+of the name is added (`myapp → APP` is taken → `MYAPPX`). Creating a board and picking its key happens under one
 global lock (`lock('__keys__')`) that re-reads every board's key, so two concurrent first creates cannot get the same key. `settled:` the key is derived and not
 user-configurable in v1. Rejected: a settings field, because the only live project needs `WP` and gets it by
 default. `[unsourced]` Only wt-pack is expected to use this board soon.
@@ -90,12 +90,12 @@ project that does not exist. `settled:` the kanban column is not derived from ta
 explicitly. Rejected: a server-side auto-move, because it would fight user drags. The Overview tiles keep
 counting task states.
 
-**Id recognition:** replace the three UMK-only regexes with one rule. A ticket id is `<KEY>-<N>` where KEY is `UMK`
+**Id recognition:** replace the three APP-only regexes with one rule. A ticket id is `<KEY>-<N>` where KEY is `APP`
 or a known board key.
-- Server `ticketOf`: build the regex from `['UMK', ...boardKeys]`, anchored as `(^|[/_-])(key)-(\d+)(?=\D|$)`, case-insensitive.
+- Server `ticketOf`: build the regex from `['APP', ...boardKeys]`, anchored as `(^|[/_-])(key)-(\d+)(?=\D|$)`, case-insensitive.
 - Shell (`handoff.sh`, `task-state.sh`): the pattern is built from known keys only:
   `keys=$(~/.claude/skills/wt-ticket/scripts/wt-ticket keys 2>/dev/null)` (one per line, which prints nothing if the
-  server is down), `pat="(umk|$(echo $keys | tr ' ' '|'))-[0-9]+"`. A generic `[a-z]+-N` was rejected because a task
+  server is down), `pat="(app|$(echo $keys | tr ' ' '|'))-[0-9]+"`. A generic `[a-z]+-N` was rejected because a task
   that mentions `utf-8` or `node-20` would win over the real branch id. That wrong id drives the label, the token and the move.
 
 **Ticket rooms:** `rooms.mjs:499 syncTickets(tasks)` must skip `task.local`, because local tickets live on the board
@@ -131,7 +131,7 @@ Exit codes: 0 ok, 1 API error (body printed), 2 usage. If the server is down, pr
 and exit 1. Integrations then treat a failure as non-fatal.
 
 **Integrations** (skill text + the two scripts). Every call is `$T … || true` (the full path, as above), so a board failure never blocks the pipeline:
-- wt-plan step 1: a `<KEY>-N` that is not UMK is resolved with `wt-ticket show <ID>` (the body is the ticket), then
+- wt-plan step 1: a `<KEY>-N` that is not APP is resolved with `wt-ticket show <ID>` (the body is the ticket), then
   `wt-ticket move <ID> planning` + `claim`. The branch name starts with the lowercase id (`wp-12-<slug>`).
 - wt-handoff (`handoff.sh`): after a successful send, if the ticket is local, run `wt-ticket move <ID> building` + `assign <ID> <worker>`.
 - wt-ship: after the PR opens / the merge to main, run `move <ID> review` with a PR comment. wt-pack has no PR (merge-direct), so it
@@ -180,7 +180,7 @@ columns, move from the drawer, no horizontal page scroll. Screenshots go to #wt-
 Files: `wt-plan/SKILL.md`, `wt-handoff/scripts/handoff.sh`, `wt-handoff/SKILL.md`, `wt-shared/scripts/task-state.sh`,
 `wt-ship/SKILL.md`, `wt-finish/SKILL.md`, `wt-work/SKILL.md`, `wt-audit/SKILL.md`, `CLAUDE.md` (skill map row + Ready rule).
 Verify: `handoff.sh --dry-run` with a `wp-12-x` branch shows `ticket=WP-12` and the move. `task-state.sh` extracts WP-12
-from the label. The UMK paths are unchanged (run the same dry run with `umk-759`). One commit per skill.
+from the label. The APP paths are unchanged (run the same dry run with `app-759`). One commit per skill.
 
 ## Files
 
@@ -199,8 +199,8 @@ wt-shared/scripts/task-state.sh · wt-ship/SKILL.md · wt-finish/SKILL.md · wt-
   the history records the agent's name.
 - The board in the browser (agent-browser, 1440 + 390) supports drag/move, the drawer, comments and persistence, and
   the screenshots are posted.
-- A Ready WP ticket appears in Tasks → Up next with "Plan it" enabled. Linear UMK rows are still there.
-- The handoff dry run shows the WP-12 token + move. The UMK dry run is unchanged.
+- A Ready WP ticket appears in Tasks → Up next with "Plan it" enabled. Linear APP rows are still there.
+- The handoff dry run shows the WP-12 token + move. The APP dry run is unchanged.
 - wt-audit SKILL.md files findings with `wt-ticket new --column backlog`.
 - The server is restarted once, at the end, via `npm run service:restart`.
 
@@ -208,6 +208,6 @@ wt-shared/scripts/task-state.sh · wt-ship/SKILL.md · wt-finish/SKILL.md · wt-
 
 - Deferred: tickets in the quick switcher (`switcherData.ts:2` has fixed sections), keys configurable from
   settings, board filters/search, archiving Done, and a Linear sync.
-- If the server is down, the shell `keys` lookup is empty, so only UMK is recognised. The integrations then no-op, which is fine because the board is down too.
+- If the server is down, the shell `keys` lookup is empty, so only APP is recognised. The integrations then no-op, which is fine because the board is down too.
 - Overview "In review" still counts task states, not the Review column. The auditor's finding #2 is separate work.
 - A dropped drag on touch devices: phone uses the drawer "Move to", so it is not needed.
