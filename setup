@@ -53,7 +53,7 @@ gh_accounts() {
     login=$(GH_TOKEN=$tok gh api user -q .login 2>/dev/null)
     [ "$login" = "$acct" ] || { bad "$proj: the token stored for $acct logs in as '${login:-nothing}'"; continue; }
     dir=
-    for d in "$REPO" $(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}WT_DASHBOARD_\(REPO\|PROJECTS\)=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tr -d "\"'" | tr ':' ' '); do
+    for d in "$REPO" $(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?WT_DASHBOARD_(REPO|PROJECTS)=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tr -d "\"'" | tr ':' ' '); do
       top=$(dirname "$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)
       [ "$(basename "$top")" = "$proj" ] && { dir=$top; break; }
     done
