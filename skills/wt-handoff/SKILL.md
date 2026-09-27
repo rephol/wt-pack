@@ -65,7 +65,8 @@ scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on std
   (`wt-ticket move` + `assign`, best effort; `--dry-run` prints `ticket=` and the move instead).
 - Target tokens: `task`, `ticket`, `handoff_from`, `handoff_from_pane`, `handoff_at`. Sender tokens (only
   inside herdr, from `$HERDR_PANE_ID`): `handoff_to`, `handoff_to_pane`.
-- The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: scripts/handoff.sh --reply <id> "..."`.
+- The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: <absolute path of this handoff.sh> --reply <id> "..."`
+  (resolved at send time, so it works from the `./setup` links and from a plugin install).
 - `handoff_at` is what lets the dashboard adopt the new `ticket` over its own mirrored copy
   (`data/agent-tags.json`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
 - `wt-finish` clears `task` when the work is retired.
