@@ -611,7 +611,7 @@ export function sourceOf(text) {
   const wt = String(text).match(/^(?:\/\S+ )*<wt-message id=\w+ kind=(\w+) from="([^"]*)"/)
   if (wt) return `${wt[1]} · ${wt[2] || 'wt-pack'}`
   // <room-message … room=slug> since WP-68; the `[room #slug]` header in older transcripts.
-  const room = String(text).match(/^(?:\/\S+ )*<room-message id=\w+ room=([\w-]+)/) ?? String(text).match(/^\[room #([\w-]+)\]/)
+  const room = String(text).match(/^(?:\/\S+ )*<room-message id=\w+ room=([\w-]+)(?=[\s>])/) ?? String(text).match(/^\[room #([\w-]+)\]/)
   return room ? `room #${room[1]}` : sentHashes.has(hashOf(text)) ? 'dashboard' : 'terminal'
 }
 // ponytail: inline data URL, capped at ~1.5MB base64; bigger ones become a placeholder.

@@ -2,7 +2,7 @@
 // A turn starts at a user message (source + attachments on it); its assistant summary (model, tokens, duration,
 // tool calls, notional cost, abnormal stop) goes on the turn's LAST assistant message.
 export interface Usage { mid: string; model?: string; in: number; out: number; cw: number; cr: number; cost: number | null; stop: string | null }
-export interface TMsg { id: string; role: string; text: string; ts: string; src?: string; images?: string[]; meta?: Usage; toolUseId?: string; tool?: { name: string } }
+export interface TMsg { id: string; role: string; text: string; ts: string; src?: string; images?: string[]; meta?: Usage; toolUseId?: string; tool?: { name: string; summary?: string }; isError?: boolean }
 export interface UserMeta { kind: 'user'; ts: string; src?: string; attachments: number }
 export interface TurnMeta { kind: 'turn'; ts: string; model?: string; up: number; cr: number; cw: number; fresh: number; down: number; ms: number; tools: number; cost: number | null; stop?: string }
 export type Meta = UserMeta | TurnMeta | { kind: 'plain'; ts: string }
@@ -93,4 +93,41 @@ export function contextUsage(msgs: TMsg[]) {
   const used = last.in + last.cr + last.cw
   const window = /\[1m\]/i.test(last.model!) || us.some((u) => u.in + u.cr + u.cw > 200_000) ? 1_000_000 : 200_000
   return { used, window, pct: Math.min(100, Math.round((used / window) * 100)) }
+}
+
+// WP-105: a turn that came from a room, as the chat page shows it — the prompt compact ("from #slug · who: …"), each
+// successful `room post <slug>` as "answered in #slug", and the agent's chat text after the last post collapsed.
+// Only `room #` turns (wt-messages are untouched); a failed or missing post collapses nothing.
+export interface RoomItem { from: string; text: string }
+export interface RoomTurns { rooms: Map<string, { slug: string; items: RoomItem[] }>; posts: Map<string, string>; postResults: Set<string>; collapse: Set<string> }
+const POST = /(?:^|[\s/;&])room\s+post\s+["']?([\w-]+)/
+const ITEM = /<room-message [^>]*from="([^"]*)"[^>]*>([\s\S]*?)<\/room-message>/g
+export function roomTurns(msgs: TMsg[]): RoomTurns {
+  const out: RoomTurns = { rooms: new Map(), posts: new Map(), postResults: new Set(), collapse: new Set() }
+  let turn: TMsg[] = [], inRoom = false
+  const close = () => {
+    if (!inRoom) return
+    let last = -1
+    turn.forEach((m, i) => {
+      if (m.role !== 'tool' || m.tool?.name === 'result') return
+      const p = m.tool?.summary?.match(POST)
+      if (!p) return
+      const r = turn.findIndex((x, j) => j > i && x.role === 'tool' && x.tool?.name === 'result' && x.toolUseId === m.toolUseId)
+      if (r < 0 || turn[r].isError) return
+      out.posts.set(m.id, p[1]); out.postResults.add(turn[r].id); last = Math.max(last, r)
+    })
+    if (last >= 0) for (const m of turn.slice(last + 1)) if (m.role === 'assistant' && m.text) out.collapse.add(m.id)
+  }
+  for (const m of msgs) {
+    if (m.role === 'user' && !INTERRUPT.test(m.text)) {
+      close()
+      turn = []
+      inRoom = Boolean(m.src?.startsWith('room #'))
+      if (inRoom) out.rooms.set(m.id, { slug: m.src!.slice(6), items: [...m.text.matchAll(ITEM)].map((x) => ({ from: x[1], text: x[2].trim() })) })
+      continue
+    }
+    turn.push(m)
+  }
+  close()
+  return out
 }

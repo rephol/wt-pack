@@ -45,7 +45,7 @@ import { LinkPreviews } from './previews'
 import { useRoles, plural, RoleBadge, TagsDialog, OTHER } from './roles'
 import { Delayed, LoadError, OverviewSkeleton, GroupedRows, Rows, ChatSkeleton } from './skeletons'
 import { useStream, mergeAgentMsgs } from './streamStore'
-import { deriveMeta, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, contextUsage, type Meta, type Usage } from './turns'
+import { deriveMeta, roomTurns, type RoomItem, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, contextUsage, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
 import { PwaHost, InstallHint, UpdateBanner } from './pwa'
@@ -1150,7 +1150,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
 
 // ---------- drawer ----------
 // Consecutive tool rows → one ChatToolCalls group; a "result" row fills the preceding call's detail.
-type Row = { kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
+type Row = { kind: 'msg'; m: Msg; meta?: Meta; room?: { slug: string; items: RoomItem[] }; collapsed?: boolean } | { kind: 'post'; id: string; slug: string } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
 // The agent transcript stream, for streamStore: resumes from the byte offset in each event's id.
 // WP-97: a remote agent's stream says how its transcript lookup is going (event: remote); kept per agent key.
 type RemoteState = 'loading' | 'ok' | 'unmatched' | 'unreachable'
@@ -1182,8 +1182,12 @@ function agentStreamSpec(base: string, key: string, session: string | null) {
 function toRows(msgs: Msg[]): Row[] {
   const rows: Row[] = []
   const meta = deriveMeta(msgs)
+  const rt = roomTurns(msgs) // WP-105: room prompts compact, `room post` → "answered in #slug", trailing chat text collapsed
   for (const m of msgs) {
-    if (m.role !== 'tool') { rows.push({ kind: 'msg', m, meta: meta.get(m.id) }); continue } // user/assistant/question
+    if (m.role !== 'tool') { rows.push({ kind: 'msg', m, meta: meta.get(m.id), room: rt.rooms.get(m.id), collapsed: rt.collapse.has(m.id) }); continue } // user/assistant/question
+    const slug = rt.posts.get(m.id)
+    if (slug) { rows.push({ kind: 'post', id: m.id, slug }); continue }
+    if (rt.postResults.has(m.id)) continue
     let g = rows.at(-1)
     if (g?.kind !== 'tools') rows.push((g = { kind: 'tools', id: m.id, calls: [], raw: [] }))
     g.raw.push(m)
@@ -1202,7 +1206,28 @@ function toRows(msgs: Msg[]): Row[] {
     const { calls, ms } = toolGroupMeta(g.raw)
     g.label = `${calls} tool call${calls === 1 ? '' : 's'}${ms ? ` · ${fmtDur(ms)}` : ''}`
   }
-  return rows.filter((r) => r.kind === 'msg' || r.calls.length)
+  return rows.filter((r) => r.kind !== 'tools' || r.calls.length)
+}
+
+// WP-105: a room delivery as one line ("from #slug · who: first line (+N more)"); a click shows every message.
+function RoomPrompt({ room }: { room: { slug: string; items: RoomItem[] } }) {
+  const [open, setOpen] = useState(false)
+  const first = room.items[0]
+  if (!first) return <ChatMessageBubble>from #{room.slug}</ChatMessageBubble>
+  const more = room.items.length - 1
+  return (
+    <ChatMessageBubble>
+      <span role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => setOpen(!open)} onKeyDown={(e) => { if (e.key === 'Enter') setOpen(!open) }}>
+        {open ? room.items.map((it, i) => <div key={i}><b>{it.from}:</b> {it.text}</div>)
+          : <>from #{room.slug} · {first.from}: {first.text.split('\n')[0]}{more > 0 ? ` (+${more} more)` : ''}</>}
+      </span>
+    </ChatMessageBubble>
+  )
+}
+// WP-105: chat text after the turn's room post, behind a toggle — the room has the answer.
+function Collapsed({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return open ? <>{children}</> : <Button label="show 1 more line" variant="ghost" size="sm" onClick={() => setOpen(true)} />
 }
 
 // One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
@@ -1399,8 +1424,12 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const noneYet = transcript && !stream.synced && !msgs.length // nothing cached and the stream has not answered
   const messageList = useMemo(() => noneYet ? <Delayed><ChatSkeleton /></Delayed> : (
               <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
-                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
-                  r.kind === 'tools' ? (
+                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'msg' ? r.m.id : r.id)} render={(r) =>
+                  r.kind === 'post' ? (
+                    <ChatMessage key={r.id} sender="assistant">
+                      <Text type="supporting" size="sm"><a href={`#rooms/${encodeURIComponent(r.slug)}`}>answered in #{r.slug}</a></Text>
+                    </ChatMessage>
+                  ) : r.kind === 'tools' ? (
                     <ChatMessage key={r.id} sender="assistant" data-tools="" metadata={<Text type="supporting" size="sm">{r.label}</Text>}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         <ChatToolCalls calls={r.calls} />
@@ -1413,7 +1442,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
                     <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
-                      {(() => {
+                      {r.room ? <RoomPrompt room={r.room} /> : (() => {
                         const u = splitUploads(r.m.text)
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
                         return (
@@ -1428,7 +1457,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                   ) : (
                     <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
-                        {r.m.text && <ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown>}
+                        {r.m.text && (r.collapsed ? <Collapsed><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown></Collapsed> : <ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown>)}
                         {r.m.text && <LinkPreviews text={r.m.text} />}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
                         {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
