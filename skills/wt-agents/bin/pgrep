@@ -1,0 +1,4 @@
+#!/bin/sh
+# WP-120 shim, first on PATH in agent panes: see ../scripts/kill-guard.mjs. No node → refuse (fail closed).
+command -v node >/dev/null 2>&1 || { echo "wt-agents pgrep guard: node not on PATH, refusing; run /usr/bin/pgrep by full path if you must" >&2; exit 2; }
+exec node "$(dirname "$0")/../scripts/kill-guard.mjs" pgrep "$@"
