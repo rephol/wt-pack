@@ -31,3 +31,9 @@ test('CLI: flags in, wrapped stdin out; unknown kind exits 2', () => {
   assert.match(out, /^<wt-message id=[0-9a-f]{12} kind=handoff from="w1" ticket=WP-3>hi\nthere<\/wt-message>$/)
   assert.throws(() => execFileSync('node', [cli, '--kind', 'nope'], { input: 'x', stdio: 'pipe' }), (e) => e.status === 2)
 })
+
+test('a leading slash command stays first, so it still runs', () => {
+  assert.equal(wrap({ kind: 'routine', from: 'Audit', id: 'n' }, '/wt-audit'), '/wt-audit <wt-message id=n kind=routine from="Audit"></wt-message>')
+  assert.equal(wrap({ kind: 'routine', from: 'r', id: 'n' }, '/wt-plan WP-3 please'), '/wt-plan <wt-message id=n kind=routine from="r">WP-3 please</wt-message>')
+  assert.equal(wrap({ kind: 'handoff', from: 'a', id: 'n' }, 'a/b not a command'), '<wt-message id=n kind=handoff from="a">a/b not a command</wt-message>')
+})

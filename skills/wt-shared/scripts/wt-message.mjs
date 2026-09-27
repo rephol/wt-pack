@@ -13,5 +13,8 @@ export const unTag = (t) => String(t ?? '').replace(/<(\/?)(room-message|wt-mess
 export function wrap({ kind, from = '', ticket = null, id = nonce() }, body) {
   if (!KINDS.includes(kind)) throw new Error(`wt-message: bad kind ${JSON.stringify(kind)}`)
   const t = typeof ticket === 'string' && /^[A-Z]+-\d+$/.test(ticket) ? ` ticket=${ticket}` : ''
-  return `<wt-message id=${id} kind=${kind} from="${attr(from)}"${t}>${unTag(body)}</wt-message>`
+  // A slash command stays first (`/wt-audit …` must still run as one): `/cmd <wt-message …>rest</wt-message>`.
+  const slash = String(body ?? '').match(/^(\/[^\s<]+)(?:\s+|$)/)
+  const rest = slash ? String(body).slice(slash[0].length) : body
+  return `${slash ? `${slash[1]} ` : ''}<wt-message id=${id} kind=${kind} from="${attr(from)}"${t}>${unTag(rest)}</wt-message>`
 }
