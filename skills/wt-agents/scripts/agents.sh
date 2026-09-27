@@ -188,6 +188,8 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   envf="${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/env-$label.sh"
   mkdir -p "$(dirname "$envf")" && cp "$shim/env.sh" "$envf"
   set -- "$@" --env "PATH=$shim:$PATH" --env "WT_KILL_SHIM_DIR=$shim" --env "CLAUDE_ENV_FILE=$envf"
+  # WP-122: mcp/<role>.json run ${WT_MEMORY_MCP:-~/.claude/skills/…}; a plugin-only install has no such link.
+  set -- "$@" --env "WT_MEMORY_MCP=$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs"
   pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@" \
     | jq -r .result.root_pane.pane_id)
 
