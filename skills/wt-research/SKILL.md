@@ -13,8 +13,11 @@ allowed-tools: Bash, Read, Glob, Grep, Agent, ToolSearch
 
 # wt-research
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Returns a **findings table**, never a report. Read
-`~/.claude/skills/wt-plan/references/findings-schema.md` before dispatching — it is the output contract, and
+`../wt-plan/references/findings-schema.md` before dispatching — it is the output contract, and
 a shard that returns prose has not done the job.
 
 ## The two questions
@@ -91,7 +94,7 @@ Report `disproved` records prominently. They are what stops the plan inheriting 
 come first. It prints a **reading order, never a shorter list** — there is no threshold and nothing is cut.
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs relevance candidates.json --rev <sha> \
+node ../wt-shared/scripts/wt-judge.mjs relevance candidates.json --rev <sha> \
   --question "<the research question, in full>"
 ```
 
@@ -103,7 +106,7 @@ a review's diff, and this skill's job is to sweep for what nobody named — whic
 is worst at seeing. Trimming the list is how that gets missed, and nothing afterwards can prove it was.
 
 When something near the bottom turns out to have mattered, say so:
-`node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes` — that is the only evidence that
+`node ../wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes` — that is the only evidence that
 could ever justify letting this cut anything.
 
 Measured once: on a real OTP question over 60 candidates, the four files that carried the answer ranked
@@ -117,7 +120,7 @@ A record can carry a real quote that does not establish the claim drawn from it 
 score sees that only in aggregate, and the shard that wrote it cannot see it at all.
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs cite records.json
+node ../wt-shared/scripts/wt-judge.mjs cite records.json
 ```
 
 **The contract already says records carry quoted evidence; this is what makes that mean something.** A
@@ -131,7 +134,7 @@ the plan, where it stops looking like a guess.
 **Exit 3 means no key: consolidate as before.** The verdicts in the records are self-assessed either way.
 
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
-`node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
+`node ../wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
 
 ## What this does not find
