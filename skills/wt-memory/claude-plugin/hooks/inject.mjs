@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url'
 async function suggest(bin, prompt) {
   const f = join(dirname(bin), 'jev-memory.mjs')
   if (!prompt || !existsSync(f)) return false
-  if (/^(?:\/\S+ )?<(wt|room)-message /.test(prompt)) return false // wt-pack/room traffic, not the user's own words (WP-104)
+  if (/^(?:\/\S+ )*<(wt|room)-message /.test(prompt)) return false // wt-pack/room traffic, not the user's own words (WP-104)
   const { memorySuggest, loadTypesafe } = await import(pathToFileURL(f).href)
   const ts = await loadTypesafe()
   if (!ts?.enabled('memory_suggest', false)) return false
