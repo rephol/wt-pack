@@ -15,9 +15,9 @@ export const loadPrefs = (): Prefs => {
   } catch { return structuredClone(DEFAULT_PREFS) }
 }
 
-export function useDesktop(openKey: string | null, open: (key: string) => void) {
-  const ref = useRef({ openKey, open })
-  ref.current = { openKey, open }
+export function useDesktop(openKeys: string[], open: (key: string) => void) {
+  const ref = useRef({ openKeys, open })
+  ref.current = { openKeys, open }
   useEffect(() => {
     if (!tauri) return
     const seen = new Set<string>()
@@ -36,7 +36,7 @@ export function useDesktop(openKey: string | null, open: (key: string) => void) 
     es.addEventListener('notification', (m) => {
       const e = JSON.parse((m as MessageEvent).data) as InboxItem
       const focused = document.hasFocus()
-      if (!gate(e, { prefs: loadPrefs(), focused, openKey: ref.current.openKey, seen, lastAt, now: Date.now() })) return
+      if (!gate(e, { prefs: loadPrefs(), focused, openKeys: ref.current.openKeys, seen, lastAt, now: Date.now() })) return
       tauri.event.emit('notify', { title: e.title, body: (e.body ?? '').slice(0, 200) || ' ' })
       const target = e.target.agent ?? (e.target.room ? `room:${e.target.room}` : null)
       if (target && !focused) pending = { key: target, at: Date.now() }

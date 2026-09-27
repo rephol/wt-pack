@@ -53,7 +53,7 @@ function Row({ title, href, onClick, children }: { title: string; href?: string;
 const Line = ({ children }: { children: ReactNode }) => <HStack gap={3} align="center" wrap="wrap">{children}</HStack>
 const Dotted = ({ v, label }: { v: Dot; label: string }) => <HStack gap={1} align="center"><StatusDot variant={v} label={label} /><Text size="sm">{label}</Text></HStack>
 
-export function OverviewPage({ data, onProject }: { data: OverviewData; onProject: (p: string) => void }) {
+export function OverviewPage({ data, onProject, onOpen }: { data: OverviewData; onProject: (p: string) => void; onOpen: (key: string) => void }) {
   const c = { ...data.counts, ...tileCounts(data.tasks) }
   const { h } = useHealth()
   const obs = useQuery({ queryKey: ['observability', ''], queryFn: () => api<ObsStats>('/api/observability'), refetchInterval: 60_000 })
@@ -104,7 +104,7 @@ export function OverviewPage({ data, onProject }: { data: OverviewData; onProjec
         </Row>
         <Row title="Rooms">
           {rooms.map((r) => (
-            <ClickableCard key={r.slug} label={`#${r.slug}`} padding={2} variant="muted" href={`#rooms/${encodeURIComponent(r.slug)}`}>
+            <ClickableCard key={r.slug} label={`#${r.slug}`} padding={2} variant="muted" onClick={() => onOpen(`room:${r.slug}`)}>{/* WP-112: a dock window on desktop */}
               <VStack gap={0.5}>
                 <HStack gap={2} justify="between"><Text size="sm" weight="semibold" maxLines={1}>{`#${r.slug}`}</Text><Text size="sm" type="supporting" style={{ flexShrink: 0 }}>{shortAgo(r.lastAt!)}</Text></HStack>
                 <Text size="sm" type="supporting" maxLines={1}>{`${r.lastFrom}: ${r.lastText}`}</Text>

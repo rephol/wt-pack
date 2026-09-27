@@ -139,7 +139,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
     if (it.anyUnread) read.mutate({ ids: it.ids })
     if ((it.kind === 'room-suggestion' || it.kind === 'memory-proposal') && !it.resolvedAt) return
     onClose()
-    if (it.target.room) location.hash = `rooms/${encodeURIComponent(it.target.room)}`
+    if (it.target.room) onOpenAgent(`room:${it.target.room}`) // desktop: a dock window; phones: the room page
     else if (it.target.agent) onOpenAgent(it.target.agent)
     else if (it.target.url) window.open(it.target.url, '_blank', 'noopener')
   }

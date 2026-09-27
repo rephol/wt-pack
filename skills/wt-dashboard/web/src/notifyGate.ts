@@ -1,5 +1,5 @@
 // Pure gate for native notifications of inbox items: per-kind toggle, never for quiet (baseline) items,
-// suppressed while the user is looking at that agent, once per item key, ~1 per target per 30s.
+// suppressed while the user is looking at that agent (side panel or an open dock window), once per item key, ~1 per target per 30s.
 export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog'] as const
 export type Kind = (typeof KINDS)[number]
 export interface InboxItem {
@@ -13,10 +13,10 @@ const all = (v: boolean, off: Kind[] = []) => Object.fromEntries(KINDS.map((k) =
 export const DEFAULT_PREFS: Prefs = { inbox: all(true), native: all(true, ['room-suggestion', 'server']) }
 export const RATE_MS = 30_000
 
-export function gate(e: InboxItem, s: { prefs: Prefs; focused: boolean; openKey: string | null; seen: Set<string>; lastAt: Map<string, number>; now: number }): boolean {
+export function gate(e: InboxItem, s: { prefs: Prefs; focused: boolean; openKeys: string[]; seen: Set<string>; lastAt: Map<string, number>; now: number }): boolean {
   if (e.quiet || !s.prefs.native[e.kind] || !s.prefs.inbox[e.kind]) return false
   const target = e.target.agent ?? (e.target.room ? `room:${e.target.room}` : null)
-  if (s.focused && target && target === s.openKey) return false
+  if (s.focused && target && s.openKeys.includes(target)) return false
   if (s.seen.has(e.key)) return false
   const rk = target ?? e.key
   if (s.now - (s.lastAt.get(rk) ?? -Infinity) < RATE_MS) return false

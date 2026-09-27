@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { isUserSkip } from './pickerGuard.ts'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppShell } from '@astryxdesign/core/AppShell'
-import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
+import { SideNav, SideNavHeading, SideNavItem } from '@astryxdesign/core/SideNav'
 import { Card } from '@astryxdesign/core/Card'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -19,10 +19,12 @@ import { ServerStatus } from './status'
 import { ImageRow, FileCards, useAttachments, IMAGE_TYPES, MAX_IMAGES, type SharedFile } from './attachments'
 import { useToast } from '@astryxdesign/core/Toast'
 import { useDesktop } from './desktop'
+import { Dock } from './ChatDock'
+import { dockReducer, load as loadDock, save as saveDock, unread as dockUnread, dockKind } from './dock'
 import { SettingsHost, openSettings } from './settings'
 import { openProjectSettings } from './projects-settings'
 import { InboxButton, InboxHost } from './inbox'
-import { RoomsPage, useRoomsList } from './rooms'
+import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier } from './rooms'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
@@ -54,7 +56,7 @@ import { openInbox } from './inbox'
 import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
-import { taskLabel, roomInProject } from './switcherData'
+import { taskLabel } from './switcherData'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
 import { useResizable, ResizeHandle } from '@astryxdesign/core/Resizable'
 import { Grid } from '@astryxdesign/core/Grid'
@@ -390,14 +392,25 @@ export default function App() {
     setNavCollapsedState(c)
     try { localStorage.setItem('nav-collapsed', c ? '1' : '0') } catch { /* private mode */ }
   }
+  // WP-112: on desktop an agent or room chat opens in the dock; terminals keep the side panel.
+  const [dock, dockDispatch] = useReducer(dockReducer, undefined, loadDock)
+  useEffect(() => { saveDock(dock) }, [dock])
+  const toPanel = (key: string) => { setOpenPane(key); setCollapsed(false); rememberRecent(key) }
   const open = (key: string) => {
+    if (key.startsWith('room:')) key = `room:${key.slice(5).split(':')[0]}`
+    if (dockKind(key)) {
+      dockDispatch({ type: 'open', key, now: Date.now() })
+      if (!narrow) { if (!key.startsWith('room:')) rememberRecent(key); return }
+      // Narrow: no dock, but the chat is tracked as a tab so the chat button's unread dot can follow it.
+      dockDispatch({ type: 'minimise', key, now: Date.now() })
+    }
     if (key.startsWith('room:')) { location.hash = `rooms/${encodeURIComponent(key.slice(5).split(':')[0])}`; return }
     if (key.startsWith('term:')) {
       if (narrow) { location.hash = `terminals/${encodeURIComponent(key.slice(5))}`; return }
       setOpenPane(key); setCollapsed(false); return
     }
     if (narrow) { openFull(key); return }
-    setOpenPane(key); setCollapsed(false); rememberRecent(key)
+    toPanel(key)
   }
   const openFull = (key: string) => {
     rememberRecent(key)
@@ -417,7 +430,9 @@ export default function App() {
   // The quick-switcher button stays off the agent panel (open, desktop) and a room's composer.
   const openTerm = openPane?.startsWith('term:') ? openPane.slice(5) : null
   const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || !!termPage || (!!openTerm && !narrow && !collapsed) || (!!openAgent && !narrow && !collapsed)
-  useDesktop(collapsed ? null : openPane, open)
+  const dockOpen = narrow ? [] : dock.items.filter((i) => !i.min).map((i) => i.key)
+  useDesktop([...(collapsed || !openPane ? [] : [openPane]), ...dockOpen], open)
+  const dockMarks = dockUnread(dock, { agents: all?.agents ?? [], rooms: roomsQ.data?.rooms ?? [] })
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
@@ -449,15 +464,6 @@ export default function App() {
       {/* WP-110: the picked project's settings, one click from the sidebar (hidden for All projects) */}
       {project !== 'all' && !navCollapsed && <IconButton label="Project settings" tooltip={`${current[1]} settings`} icon={<GearIcon />} size="sm" variant="ghost" onClick={() => openProjectSettings(project)} />}</div>
   )
-  const [sideList, setSideListState] = useState<'agents' | 'rooms'>(() => { try { return localStorage.getItem('nav-list') === 'rooms' ? 'rooms' : 'agents' } catch { return 'agents' } })
-  const setSideList = (v: string) => {
-    const s = v === 'rooms' ? 'rooms' : 'agents'
-    setSideListState(s)
-    try { localStorage.setItem('nav-list', s) } catch { /* private mode */ }
-  }
-  const sideRooms = (roomsQ.data?.rooms ?? []).filter((r) => !r.archived && roomInProject(r, project))
-    .sort((x, y) => Number(Boolean(y.needsYou?.length)) - Number(Boolean(x.needsYou?.length)))
-
   const nav = (
     <SideNav
       // Mobile top bar and drawer (below AppShell's lg breakpoint): the project picker alone, one row; the title is desktop-only.
@@ -477,21 +483,6 @@ export default function App() {
           />
         )
       })}
-      {!navCollapsed && <SideNavSection title="Open">
-        <SegmentedControl label="Sidebar list" value={sideList} onChange={setSideList} size="sm">
-          <SegmentedControlItem value="agents" label="Agents" />
-          <SegmentedControlItem value="rooms" label="Rooms" />
-        </SegmentedControl>
-        <div className="hd-nav-scroll">{sideList === 'agents'
-          ? sortAgents(data?.agents ?? [], 'attention').map((a) => (
-            <SideNavItem key={a.key} label={a.name} icon={initialsIcon(initials(a.name), false)} isSelected={openPane === a.key || fullKey === a.key} onClick={() => open(a.key)}
-              endContent={needsYou(a) ? <StatusDot variant="error" label="needs you" /> : a.status === 'working' ? <Text type="supporting" size="sm">▸</Text> : undefined} />
-          ))
-          : sideRooms.map((r) => (
-            <SideNavItem key={r.slug} label={r.title} icon={navIcon('rooms', false)} href={`#rooms/${encodeURIComponent(r.slug)}`} isSelected={page === 'rooms' && roomSlug === r.slug}
-              endContent={r.needsYou?.length ? <StatusDot variant="error" label="needs you" /> : undefined} />
-          ))}</div>
-      </SideNavSection>}
     </SideNav>
   )
 
@@ -540,11 +531,11 @@ export default function App() {
         )}
 
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
-        {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} />}
+        {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} onOpen={open} />}
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setProject} />}
         {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={all?.agents ?? []} />}
-        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
+        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
           : <Banner status="info" title="Terminals are off" description="Turn them on in Settings › Terminals, from http://127.0.0.1 on this machine." />)}
@@ -573,10 +564,27 @@ export default function App() {
       <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
+      {!narrow && <Dock state={dock} dispatch={dockDispatch} unread={dockMarks}
+        meta={(key) => {
+          if (key.startsWith('room:')) { const r = roomsQ.data?.rooms.find((x) => x.slug === key.slice(5)); return { name: `#${key.slice(5)}`, dot: r?.needsYou?.length ? 'error' : 'neutral', label: r?.needsYou?.length ? 'needs you' : 'room' } }
+          const a = all?.agents.find((x) => x.key === key)
+          return a ? { name: a.name, dot: needsYou(a) ? 'error' : AGENT_DOT[a.status], label: needsYou(a) ? 'needs you' : a.status, pulsing: a.status === 'working' } : { name: key.split('/').pop() ?? key, dot: 'neutral', label: 'not running' }
+        }}
+        body={(key) => {
+          if (key.startsWith('room:')) {
+            const r = roomsQ.data?.rooms.find((x) => x.slug === key.slice(5))
+            return r && roomsQ.data ? <RoomView key={key} room={r} agents={all?.agents ?? []} profile={roomsQ.data.settings.profile} compact onBack={() => dockDispatch({ type: 'close', key, now: Date.now() })} onOpenAgent={open} />
+              : <EmptyState isCompact title={roomsQ.data ? 'Room not found' : 'Loading…'} />
+          }
+          const a = all?.agents.find((x) => x.key === key)
+          return a ? <AgentPanelBody key={key} agent={a} task={all?.tasks.find((t) => t.id === a.task) ?? null} mode="dock" onCollapse={() => dockDispatch({ type: 'minimise', key, now: Date.now() })} autoFocus={false} />
+            : <EmptyState isCompact title={all ? 'Agent not running' : 'Loading…'} />
+        }}
+        onExpand={(key) => { if (key.startsWith('room:')) location.hash = `rooms/${encodeURIComponent(key.slice(5))}`; else toPanel(key) }} />}
       <PwaHost openInbox={() => openInbox()} />
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
-        onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => { location.hash = `rooms/${encodeURIComponent(sl)}` }}
+        onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => open(`room:${sl}`)} unread={narrow && Object.keys(dockMarks).length > 0}
         onOpenTicket={(p, id) => { setProject(p); location.hash = `board/${encodeURIComponent(id)}` }} />
     </AppShell>
   )
@@ -1281,8 +1289,9 @@ function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extra
 
 // One conversation component for the side panel and the full page (#agents/<machine>/<pane>).
 // mode="page": Back instead of X, "Open as panel", and on a wide screen the Summary beside a centered column.
-function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = 'panel', autoFocus }: {
-  agent: Agent; task: Task | null; onCollapse: () => void; onExpand?: () => void; onAsPanel?: () => void; mode?: 'panel' | 'page'; autoFocus: boolean
+// mode="dock" (WP-112): the conversation alone (the dock window has the header), the last DOCK_LIMIT rows.
+export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = 'panel', autoFocus }: {
+  agent: Agent; task: Task | null; onCollapse: () => void; onExpand?: () => void; onAsPanel?: () => void; mode?: 'panel' | 'page' | 'dock'; autoFocus: boolean
 }) {
   const [tab, setTab] = useState('conversation')
   const ticketChips = useTicketPlugins()
@@ -1385,7 +1394,9 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     const t = setTimeout(() => setQueued((q) => q.map((x) => (x.state === 'failed' ? x : { ...x, state: 'unconfirmed' }))), 15_000)
     return () => clearTimeout(t)
   }, [agent.status, queued.length])
-  const rows = useMemo(() => toRows(msgs), [msgs])
+  const allRows = useMemo(() => toRows(msgs), [msgs])
+  const [limit, setLimit] = useState(mode === 'dock' ? DOCK_LIMIT : Infinity)
+  const rows = useMemo(() => (allRows.length > limit ? allRows.slice(-limit) : allRows), [allRows, limit])
 
   // Stop: Escape via the server's stale-checked /stop. "Stopping…" until the status leaves working (10s → toast).
   const toast = useToast()
@@ -1421,13 +1432,14 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
   // The newest tool call in the transcript: the activity row's fallback when the pane shows no spinner line.
   const lastTool = useMemo(() => {
-    const c = rows.findLast((r) => r.kind === 'tools')
+    const c = allRows.findLast((r) => r.kind === 'tools')
     const call = c?.kind === 'tools' ? c.calls.at(-1) : undefined
     return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
-  }, [rows])
+  }, [allRows])
   const noneYet = transcript && !stream.synced && !msgs.length // nothing cached and the stream has not answered
   const messageList = useMemo(() => noneYet ? <Delayed><ChatSkeleton /></Delayed> : (
               <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
+                {allRows.length > rows.length && <ShowEarlier onClick={() => setLimit((l) => l + DOCK_LIMIT)} />}
                 <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'msg' ? r.m.id : r.id)} render={(r) =>
                   r.kind === 'post' ? (
                     <ChatMessage key={r.id} sender="assistant">
@@ -1470,7 +1482,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                     </ChatMessage>
                   )} />
               </ChatMessageList>
-  ), [rows, working, density, noneYet])
+  ), [rows, allRows.length, working, density, noneYet])
 
   const page = mode === 'page'
   const summary = <AgentSummary agent={agent} task={task} />
@@ -1558,6 +1570,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
             {heldPicker && <PickerCard agent={agent} picker={heldPicker} onSent={bumpPicker} />}
           </VStack>
   )
+  if (mode === 'dock') return <VStack gap={2} height="100%" padding={2}>{conversation}</VStack>
   return (
       <VStack gap={3} height="100%" padding={page ? 0 : 4} data-agent-panel={page ? undefined : ''} data-agent-page={page ? '' : undefined}>
         {tagsMode && <TagsDialog agent={agent} mode={tagsMode} onClose={() => setTagsMode(null)} />}
