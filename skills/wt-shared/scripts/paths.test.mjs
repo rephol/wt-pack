@@ -21,7 +21,11 @@ const ALLOW = {
   'skills/wt-agents/mcp/reviewer.json': ['WT_MEMORY_MCP:-'], 'skills/wt-agents/mcp/auditor.json': ['WT_MEMORY_MCP:-'],
   'skills/wt-dashboard/app/src-tauri/src/main.rs': ['~/.claude/skills/wt-dashboard', '{home}/.claude/skills/wt-dashboard'],
   'skills/wt-agents/scripts/agents.sh': ['a plugin-only install has no such link'],
-  'skills/wt-dashboard/dispatch.mjs': ['that a plugin install lacks'], // the app needs ./setup (dashboard)
+  'skills/wt-dashboard/dispatch.mjs': ['that a plugin install lacks'],
+  // prose about the ./setup install itself (the Codex hookup, wt-setup's link, the desktop app's launcher)
+  'skills/wt-memory/SKILL.md': ['codex mcp add', '"command":"node ~/.claude/skills/wt-memory', 'node $HOME/.claude/skills/wt-memory/', '/Users/<you>/.claude/skills/wt-memory/'],
+  'skills/wt-setup/SKILL.md': ['the directory `~/.claude/skills/wt-setup` links into'],
+  'skills/wt-dashboard/README.md': ['$WT_DASHBOARD_HOME'], // the app needs ./setup (dashboard)
 }
 const SKIP = /node_modules|\/dist\/|\/target\/|\.test\.|\/gen\//
 function* files(d) {
@@ -45,6 +49,6 @@ export function offenders(md = true) {
   return out
 }
 
-test('no ~/.claude/skills in scripts or strings sent to agents, outside the allowlist', () => {
-  assert.deepEqual(offenders(false), [])
+test('no ~/.claude/skills in scripts, sent strings or SKILL.md / references prose, outside the allowlist', () => {
+  assert.deepEqual(offenders(), [])
 })
