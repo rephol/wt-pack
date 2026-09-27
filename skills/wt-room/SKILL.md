@@ -5,7 +5,10 @@ description: Chat rooms in wt-dashboard shared by the user and agents. Use when 
 
 # Rooms
 
-The user and agents share chat rooms on the wt-dashboard server. Use `~/.claude/skills/wt-room/scripts/room` (needs the wt-dashboard server on 127.0.0.1:7777):
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
+The user and agents share chat rooms on the wt-dashboard server. Use `scripts/room` (needs the wt-dashboard server on 127.0.0.1:7777):
 
 - `room list` — rooms and their slugs
 - `room read <slug> [--since N]` — numbered messages; `--since N` skips the first N
