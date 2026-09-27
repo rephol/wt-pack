@@ -26,6 +26,7 @@ Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
   `caffeinate -u -t 60 &` first. If `agent-browser screenshot` still hangs, fall back to
   `node skills/wt-shared/scripts/screenshot.mjs --session <name> [--size 390x844] [--url <url>] <out.png>` (CDP).
 - **One commit per skill touched.** Commit only your own paths (`git commit <paths>`), never `-a`.
+- Commits use the rephol noreply identity (repo-local git config); `./setup doctor` flags any other.
 - Keep every CLI backward compatible. Extending skills for dashboard needs is allowed.
 
 ## Skill map
