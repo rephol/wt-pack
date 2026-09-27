@@ -58,5 +58,5 @@ Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
   unknown roles dropped.
 - WKWebView `window.confirm` is always false — native dialogs banned (`noNativeDialogs.test.ts`).
 - Room turns: agents answering in a room end their session turn with NO text.
-- Never prompt the user's real umkmall-* agents for tests; use throwaway agents/temp repos and clean up.
+- Never prompt the user's real agents (other projects' panes) for tests; use throwaway agents/temp repos and clean up.
 - herdr names: lowercase, digits, `-`, `_`, ≤32 (`wt-agents spawn` breaks on capitalised repo dirs — open).
