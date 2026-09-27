@@ -38,11 +38,11 @@ test('groupInbox: by agent / room / task / memory, first-seen order, singles sta
     r('2', 'memory', 'w-02 remembered', { agent: 'm/p2', memory: 'x' }),
     r('3', 'agent-stalled', 'w-02 (p) stalled', { agent: 'm/p2' }, true),
     r('4', 'room-created', 'New room', { room: 'wt-pack' }),
-    r('5', 'ci-failed', 'CI failed', { task: 'UMK-1', pr: '#3' }),
+    r('5', 'ci-failed', 'CI failed', { task: 'ACM-1', pr: '#3' }),
     r('6', 'agent-done', 'w-01 (p) is done', { agent: 'm/p1' }),
   ])
   assert.deepEqual(g.map((x) => [x.key, x.label, x.rows.map((y) => y.id), x.unread]), [
-    ['agent:m/p2', 'w-02', ['1', '3'], 1], ['memory', 'Memory', ['2'], 1], ['room:wt-pack', '#wt-pack', ['4'], 1], ['task:UMK-1', 'UMK-1', ['5'], 1], ['agent:m/p1', 'w-01', ['6'], 1],
+    ['agent:m/p2', 'w-02', ['1', '3'], 1], ['memory', 'Memory', ['2'], 1], ['room:wt-pack', '#wt-pack', ['4'], 1], ['task:ACM-1', 'ACM-1', ['5'], 1], ['agent:m/p1', 'w-01', ['6'], 1],
   ])
 })
 

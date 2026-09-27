@@ -5,13 +5,13 @@ import { agentsByProject, recentRooms, tileCounts } from './overviewData.ts'
 test('agentsByProject: per-project state counts, busiest first, null → other', () => {
   const g = agentsByProject([
     { project: 'wt-pack', status: 'idle' },
-    { project: 'umkmall', status: 'working' },
-    { project: 'umkmall', status: 'working' },
-    { project: 'umkmall', status: 'blocked' },
+    { project: 'acmeapp', status: 'working' },
+    { project: 'acmeapp', status: 'working' },
+    { project: 'acmeapp', status: 'blocked' },
     { project: null, status: 'done' },
   ])
   assert.deepEqual(g, [
-    { project: 'umkmall', working: 2, idle: 0, blocked: 1 },
+    { project: 'acmeapp', working: 2, idle: 0, blocked: 1 },
     { project: 'other', working: 0, idle: 0, blocked: 0 },
     { project: 'wt-pack', working: 0, idle: 1, blocked: 0 },
   ])

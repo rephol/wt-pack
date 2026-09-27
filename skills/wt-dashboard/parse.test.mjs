@@ -15,14 +15,14 @@ ${rule}
 ❯
 ${rule}
    Context: ▓▓░░ 383k/1M (38%)  Model: X
-   cwd: /tmp/wt/umk-12
+   cwd: /tmp/wt/acm-12
   ⏵⏵ bypass permissions on`
 
 test('parsePane', () => {
   const p = parsePane(pane)
   assert.equal(p.recap, 'Fixing the bug. Next, decide whether to open a PR.')
   assert.deepEqual(p.context, { used: '383k', total: '1M', pct: 38 })
-  assert.equal(p.cwd, '/tmp/wt/umk-12')
+  assert.equal(p.cwd, '/tmp/wt/acm-12')
   assert.equal(p.asks, false) // a reply ending in '?' is done, not blocked
   assert.equal(p.question, null)
   assert.deepEqual(p.turns.map((t) => t.role), ['user', 'assistant'])
@@ -48,9 +48,9 @@ test('parsePicker: preview layout (left options, boxed preview of the focused on
   assert.equal(pk.question, 'What should the planners pick up next?')
   assert.deepEqual(pk.tabs.map((t) => t.header), ['Next up', 'Polish'])
   assert.deepEqual(pk.options.map((o) => [o.label, o.description]), [
-    ['UMK-1177 OTP hang (Recommended)', ''], ['M5 video tickets', ''], ['UMK-1176 download log', ''],
+    ['ACM-1177 OTP hang (Recommended)', ''], ['M5 video tickets', ''], ['ACM-1176 download log', ''],
   ])
-  assert.equal(pk.preview, 'planner-02 -> /wt-plan UMK-1177')
+  assert.equal(pk.preview, 'planner-02 -> /wt-plan ACM-1177')
   assert.equal(pk.cursor, 1)
   const pk2 = parsePicker(readFileSync(new URL('./test-fixtures/picker-preview-focus2.txt', import.meta.url), 'utf8'))
   assert.equal(pk2.cursor, 2)
@@ -92,14 +92,14 @@ test('parsePicker: the exact Next up / Polish pair (focused tab from ANSI, revis
   const back = read('pair-back-to-q1.ansi.txt') // Q1 revisited after answering it
   assert.equal(back.current, 0)
   assert.equal(back.layout, 'preview')
-  assert.deepEqual(back.options.map((o) => [o.label, o.checked]), [['UMK-1177 OTP hang (Recommended)', true], ['M5 video tickets', false], ['UMK-1176 download log', false]])
+  assert.deepEqual(back.options.map((o) => [o.label, o.checked]), [['ACM-1177 OTP hang (Recommended)', true], ['M5 video tickets', false], ['ACM-1176 download log', false]])
   const q2 = read('pair-q2-multiselect.ansi.txt')
   assert.equal(q2.current, 1)
   assert.equal(q2.multiSelect, true)
   assert.equal(q2.options[0].description, "Make the pinned question card collapsible so the conversation isn't squeezed.")
   const review = read('pair-review.ansi.txt')
   assert.equal(review.review, true)
-  assert.deepEqual(review.answers.map((a) => a.answer), ['UMK-1177 OTP hang (Recommended)', 'Wider Task column, Nav overlay dots'])
+  assert.deepEqual(review.answers.map((a) => a.answer), ['ACM-1177 OTP hang (Recommended)', 'Wider Task column, Nav overlay dots'])
 })
 
 test('transitions: baseline is silent, then one event per transition into needs/done/stalled and CI fail', () => {
@@ -179,11 +179,11 @@ test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-o
   // WP-68: the prompt is only the tags — no header, no instruction lines
   assert.equal(R.batchPrompt('x', [{ author: { kind: 'user', name: 'you' }, text: 'hi' }], false, true, 'n1'), '<room-message id=n1 room=x from="you" kind=user>hi</room-message>')
   // ticket rooms: suggest mode lists active tickets without a room, minus dismissed; off/auto list none
-  const task = { id: 'UMK-1177', title: 'OTP hang', state: 'planning', agent: { name: 'umkmall-planner-02' }, worktree: '/w', plan: null, pr: null }
+  const task = { id: 'ACM-1177', title: 'OTP hang', state: 'planning', agent: { name: 'acmeapp-planner-02' }, worktree: '/w', plan: null, pr: null }
   const sug = R.ticketSuggestions([task, { ...task, id: 'agent:x', adHoc: true }], [], S)
-  assert.deepEqual(sug.map((x) => [x.ticket, x.reason]), [['UMK-1177', 'umkmall-planner-02 is planning']])
-  assert.deepEqual(R.ticketSuggestions([task], ['umk-1177'], S), [])
-  assert.deepEqual(R.ticketSuggestions([task], [], { ...S, dismissedTickets: ['UMK-1177'] }), [])
+  assert.deepEqual(sug.map((x) => [x.ticket, x.reason]), [['ACM-1177', 'acmeapp-planner-02 is planning']])
+  assert.deepEqual(R.ticketSuggestions([task], ['acm-1177'], S), [])
+  assert.deepEqual(R.ticketSuggestions([task], [], { ...S, dismissedTickets: ['ACM-1177'] }), [])
   assert.deepEqual(R.ticketSuggestions([task], [], { ...S, ticketRooms: 'auto' }), [])
   assert.deepEqual(R.ticketSuggestions([{ ...task, linearState: 'done' }], [], S), []) // WP-84: Done on the board
   assert.equal(S.ticketRooms, 'suggest')
@@ -295,11 +295,11 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
   const items = [
     { id: '1', kind: 'question', target: { agent: 'm/p1' } },
     { id: '2', kind: 'mention-user', target: { room: 'ops' } },
-    { id: '3', kind: 'room-suggestion', target: { task: 'UMK-1' } },
+    { id: '3', kind: 'room-suggestion', target: { task: 'ACM-1' } },
     { id: '4', kind: 'agent-done', target: { agent: 'm/p1' } },
     { id: '5', kind: 'question', target: { agent: 'm/p2' }, resolvedAt: 't' },
   ]
-  assert.deepEqual(I.toResolve(items, new Set(['m/p1', 'room:ops']), new Set(['UMK-1'])), [])
+  assert.deepEqual(I.toResolve(items, new Set(['m/p1', 'room:ops']), new Set(['ACM-1'])), [])
   assert.deepEqual(I.toResolve(items, new Set(), new Set()), ['1', '2', '3'])
   const mp = [{ id: 'p', kind: 'memory-proposal', target: { memory: 'ab12cd' } }]
   assert.deepEqual(I.toResolve(mp, new Set(), new Set()), []) // pending set unknown: keep
@@ -333,8 +333,8 @@ test('rooms: a "/" message is a command for exactly one agent (mention, else res
   const ag = [{ key: 'k1', name: 'p1' }, { key: 'k2', name: 'p2' }]
   const u = (text, mentions = []) => ({ author: { kind: 'user' }, text, mentions })
   assert.equal(R.parseCommand(u('hello /not-a-command'), {}, ag, 'user'), null)
-  assert.deepEqual(R.parseCommand(u('@p2 /wt-plan UMK-1', ['p2']), { responder: 'k1' }, ag, 'user'), { text: '/wt-plan UMK-1', target: ag[1] })
-  assert.equal(R.parseCommand(u('/wt-plan UMK-1'), { responder: 'k1' }, ag, 'user').target, ag[0]) // responder
+  assert.deepEqual(R.parseCommand(u('@p2 /wt-plan ACM-1', ['p2']), { responder: 'k1' }, ag, 'user'), { text: '/wt-plan ACM-1', target: ag[1] })
+  assert.equal(R.parseCommand(u('/wt-plan ACM-1'), { responder: 'k1' }, ag, 'user').target, ag[0]) // responder
   assert.equal(R.parseCommand(u('/wt-plan'), {}, ag, 'user').error, R.ONE_TARGET) // nobody
   assert.equal(R.parseCommand(u('@p1 @p2 /x', ['p1', 'p2']), {}, ag, 'user').error, R.ONE_TARGET) // two
   assert.equal(R.parseCommand(u('@all /x', ['all']), { responder: 'k1' }, ag, 'user').error, R.ONE_TARGET)
@@ -353,13 +353,13 @@ test('rooms: commands are delivered RAW and alone; attachments ride as paths for
   const user = { kind: 'user', name: 'me', handle: 'user' }
   const img = [{ path: '/u/a.png', type: 'image/png', size: 1 }]
   await rooms.post('r', { author: user, text: 'plain first' })
-  await rooms.post('r', { author: user, text: '/wt-plan UMK-1', attachments: img })
+  await rooms.post('r', { author: user, text: '/wt-plan ACM-1', attachments: img })
   await rooms.flush() // the plain message goes first, alone (a command is never batched with it)
   await rooms.flush() // then the command, raw, with the image path after its args
   assert.equal(sent[0][1].startsWith('<room-message id='), true)
-  assert.deepEqual(sent[1], ['loc', '/wt-plan UMK-1\n/u/a.png'])
+  assert.deepEqual(sent[1], ['loc', '/wt-plan ACM-1\n/u/a.png'])
   const msgs = await rooms.messages('r')
-  assert.ok(msgs.some((m) => m.author.kind === 'system' && m.text === 'ran /wt-plan UMK-1 on loc'))
+  assert.ok(msgs.some((m) => m.author.kind === 'system' && m.text === 'ran /wt-plan ACM-1 on loc'))
   await assert.rejects(rooms.post('r', { author: user, text: '@loc @rem /x' }), /one agent/)
   // Remote recipient: text + note, and the message records what was not delivered.
   await rooms.post('r', { author: user, text: '@rem look', attachments: img })
@@ -529,9 +529,9 @@ test('terminals: key whitelist maps to herdr names and refuses anything else', (
   assert.throws(() => herdrKeys([]), /1–32/)
 })
 test('terminals: a shell starts only in a project, a worktree, $HOME or tmp', () => {
-  const pl = { roots: ['/r/umkmall'], worktrees: ['/r/umkmall/.wt/umk-1'], home: '/Users/me', tmp: ['/private/tmp'] }
-  for (const ok of ['/r/umkmall', '/r/umkmall/', '/r/umkmall/.wt/umk-1', '/Users/me', '/private/tmp']) assert.ok(allowedCwd(ok, pl), ok)
-  for (const bad of ['/', '/etc', '/r/umkmall/src', '/r/umkmall/../x', 'relative', null]) assert.ok(!allowedCwd(bad, pl), String(bad))
+  const pl = { roots: ['/r/acmeapp'], worktrees: ['/r/acmeapp/.wt/acm-1'], home: '/Users/me', tmp: ['/private/tmp'] }
+  for (const ok of ['/r/acmeapp', '/r/acmeapp/', '/r/acmeapp/.wt/acm-1', '/Users/me', '/private/tmp']) assert.ok(allowedCwd(ok, pl), ok)
+  for (const bad of ['/', '/etc', '/r/acmeapp/src', '/r/acmeapp/../x', 'relative', null]) assert.ok(!allowedCwd(bad, pl), String(bad))
 })
 test('terminals: only agent-less panes in a -shells workspace are shells', () => {
   const ws = new Set(['wS'])
@@ -606,24 +606,24 @@ test('Rooms.createByAgent: off → 403; on → created with creator as responder
   const rooms = new Rooms({ dir: mkdtempSync(join(tmpdir(), 'wtd-rooms-')), agents: async () => list, prompt: async (...a) => prompts.push(a), log: () => {} })
   const author = { kind: 'agent', name: 'repo-planner-01', key: 'm/w:p1' }
   const make = (slug, extra = {}) => rooms.createByAgent({ author, slug, title: 'T', agentList: list, ...extra })
-  await assert.rejects(make('umk-1'), (e) => e.status === 403 && /Agents can create rooms/.test(e.message))
+  await assert.rejects(make('acm-1'), (e) => e.status === 403 && /Agents can create rooms/.test(e.message))
   await rooms.setSettings({ agentsCreateRooms: true })
   await assert.rejects(make('Bad Slug'), (e) => e.status === 400)
-  const a = await make('umk-1', { invite: ['@repo-worker-02', 'nobody'] })
+  const a = await make('acm-1', { invite: ['@repo-worker-02', 'nobody'] })
   assert.equal(a.existing, false)
   assert.equal(a.room.responder, 'm/w:p1')
   assert.deepEqual(a.room.members.sort(), ['repo-planner-01', 'repo-worker-02'])
   assert.deepEqual(a.unknown, ['nobody'])
-  const msgs = await rooms.messages('umk-1')
+  const msgs = await rooms.messages('acm-1')
   assert.equal(msgs.length, 1)
   assert.equal(msgs[0].author.kind, 'system')
   assert.deepEqual(msgs[0].deliveredTo, [])
   assert.equal(prompts.length, 0) // an invite delivers nothing
-  assert.equal((await make('umk-1')).existing, true) // idempotent, and not counted
-  await make('umk-2'); await make('umk-3')
-  await assert.rejects(make('umk-4'), (e) => e.status === 429)
-  await rooms.update('umk-2', { archived: true })
-  await assert.rejects(make('umk-2'), (e) => e.status === 409)
+  assert.equal((await make('acm-1')).existing, true) // idempotent, and not counted
+  await make('acm-2'); await make('acm-3')
+  await assert.rejects(make('acm-4'), (e) => e.status === 429)
+  await rooms.update('acm-2', { archived: true })
+  await assert.rejects(make('acm-2'), (e) => e.status === 409)
 })
 
 import { memoryFile } from './server.mjs'
@@ -672,25 +672,25 @@ test('jevState: health up/down/unreachable; key none/ok/invalid; model names fro
 
 test('deriveTasks: a worker in the main checkout joins its ticket through its ticket/task tokens, not ad-hoc', () => {
   const a = { key: 'm/p1', id: 'p1', name: 'w-02', machine: 'm', local: true, pool: 'worker', status: 'working', statusSince: Date.now(),
-    cwd: '/nowhere/main', tags: { task: 'UMK-1186 Admin variants' }, asks: false, project: 'umkmall', recap: null, lastPrompt: null }
+    cwd: '/nowhere/main', tags: { task: 'ACM-1186 Admin variants' }, asks: false, project: 'acmeapp', recap: null, lastPrompt: null }
   const t = deriveTasks({ agents: [a], worktrees: [], prs: [], issues: [] })
-  assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc, x.agent?.name]), [['UMK-1186', 'building', false, 'w-02']])
+  assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc, x.agent?.name]), [['ACM-1186', 'building', false, 'w-02']])
   assert.equal(deriveTasks({ agents: [{ ...a, tags: {} }], worktrees: [], prs: [], issues: [] }).length, 0) // untagged working agent: no ad-hoc row
 })
 
 test('deriveTasks: up_next for my Todo issues only; ad-hoc rows only when an agent asks', () => {
   const issue = (identifier, mine) => ({ identifier, title: identifier, url: null, priority: 2, updatedAt: '2026-09-26T00:00:00Z', state: 'Todo', stateType: 'unstarted', mine })
   const ag = (id, status, asks) => ({ key: `m/${id}`, id, name: id, machine: 'm', local: true, pool: 'worker', status, statusSince: Date.now(), cwd: '/x', tags: {}, asks, question: asks ? 'ok?' : null, project: 'p', recap: 'r', lastPrompt: null })
-  const t = deriveTasks({ agents: [ag('p1', 'working', false), ag('p2', 'idle', true)], worktrees: [], prs: [], issues: [issue('UMK-1', true), issue('UMK-2', false)] })
-  assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc]), [['UMK-1', 'up_next', false], ['UMK-2', 'queued', false], ['agent:m/p2', 'needs_you', true]])
+  const t = deriveTasks({ agents: [ag('p1', 'working', false), ag('p2', 'idle', true)], worktrees: [], prs: [], issues: [issue('ACM-1', true), issue('ACM-2', false)] })
+  assert.deepEqual(t.map((x) => [x.id, x.state, x.adHoc]), [['ACM-1', 'up_next', false], ['ACM-2', 'queued', false], ['agent:m/p2', 'needs_you', true]])
 })
 
 test('handoffArgs: worker/reassign, never --mcp, state-gated', async () => {
   const { handoffArgs } = await import('./server.mjs')
-  const t = { id: 'UMK-9', title: 'Thing', state: 'plan_ready', plan: 'docs/plans/x.md', worktree: '/wt/umk-9', branch: 'umk-9' }
+  const t = { id: 'ACM-9', title: 'Thing', state: 'plan_ready', plan: 'docs/plans/x.md', worktree: '/wt/acm-9', branch: 'acm-9' }
   const w = handoffArgs(t, 'worker')
-  assert.deepEqual(w.args, ['--task', 'UMK-9 Thing', '/wt/umk-9'])
-  assert.match(w.prompt, /^Use wt-work to implement docs\/plans\/x.md .*\n\nWork in \/wt\/umk-9 on umk-9\. .*\n\nThen wt-ship\.\n$/s)
+  assert.deepEqual(w.args, ['--task', 'ACM-9 Thing', '/wt/acm-9'])
+  assert.match(w.prompt, /^Use wt-work to implement docs\/plans\/x.md .*\n\nWork in \/wt\/acm-9 on acm-9\. .*\n\nThen wt-ship\.\n$/s)
   assert.deepEqual(handoffArgs({ ...t, state: 'stalled' }, 'reassign').args[0], '--new')
   assert.ok(![w, handoffArgs({ ...t, state: 'stalled' }, 'reassign')].some((r) => r.args.includes('--mcp')))
   assert.throws(() => handoffArgs({ ...t, state: 'building' }, 'worker'), (e) => e.status === 409)
@@ -701,13 +701,13 @@ test('handoffArgs: worker/reassign, never --mcp, state-gated', async () => {
 test('deriveTasks: mine = assigned to the viewer, my PR, or local work', () => {
   const issue = (identifier, mine) => ({ identifier, title: identifier, url: null, priority: 2, updatedAt: '2026-09-26T00:00:00Z', state: 'In Review', stateType: 'started', mine })
   const pr = (n, ticket, mine) => ({ number: n, title: ticket, branch: ticket.toLowerCase(), state: 'OPEN', url: 'u', ticket, mine, updatedAt: '2026-09-26T00:00:00Z' })
-  const t = deriveTasks({ agents: [], worktrees: [], prs: [pr(1, 'UMK-1', false), pr(2, 'UMK-2', true), pr(3, 'UMK-3', false)], issues: [issue('UMK-1', true), issue('UMK-2', false), issue('UMK-3', false)] })
-  assert.deepEqual(t.map((x) => [x.id, x.mine]), [['UMK-1', true], ['UMK-2', true], ['UMK-3', false]])
+  const t = deriveTasks({ agents: [], worktrees: [], prs: [pr(1, 'ACM-1', false), pr(2, 'ACM-2', true), pr(3, 'ACM-3', false)], issues: [issue('ACM-1', true), issue('ACM-2', false), issue('ACM-3', false)] })
+  assert.deepEqual(t.map((x) => [x.id, x.mine]), [['ACM-1', true], ['ACM-2', true], ['ACM-3', false]])
 })
 
 test('deriveTasks: responder carries its task_state label', () => {
   const a = { key: 'm/p1', id: 'p1', name: 'w', machine: 'm', local: true, pool: 'worker', status: 'working', statusSince: Date.now(),
-    cwd: '/x', tags: { task: 'UMK-5 x', task_state: 'babysitting PR #7' }, asks: false, project: 'p' }
+    cwd: '/x', tags: { task: 'ACM-5 x', task_state: 'babysitting PR #7' }, asks: false, project: 'p' }
   assert.equal(deriveTasks({ agents: [a], worktrees: [], prs: [], issues: [] })[0].responder.taskState, 'babysitting PR #7')
 })
 
@@ -853,7 +853,7 @@ test('pane needs-you merge: picker wins, Jev yes asks with the tail, Jev no clea
 test('deriveTasks: Jev stall class — stuck/looping stalled, finished not, waiting_on_user needs you, none = 20-min rule', () => {
   const old = Date.now() - 30 * 60_000
   const a = (status, stall) => ({ key: 'm/p1', id: 'p1', name: 'w-01', machine: 'm', local: true, pool: 'worker', status, statusSince: old,
-    cwd: '/nowhere', tags: { task: 'UMK-9 x' }, asks: false, question: null, project: 'p', recap: 'waiting on your call', lastPrompt: null, stall })
+    cwd: '/nowhere', tags: { task: 'ACM-9 x' }, asks: false, question: null, project: 'p', recap: 'waiting on your call', lastPrompt: null, stall })
   const st = (status, stall) => deriveTasks({ agents: [a(status, stall)], worktrees: [], prs: [], issues: [] })[0].state
   assert.equal(st('idle', undefined), 'stalled')
   assert.equal(st('idle', 'stuck'), 'stalled')
@@ -907,8 +907,8 @@ test('Rooms.withLast: newest non-system line, not persisted to the index', async
 test('ticketOf: Linear team keys plus local board keys, anchored', async () => {
   const { ticketOf } = await import('./server.mjs')
   assert.equal(ticketOf('wp-12-board', ['WP']), 'WP-12')
-  assert.equal(ticketOf('/wt/umk-759', ['UMK', 'WP']), 'UMK-759')
-  assert.equal(ticketOf('/wt/umk-759', ['WP']), null) // UMK is no longer built in (WP-82)
+  assert.equal(ticketOf('/wt/acm-759', ['ACM', 'WP']), 'ACM-759')
+  assert.equal(ticketOf('/wt/acm-759', ['WP']), null) // ACM is no longer built in (WP-82)
   assert.equal(ticketOf('wp-12-board', []), null) // unknown key
   assert.equal(ticketOf('node-20-utf-8', ['WP']), null)
   assert.equal(ticketOf('swp-3', ['WP']), null)
@@ -928,13 +928,13 @@ test('syncTickets ignores local board tasks', async () => {
   const { mkdtemp } = await import('node:fs/promises')
   const dir = await mkdtemp(pj(tmpdir(), 'rooms-'))
   const r = new Rooms({ dir, agents: async () => [], prompt: async () => {}, log: () => {} })
-  await r.syncTickets([{ id: 'WP-1', local: true, state: 'building' }, { id: 'UMK-1', state: 'building' }])
-  assert.deepEqual([...r.taskPrev.keys()], ['UMK-1'])
+  await r.syncTickets([{ id: 'WP-1', local: true, state: 'building' }, { id: 'ACM-1', state: 'building' }])
+  assert.deepEqual([...r.taskPrev.keys()], ['ACM-1'])
 })
 
 test('parsePane: a truncated cwd is dropped (herdr cwd wins)', () => {
-  assert.equal(parsePane(pane.replace('/tmp/wt/umk-12', '/Users/x/Work/projects/umkmall...')).cwd, undefined)
-  assert.equal(parsePane(pane).cwd, '/tmp/wt/umk-12')
+  assert.equal(parsePane(pane.replace('/tmp/wt/acm-12', '/Users/x/Work/projects/acmeapp...')).cwd, undefined)
+  assert.equal(parsePane(pane).cwd, '/tmp/wt/acm-12')
 })
 
 test('stripSelfMention: an agent opening with @itself loses the prefix (WP-13)', async () => {
@@ -946,7 +946,7 @@ test('stripSelfMention: an agent opening with @itself loses the prefix (WP-13)',
 })
 
 test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed local → <cwd>-<pane>', () => {
-  assert.equal(remoteName('code-reviewer', '/work/projects/umkmall', 'w5:p8'), 'code-reviewer-umkmall-p8')
+  assert.equal(remoteName('code-reviewer', '/work/projects/acmeapp', 'w5:p8'), 'code-reviewer-acmeapp-p8')
   assert.equal(remoteName('Herdr Box', '/x/My Repo', 'w1:p2'), 'herdr-box-my-repo-p2')
   assert.equal(remoteName('box', undefined, 'w1:p3'), 'box-agent-p3')
   const a = remoteName('code-reviewer', '/w/a-very-long-repository-name-here', 'w5:p8')
@@ -956,9 +956,9 @@ test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed l
   assert.equal(agentName(rem, { name: 'pinned', pane_id: 'w5:p8' }, '/w/u'), 'pinned')
   assert.equal(agentName(rem, { terminal_title_stripped: 'Some Topic', pane_id: 'w5:p8' }, '/w/u'), 'code-reviewer-u-p8')
   assert.equal(agentName({ local: true }, { name: 'wt-pack-worker-03', pane_id: 'w1:p1' }, '/w'), 'wt-pack-worker-03')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 'w1:p1' }, '/x/umkmall-product-ops'), 'umkmall-product-ops-p1')
+  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 'w1:p1' }, '/x/acmeapp-product-ops'), 'acmeapp-product-ops-p1')
   assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, undefined), 'agent-p1')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'umkmall-orchestrator', pane_id: 'wP:p1' }, '/x/umkmall'), 'umkmall-orchestrator')
+  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'acmeapp-orchestrator', pane_id: 'wP:p1' }, '/x/acmeapp'), 'acmeapp-orchestrator')
 })
 
 // WP-38: the delivery queue is in memory; a restart must not silently lose mentions waiting for a busy agent.
@@ -1082,12 +1082,12 @@ test('bindCheck: loopback always; anything else only with WT_ALLOW_REMOTE (WP-80
 
 test('parseTeams: WT_LINEAR_TEAMS "KEY=project,KEY" → team key → project (WP-82)', async () => {
   const { parseTeams } = await import('./config.mjs')
-  assert.deepEqual(parseTeams(['UMK=umkmall', 'eng', ' OPS = ops-tools ', '', 'bad key=x']), { UMK: 'umkmall', ENG: 'eng', OPS: 'ops-tools' })
+  assert.deepEqual(parseTeams(['ACM=acmeapp', 'eng', ' OPS = ops-tools ', '', 'bad key=x']), { ACM: 'acmeapp', ENG: 'eng', OPS: 'ops-tools' })
   assert.deepEqual(parseTeams([]), {})
   assert.deepEqual(parseTeams(['X=a"b', 'Y=../z']), {}) // quotes and slashes never reach the query or a path
   const { cfg } = tmpCfg(''); await cfg.load()
-  await cfg.setValue('WT_LINEAR_TEAMS', ['umk = umkmall', 'ENG'])
-  assert.deepEqual(cfg.list('WT_LINEAR_TEAMS'), ['umk=umkmall', 'ENG'])
+  await cfg.setValue('WT_LINEAR_TEAMS', ['acm = acmeapp', 'ENG'])
+  assert.deepEqual(cfg.list('WT_LINEAR_TEAMS'), ['acm=acmeapp', 'ENG'])
   await assert.rejects(cfg.setValue('WT_LINEAR_TEAMS', ['E"}']), (e) => e.status === 400)
 })
 
@@ -1135,7 +1135,7 @@ test('streamRemote (WP-97): tail window, ids <file>:<byte offset>, ?since= resum
     const req = Object.assign(new EventEmitter(), { headers: {} })
     let out = ''
     const res = { writeHead() {}, write(s) { out += s }, end() {} }
-    const p = streamRemote(req, res, new URL(`http://x/${qs}`), { host: 'herdr-box', pane: 'w5:p8', cwd: '/work/projects/umkmall', prompt: 'hello there' },
+    const p = streamRemote(req, res, new URL(`http://x/${qs}`), { host: 'herdr-box', pane: 'w5:p8', cwd: '/work/projects/acmeapp', prompt: 'hello there' },
       { run: fake(mode), limiter: new Limiter(4), pullMs: 5, retry: { unreachable: 5, unmatched: 5 } })
     await new Promise((r) => setTimeout(r, 20))
     if (grow) { file = Buffer.concat([file, Buffer.from(grow)]); await new Promise((r) => setTimeout(r, 30)) }

@@ -19,8 +19,8 @@
      ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
 
 ❯ Call AskUserQuestion now (no other tools) with 2 questions. Q1 header "Next up", question "What should the planners pick up next?", single
-  select, options each WITH a preview field: label "UMK-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan UMK-1177", label "M5
-  video tickets" preview "planner-03 -> M5 tickets\nthen review", label "UMK-1176 download log" preview "planner-04 -> /wt-plan UMK-1176". Q2
+  select, options each WITH a preview field: label "ACM-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan ACM-1177", label "M5
+  video tickets" preview "planner-03 -> M5 tickets\nthen review", label "ACM-1176 download log" preview "planner-04 -> /wt-plan ACM-1176". Q2
   header "Polish", question "Which polish items?", multiSelect true, options with previews: "Dark mode tweaks" preview "css tokens", "Keyboard
   shortcuts for everything in the app" preview "keys.ts", "Empty states" preview "EmptyState". Descriptions short.
 
@@ -29,10 +29,10 @@
 
 What should the planners pick up next?
 
-  1. UMK-1177 OTP hang            ┌──────────────────────────────────────────┐
+  1. ACM-1177 OTP hang            ┌──────────────────────────────────────────┐
     (Recommended)                 │ planner-03 -> M5 tickets                 │
 ❯ 2. M5 video tickets             │ then review                              │
-  3. UMK-1176 download log        └──────────────────────────────────────────┘
+  3. ACM-1176 download log        └──────────────────────────────────────────┘
 
                                   Notes: press n to add notes
 

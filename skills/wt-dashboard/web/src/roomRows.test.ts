@@ -33,8 +33,8 @@ test('an agent keeps one row per mention round that updates in place: queued →
 
 import { membersFirst } from './roomRows.ts'
 test('membersFirst: room members lead the @ menu, the rest keep their order', () => {
-  const A = ['umkmall-worker-01', 'umkmall-worker-02', 'wt-pack-worker-01', 'x'].map((name) => ({ name }))
-  assert.deepEqual(membersFirst(A, ['wt-pack-worker-01', 'x']).map((a) => a.name), ['wt-pack-worker-01', 'x', 'umkmall-worker-01', 'umkmall-worker-02'])
+  const A = ['acmeapp-worker-01', 'acmeapp-worker-02', 'wt-pack-worker-01', 'x'].map((name) => ({ name }))
+  assert.deepEqual(membersFirst(A, ['wt-pack-worker-01', 'x']).map((a) => a.name), ['wt-pack-worker-01', 'x', 'acmeapp-worker-01', 'acmeapp-worker-02'])
   assert.deepEqual(membersFirst(A, []).map((a) => a.name), A.map((a) => a.name))
 })
 

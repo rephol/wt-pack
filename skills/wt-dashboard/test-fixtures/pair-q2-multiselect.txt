@@ -18,8 +18,8 @@
      ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
 
 ❯ Call AskUserQuestion now (no other tools) with 2 questions. Q1 header "Next up", question "What should the planners pick up next?", single
-  select, options each WITH a preview: "UMK-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan UMK-1177"; "M5 video tickets" preview
-  "planner-03 -> M5 tickets"; "UMK-1176 download log" preview "planner-04 -> /wt-plan UMK-1176". Q2 header "Polish", question "Which
+  select, options each WITH a preview: "ACM-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan ACM-1177"; "M5 video tickets" preview
+  "planner-03 -> M5 tickets"; "ACM-1176 download log" preview "planner-04 -> /wt-plan ACM-1176". Q2 header "Polish", question "Which
   dashboard polish do you want?", multiSelect true, no previews, options: "Compact question card" desc "Make the pinned question card
   collapsible so the conversation isn't squeezed."; "Wider Task column" desc "Stop the Agents table scrolling sideways when the chat panel is
   open."; "Nav overlay dots" desc "Hide collapsed-count dots inside the narrow-screen nav overlay."

@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { ChatMarkdown } from './links.ts'
 import { ticketPlugin, type TicketRefs } from './ticketRefs.ts'
 
-const refs: TicketRefs = { boards: { WP: 'wt-pack' }, linear: { keys: ['UMK'], org: 'acme' } }
+const refs: TicketRefs = { boards: { WP: 'wt-pack' }, linear: { keys: ['ACM'], org: 'acme' } }
 const chips = (text: string, r: TicketRefs = refs) => {
   const p = ticketPlugin(r, (ref, key) => createElement('i', { key }, ref.kind === 'board' ? `${ref.id}@${ref.project}` : ref.url))
   const html = renderToStaticMarkup(createElement(ChatMarkdown, { inlinePlugins: p ? [p] : [] }, text))
@@ -13,7 +13,7 @@ const chips = (text: string, r: TicketRefs = refs) => {
 }
 
 test('board and Linear ids become chips; unknown keys stay text', () => {
-  assert.deepEqual(chips('Done: WP-92, see UMK-123 and ABC-4.'), ['WP-92@wt-pack', 'https://linear.app/acme/issue/UMK-123'])
+  assert.deepEqual(chips('Done: WP-92, see ACM-123 and ABC-4.'), ['WP-92@wt-pack', 'https://linear.app/acme/issue/ACM-123'])
 })
 
 test('word boundaries: WP-92a, xWP-9, wp-92 (branch) and WP-92-slug parts', () => {
@@ -29,7 +29,7 @@ test('code spans, code blocks and URLs are left alone', () => {
 })
 
 test('Linear ids stay text until the workspace url key is known; no keys → no plugin', () => {
-  assert.deepEqual(chips('UMK-1 WP-2', { ...refs, linear: { keys: ['UMK'], org: null } }), ['WP-2@wt-pack'])
+  assert.deepEqual(chips('ACM-1 WP-2', { ...refs, linear: { keys: ['ACM'], org: null } }), ['WP-2@wt-pack'])
   assert.equal(ticketPlugin({ boards: {}, linear: { keys: [], org: null } }, () => null), null)
   assert.equal(ticketPlugin(undefined, () => null), null)
 })

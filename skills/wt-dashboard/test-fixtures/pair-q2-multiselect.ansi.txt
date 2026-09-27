@@ -18,8 +18,8 @@
      [0m[38;2;153;153;153m✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30[0m
 
 [0m[38;2;80;80;80m[48;2;55;55;55m❯ [0m[38;2;255;255;255m[48;2;55;55;55mCall AskUserQuestion now (no other tools) with 2 questions. Q1 header "Next up", question "What should the planners pick up next?", single [0m[48;2;55;55;55m  [0m
-[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mselect, options each WITH a preview: "UMK-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan UMK-1177"; "M5 video tickets" preview[0m[48;2;55;55;55m [0m
-[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55m"planner-03 -> M5 tickets"; "UMK-1176 download log" preview "planner-04 -> /wt-plan UMK-1176". Q2 header "Polish", question "Which [0m[48;2;55;55;55m          [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mselect, options each WITH a preview: "ACM-1177 OTP hang (Recommended)" preview "planner-02 -> /wt-plan ACM-1177"; "M5 video tickets" preview[0m[48;2;55;55;55m [0m
+[0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55m"planner-03 -> M5 tickets"; "ACM-1176 download log" preview "planner-04 -> /wt-plan ACM-1176". Q2 header "Polish", question "Which [0m[48;2;55;55;55m          [0m
 [0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mdashboard polish do you want?", multiSelect true, no previews, options: "Compact question card" desc "Make the pinned question card [0m[48;2;55;55;55m         [0m
 [0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mcollapsible so the conversation isn't squeezed."; "Wider Task column" desc "Stop the Agents table scrolling sideways when the chat panel is [0m[48;2;55;55;55m [0m
 [0m[48;2;55;55;55m  [0m[38;2;255;255;255m[48;2;55;55;55mopen."; "Nav overlay dots" desc "Hide collapsed-count dots inside the narrow-screen nav overlay."[0m[48;2;55;55;55m                                            [0m
