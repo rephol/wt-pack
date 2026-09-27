@@ -26,7 +26,6 @@ export function Dock({ state, dispatch, meta, unread, body, onExpand }: {
   const switcher = () => dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, ctrlKey: !/Mac/.test(navigator.platform) }))
   return (
     <div className="hd-dock" role="toolbar" aria-label="Chat dock">
-      <button type="button" className="hd-dock-chats" title="Open a chat (⌘K)" onClick={switcher}><ChatIcon /><Text size="sm">Chats</Text></button>
       <div className="hd-dock-slots">{state.items.map((i) => {
         const m = meta(i.key), u = unread[i.key]
         return (
@@ -54,6 +53,8 @@ export function Dock({ state, dispatch, meta, unread, body, onExpand }: {
           </div>
         )
       })}</div>
+      {/* WP-113: right to left — the button far right, the newest chat just left of it (DOM order = visual = Tab order) */}
+      <button type="button" className="hd-dock-chats" title="Open a chat (⌘K)" onClick={switcher}><ChatIcon /><Text size="sm">Chats</Text></button>
     </div>
   )
 }
