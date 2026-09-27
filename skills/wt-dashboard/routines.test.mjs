@@ -18,7 +18,7 @@ function world(over = {}) {
     deps: {
       agents: async () => w.list,
       host: async () => ({ pressure: w.pressure }),
-      prompt: async (a, text) => { calls.prompt.push([a.name, text]) },
+      prompt: async (a, text, o) => { calls.prompt.push([a.name, text]); calls.promptOpts = o },
       spawn: async (b) => { calls.spawn.push(b); w.list.push({ id: 'p9', name: 'aud-1', status: 'working' }); return { name: 'aud-1', pane: 'p9', prompted: true } },
       remove: async (pane, o) => { calls.remove.push([pane, o]); w.list = w.list.filter((a) => a.id !== pane) },
       actions: { housekeeping: async () => { calls.actions.push('hk'); return { summary: 'done' } }, 'jev-run': async () => ({ skipped: 'triage off' }) },
@@ -251,3 +251,16 @@ test('preview: next 3 slots', tz('UTC', () => {
   assert.deepEqual(preview('0 9 * * 1', 3, new Date('2026-09-26T00:00:00Z')).map(iso), ['2026-09-28T09:00:00.000Z', '2026-10-05T09:00:00.000Z', '2026-10-12T09:00:00.000Z'])
   assert.throws(() => preview('nope'), (e) => e.status === 400)
 }))
+
+test('routine sends name themselves (WP-104): prompt gets { routine }, spawn gets tag kind=routine', async () => {
+  const { w, r } = setup()
+  w.list.push({ id: 'p1', name: 'orch', status: 'idle', pool: 'orchestrator', project: 'x' })
+  const p = r.create({ name: 'Digest', schedule: 'every 1h', target: { kind: 'prompt', agent: 'orch', text: 'digest' } })
+  await r.runNow(p.id); await r.idle()
+  assert.deepEqual(w.calls.promptOpts, { routine: 'Digest' })
+  const s = r.create({ name: 'Audit', schedule: 'every 1h', target: { kind: 'spawn', role: 'auditor', project: 'x', prompt: '/wt-audit' } })
+  await r.runNow(s.id)
+  setTimeout(() => { w.list.find((a) => a.id === 'p9').status = 'idle' }, 20)
+  await r.idle()
+  assert.deepEqual(w.calls.spawn.at(-1).tag, { kind: 'routine', from: 'Audit' })
+})
