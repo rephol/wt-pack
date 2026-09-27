@@ -33,6 +33,22 @@ case "$1 $2" in
 esac
 `)
 chmodSync(join(bin, 'gh'), 0o755)
+// WP-121: herdr and handoff stubs for mode/dispatch (fixture files; a missing agents.json means herdr is absent).
+writeFileSync(join(bin, 'herdr'), `#!/bin/sh
+case "$1 $2" in
+  "pane get") cat "${fx}/pane.json" ;;
+  "agent list") cat "${fx}/agents.json" ;;
+  "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
+esac
+`)
+chmodSync(join(bin, 'herdr'), 0o755)
+const handoff = join(tmp, 'handoff.sh')
+writeFileSync(handoff, `#!/bin/sh
+{ echo "ARGS $*"; echo "BODY $(cat)"; } > "${fx}/handoff"
+[ -n "\${HANDOFF_FAIL:-}" ] && exit 1
+echo "created demo-reviewer-01 wR:p1"; echo "target demo-reviewer-01 wR:p1"
+`)
+chmodSync(handoff, 0o755)
 execFileSync('git', ['-C', repo, 'init', '-q'])
 
 const sd = join(home, '.local/share/wt-watch-prs/acme-demo'), stateFile = join(sd, 'state.json')
@@ -175,6 +191,63 @@ test('diff: delta when the recorded head is an ancestor, full review after a for
   assert.match(r.stdout, /# FULL review: 9+ is not an ancestor/); assert.match(r.stdout, /a\.txt/); assert.match(r.stdout, /b\.txt/)
   r = run(['diff', '17', 'sess-a', '--sha', sha('0')])
   assert.equal(r.status, 1); assert.match(r.stderr, /aborting/)
+  // WP-121: two PRs under one session keep distinct base refs
+  g('-C', work, 'push', '-q', origin, `${c1}:refs/pull/18/head`)
+  assert.equal(run(['diff', '18', 'sess-a']).status, 0)
+  const refs = g('-C', repo, 'for-each-ref', '--format=%(refname)', 'refs/review/sess-a/')
+  assert.match(refs, /pr-17-base/); assert.match(refs, /pr-18-base/)
+})
+
+const agents = (...a) => fixture('agents.json', { result: { agents: a.map(([name, pane_id, agent_status, workspace_id = 'wR']) => ({ name, pane_id, agent_status, workspace_id })) } })
+const drun = (args, env = {}) => run(['dispatch', ...args], { WATCH_PRS_HANDOFF: handoff, ...env })
+const handed = () => readFileSync(join(fx, 'handoff'), 'utf8')
+
+test('WP-121 mode: explicit arg wins; orchestrator → dispatch; reviewer, none or no herdr → standalone', () => {
+  fixture('pane.json', { result: { pane: { tokens: { role: 'orchestrator' } } } })
+  assert.equal(run(['mode'], { HERDR_PANE_ID: 'x' }).stdout.trim(), 'dispatch')
+  assert.equal(run(['mode', 'review'], { HERDR_PANE_ID: 'x' }).stdout.trim(), 'review')
+  assert.equal(run(['mode', 'acme/demo'], { HERDR_PANE_ID: 'x' }).stdout.trim(), 'standalone')
+  fixture('pane.json', { result: { pane: { tokens: { role: 'reviewer' } } } })
+  assert.equal(run(['mode'], { HERDR_PANE_ID: 'x' }).stdout.trim(), 'standalone')
+  assert.equal(run(['mode']).stdout.trim(), 'standalone') // not in a herdr pane
+})
+
+test('WP-121 dispatch: claims under D, hands to a reviewer with pr/sha, cross-mode claim, cap and failure release', () => {
+  reset(); agents()
+  let r = drun(['12', '--sha', sha('c'), '--session', 'sess-d'])
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /dispatched #12 to demo-reviewer-01/)
+  assert.match(handed(), new RegExp(`ARGS --role reviewer --kind dispatch --pr 12 --sha ${sha('c')} --no-goal`))
+  assert.match(handed(), new RegExp(`BODY /wt-watch-prs review 12 --sha ${sha('c')} --session sess-d`))
+  assert.ok(existsSync(join(sd, 'claims', 'pr12')))
+  r = drun(['12', '--sha', sha('c'), '--session', 'sess-e'])
+  assert.equal(r.status, 1); assert.match(r.stdout, /held by sess-d/)
+  assert.equal(run(['claim', '12', 'sess-s']).status, 1) // a standalone watcher loses to the dispatch claim
+  // at the cap (2 live reviewers, none free): release and exit 3
+  reset(); agents(['r1', 'wR:p1', 'working'], ['r2', 'wR:p2', 'working'])
+  r = drun(['13', '--sha', sha('d'), '--session', 'sess-d'])
+  assert.equal(r.status, 3); assert.match(r.stdout, /queued: at maxReviewers \(2\)/); assert.ok(!existsSync(join(sd, 'claims', 'pr13')))
+  reset(); agents()
+  r = drun(['14', '--sha', sha('e'), '--session', 'sess-d'], { HANDOFF_FAIL: '1' })
+  assert.equal(r.status, 1); assert.ok(!existsSync(join(sd, 'claims', 'pr14')))
+})
+
+test('WP-121 re-dispatch: the recorded reviewer gets --pane when idle; working or gone → pool pick', () => {
+  reset({ reviewed: { 12: { sha: sha('a'), state: 'changes-requested', reviewer: 'r1' } } }); agents(['r1', 'wR:p7', 'idle'])
+  assert.equal(drun(['12', '--sha', sha('b'), '--session', 'sess-d']).status, 0); assert.match(handed(), /--pane wR:p7/)
+  reset({ reviewed: { 12: { reviewer: 'r1' } } }); agents(['r1', 'wR:p7', 'working'])
+  assert.equal(drun(['12', '--sha', sha('b'), '--session', 'sess-d']).status, 0); assert.doesNotMatch(handed(), /--pane/)
+  reset({ reviewed: { 12: { reviewer: 'r1' } } }); agents()
+  assert.equal(drun(['12', '--sha', sha('b'), '--session', 'sess-d']).status, 0); assert.doesNotMatch(handed(), /--pane/)
+})
+
+test('WP-121 record --by stores the reviewer; a bad name is refused', () => {
+  reset()
+  let r = run(['record', '12', sha('a'), 'changes-requested', 'x', 'sess-d', '--by', 'demo-reviewer-01'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).reviewed[12].reviewer, 'demo-reviewer-01')
+  r = run(['record', '12', sha('a'), 'approved', 'x', 'sess-d', '--by', 'Bad Name'])
+  assert.equal(r.status, 1); assert.match(r.stderr, /bad --by/)
+  assert.equal(run(['record', '12', sha('a'), 'approved', 'x', 'sess-d']).status, 0) // old callers unchanged
 })
 
 test.after(() => { assert.ok(!existsSync(join(tmp, 'home', '.claude'))); rmSync(tmp, { recursive: true, force: true }) })
