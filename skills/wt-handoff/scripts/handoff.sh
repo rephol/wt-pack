@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
 #
 # WP-104: every prompt goes out wrapped as <wt-message id=… kind=handoff|dispatch|routine|reply|system from="…"
@@ -59,6 +59,8 @@ WTMSG="$(cd "$(dirname "$0")" && pwd)/../../wt-shared/scripts/wt-message-cli.mjs
 goal=1
 task=
 mcp=
+pr=
+sha=
 dry=0
 while :; do
   case "${1:-}" in
@@ -76,7 +78,9 @@ while :; do
     --no-goal) goal=0; shift ;;
     --task)  task=$2; shift 2 ;;
     --role)  role=$2; shift 2
-             case "$role" in worker|planner) ;; *) echo "--role: worker or planner" >&2; exit 2 ;; esac ;;
+             case "$role" in worker|planner|reviewer) ;; *) echo "--role: worker, planner or reviewer" >&2; exit 2 ;; esac ;;
+    --pr)    pr=$2; shift 2 ;;   # WP-121: pr=/sha= on the wt-message (wt-watch-prs dispatch)
+    --sha)   sha=$2; shift 2 ;;
     --mcp)   mcp=$2; shift 2 ;;
     --dry-run) dry=1; shift ;;
     *) break ;;
@@ -161,7 +165,7 @@ candidates() {
 # MCP picks from Jev (before the footer is added: it judges the task, not the routing).
 jev=
 # Only in lean mode: a full-set worker already has every server, so there is nothing to pick.
-if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] \
+if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] && [ "${role:-worker}" = worker ] \
   && [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh" --cwd "${main_checkout:-$cwd}")" = lean ]; then
   jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
   mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
@@ -179,10 +183,11 @@ if [ -z "$role" ] && [ "$mode" = auto ]; then
   esac
 fi
 role=${role:-worker}
-[ "$role" = planner ] && ws_label=${HANDOFF_WORKSPACE:-$(basename "${main_checkout:-$cwd}")-planners}
-# A planner makes its own worktree, so it starts in the main checkout (as `agents.sh spawn planner` does).
+# Every role but worker has its own pool "<repo>-<role>s" and starts in the main checkout (as `agents.sh spawn
+# <role>` does): a planner makes its own worktree, a reviewer (WP-121) reviews by SHA without one.
+[ "$role" = worker ] || ws_label=${HANDOFF_WORKSPACE:-$(basename "${main_checkout:-$cwd}")-${role}s}
 spawn_cwd=$cwd
-[ "$role" = planner ] && [ -n "$main_checkout" ] && spawn_cwd=$main_checkout
+[ "$role" = worker ] || [ -z "$main_checkout" ] || spawn_cwd=$main_checkout
 
 # A worker has the picks if it runs the full set (no lean config) or its config lists them all.
 has_picks() {
@@ -226,7 +231,7 @@ esac
 task=$(printf '%.80s' "$task")
 
 # Wrap once, before the goal/no-goal split (so --no-goal is tagged too); a failed wrap never sends untagged.
-prompt=$(printf '%s' "$prompt" | node "$WTMSG" --kind "$kind" --from "${from_arg:-${from_name:-${from_pane:-wt-handoff}}}" ${ticket:+--ticket "$ticket"}) \
+prompt=$(printf '%s' "$prompt" | node "$WTMSG" --kind "$kind" --from "${from_arg:-${from_name:-${from_pane:-wt-handoff}}}" ${ticket:+--ticket "$ticket"} ${pr:+--pr "$pr"} ${sha:+--sha "$sha"}) \
   || { echo "wt-message wrap failed" >&2; exit 1; }
 
 # The goal IS the directive: setting one starts a turn with the condition as the
