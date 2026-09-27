@@ -132,7 +132,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   `unreachable — pane view`; until messages arrive the pane view shows.
 - **Roles** (Settings › Roles): Orchestrator (purple, not spawnable), Planner (blue, starts in the main
   checkout, workspace `<repo>-planners`), Worker (green, starts in a worktree, `<repo>-workers`), Auditor
-  (orange, main checkout, `<repo>-auditors`). Editable: name, id, letter, colour, workspace/name patterns,
+  (orange, main checkout, `<repo>-auditors`), Reviewer (teal, main checkout, `<repo>-reviewers`; runs
+  wt-watch-prs — arm it with the first prompt `/goal Use wt-watch-prs to watch this repo's PRs`, since roles
+  carry no prompt of their own). A default role added in a later version joins an existing role list once; a
+  default you delete stays deleted (`retired-roles.json`). Editable: name, id, letter, colour, workspace/name patterns,
   start (main / worktree / choose), allowed projects; 1–20 roles. A deleted role still in use must be
   reassigned first.
 - **New agent** (Overview or palette): pick role and project, optional **first prompt** (sent once the agent
@@ -212,8 +215,12 @@ Chat rooms shared by you and agents.
 - A drawer from the sidebar bell; Escape or going to another page closes it (WP-87).
 - Kinds include questions, mentions of you, room suggestions, memory proposals, agent done/stalled, CI
   failed, server, usage and watchdog notices.
+- **Held PR** (`pr-held`, WP-116): each PR a wt-watch-prs reviewer holds for clarification (state
+  `changes-requested` in `~/.local/share/wt-watch-prs/<owner>-<repo>/state.json`) is an item titled
+  `Held PR #n (<owner>-<repo>)` with the reviewer's note; it resolves when the reviewer records a new verdict.
+  Holds that predate a server restart appear too.
 - **Needs you** = unresolved **and** actionable (needs-you, question, mention-user, room-suggestion,
-  memory-proposal), regardless of read state; pinned at the top. Items resolve themselves when the condition
+  memory-proposal, pr-held), regardless of read state; pinned at the top. Items resolve themselves when the condition
   clears (a room suggestion also when its ticket reaches Done on the board).
 - Grouping: repeats of a non-actionable kind with the same title collapse with a count; rows group by memory,
   room, agent, task/PR or kind, and groups sort by their most urgent row. Recent list capped at 150.
@@ -268,7 +275,9 @@ Projects, Terminals, Usage, Observability, Server, About.
   **Reset**. Keys: **GitHub account** (agents spawned for the project get `GH_TOKEN` for that account from gh's
   keyring, and the checkout's `credential.https://github.com.username` is set so `git push` matches; the
   dashboard's PR/issue calls for the default repo use it too; gh's active account is never switched; a token is
-  a snapshot — respawn after changing it), **Base branch** (default `main`; dispatch reconcile and the PR list's
+  a snapshot — respawn after changing it), **Reviewer GitHub account** (wt-watch-prs posts reviews as this
+  account, token from gh's keyring per call, so it can approve PRs your agents opened; unset → the
+  `GH_REVIEWER_TOKEN_FILE` token, else the default identity, which only comments), **Base branch** (default `main`; wt-watch-prs diffs against it too; dispatch reconcile and the PR list's
   shipped check), **Agent MCP** (`WT_AGENTS_MCP`), **Max working agents** (dispatch cap; global = Routines'),
   **Ticket triage** (`WT_JEV_TICKET_TRIAGE`); plus the board's Auto and Dispatch switches. Stored in `wt.db`
   (`project_settings`, not in the JSON rollback); shell scripts read it via
@@ -412,6 +421,7 @@ current repo; `--json` on any command. Exit 0 ok, 1 API error / server down, 2 u
 | wt-simplify · wt-review · wt-compound · wt-pr | The steps wt-ship runs in order |
 | wt-ship | Simplify → review → record learnings → PR (this repo merges to main instead) |
 | wt-babysit | Watch a PR until merge-ready |
+| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity |
 | wt-finish | Retire a merged worktree and its branch |
 | wt-handoff | Hand a prompt to an agent, or a freshly spawned one |
 | wt-audit | PM+QA pass that files board cards; proposals only |

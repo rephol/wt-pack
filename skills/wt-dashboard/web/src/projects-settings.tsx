@@ -21,6 +21,7 @@ type Source = 'env' | 'project' | 'global' | 'default'
 type Item = { key: string; label: string; scope: 'project' | 'overridable'; value: string | null; source: Source; project: string | null; inherited: { value: string | null; source: Source } }
 const ABOUT: Record<string, string> = {
   githubAccount: 'gh and git push in agents spawned for this project act as this account (GH_TOKEN from gh\'s keyring). The account must be logged in: gh auth login. Takes effect for new agents; respawn existing ones.',
+  reviewerGithubAccount: 'wt-watch-prs posts PR reviews as this account (token from gh\'s keyring), so it can approve PRs your agents opened. Unset: it comments only, as the default identity.',
   baseBranch: 'The integration branch dispatch reconciles merges against, and the PR list checks for shipped.',
   WT_AGENTS_MCP: 'full: every agent gets claude\'s normal MCP set; lean: its role\'s set only.',
   maxWorking: 'Dispatch hands out work only while fewer agents than this are working.',

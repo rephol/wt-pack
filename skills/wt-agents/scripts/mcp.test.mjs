@@ -35,3 +35,8 @@ test('auditor: lean set is wt-memory + context7', () => {
   writeFileSync(envFile, 'WT_AGENTS_MCP=lean\n')
   assert.equal(run(join(here, 'agents.sh'), ['mcp-args', 'auditor', '.']), '--strict-mcp-config --mcp-config\n["context7","wt-memory"]')
 })
+
+test('reviewer: lean set is wt-memory + context7', () => {
+  writeFileSync(envFile, 'WT_AGENTS_MCP=lean\n')
+  assert.equal(run(join(here, 'agents.sh'), ['mcp-args', 'reviewer', '.']), '--strict-mcp-config --mcp-config\n["context7","wt-memory"]')
+})

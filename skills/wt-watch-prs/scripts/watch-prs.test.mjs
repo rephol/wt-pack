@@ -1,0 +1,180 @@
+// Run: node --test skills/wt-watch-prs/scripts/*.test.mjs — WP-116: watch-prs.sh against a gh stub and fixture JSON,
+// with a temp HOME so the real state dir (read by the dashboard) is never touched.
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { spawnSync, execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+
+const script = join(import.meta.dirname, 'watch-prs.sh')
+const tmp = mkdtempSync(join(tmpdir(), 'wt-watch-prs-'))
+const bin = join(tmp, 'bin'), fx = join(tmp, 'fx'), repo = join(tmp, 'demo'), home = join(tmp, 'home')
+for (const d of [bin, fx, repo, home, join(tmp, 'data', 'data')]) mkdirSync(d, { recursive: true })
+const SECRET = 'SECRET-TOK-9f3a'
+const tokFile = join(tmp, 'reviewer-token')
+writeFileSync(tokFile, SECRET + '\n')
+writeFileSync(join(bin, 'gh'), `#!/bin/sh
+echo "gh $*" >> "${fx}/calls"
+case "$1 $2" in
+  "repo view") echo acme/demo ;;
+  "auth status") exit \${AUTH_FAIL:-0} ;;
+  "auth token") [ "$4" = bot ] && { echo ${SECRET}; exit 0; }; exit 1 ;;
+  "api --paginate") shift; cat "${fx}/reviews.json"; exit ;;
+  "api user") [ -n "\${NO_LOGIN:-}" ] && exit 1; [ "\$GH_TOKEN" = ${SECRET} ] && echo reviewer-bot || echo human ;;
+  "pr list") c=$(cat "${fx}/n" 2>/dev/null || echo 0); c=$((c+1)); echo $c > "${fx}/n"
+    f="${fx}/list.$c.json"; [ -f "$f" ] || f="${fx}/list.json"; cat "$f" ;;
+  "pr view") cat "${fx}/view-$3.json" ;;
+  api\\ repos/*) case "$2" in
+      */comments*) cat "${fx}/comments.json" ;;
+      */reviews*) cat "${fx}/reviews.json" ;;
+    esac ;;
+esac
+`)
+chmodSync(join(bin, 'gh'), 0o755)
+execFileSync('git', ['-C', repo, 'init', '-q'])
+
+const sd = join(home, '.local/share/wt-watch-prs/acme-demo'), stateFile = join(sd, 'state.json')
+const run = (args, env = {}) => {
+  const r = spawnSync(script, args, { cwd: repo, encoding: 'utf8', env: {
+    PATH: `${bin}:${process.env.PATH}`, HOME: home, WT_DASHBOARD_DATA: join(tmp, 'data'),
+    GH_REVIEWER_TOKEN_FILE: tokFile, WATCH_PRS_SLEEP: '0', ...env } })
+  for (const s of [r.stdout, r.stderr]) assert.ok(!s.includes(SECRET), `token leaked: ${s}`)
+  return r
+}
+const fixture = (name, v) => writeFileSync(join(fx, name), JSON.stringify(v))
+const reset = (state = { reviewed: {} }) => {
+  rmSync(sd, { recursive: true, force: true }); mkdirSync(join(sd, 'claims'), { recursive: true })
+  writeFileSync(stateFile, JSON.stringify(state)); rmSync(join(fx, 'n'), { force: true }); rmSync(join(fx, 'calls'), { force: true })
+  for (const n of [1, 2, 3]) rmSync(join(fx, `list.${n}.json`), { force: true })
+}
+const sha = (c) => c.repeat(40)
+const pr = (number, headRefOid, extra = {}) => ({ number, headRefOid, author: { login: 'dev' }, title: `pr ${number}`, isDraft: false, ...extra })
+
+test('preflight: ok with degraded lines, hard fail exits 1', () => {
+  let r = run(['preflight'])
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /ok: acme\/demo as reviewer-bot \(token file\)/)
+  r = run(['preflight'], { GH_REVIEWER_TOKEN_FILE: join(tmp, 'none') })
+  assert.equal(r.status, 0); assert.match(r.stdout, /DEGRADED: no reviewer identity .* never approve/)
+  r = run(['preflight'], { AUTH_FAIL: '1' })
+  assert.equal(r.status, 1); assert.match(r.stdout, /HARD fail: gh not authenticated/)
+})
+
+test('identity: token file, project account, unresolved', () => {
+  assert.match(run(['identity']).stdout, /^reviewer-bot token file/)
+  const db = new DatabaseSync(join(tmp, 'data', 'data', 'wt.db'))
+  db.exec('CREATE TABLE project_settings (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project, key))')
+  db.prepare("INSERT INTO project_settings VALUES ('demo', 'reviewerGithubAccount', 'bot')").run()
+  assert.match(run(['identity'], { GH_REVIEWER_TOKEN_FILE: join(tmp, 'none') }).stdout, /^reviewer-bot account bot/)
+  db.exec('DELETE FROM project_settings'); db.close()
+  assert.equal(run(['identity'], { NO_LOGIN: '1' }).status, 1)
+})
+
+test('poll-shas: exact and short-prefix suppression, claim suppression, siblings fire', () => {
+  reset({ reviewed: { 1: { sha: sha('a') }, 2: { sha: 'bbbbbbbb' } } })
+  mkdirSync(join(sd, 'claims', 'pr3'))
+  fixture('list.json', [pr(1, sha('a')), pr(2, sha('b')), pr(3, sha('c')), pr(4, sha('d')), pr(5, sha('e'), { isDraft: true }), pr(6, sha('f'))])
+  const out = run(['poll-shas', '--once']).stdout
+  assert.deepEqual(out.match(/PR #\d+/g), ['PR #4', 'PR #6'])
+  assert.match(out, new RegExp(`PR #4 — new commits ${sha('d')} — dev: pr 4`))
+})
+
+test('poll-shas: TTL keeps a fired head quiet, expiry re-fires it', () => {
+  reset(); fixture('list.json', [pr(7, sha('7'))])
+  assert.equal(run(['poll-shas'], { WATCH_PRS_POLLS: '2' }).stdout.match(/PR #7/g).length, 1)
+  reset(); assert.equal(run(['poll-shas'], { WATCH_PRS_POLLS: '2', WATCH_PRS_TTL: '0' }).stdout.match(/PR #7/g).length, 2)
+})
+
+test('poll-shas: NO LONGER OPEN only for a verified merge; an empty poll is not a mass close', () => {
+  reset({ reviewed: { 8: { sha: sha('8') }, 9: { sha: sha('9') }, 10: { sha: sha('1') } } })
+  fixture('list.1.json', [pr(8, sha('8')), pr(9, sha('9')), pr(10, sha('1'))])
+  fixture('list.2.json', [])
+  fixture('list.3.json', [pr(10, sha('1'))])
+  fixture('view-8.json', { state: 'MERGED', title: 'pr 8', author: { login: 'dev' } })
+  fixture('view-9.json', { state: 'OPEN', title: 'pr 9', author: { login: 'dev' } })
+  const out = run(['poll-shas'], { WATCH_PRS_POLLS: '3' }).stdout
+  assert.equal(out.trim(), 'PR #8 — NO LONGER OPEN — MERGED — dev: pr 8')
+})
+
+test('claim: second claim loses; release frees it', () => {
+  reset()
+  assert.equal(run(['claim', '11', 'sess-a']).stdout.trim(), 'claimed')
+  const r = run(['claim', '11', 'sess-b'])
+  assert.equal(r.status, 1); assert.match(r.stdout, /held by sess-a/)
+  assert.equal(run(['release', '11', 'sess-b']).status, 1)
+  assert.equal(run(['release', '11', 'sess-a']).status, 0)
+  assert.equal(run(['claim', '11', 'sess-b']).status, 0)
+})
+
+test('record: full SHA required; note with backticks and $ survives', () => {
+  reset()
+  assert.equal(run(['record', '12', 'abc1234', 'approved', 'x', 'sess-a']).status, 1)
+  const note = 'gate green; `if ($x)` kept'
+  assert.equal(run(['record', '12', sha('c'), 'changes-requested', note, 'sess-a']).status, 0)
+  const e = JSON.parse(readFileSync(stateFile, 'utf8')).reviewed['12']
+  assert.deepEqual(e, { sha: sha('c'), state: 'changes-requested', outcome: note, reviewer_session: 'sess-a' })
+  assert.ok(!readFileSync(stateFile, 'utf8').includes(SECRET))
+  assert.ok(!existsSync(join(sd, 'state.lock')))
+  assert.equal(run(['gh', 'auth', 'token']).status, 1)
+})
+
+test('poll-replies: drops self and bots, only this session\'s holds, since is 15 min back', () => {
+  reset({ reviewed: { 13: { sha: sha('d'), state: 'changes-requested', reviewer_session: 'sess-a' },
+    14: { sha: sha('e'), state: 'changes-requested', reviewer_session: 'sess-b' } } })
+  fixture('comments.json', [
+    { id: 1, user: { login: 'reviewer-bot', type: 'User' }, body: 'my own hold' },
+    { id: 2, user: { login: 'railway-app[bot]', type: 'Bot' }, body: 'deployed' },
+    { id: 3, user: { login: 'dev', type: 'User' }, body: 'answered:\n yes' }])
+  fixture('reviews.json', [{ id: 5, user: { login: 'reviewer-bot', type: 'User' }, state: 'CHANGES_REQUESTED', body: 'hold', submitted_at: '2999-01-01T00:00:00Z' }, { id: 4, user: { login: 'dev', type: 'User' }, state: 'COMMENTED', body: 'see above', submitted_at: '2999-01-01T00:00:00Z' }])
+  const out = run(['poll-replies', '--session', 'sess-a', '--once']).stdout
+  assert.equal(out.trim(), 'PR #13 — REPLY on a held PR — dev: answered: yes\nPR #13 — REVIEW (COMMENTED) on a held PR — dev: see above')
+  const since = readFileSync(join(fx, 'calls'), 'utf8').match(/since=([^&]+)/)[1]
+  const ago = (Date.now() - Date.parse(since)) / 60000
+  assert.ok(ago > 14 && ago < 16.1, `since ${since} is ${ago} min back`)
+  assert.ok(!readFileSync(join(fx, 'calls'), 'utf8').includes('/14/'))
+  const r = run(['poll-replies', '--session', 'sess-a', '--once'], { NO_LOGIN: '1' })
+  assert.equal(r.status, 1); assert.match(r.stderr, /SELF is unresolved/)
+})
+
+test('gate classifies rollups; describes flags empty bodies and branch titles', () => {
+  reset()
+  const cr = (conclusion, status = 'COMPLETED', name = 'ci') => ({ __typename: 'CheckRun', name, status, conclusion })
+  const cases = [
+    [[cr('SUCCESS'), { __typename: 'StatusContext', state: 'PENDING' }], 'green'],
+    [[cr('SUCCESS'), cr('FAILURE')], 'red'],
+    [[cr('SUCCESS'), cr('CANCELLED')], 'pending'],
+    [[cr('', 'IN_PROGRESS')], 'pending'],
+    [[cr('FAILURE', 'COMPLETED', 'Informational lint')], 'none'],
+    [[], 'none']]
+  for (const [rollup, want] of cases) { fixture('view-15.json', { statusCheckRollup: rollup }); assert.equal(run(['gate', '15']).stdout.trim(), want) }
+  for (const [v, want] of [
+    [{ title: 'Add x', body: 'why', author: { login: 'dev' } }, 'ok'],
+    [{ title: 'Add x', body: ' \n', author: { login: 'dev' } }, 'no-body'],
+    [{ title: 'dev/wp-1-thing', body: 'why', author: { login: 'dev' } }, 'branch-title'],
+    [{ title: 'chore: deps', body: '', author: { login: 'dependabot[bot]' } }, 'ok']]) {
+    fixture('view-16.json', v); assert.equal(run(['describes', '16']).stdout.trim(), want)
+  }
+})
+
+test('diff: delta when the recorded head is an ancestor, full review after a force-push', () => {
+  const origin = join(tmp, 'origin.git'), g = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim()
+  const work = join(tmp, 'work')
+  g('init', '-q', '-b', 'main', work)
+  const commit = (f, msg) => { writeFileSync(join(work, f), msg); g('-C', work, 'add', f); g('-C', work, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg); return g('-C', work, 'rev-parse', 'HEAD') }
+  commit('base.txt', 'base')
+  g('clone', '-q', '--bare', work, origin)
+  g('-C', work, 'checkout', '-qb', 'feat'); const c1 = commit('a.txt', 'one'); const c2 = commit('b.txt', 'two')
+  g('-C', work, 'push', '-q', origin, `${c2}:refs/pull/17/head`)
+  g('-C', repo, 'remote', 'add', 'origin', origin)
+  reset({ reviewed: { 17: { sha: c1 } } })
+  let r = run(['diff', '17', 'sess-a', '--sha', c2])
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /# DELTA/); assert.match(r.stdout, /b\.txt/); assert.doesNotMatch(r.stdout, /a\.txt/)
+  reset({ reviewed: { 17: { sha: sha('9') } } })
+  r = run(['diff', '17', 'sess-a'])
+  assert.match(r.stdout, /# FULL review: 9+ is not an ancestor/); assert.match(r.stdout, /a\.txt/); assert.match(r.stdout, /b\.txt/)
+  r = run(['diff', '17', 'sess-a', '--sha', sha('0')])
+  assert.equal(r.status, 1); assert.match(r.stderr, /aborting/)
+})
+
+test.after(() => { assert.ok(!existsSync(join(tmp, 'home', '.claude'))); rmSync(tmp, { recursive: true, force: true }) })
