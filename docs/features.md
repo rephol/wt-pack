@@ -112,15 +112,16 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - Agents are herdr panes. The Agents page is a table grouped by role (agent, task, status, activity,
   machine, branch), one card per machine (local and remote herdr hosts), with filters All / Busy / Free /
   Needs you / Attention and sorting; open an agent to read and type into its conversation. **Stop** sends Esc (only while working and no question is pending).
-- **Chat dock** (WP-112, desktop): opening an agent or room chat — Agents page, task queue, ⌘K switcher, room
+- **Chat dock** (WP-112, windows 900px and wider): opening an agent or room chat — Agents page, task queue, ⌘K switcher, room
   members and @mentions, Inbox, notifications, Overview's room cards — puts it in a dock at the bottom right
   instead of the side panel. Each chat is a compact window (at most 3; a 4th turns the oldest into a tab) or a
   minimised tab with a status dot and an unread marker (dot = activity since you last looked, **!** = needs you;
-  per device, approximate — not a count). Window buttons: minimise, expand (agent → side panel, room → its page)
+  per device, approximate — not a count). Window buttons (Esc minimises): minimise, expand (agent → side panel, room → its page)
   and close. The dock survives page navigation and a reload (per browser). A window shows the last 100 messages,
   **Show earlier** reveals 100 more; a tab loads no chat at all (its stream closes 30s after it is minimised).
   Terminals keep the side panel. The sidebar's old Agents/Rooms **Open** list is gone — use the Agents and Rooms
-  pages or ⌘K. Phones have no dock: the chat button gets a red dot while a docked chat is unread.
+  pages or ⌘K. Narrower windows and phones have no dock (chats open as pages, as before) but remember what you opened: the
+  chat button gets a red dot while one of those chats is unread.
 - **Remote agents** (WP-97): the conversation shows the real Claude transcript, read over SSH (read-only, from the
   `herdr machine list` host). herdr gives remote panes no session id, so the file is matched: the jsonl in the
   pane's project dir (changed in the last week) whose recent text matches the pane's last prompt or reply. The
