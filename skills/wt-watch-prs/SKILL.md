@@ -64,7 +64,11 @@ $W identity           # "<login> <source>" — the account reviews post as
 - **Session id** `S`: 4–16 chars of `[a-z0-9-]` (e.g. the first 8 of your session id). Stable for the whole
   session and distinct from any other reviewer's — it names your claims, refs and reply filter.
 - **Identity.** The project setting `reviewerGithubAccount` (dashboard Settings › Projects) wins, then
-  `GH_REVIEWER_TOKEN_FILE` (default `~/.config/gh-reviewer-token`). With neither you run **degraded** under the
+  `GH_REVIEWER_TOKEN_FILE` (default `~/.config/gh-reviewer-token`). A machine whose default gh login IS the
+  reviewer account (a remote box with no dashboard) declares it instead: `WT_REVIEWER_LOGIN=<login>` (start.sh or
+  the pane env) or one line in `~/.config/gh-reviewer-login`. When the default login matches, preflight reports
+  `default identity (declared reviewer <login>)` and you are not degraded; a mismatch stays degraded (WP-126).
+  With none of these you run **degraded** under the
   default identity: comment only, never approve (GitHub refuses self-approval, and an approval from the account
   that opened the PR means nothing). Say so in every affected review.
 - **Post only through `$W gh …`** (`$W gh pr review 12 --approve --body-file f`). It injects the reviewer token

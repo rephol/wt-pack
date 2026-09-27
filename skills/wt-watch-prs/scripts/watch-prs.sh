@@ -2,6 +2,7 @@
 # wt-watch-prs (WP-116): the mechanical half of the PR reviewer loop. Judgement lives in ../SKILL.md.
 #   preflight                        HARD fail / DEGRADED lines; exit 1 on any hard failure
 #   identity                         reviewer login + token source; exit 1 when unresolved
+#                                    (WT_REVIEWER_LOGIN / ~/.config/gh-reviewer-login: declared default-login reviewer)
 #   gh <args…>                       run gh as the reviewer identity (the token never leaves this process)
 #   poll-shas [--once]               "PR #n — new commits <sha> — …" / "PR #n — NO LONGER OPEN — …", every 60s
 #   poll-replies --session S [--once]  human replies on holds this session placed, every 90s
@@ -48,6 +49,22 @@ token() {
   [ -s "$f" ] && { TOKSRC="token file"; tr -d '[:space:]' < "$f"; return 0; }
   return 1
 }
+# WP-126: a machine whose default gh login IS the reviewer account (e.g. a remote box with no dashboard) declares it:
+# WT_REVIEWER_LOGIN (start.sh or the pane env), else ${GH_REVIEWER_LOGIN_FILE:-~/.config/gh-reviewer-login}.
+# It only relabels the default identity after the login is checked; it never supplies a token.
+declared() {
+  local d=${WT_REVIEWER_LOGIN:-} f="${GH_REVIEWER_LOGIN_FILE:-$HOME/.config/gh-reviewer-login}"
+  [ -n "$d" ] || { [ -s "$f" ] && d=$(tr -d '[:space:]' < "$f"); }
+  printf '%s' "$d" | grep -qE '^[A-Za-z0-9-]{1,39}$' && printf '%s' "$d"
+}
+# resolve: sets SRC and WHO; a default identity that matches the declared reviewer is not degraded.
+resolve() {
+  local d; token >/dev/null; SRC=$TOKSRC; WHO=$(login)
+  # Only the plain default: a configured account without a token stays degraded whatever is declared.
+  case "$SRC" in "default identity") d=$(declared) || return 0
+    if [ -n "$WHO" ] && [ "$WHO" = "$d" ]; then SRC="default identity (declared reviewer $d)"
+    else SRC="$SRC — declared reviewer $d, but gh is ${WHO:-unresolved}"; fi;; esac
+}
 rgh() { local t; if t=$(token); then GH_TOKEN="$t" gh "$@"; else gh "$@"; fi; }
 login() { rgh api user -q .login 2>/dev/null; }
 
@@ -62,17 +79,17 @@ preflight)
     [ "$hard" -eq 0 ] && { r=$(repo) || { echo "HARD fail: cannot resolve owner/repo (gh repo view)"; hard=1; }; }
   fi
   [ "$hard" -eq 0 ] || exit 1
-  token >/dev/null; src=$TOKSRC; who=$(login)
-  case "$src" in default*) echo "DEGRADED: no reviewer identity ($src) — posting as ${who:-?}: comment only, never approve";; esac
+  resolve; src=$SRC; who=$WHO
+  case "$src" in *"(declared reviewer "*) ;; default*) echo "DEGRADED: no reviewer identity ($src) — posting as ${who:-?}: comment only, never approve";; esac
   [ -n "$who" ] || echo "DEGRADED: cannot read the posting login (gh api user)"
   date -u -v-15M +%Y >/dev/null 2>&1 || date -u -d '15 minutes ago' +%Y >/dev/null 2>&1 \
     || echo "DEGRADED: date has neither -v nor -d — reply backfill starts at now"
   echo "ok: $r as ${who:-?} ($src)"
   ;;
 identity)
-  token >/dev/null; who=$(login)
-  [ -n "$who" ] || die "reviewer identity unresolved ($TOKSRC)"
-  echo "$who $TOKSRC"
+  resolve
+  [ -n "$WHO" ] || die "reviewer identity unresolved ($SRC)"
+  echo "$WHO $SRC"
   ;;
 gh) case "${1:-}" in auth|extension|ext|alias|config) die "gh $1 is refused here (it could print or keep the reviewer token)";; esac; rgh "$@" ;;
 claim|release)

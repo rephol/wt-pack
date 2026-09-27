@@ -77,6 +77,26 @@ test('preflight: ok with degraded lines, hard fail exits 1', () => {
   assert.equal(r.status, 1); assert.match(r.stdout, /HARD fail: gh not authenticated/)
 })
 
+test('WP-126: a declared reviewer matching the default gh login is not degraded; a mismatch is; no dashboard needed', () => {
+  const none = join(tmp, 'none'), noDash = { GH_REVIEWER_TOKEN_FILE: none, WT_DASHBOARD_DATA: join(tmp, 'no-dashboard') }
+  const t0 = Date.now()
+  let r = run(['preflight'], { ...noDash, WT_REVIEWER_LOGIN: 'human' }) // the stub's default login is "human"
+  assert.equal(r.status, 0, r.stderr); assert.doesNotMatch(r.stdout, /DEGRADED: no reviewer/)
+  assert.match(r.stdout, /ok: acme\/demo as human \(default identity \(declared reviewer human\)\)/)
+  assert.ok(Date.now() - t0 < 5000, 'no dashboard must not stall preflight')
+  assert.match(run(['identity'], { ...noDash, WT_REVIEWER_LOGIN: 'human' }).stdout, /^human default identity \(declared reviewer human\)/)
+  r = run(['preflight'], { ...noDash, WT_REVIEWER_LOGIN: 'reviewer-bot' })
+  assert.match(r.stdout, /DEGRADED: no reviewer identity \(default identity — declared reviewer reviewer-bot, but gh is human\)/)
+  const lf = join(tmp, 'login-file'); writeFileSync(lf, 'human\n')
+  assert.doesNotMatch(run(['preflight'], { ...noDash, GH_REVIEWER_LOGIN_FILE: lf }).stdout, /DEGRADED: no reviewer/)
+  assert.match(run(['preflight'], noDash).stdout, /DEGRADED: no reviewer identity \(default identity\)/) // nothing declared
+  // a dashboard account with no gh token is not rescued by a declared login
+  const db = new DatabaseSync(join(tmp, 'data', 'data', 'wt.db'))
+  db.exec("CREATE TABLE IF NOT EXISTS project_settings (project TEXT, key TEXT, value TEXT); DELETE FROM project_settings; INSERT INTO project_settings VALUES ('demo', 'reviewerGithubAccount', 'nobody')")
+  assert.match(run(['preflight'], { GH_REVIEWER_TOKEN_FILE: none, WT_REVIEWER_LOGIN: 'human' }).stdout, /DEGRADED: no reviewer identity \(default identity \(no gh token for nobody\)\)/)
+  db.exec('DROP TABLE project_settings'); db.close()
+})
+
 test('identity: token file, project account, unresolved', () => {
   assert.match(run(['identity']).stdout, /^reviewer-bot token file/)
   const db = new DatabaseSync(join(tmp, 'data', 'data', 'wt.db'))

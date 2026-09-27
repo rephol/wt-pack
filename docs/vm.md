@@ -69,6 +69,19 @@ tailnet address). With it:
 
 `./setup doctor` shows which bind is configured.
 
+## A remote reviewer (no dashboard)
+
+A box that only runs wt-watch-prs reviewers, logged into gh as the reviewer account, has no dashboard and so
+no `reviewerGithubAccount` setting. Declare the account instead, so preflight doesn't report DEGRADED and the
+reviewer may approve (WP-126):
+
+```sh
+export WT_REVIEWER_LOGIN=<reviewer-login>          # in start.sh or the pane env
+# or: echo <reviewer-login> > ~/.config/gh-reviewer-login   (path: GH_REVIEWER_LOGIN_FILE)
+```
+
+It only counts when `gh api user` returns that same login. A mismatch still runs degraded (comment only).
+
 ## Updating
 
 ```sh
