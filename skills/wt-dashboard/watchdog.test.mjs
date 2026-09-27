@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv } from './watchdog.mjs'
+import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const min = (n) => new Date(now - n * 60_000).toISOString()
@@ -132,4 +132,28 @@ test('resume: argv mirrors spawn plus --resume; blocked when running again, name
   assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p9', name: r.name }]), /already running in pane w1:p9/)
   assert.match(resumeBlock('w1:p1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 'w1:p9' } }]), /now assigned/)
   assert.match(resumeBlock('w1:p1', { name: 'x' }, []), /no session id/)
+})
+
+test('WP-120 stale-hooks: ps parse, agents started before the guard flagged, after not, no guard → nothing', () => {
+  const ps = psStarts([
+    '29492 Sun Sep 27 11:31:40 2026 claude --name wt-pack-worker-01',
+    '  812 Sun Sep 27 20:10:00 2026 /usr/local/bin/claude --dangerously-skip-permissions --name wt-pack-worker-02',
+    '  900 Sun Sep 27 10:00:00 2026 node server.mjs --name wt-pack-worker-02',
+    '  901 Sun Sep 27 10:00:00 2026 zsh',
+  ].join('\n'))
+  assert.equal(ps.size, 2)
+  const guardAt = Date.parse('Sun Sep 27 19:37:40 2026')
+  const ag = [
+    { id: 'w1:p1', name: 'wt-pack-worker-01', local: true, pool: 'worker' },
+    { id: 'w1:p2', name: 'wt-pack-worker-02', local: true, pool: 'worker' },
+    { id: 'w1:p3', name: 'someone', local: true, pool: 'other' },
+  ]
+  const stale = staleAgents(ag, ps, guardAt)
+  assert.deepEqual(stale.map((a) => a.name), ['wt-pack-worker-01'])
+  assert.deepEqual(staleAgents(ag, ps, null), [])
+  const f = evaluate({ stale: { guardAt, version: '0.4.4', agents: stale } }, {}, now)
+  assert.deepEqual(f.map((x) => x.key), ['stale-hooks|w1:p1'])
+  assert.match(f[0].body, /restart to load the pkill guard/i)
+  assert.deepEqual(checks({ stale: { guardAt, agents: stale } }, { 'stale-hooks': { threshold: 600 } }), [])
+  assert.deepEqual(checks({ stale: null }), [])
 })

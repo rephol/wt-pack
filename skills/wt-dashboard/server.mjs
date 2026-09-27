@@ -25,7 +25,7 @@ import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
-import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv } from './watchdog.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -2707,6 +2707,17 @@ const wdLoaded = readFile(WD_FILE, 'utf8').then((t) => { const j = JSON.parse(t)
 const serverErrors = [] // console.error timestamps, last hour (wrapped in the listening block)
 // The pack checkout, for Investigate's wt-handoff: skills are symlinks into it (…/wt-pack/skills/<name>).
 const packRoot = () => { try { return dirname(dirname(realpathSync(join(homedir(), '.claude', 'skills', 'wt-handoff')))) } catch { return null } }
+// WP-120: pool agents whose claude started before the installed wt-memory version was installed run without its
+// hooks (the pkill guard): hooks load at session start. guardAt = that version's installPath birth time.
+async function staleHooks(ag) {
+  if (!ag) return null
+  const inst = await readFile(join(homedir(), '.claude', 'plugins', 'installed_plugins.json'), 'utf8').then(JSON.parse, () => null)
+  const p = inst?.plugins?.['wt-memory@wt-pack']?.[0]
+  const guardAt = p?.installPath ? await stat(p.installPath).then((x) => x.birthtimeMs, () => null) : null
+  if (guardAt == null) return null
+  const ps = await new Promise((ok) => execFile('ps', ['-axo', 'pid=,lstart=,command='], { env: { ...process.env, LC_ALL: 'C' }, maxBuffer: 8 << 20 }, (e, out) => ok(e ? null : out)))
+  return ps == null ? null : { guardAt, version: p.version, agents: staleAgents(ag, psStarts(ps), guardAt) }
+}
 async function watchdogSnapshot() {
   const ag = await agents().catch(() => null)
   const nameOf = new Map((ag ?? []).map((a) => [a.key, a.name]))
@@ -2719,6 +2730,7 @@ async function watchdogSnapshot() {
   wd.lastSeen = rememberAgents(wd.lastSeen, ag, panes, (c) => ticketOf(c ?? ''))
   return {
     exited: exitedAgents(wd.lastSeen, panes),
+    stale: await staleHooks(ag).catch(() => null),
     starts: await readFile(join(DATA, 'server-starts.json'), 'utf8').then(JSON.parse, () => null),
     queue: [...rooms.queue].flatMap(([key, items]) => items.map((it) => ({ agent: nameOf.get(key) ?? key, slug: it.slug, ts: it.msg.ts }))),
     boards, agents: ag, herdr: SOURCES.herdr,
