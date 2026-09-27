@@ -1152,12 +1152,30 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
 // Consecutive tool rows → one ChatToolCalls group; a "result" row fills the preceding call's detail.
 type Row = { kind: 'msg'; m: Msg; meta?: Meta } | { kind: 'tools'; id: string; calls: ChatToolCallItem[]; raw: Msg[]; label?: string }
 // The agent transcript stream, for streamStore: resumes from the byte offset in each event's id.
-function agentStreamSpec(base: string, key: string, session: string) {
+// WP-97: a remote agent's stream says how its transcript lookup is going (event: remote); kept per agent key.
+type RemoteState = 'loading' | 'ok' | 'unmatched' | 'unreachable'
+const remoteStates = new Map<string, RemoteState>()
+const remoteSubs = new Set<() => void>()
+const subRemote = (f: () => void) => { remoteSubs.add(f); return () => { remoteSubs.delete(f) } }
+function agentStreamSpec(base: string, key: string, session: string | null) {
+  let file: string | null = null // remote: the matched transcript this stream's messages came from
   return {
-    url: (cursor: string | null) => `${base}/stream${cursor ? `?since=${cursor}` : ''}`,
-    persistKey: `agent|${key}`, persistTag: session,
+    url: (cursor: string | null) => `${base}/stream${cursor ? `?since=${encodeURIComponent(cursor)}` : ''}`,
+    // Remote (no session): not persisted; its cursor carries the matched file id, so a re-match starts clean.
+    ...(session ? { persistKey: `agent|${key}`, persistTag: session } : {}),
     attach: (es: EventSource, apply: (fn: (items: Msg[]) => Msg[], cursor?: string | null) => void) => {
       es.onmessage = (ev) => apply((prev) => mergeAgentMsgs(prev, JSON.parse(ev.data)), ev.lastEventId || undefined)
+      if (session) return
+      // Remote: a fresh stream starts at 'loading' (not a stale state from an earlier visit), and a re-match to
+      // another file (/clear, a restart) replaces the messages instead of merging two transcripts.
+      const set = (st: RemoteState) => { remoteStates.set(key, st); remoteSubs.forEach((f) => f()) }
+      set('loading')
+      es.addEventListener('remote', (ev) => set(JSON.parse((ev as MessageEvent).data).state))
+      es.addEventListener('session', (ev) => {
+        const f = JSON.parse((ev as MessageEvent).data)
+        if (file && f !== file) apply(() => [], null)
+        file = f
+      })
     },
   }
 }
@@ -1296,17 +1314,25 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   }
   const qc = useQueryClient()
   // Keyed on the session id: /clear or a restart gives a new transcript, so a new cache entry.
-  const live = agent.local && Boolean(agent.session)
-  // Remote (or session-less) agents: pane-read timeline instead of the transcript stream.
+  // Remote agents stream too (WP-97: the transcript over SSH, matched to the pane); the pane view covers the wait.
+  const live = agent.local ? Boolean(agent.session) : true
+  const stream = useStream<Msg>(live ? `agent|${agent.key}|${agent.session ?? 'remote'}` : null, () => agentStreamSpec(agentUrl(agent), agent.key, agent.session))
+  const remote = useSyncExternalStore(subRemote, () => (agent.local ? null : remoteStates.get(agent.key) ?? 'loading'))
+  const transcript = live && (agent.local || stream.items.length > 0) // a remote stream counts once it has messages
+  // Remote until then, and session-less local agents: the pane-read timeline instead of the transcript.
   const pane = useQuery({
     queryKey: ['pane', agent.key],
-    queryFn: () => getJSON<{ turns: { role: 'user' | 'assistant'; text: string }[] }>(`${agentUrl(agent)}?lines=500`),
-    enabled: !live,
+    queryFn: () => getJSON<{ turns: { role: 'user' | 'assistant'; text: string }[]; tail?: string }>(`${agentUrl(agent)}?lines=500`),
+    enabled: !transcript,
     refetchInterval: agent.status === 'working' ? 5000 : false,
   })
-  const stream = useStream<Msg>(live ? `agent|${agent.key}|${agent.session}` : null, () => agentStreamSpec(agentUrl(agent), agent.key, agent.session!))
-  const paneMsgs = useMemo(() => (pane.data?.turns ?? []).map((t, i): Msg => ({ id: `pane:${i}`, role: t.role, text: t.text, ts: '' })), [pane.data])
-  const msgs = live ? stream.items : paneMsgs
+  // No parsed turns (a narrow remote pane with no prompt on screen): its last lines, as-is, rather than nothing.
+  const paneMsgs = useMemo(() => {
+    const turns = pane.data?.turns ?? []
+    if (!turns.length && pane.data?.tail?.trim()) return [{ id: 'pane:tail', role: 'assistant', text: '```\n' + pane.data.tail.trim() + '\n```', ts: '' } as Msg]
+    return turns.map((t, i): Msg => ({ id: `pane:${i}`, role: t.role, text: t.text, ts: '' }))
+  }, [pane.data])
+  const msgs = transcript ? stream.items : paneMsgs
   // The pane's status line is exact (it knows the window); the transcript estimate fills in when it's hidden.
   const ctx = useMemo(() => {
     if (agent.context) return { pct: agent.context.pct, text: `${agent.context.used} / ${agent.context.total}` }
@@ -1370,7 +1396,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
     const call = c?.kind === 'tools' ? c.calls.at(-1) : undefined
     return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
   }, [rows])
-  const noneYet = live && !stream.synced && !msgs.length // nothing cached and the stream has not answered
+  const noneYet = transcript && !stream.synced && !msgs.length // nothing cached and the stream has not answered
   const messageList = useMemo(() => noneYet ? <Delayed><ChatSkeleton /></Delayed> : (
               <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
                 <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'tools' ? r.id : r.m.id)} render={(r) =>
@@ -1416,16 +1442,19 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
   const summary = <AgentSummary agent={agent} task={task} />
   const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
-            {!live && <Text type="supporting" size="sm">{agent.local ? 'no transcript · pane view' : 'remote · pane view'}</Text>}
+            {!live && <Text type="supporting" size="sm">no transcript · pane view</Text>}
+            {remote && <Text type="supporting" size="sm">{transcript ? 'remote · transcript'
+              : remote === 'unmatched' ? 'remote · transcript not matched — pane view'
+              : remote === 'unreachable' ? 'remote · unreachable — pane view' : 'remote · loading transcript… (pane view)'}</Text>}
             {pane.isError && <Banner status="error" title="Couldn't read pane" description={String(pane.error)} />}
             {streamErr && <Banner status="warning" title="Transcript stream disconnected — retrying" />}
-            {live && !streamErr && !stream.synced && msgs.length > 0 && (
+            {transcript && !streamErr && !stream.synced && msgs.length > 0 && (
               <div role="status" style={{ height: 0, overflow: 'visible', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1, pointerEvents: 'none' }}>
                 <HStack gap={1} align="center" style={{ height: 20 }}><StatusDot variant="neutral" label="" /><Text type="supporting" size="sm">syncing…</Text></HStack></div>)}
             {send.isError && <Banner status="error" title="Send failed" description={String(send.error)} />}
             <div ref={chatBox} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <ChatLayout ref={layoutRef}
-              emptyState={live && !stream.synced ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" />}
+              emptyState={transcript && !stream.synced ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" />}
               composer={heldPicker ? null : (<VStack gap={1}>
                 <ChatComposer
                   sendButton={working ? <Tooltip content="Queue: Claude picks it up after its current step"><span><ChatSendButton /></span></Tooltip> : undefined}
