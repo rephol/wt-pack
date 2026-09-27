@@ -509,7 +509,6 @@ export default function App() {
               </Text>
             )}
             {(page === 'agents' || page === 'overview') && <IconButton label="New agent" tooltip="New agent" icon={<PlusIcon />} size="sm" variant="primary" onClick={openSpawn} />}
-            {project !== 'all' && <Button label="Project settings" size="sm" variant="ghost" onClick={() => openProjectSettings(project)} />}
             <IconButton label="Refresh" tooltip="Refresh" icon={<RefreshIcon />} size="sm" variant="ghost" onClick={() => q.refetch()} />
           </HStack>
         </HStack>}
