@@ -14,7 +14,7 @@ allowed-tools: Bash
 ```bash
 ~/.claude/skills/wt-handoff/scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--no-goal] [--task "UMK-1192 Tailwind v4 for @umkmall/ui"] [--mcp figma] [--dry-run] <cwd>
+  [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--dry-run] <cwd>
 ```
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
@@ -47,7 +47,7 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
   probabilities, and sends, tags and spawns nothing.
 - `--task` labels the target: herdr pane token `task` (source `wt-dashboard`), shown in the dashboard's agent
   list, detail header and switcher. It always **starts with the ticket**; without `--task` the label is just
-  the ticket from `<cwd>`'s branch (`UMK-NNN`, or `<KEY>-N` for a local board key from `wt-ticket keys`), and with
+  the ticket from `<cwd>`'s branch (`ENG-NNN` for a Linear team key, or `<KEY>-N` for a local board key from `wt-ticket keys`), and with
   neither nothing is set. Cut to 80 characters.
 - A local board ticket (`WP-12`) handed to a worker moves to **building** and is assigned to the worker
   (`wt-ticket move` + `assign`, best effort; `--dry-run` prints `ticket=` and the move instead).
