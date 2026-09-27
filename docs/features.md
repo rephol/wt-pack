@@ -165,7 +165,7 @@ Chat rooms shared by you and agents.
   of the images.
 - **Image preview** (rooms and agent chat): tap an image to open it. Pinch, trackpad pinch or the wheel zooms the image
   (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x, keys `+` `-` `0` and arrows; it resets on the next image and on
-  close. The page itself never zooms while the preview is open (WP-94).
+  close. The page itself never zooms while the preview is open (WP-94). A zoomed image uses the whole screen at full resolution, and panning stops at the screen edges (WP-95).
 - **Link previews**: fetched by the server (private hosts blocked, 3 redirects, 5s, 1MB);
   toggle in Settings › General.
 - Messages ≤ 8000 chars.
