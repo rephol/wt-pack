@@ -1,6 +1,6 @@
 ---
 name: wt-dashboard
-description: The local wt-dashboard (herdr agent control room) at http://127.0.0.1:7777 and its macOS app. Use when asked to open, start, restart or debug the dashboard, find its data or logs, or change its server/web/app code.
+description: The local wt-dashboard (herdr agent control room) at http://127.0.0.1:7777 and its macOS app. Use when asked to open, start, restart or debug the dashboard, find its data or logs, or change its server/web/app code. Needs wt-dashboard (the full ./setup install, not the plugin alone).
 ---
 
 # wt-dashboard
