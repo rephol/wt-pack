@@ -2762,6 +2762,7 @@ async function watchdogApi(req, res, sub) {
     for (const project of Object.keys(await tickets.keys().catch(() => ({})))) all.push(...((await tickets.list(project)).tickets ?? []))
     const why = resumeBlock(pane, r, await agents(), all)
     if (why) return send(res, 409, { error: why })
+    if (!(await findTranscript(r.session))) return send(res, 409, { error: `no transcript for session ${r.session} (it never took a prompt), so there is nothing to resume` })
     const mcp = (await run(AGENTS_SH, ['mcp-file', r.role, r.cwd, r.name], r.cwd, 30_000).catch(() => '')).trim().split(/\s+/).filter(Boolean)
     await run('herdr', resumeArgv(pane, r, mcp), undefined, 30_000)
     await herdr('agent', 'rename', pane, r.name).catch(() => {})
