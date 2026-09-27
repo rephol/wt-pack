@@ -12,7 +12,8 @@ const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'de
 mkdirSync(bin); mkdirSync(repo)
 writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$1 $2" in
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
-  "agent list") echo '{"result":{"agents":[]}}' ;;
+  "agent list") cat "${tmp}/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
+  "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
 esac\n`)
 chmodSync(join(bin, 'herdr'), 0o755)
 execFileSync('git', ['-C', repo, 'init', '-q'])
@@ -26,4 +27,14 @@ test('WP-121: --role reviewer targets <repo>-reviewers, spawns in the main check
   assert.match(out, new RegExp(`kind=dispatch from="[^"]*" pr=12 sha=${sha}>`))
   assert.match(readFileSync(log, 'utf8'), /herdr workspace list/)
   assert.throws(() => run(['--role', 'boss', '--dry-run', repo]), (e) => e.status === 2)
+  // reuse comes from the reviewers workspace (wR) only; a free worker elsewhere is not a candidate
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo },
+    { name: 'demo-reviewer-01', pane_id: 'wR:p1', tab_id: 't2', agent_status: 'idle', workspace_id: 'wR', cwd: repo }] } }))
+  assert.match(run(['--role', 'reviewer', '--no-goal', '--dry-run', repo]), /would reuse reviewer demo-reviewer-01 \(wR:p1\)/)
+  // from a worktree cwd, a reviewer still spawns in the main checkout
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+  execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x'])
+  execFileSync('git', ['-C', repo, 'worktree', 'add', '-q', join(tmp, 'wt'), '-b', 'wt'])
+  assert.match(run(['--role', 'reviewer', '--no-goal', '--dry-run', join(tmp, 'wt')]), new RegExp(`would spawn a reviewer in ${repo}$`, 'm'))
 })
