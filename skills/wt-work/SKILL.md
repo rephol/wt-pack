@@ -84,7 +84,7 @@ When you stop on a blocker, also put it on the planner's label (a no-op if no pl
 ~/.claude/skills/wt-shared/scripts/task-state.sh planner "blocked: <reason, a few words>"
 ```
 
-On a local board ticket (`<KEY>-N`, not UMK), also move its card: `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> blocked --note "<reason>" || true`.
+On a local board ticket (`<KEY>-N`, not a Linear team key), also move its card: `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> blocked --note "<reason>" || true`.
 
 A real defect found inside a settled approach is still reported at full strength. The label never suppresses
 defect evidence.
