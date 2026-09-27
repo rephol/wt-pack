@@ -50,12 +50,12 @@ re-processes a growing context — so these two rules outrank any prose below th
 
 ## 1. Ticket and base branch
 
-**Named ticket** (`UMK-759`, a tracker URL): fetch it with whatever tracker tooling is connected — a Linear /
+**Named ticket** (`ENG-759`, a tracker URL): fetch it with whatever tracker tooling is connected — a Linear /
 Jira / GitHub MCP tool, `gh issue view`, the API. Read the **whole** description including quoted corrections;
 an active ticket often carries re-prioritisation notes that change what the work is. No tracker tool available
 → ask for a paste. Never invent a ticket's contents.
 
-**Local board ticket** (`<KEY>-N` whose prefix is not `UMK`, e.g. `WP-12`; `~/.claude/skills/wt-ticket/scripts/wt-ticket keys` lists the keys): the
+**Local board ticket** (`<KEY>-N` whose prefix is not a Linear team key, e.g. `WP-12`; `~/.claude/skills/wt-ticket/scripts/wt-ticket keys` lists the keys): the
 board is the tracker. `~/.claude/skills/wt-ticket/scripts/wt-ticket show <ID>` is the ticket (its body and comments are the description), then take it
 and mark it — `~/.claude/skills/wt-ticket/scripts/wt-ticket claim <ID> || true` and `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> planning || true`. The branch starts with the lowercase
 id: `wp-12-<slug>`, so the dashboard and wt-handoff join the worktree to the card.
@@ -72,13 +72,13 @@ unrelated in-flight work plans against a tree nobody else has. Resolve it from t
 `scripts/worktree.sh` resolves the base and creates the worktree with plain `git worktree add` at
 `<main checkout>/.claude/worktrees/<name>`, Claude Code's own location; `WT_WORKTREE_DIR` overrides the folder.
 It resolves the main checkout from `--git-common-dir`, so running it from inside a worktree still nests under the
-main repo, and it never copies the folder of an existing worktree (in umkmall that was a sibling repo's, which put
+main repo, and it never copies the folder of an existing worktree (in one repo that was a sibling repo's, which put
 every worktree beside the repo). If the repo doesn't ignore `.claude/worktrees`, it adds it to
 `.git/info/exclude` and says so. **Creation stays plain git** — `EnterWorktree` branches from the repository's
 default branch, which is the wrong base wherever the integration branch is not `main`.
 
 **The base is resolved in three steps, and the first two exist because `origin/HEAD` lies.** A repo can
-publish `origin/HEAD -> main` while integrating to `preview` — umkmall does — so the script takes, in order:
+publish `origin/HEAD -> main` while integrating to `preview` — some repos do — so the script takes, in order:
 `WT_BASE` if set; the branch the main checkout is sitting on when that is itself an integration name
 (`preview`, `develop`, `staging`, `main`, `master`); then `origin/HEAD`, then those names in order. It prints
 `base: origin/<branch>` — **read that line.** A worktree on the wrong base produces a plan reviewed against
@@ -100,7 +100,7 @@ Enter it with `EnterWorktree` by `path`. The harness did not create it, so it ow
 works, `remove` is refused, and if the entry never registered, leaving is a no-op and the directory is just a
 directory. That is fine — `wt-finish` deletes it with plain git for the same reason.
 
-Branch names are meaningful (`oreviyanto/umk-759-classifier-metering`), never auto-generated. Match the
+Branch names are meaningful (`alex/eng-759-usage-metering`), never auto-generated. Match the
 convention `git worktree list` already shows rather than inventing one.
 
 **Gitignored env files are copied across.** `git worktree add` materialises tracked files only, so a new

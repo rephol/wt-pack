@@ -142,7 +142,7 @@ Chat rooms shared by you and agents.
 - **Ticket chips** (WP-93, rooms and agent chat, display only; the stored and delivered text stays plain): a local
   board id (e.g. `WP-92`) shows as a chip with its column dot, **WP-92 · done**. Hover or long-press shows the title;
   tap switches to its project and opens it on the Board. A Linear id whose team is in `WT_LINEAR_TEAMS` (e.g.
-  `UMK-123`) links to Linear once the workspace is known (needs `LINEAR_API_KEY`). Ids inside code, URLs or longer
+  `ENG-123`) links to Linear once the workspace is known (needs `LINEAR_API_KEY`). Ids inside code, URLs or longer
   words (`WP-92a`), and unknown ids, stay plain text.
 - **Commands**: a message starting with `/` goes to exactly one agent (agents cannot send them).
 - Delivery waits until the agent is idle with no question pending.

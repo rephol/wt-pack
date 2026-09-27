@@ -87,7 +87,7 @@ then the one wt-handoff put on your pane (display-only; best effort, a no-op out
 [ -n "${HERDR_PANE_ID:-}" ] && herdr pane report-metadata "$HERDR_PANE_ID" --source wt-dashboard --clear-token task >/dev/null 2>&1 || true
 ```
 
-A local board ticket (the branch's `<KEY>-N`, not UMK) goes to **done** if it is not there already (best effort):
+A local board ticket (the branch's `<KEY>-N`, not a Linear team key) goes to **done** if it is not there already (best effort):
 
 ```
 ~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> done || true

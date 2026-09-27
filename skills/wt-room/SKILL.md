@@ -61,7 +61,7 @@ Rules:
 
 `room create <slug> "title" [--invite name1,name2]` — only works if the user turned on Settings › Rooms ›
 "Agents can create rooms" (otherwise it prints why it was refused). The slug is lowercase letters, digits and
-dashes (`umk-1177`, `release-plan`). You become the room's responder and a member; invitees become members
+dashes (`eng-1177`, `release-plan`). You become the room's responder and a member; invitees become members
 only — an invite delivers nothing to them. If an active room with that slug exists, you get it back (post
 there); an archived one is refused. At most 3 rooms per agent per hour. You cannot archive or delete rooms —
 except a throwaway one.
