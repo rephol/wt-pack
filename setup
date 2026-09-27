@@ -112,6 +112,16 @@ doctor() {
     ok "plugin wt-memory@wt-pack${mp:+ (marketplace $mp)}"
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
 
+  # WP-98: commits here use a GitHub noreply identity (repo-local git config), so no personal/work email ships.
+  if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+    nr='(^|[+@])(users\.)?noreply\.github\.com$'
+    me=$(git -C "$REPO" config user.email || true)
+    other=$(git -C "$REPO" log -50 --format='%ae%n%ce' 2>/dev/null | grep -vEc "$nr" || true)
+    if ! printf '%s' "$me" | grep -qE "$nr"; then opt "git user.email here is '${me:-unset}', not a users.noreply.github.com address — git -C \"$REPO\" config user.email <id>+<user>@users.noreply.github.com"
+    elif [ "${other:-0}" -gt 0 ]; then opt "git: $other of the last 50 author/committer emails are not GitHub noreply addresses — check git -C \"$REPO\" log -50 --format='%ae %ce'"
+    else ok "git identity: GitHub noreply ($me)"; fi
+  fi
+
   if [ -f "$DASH/web/dist/index.html" ]; then
     if built; then ok "dashboard web built"; else opt "dashboard web built, but older than web/src — npm --prefix skills/wt-dashboard run build"; fi
   else bad "dashboard web not built — ./setup install"; fi
