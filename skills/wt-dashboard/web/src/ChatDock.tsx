@@ -36,7 +36,8 @@ export function Dock({ state, dispatch, meta, unread, body, onExpand }: {
       {wins.map((i) => {
         const m = meta(i.key)
         return (
-          <section key={i.key} className="hd-dock-win" aria-label={`Chat ${m.name}`}>
+          <section key={i.key} className="hd-dock-win" aria-label={`Chat ${m.name}`}
+            onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement).closest('dialog')) act('minimise', i.key) }}>
             <header className="hd-dock-win-head">
               <StatusDot variant={m.dot} label={m.label} isPulsing={m.pulsing} />
               <button type="button" className="hd-dock-win-title" title="Minimise" onClick={() => act('minimise', i.key)}><Text size="sm" weight="semibold" maxLines={1}>{m.name}</Text></button>

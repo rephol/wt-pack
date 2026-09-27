@@ -397,7 +397,13 @@ export default function App() {
   useEffect(() => { saveDock(dock) }, [dock])
   const toPanel = (key: string) => { setOpenPane(key); setCollapsed(false); rememberRecent(key) }
   const open = (key: string) => {
-    if (!narrow && dockKind(key)) { dockDispatch({ type: 'open', key, now: Date.now() }); if (!key.startsWith('room:')) rememberRecent(key); return }
+    if (key.startsWith('room:')) key = `room:${key.slice(5).split(':')[0]}`
+    if (dockKind(key)) {
+      dockDispatch({ type: 'open', key, now: Date.now() })
+      if (!narrow) { if (!key.startsWith('room:')) rememberRecent(key); return }
+      // Narrow: no dock, but the chat is tracked as a tab so the chat button's unread dot can follow it.
+      dockDispatch({ type: 'minimise', key, now: Date.now() })
+    }
     if (key.startsWith('room:')) { location.hash = `rooms/${encodeURIComponent(key.slice(5).split(':')[0])}`; return }
     if (key.startsWith('term:')) {
       if (narrow) { location.hash = `terminals/${encodeURIComponent(key.slice(5))}`; return }
@@ -529,7 +535,7 @@ export default function App() {
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setProject} />}
         {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={all?.agents ?? []} />}
-        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={openPane} />}
+        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
           : <Banner status="info" title="Terminals are off" description="Turn them on in Settings › Terminals, from http://127.0.0.1 on this machine." />)}

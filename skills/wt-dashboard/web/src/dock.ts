@@ -2,7 +2,7 @@
 // Pure (the reducer, the unread rule, load/save); ChatDock.tsx renders it. Remembered per device in localStorage.
 export type DockItem = { key: string; kind: 'agent' | 'room'; min: boolean; openedAt: number }
 export type DockState = { items: DockItem[]; seen: Record<string, number> }
-export type DockAction = { type: 'open' | 'minimise' | 'close' | 'seen'; key: string; now: number }
+export type DockAction = { type: 'open' | 'minimise' | 'close'; key: string; now: number }
 export const MAX_WINDOWS = 3
 export const STORE_KEY = 'chat-dock'
 export const EMPTY: DockState = { items: [], seen: {} }
@@ -25,10 +25,9 @@ export function close(s: DockState, key: string): DockState {
   delete seen[key]
   return { items: s.items.filter((i) => i.key !== key), seen }
 }
-export const markSeen = (s: DockState, key: string, now: number): DockState => ({ ...s, seen: { ...s.seen, [key]: now } })
 
 export function dockReducer(s: DockState, a: DockAction): DockState {
-  return a.type === 'open' ? openChat(s, a.key, a.now) : a.type === 'minimise' ? minimise(s, a.key, a.now) : a.type === 'close' ? close(s, a.key) : markSeen(s, a.key, a.now)
+  return a.type === 'open' ? openChat(s, a.key, a.now) : a.type === 'minimise' ? minimise(s, a.key, a.now) : close(s, a.key)
 }
 
 // Unread, per device and approximate (no server read cursors): '!' when it needs you, 'dot' when there was
