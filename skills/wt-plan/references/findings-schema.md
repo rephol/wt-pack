@@ -49,4 +49,4 @@ land in the plan rather than in a note beside it.
 
 It does not catch plan errors — a decision that targets the wrong file, a count that does not sum, a heading
 that contradicts its body. Nothing structural prevents those; the self-trace and a feasibility lens do.
-Measured on UMK-690, that class was the majority of what review found. Do not expect this schema to shrink it.
+Measured on one real ticket, that class was the majority of what review found. Do not expect this schema to shrink it.
