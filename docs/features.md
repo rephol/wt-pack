@@ -114,7 +114,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   Needs you / Attention and sorting; open an agent to read and type into its conversation. **Stop** sends Esc (only while working and no question is pending).
 - **Chat dock** (WP-112, windows 900px and wider): opening an agent or room chat — Agents page, task queue, ⌘K switcher, room
   members and @mentions, Inbox, notifications, Overview's room cards — puts it in a dock at the bottom right
-  instead of the side panel: a full-width bar along the bottom (shown while any chat is docked; the page stops above
+  instead of the side panel: a full-width bar along the bottom (always shown, "No chats open" when empty, so nothing jumps when the first chat opens — WP-119; the page stops above
   it, toasts sit over it, and its **Chats** button replaces the floating ⌘K button) holds a tab per chat, right to left (**Chats** far right, the newest chat just left of it — WP-113), and an open
   chat's window pops up above its tab. Each chat is a compact window (at most 3; a 4th turns the oldest into a tab) or a
   minimised tab with a status dot and an unread marker (dot = activity since you last looked, **!** = needs you;
