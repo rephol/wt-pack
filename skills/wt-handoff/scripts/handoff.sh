@@ -162,7 +162,7 @@ candidates() {
 jev=
 # Only in lean mode: a full-set worker already has every server, so there is nothing to pick.
 if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] \
-  && [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh")" = lean ]; then
+  && [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh" --cwd "${main_checkout:-$cwd}")" = lean ]; then
   jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
   mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
 fi
