@@ -10,12 +10,15 @@ const run = (command) => execFileSync('node', [hook], { input: JSON.stringify({ 
 test('denies the WP-109 incident command', () => {
   assert.ok(misordered('pkill -f "node server.mjs" -U $(id -u) -n'))
   assert.ok(misordered('cd x && pgrep -lf zzz -U 501 -n'))
+  assert.ok(misordered('pkill -f x -- -n'))
+  assert.ok(misordered('xargs pkill -f x -n'))
+  assert.ok(misordered('pkill -TERM x -n'))
   const out = JSON.parse(run('pkill -f "node server.mjs" -U $(id -u) -n'))
   assert.equal(out.hookSpecificOutput.permissionDecision, 'deny')
 })
 
 test('allows correctly ordered and unrelated commands', () => {
-  for (const c of ['pkill -U 1 -n -f "x"', 'kill 123', 'echo pkill', 'pgrep -U 501 -f "a -n"', 'git commit -m "pkill -f x -n"'])
+  for (const c of ['pkill -U 1 -n -f "x"', 'kill 123', 'echo pkill', 'pgrep -U 501 -f "a -n"', 'git commit -m "pkill -f x -n"', 'pgrep -d , -f foo', 'pgrep -fU 501 -l foo', 'pkill -9 -f foo'])
     assert.equal(misordered(c), null, c)
   assert.equal(run('pkill -U 1 -n -f "x"'), '')
 })

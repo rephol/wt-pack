@@ -4,7 +4,7 @@
 // against accidents, not obfuscation. Any failure → exit 0, no output.
 import { pathToFileURL } from 'node:url'
 
-const TAKES_VALUE = new Set('FGgPstUucJjMN'.split(''))
+const TAKES_VALUE = new Set('FGgPstUucJjMNd'.split(''))
 
 function words(seg) {
   return [...seg.matchAll(/"[^"]*"|'[^']*'|\S+/g)].map((m) => m[0])
@@ -15,16 +15,15 @@ export function misordered(cmd) {
   for (const seg of String(cmd).split(/&&|\|\||[;|\n&]|\$\(|`/)) {
     const w = words(seg)
     let i = 0
-    while (w[i] === 'sudo' || w[i] === 'exec' || w[i] === 'command' || /^\w+=/.test(w[i] ?? '')) i++
+    while (['sudo', 'exec', 'command', 'nice', 'xargs', 'env'].includes(w[i]) || /^\w+=/.test(w[i] ?? '')) i++
     if (!/^(?:\S*\/)?p(?:kill|grep)$/.test(w[i] ?? '')) continue
     let operand = false
     for (let j = i + 1; j < w.length; j++) {
       const t = w[j]
-      if (t === '--') break
+      if (t === '--' && !operand) break
       if (/^-./.test(t)) {
         if (operand) return seg.trim()
-        const last = t[t.length - 1]
-        if (t.length === 2 && TAKES_VALUE.has(last)) j++
+        if (!/^-[A-Z]{2,}$/.test(t) && TAKES_VALUE.has(t[t.length - 1])) j++ // -U 501, and a bundle ending in one (-fU 501)
       } else operand = true
     }
   }
