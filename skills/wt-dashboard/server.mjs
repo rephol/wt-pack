@@ -2752,25 +2752,32 @@ async function watchdogApi(req, res, sub) {
     store.delete('agents:local')
     return send(res, 200, { ok: true, message: out.trim().split('\n')[0] })
   }
-  if (req.method === 'POST' && sub === 'resume') {
-    const { key } = JSON.parse((await body(req)) || '{}')
-    const pane = typeof key === 'string' && key.startsWith('exited|') ? key.slice(7) : null
-    const r = pane && wd.lastSeen[pane]
-    if (!r) return send(res, 404, { error: 'no remembered agent for that finding' })
-    store.delete('agents:local')
-    const all = []
-    for (const project of Object.keys(await tickets.keys().catch(() => ({})))) all.push(...((await tickets.list(project)).tickets ?? []))
-    const why = resumeBlock(pane, r, await agents(), all)
-    if (why) return send(res, 409, { error: why })
-    if (!(await findTranscript(r.session))) return send(res, 409, { error: `no transcript for session ${r.session} (it never took a prompt), so there is nothing to resume` })
-    const mcp = (await run(AGENTS_SH, ['mcp-file', r.role, r.cwd, r.name], r.cwd, 30_000).catch(() => '')).trim().split(/\s+/).filter(Boolean)
+  if (req.method === 'POST' && sub === 'resume') return resumeExited(req, res)
+  return send(res, 405, { error: 'GET, PUT, POST run, investigate or resume' })
+}
+const resuming = new Set() // panes with a Resume in flight: two clicks (Inbox + Watchdog page) must not start twice
+async function resumeExited(req, res) {
+  const { key } = JSON.parse((await body(req)) || '{}')
+  const pane = typeof key === 'string' && key.startsWith('exited|') ? key.slice(7) : null
+  const r = pane && wd.lastSeen[pane]
+  if (!r) return send(res, 404, { error: 'no remembered agent for that finding' })
+  store.delete('agents:local')
+  const all = []
+  for (const project of Object.keys(await tickets.keys().catch(() => ({})))) all.push(...((await tickets.list(project)).tickets ?? []))
+  const why = resumeBlock(pane, r, await agents(), all)
+  if (why) return send(res, 409, { error: why })
+  if (!(await findTranscript(r.session))) return send(res, 409, { error: `no transcript for session ${r.session} (it never took a prompt), so there is nothing to resume` })
+  if (resuming.has(pane)) return send(res, 409, { error: 'a Resume for this pane is already running' })
+  resuming.add(pane)
+  try {
+    const mcp = await run(AGENTS_SH, ['mcp-file', r.role, r.cwd, r.name], r.cwd, 30_000).then((o) => o.trim().split(/\s+/).filter(Boolean), () => null)
+    if (!mcp) return send(res, 409, { error: `could not rebuild the MCP config in ${r.cwd} (worktree gone?)` })
     await run('herdr', resumeArgv(pane, r, mcp), undefined, 30_000)
     await herdr('agent', 'rename', pane, r.name).catch(() => {})
-    store.delete('agents:local')
-    await runWatchdog()
-    return send(res, 200, { ok: true, message: `Resumed ${r.name} (session ${r.session}) in ${pane}` })
-  }
-  return send(res, 405, { error: 'GET, PUT, POST run, investigate or resume' })
+  } finally { resuming.delete(pane) }
+  store.delete('agents:local')
+  await runWatchdog()
+  return send(res, 200, { ok: true, message: `Resumed ${r.name} (session ${r.session}) in ${pane}` })
 }
 async function recordStart() {
   const f = join(DATA, 'server-starts.json')
