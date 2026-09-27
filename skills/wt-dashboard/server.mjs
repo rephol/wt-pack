@@ -8,6 +8,7 @@ import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync,
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
@@ -652,6 +653,31 @@ function foldQuestions(msgs) {
   }
   return out
 }
+// The first batch of a transcript stream (local or remote WP-97): `text` is whole lines starting at byte `base`
+// and ending at `offset`. A cursor inside (base, offset] resumes with only the lines past it (all lines are still
+// parsed, so question ids are known); otherwise the last 200 user/assistant turns.
+function firstBatch(emit, res, text, base, offset, since, asks) {
+  if (Number.isFinite(since) && since > base && since <= offset) {
+    let at = base
+    const fresh = []
+    for (const line of text.split('\n')) {
+      at += Buffer.byteLength(line) + 1
+      if (!line) continue
+      let e
+      try { e = JSON.parse(line) } catch { continue }
+      const msgs = normalizeEntry(e, asks)
+      if (at > since) fresh.push(...msgs)
+    }
+    if (fresh.length) emit(fresh, offset); else res.write(`id: ${emit.id(offset)}\n: resumed\n\n`)
+  } else {
+    // Last 200 user/assistant turns; tool rows between them ride along uncounted.
+    const backlog = foldQuestions(parseLines(text, asks))
+    let start = backlog.length
+    for (let n = 0; start > 0 && n < 200; ) if (backlog[--start].role !== 'tool') n++
+    const first = backlog.slice(start)
+    if (first.length) emit(first, offset); else res.write(`id: ${emit.id(offset)}\n: empty\n\n`)
+  }
+}
 export async function streamTranscript(req, res, session, url, fileOverride) {
   let file = fileOverride ?? (session && (await findTranscript(session)))
   if (!file && !session) return send(res, 404, { error: 'no transcript for this agent' })
@@ -672,6 +698,7 @@ export async function streamTranscript(req, res, session, url, fileOverride) {
   // Every data event carries `id: <byte offset read so far>`. A client that has messages up to an offset resumes
   // with Last-Event-ID (EventSource's own reconnect) or ?since=<offset>, and gets only what came after it.
   const emit = (msgs, off) => { if (msgs.length) res.write(`id: ${off}\ndata: ${JSON.stringify(msgs)}\n\n`) }
+  emit.id = (off) => off
   res.write(`event: session\ndata: ${JSON.stringify(session)}\n\n`)
   // ponytail: backlog reads the whole file once; tail-read from the end if transcripts get huge.
   let all
@@ -680,28 +707,7 @@ export async function streamTranscript(req, res, session, url, fileOverride) {
   let offset = Buffer.byteLength(all.slice(0, nl + 1)) // an unfinished last line is re-read on the next pull
   let partial = ''
   const asks = new Set()
-  const since = Number(req.headers['last-event-id'] ?? url?.searchParams.get('since'))
-  if (Number.isFinite(since) && since > 0 && since <= offset) {
-    // Resume: parse everything (question ids must be known), emit only lines that end past `since`.
-    let at = 0
-    const fresh = []
-    for (const line of all.slice(0, nl + 1).split('\n')) {
-      at += Buffer.byteLength(line) + 1
-      if (!line) continue
-      let e
-      try { e = JSON.parse(line) } catch { continue }
-      const msgs = normalizeEntry(e, asks)
-      if (at > since) fresh.push(...msgs)
-    }
-    if (fresh.length) emit(fresh, offset); else res.write(`id: ${offset}\n: resumed\n\n`)
-  } else {
-    // Last 200 user/assistant turns; tool rows between them ride along uncounted.
-    const backlog = foldQuestions(parseLines(all.slice(0, nl + 1), asks))
-    let start = backlog.length
-    for (let n = 0; start > 0 && n < 200; ) if (backlog[--start].role !== 'tool') n++
-    const first = backlog.slice(start)
-    if (first.length) emit(first, offset); else res.write(`id: ${offset}\n: empty\n\n`)
-  }
+  firstBatch(emit, res, all.slice(0, nl + 1), 0, offset, Number(req.headers['last-event-id'] ?? url?.searchParams.get('since')), asks)
 
   let busy = false
   const pull = async () => {
@@ -727,6 +733,67 @@ export async function streamTranscript(req, res, session, url, fileOverride) {
   const poll = setInterval(pull, 1000) // fs.watch on macOS can miss appends
   const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
   req.on('close', () => (w.close(), clearInterval(poll), clearInterval(beat)))
+}
+
+// WP-97: a remote agent's transcript over SSH (remoteTranscript.mjs), same SSE framing as streamTranscript. The ids
+// are `<file id>:<byte offset>` so a cursor from another file (a re-match) is ignored. `event: remote` says
+// loading / ok / unmatched / unreachable; the client keeps the pane view until messages arrive. Nothing runs
+// without an open stream: the SSH calls stop (and ssh is killed) when the client goes.
+const remoteLimiter = new Limiter(4)
+export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, { run = sshRun, limiter = remoteLimiter, pullMs = 3000, retry = { unreachable: 30_000, unmatched: 60_000 } } = {}) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+  const ac = new AbortController(), { signal } = ac
+  const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
+  req.on('close', () => { ac.abort(); clearInterval(beat) })
+  const state = (st) => res.write(`event: remote\ndata: ${JSON.stringify({ state: st })}\n\n`)
+  const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); signal.addEventListener('abort', () => { clearTimeout(t); r() }, { once: true }) })
+  // One SSH job per pane at a time (null = another stream of this pane is busy: try again shortly).
+  const job = (fn) => limiter.run(host, pane, fn)
+  state('loading')
+  let hit
+  for (;;) {
+    let st = null
+    try { hit = await job(() => locateRemote({ host, cwd, prompt, run, signal }).then((h) => h ?? false)) } catch { st = 'unreachable' }
+    if (signal.aborted) return
+    if (hit) break
+    if (hit === false) st = 'unmatched'
+    if (st) state(st)
+    await sleep(st === 'unreachable' ? retry.unreachable : st === 'unmatched' ? retry.unmatched : pullMs)
+    if (signal.aborted) return
+  }
+  const { dir, id, size } = hit
+  res.write(`event: session\ndata: ${JSON.stringify(id)}\n\n`)
+  const emit = (msgs, off) => { if (msgs.length) res.write(`id: ${id}:${off}\ndata: ${JSON.stringify(msgs)}\n\n`) }
+  emit.id = (off) => `${id}:${off}`
+  const [cid, coff] = String(req.headers['last-event-id'] ?? url?.searchParams.get('since') ?? '').split(':')
+  const since = cid === id ? Number(coff) : NaN
+  // First load: the last WINDOW bytes only (transcripts run to tens of MB), from the first whole line in them.
+  const start = Math.max(0, size - REMOTE_WINDOW)
+  let buf = null
+  while (!buf) {
+    try { buf = await job(() => run(host, remoteRead(dir, id, start, size - start), { signal })) } catch { if (!signal.aborted) state('unreachable'); return res.end() }
+    if (signal.aborted) return
+    if (!buf) await sleep(pullMs)
+  }
+  let from = start
+  if (start > 0) { const nl = buf.indexOf(0x0a); buf = nl < 0 ? Buffer.alloc(0) : buf.subarray(nl + 1); from = nl < 0 ? start + buf.length : start + nl + 1 }
+  const asks = new Set()
+  const first = cutLines(Buffer.alloc(0), buf, from)
+  let offset = first.end ?? from, left = first.left
+  state('ok')
+  firstBatch(emit, res, first.text, from, offset, since, asks)
+  while (!signal.aborted) {
+    await sleep(pullMs)
+    if (signal.aborted) break
+    const at = offset + left.length
+    try {
+      const b = await job(() => run(host, remoteRead(dir, id, at, REMOTE_WINDOW), { signal }))
+      if (!b?.length) continue
+      const r = cutLines(left, b, at)
+      left = r.left
+      if (r.end !== null) { emit(parseLines(r.text, asks), r.end); offset = r.end }
+    } catch { if (!signal.aborted) state('unreachable') }
+  }
 }
 
 // ---- roles (Settings › Roles) ----
@@ -2313,7 +2380,14 @@ const server = http.createServer(async (req, res) => {
         const pane = decodeURIComponent(parts[3] ?? '')
         if (!PANE.test(pane) || pane.startsWith('-')) return send(res, 400, { error: 'bad pane' })
         if (parts[4] === 'stream' && req.method === 'GET') {
-          if (!m.local) return send(res, 404, { error: 'no transcript for remote agents; use the pane read' })
+          if (!m.local) {
+            const a = (await agents()).find((x) => x.machine === m.label && x.id === pane)
+            if (!a) return send(res, 404, { error: 'unknown agent' })
+            // No visible prompt (a narrow pane, a long reply): its last reply is the match hint instead.
+            const p = parsed.get(`${m.label}|${pane}`)?.p
+            const hints = [a.lastPrompt, p?.turns?.findLast((t) => t.role === 'assistant')?.text, ...paneHints(p?.tail)]
+            return streamRemote(req, res, url, { host: m.host, pane, cwd: a.cwd, prompt: hints })
+          }
           const a = (await agents()).find((x) => x.local && x.id === pane)
           return streamTranscript(req, res, a?.session, url)
         }
@@ -2373,6 +2447,10 @@ const server = http.createServer(async (req, res) => {
           return send(res, code, out)
         }
         if (req.method === 'GET') {
+          // Remote: a long read takes longer than REMOTE_TIMEOUT_MS (~15s for 500 lines), so reuse the agents
+          // poll's own parse of the pane (120 lines, refreshed as the pane changes) — WP-97's pane fallback.
+          const seen = !m.local && !url.searchParams.get('visible') && parsed.get(`${m.label}|${pane}`)
+          if (seen) return send(res, 200, { text: '', ...seen.p })
           const lines = String(Math.min(2000, Number(url.searchParams.get('lines')) || 300))
           const raw = url.searchParams.get('visible') ? await herdrOn(m, 'agent', 'read', pane, '--source', 'visible', '--ansi') : await readPane(m, pane, lines)
           const text = stripAnsi(raw)

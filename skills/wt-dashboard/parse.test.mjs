@@ -1114,3 +1114,75 @@ test('rooms: a new room takes its project at create (WP-96); none by default; th
   assert.throws(() => checkProject('../x'), (e) => e.status === 400) // POST /api/rooms checks it
   assert.doesNotThrow(() => checkProject(null))
 })
+
+test('streamRemote (WP-97): tail window, ids <file>:<byte offset>, ?since= resumes, unmatched/unreachable states', async () => {
+  const { streamRemote } = await import('./server.mjs')
+  const { Limiter } = await import('./remoteTranscript.mjs')
+  const { EventEmitter } = await import('node:events')
+  const ID = '655088a9-831f-4fb0-bbf2-28b96c355918'
+  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
+  let file = Buffer.from(line('a', 'hello there') + line('b', 'café 🎉'))
+  // A fake remote: `find` lists the file, `tail -c N` / `tail -c +K | head -c L` slice it.
+  const fake = (mode) => async (host, script) => {
+    if (mode === 'down') throw Object.assign(new Error('ssh: connect timed out'), { code: 255 })
+    if (script.includes('find')) return Buffer.from(mode === 'none' ? '' : `2 ${file.length} ${ID}.jsonl\n`)
+    let m = script.match(/^tail -c (\d+) /)
+    if (m) return file.subarray(Math.max(0, file.length - Number(m[1])))
+    m = script.match(/^tail -c \+(\d+) .*head -c (\d+)$/)
+    return file.subarray(Number(m[1]) - 1, Number(m[1]) - 1 + Number(m[2]))
+  }
+  const run = async (mode, qs = '', grow = null) => {
+    const req = Object.assign(new EventEmitter(), { headers: {} })
+    let out = ''
+    const res = { writeHead() {}, write(s) { out += s }, end() {} }
+    const p = streamRemote(req, res, new URL(`http://x/${qs}`), { host: 'herdr-box', pane: 'w5:p8', cwd: '/work/projects/umkmall', prompt: 'hello there' },
+      { run: fake(mode), limiter: new Limiter(4), pullMs: 5, retry: { unreachable: 5, unmatched: 5 } })
+    await new Promise((r) => setTimeout(r, 20))
+    if (grow) { file = Buffer.concat([file, Buffer.from(grow)]); await new Promise((r) => setTimeout(r, 30)) }
+    req.emit('close'); await p
+    return {
+      out,
+      ids: [...out.matchAll(/^id: (.+)$/gm)].map((m) => m[1]),
+      texts: [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text)),
+      states: [...out.matchAll(/^event: remote\ndata: (.*)$/gm)].map((m) => JSON.parse(m[1]).state),
+    }
+  }
+  const full = await run('ok', '', line('c', 'more'))
+  assert.deepEqual(full.texts, ['hello there', 'café 🎉', 'more'])
+  const firstLen = Buffer.byteLength(line('a', 'hello there'))
+  assert.equal(full.ids[0], `${ID}:${firstLen + Buffer.byteLength(line('b', 'café 🎉'))}`)
+  assert.equal(full.ids.at(-1), `${ID}:${file.length}`)
+  assert.deepEqual(full.states, ['loading', 'ok'])
+  assert.match(full.out, new RegExp(`event: session\\ndata: "${ID}"`))
+  assert.deepEqual((await run('ok', `?since=${ID}:${firstLen}`)).texts, ['café 🎉', 'more'])
+  assert.deepEqual((await run('ok', `?since=other:${firstLen}`)).texts, ['hello there', 'café 🎉', 'more']) // another file's cursor: ignored
+  assert.ok((await run('none')).states.includes('unmatched'))
+  const down = await run('down')
+  assert.ok(down.states.includes('unreachable'))
+  assert.deepEqual(down.texts, [])
+})
+
+test('streamRemote (WP-97): a transcript over 4 MB loads only its tail, from the first whole line, with absolute offsets', async () => {
+  const { streamRemote } = await import('./server.mjs')
+  const { Limiter, WINDOW } = await import('./remoteTranscript.mjs')
+  const { EventEmitter } = await import('node:events')
+  const ID = '37b2a164-fbe5-4a47-8ebb-d8b353718924'
+  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
+  const pad = line('pad', 'x'.repeat(1000))
+  const file = Buffer.from(pad.repeat(Math.ceil(WINDOW / pad.length) + 50) + line('z', 'the end'))
+  const run = async (host, script) => {
+    if (script.includes('find')) return Buffer.from(`2 ${file.length} ${ID}.jsonl\n`)
+    let m = script.match(/^tail -c (\d+) /)
+    if (m) return file.subarray(file.length - Number(m[1]))
+    m = script.match(/^tail -c \+(\d+) .*head -c (\d+)$/)
+    return file.subarray(Number(m[1]) - 1, Number(m[1]) - 1 + Number(m[2]))
+  }
+  const req = Object.assign(new EventEmitter(), { headers: {} })
+  let out = ''
+  const p = streamRemote(req, { writeHead() {}, write(s) { out += s }, end() {} }, new URL('http://x/'), { host: 'h', pane: 'p', cwd: '/w', prompt: 'the end' }, { run, limiter: new Limiter(), pullMs: 5 })
+  await new Promise((r) => setTimeout(r, 30)); req.emit('close'); await p
+  const texts = [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text))
+  assert.equal(texts.at(-1), 'the end')
+  assert.ok(texts.length < 200 + 1 && texts.every((t) => t === 'the end' || t.startsWith('xxx'))) // no torn first line
+  assert.match(out, new RegExp(`^id: ${ID}:${file.length}$`, 'm'))
+})
