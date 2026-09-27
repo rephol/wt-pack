@@ -18,6 +18,7 @@ export const DEFAULT_ROLES = [
   { id: 'reviewer', name: 'Reviewer', color: 'teal', letter: 'R', match: { workspace: '*-reviewers', name: '*reviewer*' },
     spawn: { start: 'main', workspace: '<repo>-reviewers', projects: [] } },
 ]
+export const ADDED_DEFAULTS = ['reviewer'] // defaults added after roles.json shipped; append new ones here
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
 // alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.
@@ -98,7 +99,8 @@ export class RoleStore {
     try {
       const saved = validateRoles(JSON.parse(await readFile(this.rolesFile, 'utf8')))
       // A default added after roles.json was written (reviewer, WP-116) joins it, unless the user deleted it.
-      const missing = DEFAULT_ROLES.filter((d) => !saved.some((r) => r.id === d.id) && !this.retired.includes(d.id))
+      // Only defaults newer than roles.json itself: an older default absent from it was deleted before retired-roles.json existed.
+      const missing = DEFAULT_ROLES.filter((d) => ADDED_DEFAULTS.includes(d.id) && !saved.some((r) => r.id === d.id) && !this.retired.includes(d.id))
       this.roles = [...saved, ...missing].slice(0, 20)
     } catch { this.roles = DEFAULT_ROLES }
     try { this.tags = JSON.parse(await readFile(this.tagsFile, 'utf8')) } catch { this.tags = {} }

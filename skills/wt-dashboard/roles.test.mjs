@@ -73,4 +73,7 @@ test('RoleStore: a saved roles.json gains a new default once; a deleted default 
   await s.saveRoles(s.roles.filter((r) => r.id !== 'reviewer'))
   assert.deepEqual(JSON.parse(await readFile(join(dir, 'retired-roles.json'), 'utf8')), ['reviewer'])
   assert.ok(!(await new RoleStore(dir).load()).roles.some((r) => r.id === 'reviewer'))
+  const old = await mkdtemp(join(tmpdir(), 'roles-')) // auditor deleted before retired-roles.json existed
+  await writeFile(join(old, 'roles.json'), JSON.stringify(DEFAULT_ROLES.filter((r) => r.id !== 'reviewer' && r.id !== 'auditor')))
+  assert.deepEqual((await new RoleStore(old).load()).roles.map((r) => r.id), ['orchestrator', 'planner', 'worker', 'reviewer'])
 })
