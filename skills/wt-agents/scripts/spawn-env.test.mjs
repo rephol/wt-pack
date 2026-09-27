@@ -66,6 +66,6 @@ test('WP-120: numbering skips a name held by an exited agent in watchdog.json; n
 test('WP-120: every spawn puts the kill shims first on PATH and sets CLAUDE_ENV_FILE', () => {
   const s = spawn(), shim = join(here, '..', 'bin')
   assert.match(s.tab, new RegExp(`--env PATH=${shim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`))
-  assert.match(s.tab, /--env CLAUDE_ENV_FILE=\S+\/bin\/env\.sh/)
+  assert.match(s.tab, /--env CLAUDE_ENV_FILE=\S+\/wt-agents\/env-demo-worker-\d+\.sh/)
   assert.match(s.tab, /--env WT_KILL_SHIM_DIR=\S+\/bin/)
 })

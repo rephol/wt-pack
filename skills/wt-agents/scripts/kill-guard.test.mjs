@@ -25,6 +25,9 @@ test('refuses a -f / killall -m pattern under 6 characters or starting with "-"'
   assert.match(refuse('killall', ['-m', 'ab']), /too broad/)
   assert.equal(refuse('pkill', ['node']), null) // exact-name match without -f: not broad
   assert.equal(refuse('pkill', ['-F', '/tmp/x.pid']), null) // -F takes a pidfile, not -f
+  assert.match(refuse('pgrep', ['-Uroot', 'sshd', '-n']), /after the pattern/) // attached value, then a trailing option
+  assert.equal(refuse('pgrep', ['-Pf', '123']), null) // f is -P's value, not -f
+  assert.match(refuse('killall', ['-s', '-m', 'Fin']), /too broad/) // -s takes no value on macOS
 })
 
 test('bin shims: refused → exit 2 without running the real binary; allowed → the real exit status', () => {

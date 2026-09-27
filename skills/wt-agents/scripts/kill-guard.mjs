@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
-const TAKES_VALUE = { pkill: 'FGgPstUucJjMNd', pgrep: 'FGgPstUucJjMNd', killall: 'utcs' } // killall: -u user, -t tty, -c proc, -SIG handled below
+const TAKES_VALUE = { pkill: 'FGgPstUucJjMNd', pgrep: 'FGgPstUucJjMNd', killall: 'utc' } // killall: -u user, -t tty, -c proc; -SIG forms handled below
 
 // Returns why the call is refused, or null.
 export function refuse(tool, args) {
@@ -20,8 +20,13 @@ export function refuse(tool, args) {
     if (t === '--' && !operand) { ops.push(...args.slice(i + 1)); break }
     if (/^-./.test(t)) {
       if (operand) return `option ${t} after the pattern — BSD ${tool} treats it as another pattern (WP-109/WP-120)`
-      if (tool === 'killall' ? /m/.test(t.slice(1)) && !/^-[A-Z]/.test(t) : /f/.test(t.slice(1)) && !/^-[A-Z]{2,}$/.test(t)) full = true
-      if (!/^-[A-Z]{2,}$/.test(t) && !/^-\d+$/.test(t) && takes.has(t[t.length - 1])) i++
+      if (/^-([A-Z]{2,}|\d+)$/.test(t)) continue // signal: -KILL, -9
+      // Walk the bundle left to right: the first value-taking letter ends it (its value attached, or the next arg).
+      for (let k = 1; k < t.length; k++) {
+        const c = t[k]
+        if (c === (tool === 'killall' ? 'm' : 'f')) full = true
+        if (takes.has(c)) { if (k === t.length - 1) i++; break }
+      }
     } else { operand = true; ops.push(t) }
   }
   if (full) for (const p of ops) if (p.length < 6 || p.startsWith('-')) return `pattern "${p}" is too broad for ${tool === 'killall' ? '-m' : '-f'} (under 6 characters or a flag) — it would match unrelated processes (WP-120)`
