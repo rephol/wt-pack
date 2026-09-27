@@ -60,7 +60,8 @@ declared() {
 # resolve: sets SRC and WHO; a default identity that matches the declared reviewer is not degraded.
 resolve() {
   local d; token >/dev/null; SRC=$TOKSRC; WHO=$(login)
-  case "$SRC" in default*) d=$(declared) || return 0
+  # Only the plain default: a configured account without a token stays degraded whatever is declared.
+  case "$SRC" in "default identity") d=$(declared) || return 0
     if [ -n "$WHO" ] && [ "$WHO" = "$d" ]; then SRC="default identity (declared reviewer $d)"
     else SRC="$SRC — declared reviewer $d, but gh is ${WHO:-unresolved}"; fi;; esac
 }

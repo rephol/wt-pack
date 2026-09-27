@@ -90,6 +90,11 @@ test('WP-126: a declared reviewer matching the default gh login is not degraded;
   const lf = join(tmp, 'login-file'); writeFileSync(lf, 'human\n')
   assert.doesNotMatch(run(['preflight'], { ...noDash, GH_REVIEWER_LOGIN_FILE: lf }).stdout, /DEGRADED: no reviewer/)
   assert.match(run(['preflight'], noDash).stdout, /DEGRADED: no reviewer identity \(default identity\)/) // nothing declared
+  // a dashboard account with no gh token is not rescued by a declared login
+  const db = new DatabaseSync(join(tmp, 'data', 'data', 'wt.db'))
+  db.exec("CREATE TABLE IF NOT EXISTS project_settings (project TEXT, key TEXT, value TEXT); DELETE FROM project_settings; INSERT INTO project_settings VALUES ('demo', 'reviewerGithubAccount', 'nobody')")
+  assert.match(run(['preflight'], { GH_REVIEWER_TOKEN_FILE: none, WT_REVIEWER_LOGIN: 'human' }).stdout, /DEGRADED: no reviewer identity \(default identity \(no gh token for nobody\)\)/)
+  db.exec('DROP TABLE project_settings'); db.close()
 })
 
 test('identity: token file, project account, unresolved', () => {
