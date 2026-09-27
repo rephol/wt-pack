@@ -54,3 +54,11 @@ test('no account: no --env, gh not asked; unknown account: warns, spawns without
   assert.ok(!s.calls.some((l) => /^gh auth switch/.test(l)))
   assert.ok(existsSync(join(tmp, '.claude.json')))
 })
+
+test('WP-120: numbering skips a name held by an exited agent in watchdog.json; no file → 01', () => {
+  const wd = join(tmp, 'data', 'watchdog.json')
+  writeFileSync(wd, JSON.stringify({ lastSeen: { 'w1:p2': { name: 'demo-worker-02', goneAt: '2026-09-27T12:04:09Z' }, 'w1:p3': { name: 'demo-worker-07' } } }))
+  assert.match(spawn().out, /^demo-worker-03 /)
+  rmSync(wd)
+  assert.match(spawn().out, /^demo-worker-01 /)
+})

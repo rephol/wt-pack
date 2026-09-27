@@ -112,7 +112,11 @@ spawn|mcp-args|mcp-file)
   # so two repos numbering from 1 collide on the second pool with
   # agent_name_taken and the agent never starts.
   slug=$(repo_slug "$main")
-  next=$(herdr agent list | jq -r '.result.agents[].name // empty' \
+  # WP-120: plus the names of exited agents the watchdog remembers — herdr drops them from its list, and
+  # reusing one blocks that agent's Resume ("already running in pane …").
+  wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
+  next=$({ herdr agent list | jq -r '.result.agents[].name // empty'
+    [ -r "$wd" ] && jq -r '.lastSeen // {} | .[] | select(.goneAt) | .name // empty' "$wd" 2>/dev/null; } \
     | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
   label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
   }
