@@ -25,6 +25,7 @@ const ABOUT: Record<string, string> = {
   baseBranch: 'The integration branch dispatch reconciles merges against, and the PR list checks for shipped.',
   WT_AGENTS_MCP: 'full: every agent gets claude\'s normal MCP set; lean: its role\'s set only.',
   maxWorking: 'Dispatch hands out work only while fewer agents than this are working.',
+  maxReviewers: 'wt-watch-prs dispatch spawns a new reviewer only while fewer than this are live; at the cap a PR head waits.',
   WT_JEV_TICKET_TRIAGE: 'Jev suggests type, size, priority and role for new tickets on this board.',
 }
 const CHOICES: Record<string, string[]> = { WT_AGENTS_MCP: ['full', 'lean'], WT_JEV_TICKET_TRIAGE: ['on', 'off'] }
