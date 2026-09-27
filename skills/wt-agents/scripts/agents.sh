@@ -181,6 +181,10 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
       echo "warning: no gh token for $acct (gh auth login --hostname github.com, as $acct); spawning with gh's active account" >&2
     fi
   fi
+  # WP-120: pkill/pgrep/killall shims first on PATH (refuse options after the pattern and too-broad -f patterns).
+  # CLAUDE_ENV_FILE is sourced before every Bash command, so rc files that prepend to PATH cannot bury the shims.
+  shim=$(cd "$(dirname "$0")/../bin" && pwd)
+  set -- "$@" --env "PATH=$shim:$PATH" --env "WT_KILL_SHIM_DIR=$shim" --env "CLAUDE_ENV_FILE=$shim/env.sh"
   pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@" \
     | jq -r .result.root_pane.pane_id)
 

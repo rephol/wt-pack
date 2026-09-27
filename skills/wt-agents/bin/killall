@@ -1,0 +1,3 @@
+#!/bin/sh
+# WP-120 shim, first on PATH in agent panes: see ../scripts/kill-guard.mjs
+exec node "$(dirname "$0")/../scripts/kill-guard.mjs" killall "$@"
