@@ -5,10 +5,13 @@ description: The local ticket board in wt-dashboard — per-project kanban ticke
 
 # wt-ticket
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Every project gets a board in wt-dashboard (Tasks → Board). Tickets are `<KEY>-N`: the key is derived from the
 project name (`wt-pack` → `WP`) when the board is first used. The user drags cards on the web; agents use the CLI:
 
-`T=~/.claude/skills/wt-ticket/scripts/wt-ticket` (needs the wt-dashboard server on 127.0.0.1:7777; your herdr pane identifies you)
+`T=<this skill's base directory>/scripts/wt-ticket` (needs the wt-dashboard server on 127.0.0.1:7777; your herdr pane identifies you)
 
 - `$T new "<title>" [--type bug|ux|gap|debt|feature] [--size S|M|L] [--priority 0-4] [--label l]... [--link url]... [--body text] [--column c]` — `--label needs-plan` makes Dispatch hand it to a planner whatever its size
   — priority is Linear's scale: 0 none (the default; rows omit it), 1 urgent, 2 high, 3 medium, 4 low. The project defaults to the repo you are in (`--project p` to override); new tickets land in `backlog`. Jev may fill type/size/priority you left unset (undoable in the dashboard) and flag likely duplicates; fields you set are never changed
