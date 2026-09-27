@@ -169,6 +169,7 @@ html.hd-has-dock [role="region"]:has([data-toast-id]) { bottom: 52px !important;
 html.hd-has-dock button[aria-label^="Agent conversations"] { display: none !important; }
 .hd-dock-chats { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 28px; padding: 0 8px; border-radius: 6px; background: none; border: none; cursor: pointer; color: inherit; font: inherit; }
 .hd-dock-chats:hover, .hd-dock-tab:hover { background: var(--color-background-muted, rgba(127,127,127,.15)); }
+.hd-dock-need { min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--color-background-error, #dc2626); color: #fff; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
 .hd-dock-slots { flex: 1; min-width: 0; height: 100%; display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
 .hd-dock-slot { position: relative; display: flex; align-items: center; min-width: 56px; max-width: 200px; flex: 0 1 auto; height: 28px; }
 .hd-dock-slot[data-open] { width: 320px; max-width: 320px; flex-shrink: 0; }

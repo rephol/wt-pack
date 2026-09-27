@@ -12,8 +12,8 @@ import type { DockAction, DockState } from './dock'
 
 export type DockMeta = { name: string; dot: 'error' | 'success' | 'warning' | 'neutral' | 'accent'; label: string; pulsing?: boolean }
 
-export function Dock({ state, dispatch, meta, unread, body, onExpand }: {
-  state: DockState; dispatch: (a: DockAction) => void; meta: (key: string) => DockMeta; unread: Record<string, 'dot' | '!'>
+export function Dock({ state, dispatch, meta, unread, need, body, onExpand }: {
+  state: DockState; need: number; dispatch: (a: DockAction) => void; meta: (key: string) => DockMeta; unread: Record<string, 'dot' | '!'>
   body: (key: string) => ReactNode; onExpand: (key: string) => void
 }) {
   useEffect(() => {
@@ -53,7 +53,7 @@ export function Dock({ state, dispatch, meta, unread, body, onExpand }: {
         )
       })}</div>
       {/* WP-113: right to left — the button far right, the newest chat just left of it (DOM order = visual = Tab order) */}
-      <button type="button" className="hd-dock-chats" title="Open a chat (⌘K)" onClick={switcher}><ChatIcon /><Text size="sm">Chats</Text></button>
+      <button type="button" className="hd-dock-chats" title="Open a chat (⌘K)" aria-label={`Chats${need ? ` (${need} need you)` : ''}`} onClick={switcher}><ChatIcon /><Text size="sm">Chats</Text>{need > 0 && <span className="hd-dock-need" aria-hidden>{need}</span>}</button>
     </div>
   )
 }
