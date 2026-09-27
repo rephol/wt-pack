@@ -10,6 +10,9 @@ allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion, ToolSearch
 
 # wt-finish
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Deletes a worktree and its branch. It is the only skill in the pack whose failure mode is **losing work**,
 so the whole of it is about what must be true first.
 
@@ -83,14 +86,14 @@ Then drop the task labels: the planner's that handed you this work (only while i
 then the one wt-handoff put on your pane (display-only; best effort, a no-op outside herdr):
 
 ```
-~/.claude/skills/wt-shared/scripts/task-state.sh planner --clear
+../wt-shared/scripts/task-state.sh planner --clear
 [ -n "${HERDR_PANE_ID:-}" ] && herdr pane report-metadata "$HERDR_PANE_ID" --source wt-dashboard --clear-token task >/dev/null 2>&1 || true
 ```
 
 A local board ticket (the branch's `<KEY>-N`, not a Linear team key) goes to **done** if it is not there already (best effort):
 
 ```
-~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> done || true
+../wt-ticket/scripts/wt-ticket move <ID> done || true
 ```
 
 ## 4. Report
