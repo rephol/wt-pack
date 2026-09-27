@@ -1226,3 +1226,13 @@ test('WP-114 rooms: rename changes the title only (slug and posting by slug keep
   await rooms.remove('ops')
   assert.equal(rooms.room('ops'), undefined)
 })
+
+test('WP-115 parsePicker: box borders stripped, soft wraps joined, paragraph breaks kept (question and descriptions)', async () => {
+  const { parsePicker, unbox } = await import('./server.mjs')
+  const { readFileSync } = await import('node:fs')
+  const pk = parsePicker(readFileSync(new URL('./test-fixtures/picker-boxed-question.txt', import.meta.url), 'utf8'))
+  assert.equal(pk.question, 'Optimize analyses the photo with a model call (persona analysis) before it writes the caption.\n\nKeep that step?')
+  assert.deepEqual(pk.options.map((o) => [o.label, o.description]), [['Keep it', 'One extra call per photo, better captions'], ['Drop it', 'Faster']])
+  assert.doesNotMatch(JSON.stringify(pk), /[│┃╭╰]/)
+  assert.equal(unbox(['a | b', 'c']), 'a | b c') // a plain pipe is text, not a border
+})

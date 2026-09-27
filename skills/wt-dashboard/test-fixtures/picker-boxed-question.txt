@@ -1,0 +1,20 @@
+───────────────────────────────────────────────────────────────────────────────
+ ☐ Persona
+
+╭──────────────────────────────────────────────────────────╮
+│ Optimize analyses the photo with a model call             │
+│ (persona analysis) before it writes the caption.           │
+│                                                           │
+│ Keep that step?                                           │
+╰──────────────────────────────────────────────────────────╯
+
+❯ 1. Keep it
+     │ One extra call per photo, │
+     │ better captions │
+  2. Drop it
+     ┃ Faster ┃
+  3. Type something.
+───────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
