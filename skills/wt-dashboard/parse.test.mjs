@@ -305,6 +305,27 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
   assert.deepEqual(I.toResolve(mp, new Set(), new Set()), []) // pending set unknown: keep
   assert.deepEqual(I.toResolve(mp, new Set(), new Set(), new Set(['ab12cd'])), [])
   assert.deepEqual(I.toResolve(mp, new Set(), new Set(), new Set()), ['p'])
+  // WP-116: held PRs from wt-watch-prs state files — first scan creates, cleared hold resolves, no duplicates.
+  {
+    const { mkdtemp, mkdir, writeFile, symlink } = await import('node:fs/promises')
+    const root = await mkdtemp((await import('node:os')).tmpdir() + '/holds-')
+    await mkdir(root + '/acme-demo'); await mkdir(root + '/evil-link')
+    const write = (v) => writeFile(root + '/acme-demo/state.json', JSON.stringify(v))
+    await write({ reviewed: { 7: { state: 'changes-requested', outcome: 'x'.repeat(900) }, 8: { state: 'approved' }, '../9': { state: 'changes-requested' } } })
+    await symlink(root + '/acme-demo/state.json', root + '/evil-link/state.json')
+    const hbox = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
+    let holds = I.reviewHolds(root)
+    assert.deepEqual(holds.map((h) => [h.key, h.title, h.body.length]), [['pr-held|acme-demo#7', 'Held PR #7 (acme-demo)', 500]])
+    for (const h of holds) await hbox.add(h)
+    for (const h of I.reviewHolds(root)) assert.equal(await hbox.add(h), null)
+    assert.equal(hbox.items.length, 1)
+    assert.deepEqual(I.toResolve(hbox.items, new Set(), new Set(), null, new Set(holds.map((h) => h.key))), [])
+    assert.deepEqual(I.toResolve(hbox.items, new Set(), new Set(), null, null), []) // unknown: keep
+    await write({ reviewed: { 7: { state: 'approved' } } })
+    holds = I.reviewHolds(root)
+    assert.deepEqual(I.toResolve(hbox.items, new Set(), new Set(), null, new Set(holds.map((h) => h.key))), [hbox.items[0].id])
+    assert.deepEqual(I.reviewHolds(root + '/missing'), [])
+  }
   const { mkdtemp } = await import('node:fs/promises')
   const box = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
   assert.ok(await box.add({ kind: 'question', key: 'k', title: 't', body: '', target: { agent: 'a' } }))

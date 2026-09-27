@@ -15,7 +15,7 @@ import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
-import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
+import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
@@ -863,6 +863,7 @@ export function memoryFile(scope, name) {
   return null
 }
 const MEMORY_KEY = 'wt-memory@wt-pack'
+const WATCH_PRS = process.env.WT_WATCH_PRS_HOME || join(homedir(), '.local', 'share', 'wt-watch-prs') // wt-watch-prs state, read-only here
 // Agent-written entries and pending global proposals, via the CLI (the one parser of the trailer format).
 const memoryEntries = async () => (MEMORY_BIN ? JSON.parse(await run(process.execPath, [MEMORY_BIN, 'list', '--json'], undefined, 5000)) : [])
 // Seen ids; null until the first scan, which is a baseline (no notices for what already existed).
@@ -1569,7 +1570,10 @@ async function tick() {
     for (const x of sugg) await inbox.add({ kind: 'room-suggestion', key: `suggest|${x.ticket}`, title: `Room suggested: #${x.slug}`, body: `${x.title} — ${x.reason}`, target: { task: x.ticket, room: x.slug }, quiet: true })
     const needs = new Set([...snap.agents.values()].filter((a) => a.state === 'needs_you').map((a) => a.key))
     const proposals = await memoryNotices().catch((e) => { console.error('memory:', e.message); return null })
-    const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket)), proposals))
+    // WP-116: no baseline — a hold that predates a restart still needs the user.
+    const holds = reviewHolds(WATCH_PRS)
+    for (const h of holds) await inbox.add(h)
+    const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket)), proposals, new Set(holds.map((h) => h.key))))
     if (resolved) broadcastEvent('inbox', { changed: true })
     broadcastEvent('tray', trayOfInbox())
   } catch (e) { console.error('inbox:', e.message) }

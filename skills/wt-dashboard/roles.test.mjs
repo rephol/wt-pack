@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_ROLES, glob, resolveRole, validateRoles, inferTags, tokenDiff, clean, adoptHandoff } from './roles.mjs'
+import { mkdtemp, writeFile, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { RoleStore, DEFAULT_ROLES, glob, resolveRole, validateRoles, inferTags, tokenDiff, clean, adoptHandoff } from './roles.mjs'
 
 test('glob', () => {
   assert.equal(glob('*-planners', 'acmeapp-planners'), true)
@@ -53,4 +56,21 @@ test('tags: a newer handoff adopts its ticket into the mirror; live keys are nev
 test('resolveRole: auditors by pool or name', () => {
   assert.deepEqual(resolveRole(DEFAULT_ROLES, { workspace: 'wt-pack-auditors', name: 'x' }), { id: 'auditor', by: 'workspace' })
   assert.deepEqual(resolveRole(DEFAULT_ROLES, { workspace: 'misc', name: 'wt-pack-auditor-01' }), { id: 'auditor', by: 'name' })
+})
+
+test('resolveRole: reviewers by pool or name', () => {
+  assert.deepEqual(resolveRole(DEFAULT_ROLES, { workspace: 'wt-pack-reviewers', name: 'x' }), { id: 'reviewer', by: 'workspace' })
+  assert.deepEqual(resolveRole(DEFAULT_ROLES, { workspace: 'misc', name: 'wt-pack-reviewer-01' }), { id: 'reviewer', by: 'name' })
+})
+
+test('RoleStore: a saved roles.json gains a new default once; a deleted default stays deleted', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'roles-'))
+  await writeFile(join(dir, 'roles.json'), JSON.stringify(DEFAULT_ROLES.filter((r) => r.id !== 'reviewer')))
+  const s = await new RoleStore(dir).load()
+  assert.equal(s.roles.filter((r) => r.id === 'reviewer').length, 1)
+  await s.saveRoles(s.roles)
+  assert.equal((await new RoleStore(dir).load()).roles.filter((r) => r.id === 'reviewer').length, 1)
+  await s.saveRoles(s.roles.filter((r) => r.id !== 'reviewer'))
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'retired-roles.json'), 'utf8')), ['reviewer'])
+  assert.ok(!(await new RoleStore(dir).load()).roles.some((r) => r.id === 'reviewer'))
 })

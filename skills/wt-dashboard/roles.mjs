@@ -14,6 +14,9 @@ export const DEFAULT_ROLES = [
   // PM+QA: audits the running apps and posts ranked proposals; read-only, so it stays in the main checkout.
   { id: 'auditor', name: 'Auditor', color: 'orange', letter: 'A', match: { workspace: '*-auditors', name: '*auditor*' },
     spawn: { start: 'main', workspace: '<repo>-auditors', projects: [] } },
+  // Watches the repo's open PRs and posts reviews (wt-watch-prs, WP-116); reads refs, never checks out.
+  { id: 'reviewer', name: 'Reviewer', color: 'teal', letter: 'R', match: { workspace: '*-reviewers', name: '*reviewer*' },
+    spawn: { start: 'main', workspace: '<repo>-reviewers', projects: [] } },
 ]
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
@@ -86,13 +89,27 @@ export function tokenDiff(have = {}, want = {}) {
 }
 
 export class RoleStore {
-  constructor(dir) { this.rolesFile = `${dir}/roles.json`; this.tagsFile = `${dir}/agent-tags.json`; this.roles = DEFAULT_ROLES; this.tags = {} }
+  constructor(dir) {
+    this.rolesFile = `${dir}/roles.json`; this.retiredFile = `${dir}/retired-roles.json`; this.tagsFile = `${dir}/agent-tags.json`
+    this.roles = DEFAULT_ROLES; this.retired = []; this.tags = {}
+  }
   async load() {
-    try { this.roles = validateRoles(JSON.parse(await readFile(this.rolesFile, 'utf8'))) } catch { this.roles = DEFAULT_ROLES }
+    try { this.retired = JSON.parse(await readFile(this.retiredFile, 'utf8')).filter((id) => typeof id === 'string') } catch { this.retired = [] }
+    try {
+      const saved = validateRoles(JSON.parse(await readFile(this.rolesFile, 'utf8')))
+      // A default added after roles.json was written (reviewer, WP-116) joins it, unless the user deleted it.
+      const missing = DEFAULT_ROLES.filter((d) => !saved.some((r) => r.id === d.id) && !this.retired.includes(d.id))
+      this.roles = [...saved, ...missing].slice(0, 20)
+    } catch { this.roles = DEFAULT_ROLES }
     try { this.tags = JSON.parse(await readFile(this.tagsFile, 'utf8')) } catch { this.tags = {} }
     return this
   }
-  async saveRoles(list) { this.roles = validateRoles(list); await this.#write(this.rolesFile, this.roles) }
+  async saveRoles(list) {
+    this.roles = validateRoles(list)
+    const kept = new Set(this.roles.map((r) => r.id))
+    this.retired = DEFAULT_ROLES.map((d) => d.id).filter((id) => !kept.has(id))
+    await this.#write(this.rolesFile, this.roles); await this.#write(this.retiredFile, this.retired)
+  }
   async setTags(name, tags) { this.tags[name] = clean(tags); await this.saveTags() }
   async saveTags() { await this.#write(this.tagsFile, this.tags) }
   async #write(f, v) { await mkdir(dirname(f), { recursive: true }); await writeFile(f, JSON.stringify(v, null, 2)) }

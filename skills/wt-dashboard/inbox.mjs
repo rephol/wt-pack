@@ -1,11 +1,12 @@
 // Notifications inbox: one feed in <data root>/data/wt.db (table notifications), the single source for the
 // in-app inbox, native notifications and the tray count. Items are inserted; read/resolved/cleared update the row. Pure pieces (kind mapping, actionable, resolution) are exported for parse.test.mjs.
 import { join } from 'node:path'
+import { readdirSync, lstatSync, readFileSync } from 'node:fs'
 import { open, tx } from './store.mjs'
 import { randomUUID } from 'node:crypto'
 
-export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog']
-export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal'])
+export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held']
+export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held'])
 
 // A transition (from server.mjs transitions()) → an inbox item draft.
 export function itemFromTransition(e) {
@@ -22,14 +23,36 @@ export function itemFromTransition(e) {
 
 // Which unresolved actionable items no longer hold. `needs`: Set of target keys still needing the user
 // (agent keys and `room:<slug>` for room mentions); `suggested`: Set of ticket ids still suggested;
-// `proposals`: Set of wt-memory ids still pending, or null when unknown (then none resolve).
-export function toResolve(items, needs, suggested, proposals = null) {
+// `proposals`: Set of wt-memory ids still pending, or null when unknown (then none resolve); `holds`: Set of
+// pr-held keys still held (reviewHolds), or null when unknown.
+export function toResolve(items, needs, suggested, proposals = null, holds = null) {
   return items.filter((it) => !it.resolvedAt && ACTIONABLE.has(it.kind) && (
     it.kind === 'memory-proposal' ? proposals !== null && !proposals.has(it.target.memory)
+    : it.kind === 'pr-held' ? holds !== null && !holds.has(it.key)
     : it.kind === 'room-suggestion' ? !suggested.has(it.target.task)
       : it.kind === 'mention-user' ? !needs.has(`room:${it.target.room}`)
         : !needs.has(it.target.agent)
   )).map((it) => it.id)
+}
+
+// WP-116: PRs a wt-watch-prs reviewer holds (state "changes-requested"), from <root>/<owner>-<repo>/state.json,
+// as inbox drafts. The files are agent-written, so untrusted: no symlinks, ≤1 MB, digit PR keys only, the repo
+// from the dir name (never the JSON), the note cut to 500 chars. A missing root is no holds.
+export function reviewHolds(root) {
+  let dirs = []
+  try { dirs = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()) } catch { return [] }
+  return dirs.flatMap((d) => {
+    const f = join(root, d.name, 'state.json')
+    try {
+      const st = lstatSync(f)
+      if (!st.isFile() || st.size > 1_000_000) return []
+      const reviewed = JSON.parse(readFileSync(f, 'utf8'))?.reviewed ?? {}
+      return Object.entries(reviewed).filter(([n, e]) => /^\d{1,7}$/.test(n) && e?.state === 'changes-requested').map(([n, e]) => ({
+        kind: 'pr-held', key: `pr-held|${d.name}#${n}`, title: `Held PR #${n} (${d.name})`,
+        body: typeof e.outcome === 'string' ? e.outcome.slice(0, 500) : '', target: { pr: `${d.name}#${n}` },
+      }))
+    } catch { return [] }
+  })
 }
 
 // WT_JEV_INBOX_RANK: one score per new item, stored as `urgency` 0-3 (noise, FYI, needs attention soon, blocking).

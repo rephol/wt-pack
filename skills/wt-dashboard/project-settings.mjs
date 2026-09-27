@@ -14,6 +14,8 @@ const jev = (label) => ({ scope: 'overridable', label, cfg: true, check: oneOf('
 export const PKEYS = {
   githubAccount: { scope: 'project', label: 'GitHub account',
     check: (v) => /^[A-Za-z0-9-]{1,39}$/.test(v) || 'a GitHub login (letters, digits, -; ≤39)' },
+  reviewerGithubAccount: { scope: 'project', label: 'Reviewer GitHub account',
+    check: (v) => /^[A-Za-z0-9-]{1,39}$/.test(v) || 'a GitHub login (letters, digits, -; ≤39)' },
   baseBranch: { scope: 'project', label: 'Base branch', default: 'main',
     check: (v) => (!v.startsWith('-') && spawnSync('git', ['check-ref-format', '--branch', v]).status === 0) || 'not a valid branch name' },
   WT_AGENTS_MCP: { scope: 'overridable', label: 'Agent MCP', cfg: true, default: 'full', check: oneOf('full', 'lean') },
