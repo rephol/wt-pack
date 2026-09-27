@@ -379,10 +379,10 @@ Eval: `node skills/wt-shared/scripts/jev-eval.mjs <feature>`.
 ## ./setup and doctor
 
 - `./setup` (install, default): Homebrew deps (asks once; `--yes`), links `wt-*` skills into
-  `~/.claude/skills`, config dirs, the wt-memory plugin, web build, launchd service, secrets, then doctor.
+  `~/.claude/skills`, config dirs, the wt-memory plugin (updated when the checkout's version is newer), web build, launchd service, secrets, then doctor.
   Never repoints an install owned by another checkout. Flags: `--yes`, `--no-secrets`, `--no-service`.
 - `./setup doctor`: one line per check (node ≥ 22.13 with `node:sqlite`, git/curl/jq, gh auth, claude, herdr,
-  links, plugin, build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
+  links, plugin (installed version = checkout's), build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
   cargo); per project with a GitHub account: gh has its token, the token logs in as it, and it reaches the
   repo; exit 1 while a required check fails.
 - `./setup secrets`: TypeSafe key into `~/.claude/.env` (Linear goes through Settings › Integrations).
