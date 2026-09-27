@@ -270,6 +270,20 @@ export function parsePicker(text, raw = '') {
   if (pk && !pk.review && f != null) pk.current = f
   return pk
 }
+// WP-115: text drawn inside a terminal box. Drops border-only rows (╭──╮, └──┘), strips │ ┃ ║ at line edges, joins
+// soft-wrapped lines with a space and keeps blank lines as paragraph breaks.
+const BOX_EDGE = /^[│┃║╎╏┆┇┊┋]\s?|\s*[│┃║╎╏┆┇┊┋]$/g
+export function unbox(lines) {
+  const paras = [[]]
+  for (const raw of lines) {
+    const l = raw.trim()
+    if (/^[╭╮╰╯┌┐└┘├┤─━═\s]+$/.test(l) && /[─━═]/.test(l)) continue
+    const t = l.replace(BOX_EDGE, '').trim()
+    if (t) paras.at(-1).push(t)
+    else if (paras.at(-1).length) paras.push([])
+  }
+  return paras.filter((p) => p.length).map((p) => p.join(' ')).join('\n\n')
+}
 function parsePickerText(text) {
   const lines = text.split('\n')
   const foot = lines.findLastIndex((l) => /Enter to select\s*·/.test(l)) // hint line; may be truncated
@@ -300,12 +314,13 @@ function parsePickerText(text) {
   // A single question shows its header alone (" ☐ Color"), without the ← … → tab bar.
   const solo = tabLine < 0 && lines[qStart]?.match(/^\s*([☐☒])\s+(\S.*)$/)
   if (solo) { tabs.push({ header: solo[2].trim(), done: solo[1] === '☒' }); qStart++ }
-  const question = lines.slice(qStart, first).map((l) => l.trim()).filter(Boolean).join('\n')
+  const question = unbox(lines.slice(qStart, first))
   // Preview layout (options carry `preview`): options sit in a narrow left column, a box-drawn preview of the
   // FOCUSED option on the right, "Notes: press n…" under it, no descriptions, labels wrap onto indented lines.
   let end = foot
   for (let i = first; i < foot; i++) if (/^\s*─{10,}/.test(lines[i])) { end = i; break }
-  const boxX = Math.min(...lines.slice(first, end).map((l) => l.search(/[┌│└]/)).filter((x) => x > 0))
+  // A preview box has a top corner; a bare │ in an option row is a boxed description (WP-115), not a preview.
+  const boxX = lines.slice(first, end).some((l) => /[┌╭]/.test(l)) ? Math.min(...lines.slice(first, end).map((l) => l.search(/[┌│└╭╰]/)).filter((x) => x > 0)) : Infinity
   if (Number.isFinite(boxX)) {
     const options = []
     let cursor = 1
@@ -343,7 +358,8 @@ function parsePickerText(text) {
       break
     } else if (options.length && lines[i].trim()) {
       const o = options.at(-1)
-      o.description = (o.description ? o.description + ' ' : '') + lines[i].trim()
+      const d = unbox([lines[i]])
+      if (d) o.description = (o.description ? o.description + ' ' : '') + d
     }
   }
   return question && options.length ? { review: false, tabs, current: tabs.findIndex((t) => !t.done), question, multiSelect, options, other, cursor } : null
