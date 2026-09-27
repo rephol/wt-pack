@@ -445,7 +445,9 @@ export default function App() {
   const projectPicker = (
     <div className="hd-project-picker"><DropdownMenu hasChevron={!navCollapsed} menuWidth={260}
       button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: current[0] === 'all' && !navCollapsed ? undefined : <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
-      items={projectRows.map(([v, label, c]) => ({ id: v, label, icon: projectIcon(v, label, false), endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} /></div>
+      items={projectRows.map(([v, label, c]) => ({ id: v, label, icon: projectIcon(v, label, false), endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} />
+      {/* WP-110: the picked project's settings, one click from the sidebar (hidden for All projects) */}
+      {project !== 'all' && !navCollapsed && <IconButton label="Project settings" tooltip={`${current[1]} settings`} icon={<GearIcon />} size="sm" variant="ghost" onClick={() => openProjectSettings(project)} />}</div>
   )
   const [sideList, setSideListState] = useState<'agents' | 'rooms'>(() => { try { return localStorage.getItem('nav-list') === 'rooms' ? 'rooms' : 'agents' } catch { return 'agents' } })
   const setSideList = (v: string) => {
