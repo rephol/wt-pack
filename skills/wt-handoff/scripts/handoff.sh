@@ -32,7 +32,7 @@
 # --role worker|planner forces the role (also with --new). --pane and --list are untouched.
 #
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
-# ticket is taken from <cwd>'s branch (UMK-NNN). Both panes are told about each other through
+# ticket is taken from <cwd>'s branch (ENG-123 or WP-12). Both panes are told about each other through
 # tokens (target: task, ticket, handoff_from[_pane], handoff_at; sender: handoff_to[_pane]), and
 # the prompt gets a footer naming the sender so the target can answer it.
 #
