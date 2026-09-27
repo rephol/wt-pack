@@ -20,7 +20,7 @@ if [ -n "${WT_BASE:-}" ]; then
   base="${WT_BASE#origin/}"
 # 2. The branch the checkout is SITTING on, when that is itself an integration
 #    branch. origin/HEAD is the repo's default branch, which is not the same
-#    thing: umkmall publishes origin/HEAD -> main while integrating to preview,
+#    thing: a repo can publish origin/HEAD -> main while integrating to preview,
 #    so trusting HEAD first silently branched every worktree off the wrong base.
 else
   cur=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
@@ -46,7 +46,7 @@ echo "base: origin/$base" >&2
 git -C "$root" fetch --quiet origin "$base"
 
 # Always under the main checkout, where Claude Code puts its own worktrees. Not "wherever the first
-# existing worktree is": in umkmall that was a sibling repo's folder, so every new worktree landed
+# existing worktree is": in one repo that was a sibling repo's folder, so every new worktree landed
 # beside the repo in ~/Work/projects. WT_WORKTREE_DIR overrides; existing worktrees are left alone.
 dir="${WT_WORKTREE_DIR:-$root/.claude/worktrees}"
 # Nested worktrees must be ignored by the main checkout, or they show up as untracked files there.
@@ -67,7 +67,7 @@ git -C "$root" worktree add -b "$branch" "$path" "origin/$base" >&2
 # absent from the new tree while its tracked .template/.example sibling is present
 # — the worktree looks configured and is not. Copy them across.
 #
-# cp, not ln -s: a repo guarding secret reads (umkmall's block-secret-reads.sh)
+# cp, not ln -s: a repo guarding secret reads (e.g. a block-secret-reads.sh hook)
 # blocks `ln -s <secret>` as an attempted read while allowing a copy to the same
 # name. The copy is the shape those guards have been taught.
 #
