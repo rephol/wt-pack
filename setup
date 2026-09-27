@@ -41,6 +41,30 @@ has()  { command -v "$1" >/dev/null 2>&1; }
 ask()  { [ "$yes" -eq 1 ] && return 0; [ -t 0 ] || return 1; printf '%s [y/N] ' "$1"; read -r r; [ "$r" = y ] || [ "$r" = Y ]; }
 fails=0
 
+# WP-107: each project with a GitHub account (dashboard Settings › Projects): gh has a token for it, the token logs in
+# as that account (not another one stored under its name), and it reaches the project's repo (when its checkout is known:
+# WT_DASHBOARD_REPO / WT_DASHBOARD_PROJECTS, or this checkout).
+gh_accounts() {
+  accts=$(node "$SK/wt-shared/scripts/project-setting.mjs" list-accounts 2>/dev/null)
+  [ -n "$accts" ] || return 0
+  while IFS="$(printf '\t')" read -r proj acct; do
+    [ -n "$acct" ] || continue
+    if ! tok=$(gh auth token --user "$acct" 2>/dev/null) || [ -z "$tok" ]; then bad "$proj: no gh token for $acct — gh auth login (as $acct)"; continue; fi
+    login=$(GH_TOKEN=$tok gh api user -q .login 2>/dev/null)
+    [ "$login" = "$acct" ] || { bad "$proj: the token stored for $acct logs in as '${login:-nothing}'"; continue; }
+    dir=
+    for d in "$REPO" $(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?WT_DASHBOARD_(REPO|PROJECTS)=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tr -d "\"'" | tr ':' ' '); do
+      top=$(dirname "$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)
+      [ "$(basename "$top")" = "$proj" ] && { dir=$top; break; }
+    done
+    if [ -z "$dir" ]; then ok "$proj: gh account $acct (repo not checked: checkout unknown)"
+    elif (cd "$dir" && GH_TOKEN=$tok gh repo view --json name >/dev/null 2>&1); then ok "$proj: gh account $acct reaches its repo"
+    else bad "$proj: $acct cannot reach the repo of $dir"; fi
+  done <<EOF
+$accts
+EOF
+}
+
 # A wt-pack checkout: a directory with the pack's marketplace manifest.
 is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt-pack"' "$1/.claude-plugin/marketplace.json"; }
 # The checkout a skill dir belongs to: <co>/skills/<s> (this layout) or <co>/<s> (before WP-69).
@@ -89,6 +113,7 @@ doctor() {
   if ! has gh; then bad "gh — $(pkg gh)"
   elif gh auth status >/dev/null 2>&1; then ok "gh (authenticated)"
   else bad "gh not logged in — run: gh auth login"; fi
+  has gh && has node && gh_accounts
   herdr_check bad 1
   if has claude; then ok "claude"; else bad "claude (Claude Code) not on PATH"; fi
 

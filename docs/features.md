@@ -237,7 +237,7 @@ Recurring work the server runs itself (Routines page).
 ## Settings
 
 Order: **You** — General, Notifications · **Agents** — Rooms, Roles, Memory · **System** — Integrations,
-Terminals, Usage, Observability, Server, About.
+Projects, Terminals, Usage, Observability, Server, About.
 
 - **General**: avatar, display name, handle; this browser only: chat density (Compact / **Balanced** /
   Spacious), link previews (**on**).
@@ -245,6 +245,17 @@ Terminals, Usage, Observability, Server, About.
 - **Rooms**, **Roles**: see above.
 - **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries (the list scrolls in its own box as it grows), Accept/Reject pending
   global proposals, **Preview for agent…** shows what an agent receives. Warns when the plugin is missing.
+- **Projects** (WP-107): per-project overrides, opened from Settings, the page header's **Project settings**
+  (a project picked) or the board's Automation › **More project settings**. Order: server env var › project ›
+  global › default; each row shows *overridden*, *inherited from global/default* or *locked by env var*, with
+  **Reset**. Keys: **GitHub account** (agents spawned for the project get `GH_TOKEN` for that account from gh's
+  keyring, and the checkout's `credential.https://github.com.username` is set so `git push` matches; the
+  dashboard's PR/issue calls for the default repo use it too; gh's active account is never switched; a token is
+  a snapshot — respawn after changing it), **Base branch** (default `main`; dispatch reconcile and the PR list's
+  shipped check), **Agent MCP** (`WT_AGENTS_MCP`), **Max working agents** (dispatch cap; global = Routines'),
+  **Ticket triage** (`WT_JEV_TICKET_TRIAGE`); plus the board's Auto and Dispatch switches. Stored in `wt.db`
+  (`project_settings`, not in the JSON rollback); shell scripts read it via
+  `wt-shared/scripts/project-setting.mjs get <key> [--project P|--cwd DIR]`.
 - **Integrations**: precedence is process env › Keychain (secrets) › `~/.config/wt-dashboard/env` › default;
   applies without restart except `WT_DASHBOARD_REPO` and `WT_LINEAR_TEAMS`.
   - `LINEAR_API_KEY` (Keychain, last 4 shown, Test connection), `TYPESAFE_API_KEY` (Keychain, powers Jev).
@@ -341,7 +352,8 @@ Eval: `node skills/wt-shared/scripts/jev-eval.mjs <feature>`.
   Never repoints an install owned by another checkout. Flags: `--yes`, `--no-secrets`, `--no-service`.
 - `./setup doctor`: one line per check (node ≥ 22.13 with `node:sqlite`, git/curl/jq, gh auth, claude, herdr,
   links, plugin, build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
-  cargo); exit 1 while a required check fails.
+  cargo); per project with a GitHub account: gh has its token, the token logs in as it, and it reaches the
+  repo; exit 1 while a required check fails.
 - `./setup secrets`: TypeSafe key into `~/.claude/.env` (Linear goes through Settings › Integrations).
 - `./setup uninstall [--purge]`: removes service, plugin and links; keeps data unless `--purge`.
 - Skill: wt-setup ("set up wt-pack").
