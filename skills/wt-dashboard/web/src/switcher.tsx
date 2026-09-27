@@ -68,8 +68,9 @@ function Row({ it, phone }: { it: SwItem; phone: boolean }) {
   )
 }
 
-export function QuickSwitcher({ agents, rooms, project = 'all', projects = [], phone, hidden, loading = false, onOpenAgent, onOpenRoom, onOpenTicket }: {
+export function QuickSwitcher({ agents, rooms, project = 'all', projects = [], phone, hidden, loading = false, unread = false, onOpenAgent, onOpenRoom, onOpenTicket }: {
   agents: SwAgent[]; rooms: SwRoom[]; project?: string; projects?: string[]; phone: boolean; hidden: boolean; loading?: boolean
+  unread?: boolean // WP-112: a docked chat is unread (phones have no dock; the button is its bubble)
   onOpenAgent: (key: string, full?: boolean) => void; onOpenRoom: (slug: string) => void; onOpenTicket: (project: string, id: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -143,6 +144,7 @@ export function QuickSwitcher({ agents, rooms, project = 'all', projects = [], p
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
+        {unread && !needCount && <span aria-label="unread chats" data-dock-unread style={{ position: 'absolute', top: 2, right: 2, width: 12, height: 12, borderRadius: 6, background: 'var(--color-background-error, #dc2626)', border: '2px solid var(--color-background-surface, #fff)' }} />}
         {needCount > 0 && (
           <span aria-hidden style={{ position: 'absolute', top: -2, right: -2, minWidth: 20, height: 20, padding: '0 5px', borderRadius: 10, fontSize: 12, fontWeight: 700, lineHeight: '20px', background: 'var(--color-background-error, #dc2626)', color: '#fff' }}>{needCount}</span>
         )}

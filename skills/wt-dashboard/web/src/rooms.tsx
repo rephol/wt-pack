@@ -200,7 +200,9 @@ function mentionPlugin(agents: RoomAgent[], profile: Profile, colorOf: (a: RoomA
   }
 }
 
-function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, onProject }: { room: Room; agents: RoomAgent[]; profile: Profile; projects?: string[]; onBack: () => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void }) {
+// compact (WP-112 dock window): no header (back, project chip, members, settings), and the last DOCK_LIMIT rows.
+export function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, onProject, compact = false }: { room: Room; agents: RoomAgent[]; profile: Profile; projects?: string[]; onBack: () => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void; compact?: boolean }) {
+  const rootRef = useRef<HTMLDivElement>(null) // the composer and message ids of THIS view (a dock window and the page can both be open)
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [typed, setTyped] = useState('')
@@ -221,7 +223,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
   // Each added image leaves a [image:…] chip at the caret (as the @ menu inserts chips; insertToken emits no change,
   // so an input event syncs the draft). Deleting a chip drops its image.
   const addFiles = (files: File[]) => {
-    const h = inputRef.current, el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+    const h = inputRef.current, el = rootRef.current?.querySelector('[aria-label="Message input"]') as HTMLElement | null
     const added = addAtts(files)
     if (!h || !el || !added.length) return
     if (!el.contains(getSelection()?.anchorNode ?? null)) { el.focus(); getSelection()?.selectAllChildren(el); getSelection()?.collapseToEnd() }
@@ -237,7 +239,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
   const startReply = useCallback((m: RoomMsg) => {
     setReplyTo(m)
     setTimeout(() => { // after the drawer mounts; caret to the end so typing lands in the input
-      const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+      const el = rootRef.current?.querySelector('[aria-label="Message input"]') as HTMLElement | null
       if (!el) return
       el.focus(); getSelection()?.selectAllChildren(el); getSelection()?.collapseToEnd()
       // An @author chip, as the @ menu would insert it; not for your own message, nor twice.
@@ -248,7 +250,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
   // Dismiss the reply; drop the prefilled @author chip too, unless the user has typed more since.
   const cancelReply = () => {
     // insertToken doesn't fire onChange, so read the editor itself and clear it the way typing would.
-    const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+    const el = rootRef.current?.querySelector('[aria-label="Message input"]') as HTMLElement | null
     if (replyTo && el && inputRef.current?.getValue().trim() === `@${replyTo.author.name}`) {
       el.focus(); getSelection()?.selectAllChildren(el); document.execCommand('delete')
     }
@@ -256,7 +258,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
   }
   // The @ button types an @ at the caret (after a space when needed), which opens the mention menu.
   const startMention = () => {
-    const el = document.querySelector('[aria-label="Message input"]') as HTMLElement | null
+    const el = rootRef.current?.querySelector('[aria-label="Message input"]') as HTMLElement | null
     if (!el) return
     const sel = getSelection()
     if (!el.contains(sel?.anchorNode ?? null)) { el.focus(); sel?.selectAllChildren(el); sel?.collapseToEnd() }
@@ -264,9 +266,11 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
     document.execCommand('insertText', false, before && !/\s$/.test(before) ? ' @' : '@')
   }
   const jumpTo = useCallback((id: string) => {
+    setLimit(Infinity) // the original may be above the shown rows
     setJump({ key: id })
-    const flash = () => document.getElementById(`rm-${id}`)?.parentElement?.animate([{ background: 'var(--color-background-muted, rgba(127,127,127,.25))' }, { background: 'transparent' }], 1200)
-    const el = document.getElementById(`rm-${id}`)
+    const byId = () => rootRef.current?.querySelector(`#rm-${CSS.escape(id)}`)
+    const flash = () => byId()?.parentElement?.animate([{ background: 'var(--color-background-muted, rgba(127,127,127,.25))' }, { background: 'transparent' }], 1200)
+    const el = byId()
     if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); flash() } else setTimeout(flash, 300)
   }, [])
   const post = useMutation({
@@ -348,11 +352,14 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
     return out
   }, [msgs, room.members, byName])
   const { byId: roleOf } = useRoles()
-  const rows = useMemo(() => roomRows(msgs, profile.handle, workingAfter), [msgs, profile.handle, workingAfter])
+  const allRows = useMemo(() => roomRows(msgs, profile.handle, workingAfter), [msgs, profile.handle, workingAfter])
+  const [limit, setLimit] = useState(compact ? DOCK_LIMIT : Infinity)
+  const rows = useMemo(() => (allRows.length > limit ? allRows.slice(-limit) : allRows), [allRows, limit])
   const tickets = useTicketPlugins()
   const mentions = useMemo(() => [mentionPlugin(agents, profile, (a) => roleOf(a.pool ?? 'other').color as TokenColor, onOpenAgent), ...tickets], [agents, profile, roleOf, onOpenAgent, tickets])
   const messageList = useMemo(() => syncing ? <Delayed><ChatSkeleton /></Delayed> : (
         <ChatMessageList density={density}>
+          {allRows.length > rows.length && <ShowEarlier onClick={() => setLimit((l) => l + DOCK_LIMIT)} />}
           <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => r.id} jump={jump} render={(r) => r.kind === 'status' ? (
             <ChatMessage key={r.id} sender="system">
               <Text type="supporting" size="sm" maxLines={1}>{r.text}</Text>
@@ -377,7 +384,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
             </ChatMessage>
           ))(r.m)} />
         </ChatMessageList>
-  ), [rows, profile, agents, mentions, density, syncing, jump]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [rows, allRows.length, profile, agents, mentions, density, syncing, jump]) // eslint-disable-line react-hooks/exhaustive-deps
   // One body for the phone sheet and the desktop popover.
   const roomSettings = (
     <div style={{ display: 'flex', flexDirection: 'column', width: narrow ? '100%' : 340, maxHeight: '85dvh', minWidth: 0 }}>
@@ -416,8 +423,9 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
     </div>
   )
   return (
+    <div ref={rootRef} style={{ display: 'contents' }}>
     <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
-      <HStack gap={1} align="center" style={{ minWidth: 0, flexWrap: 'nowrap' }}>
+      {!compact && <HStack gap={1} align="center" style={{ minWidth: 0, flexWrap: 'nowrap' }}>
         <IconButton icon={<span aria-hidden style={{ fontSize: 20, lineHeight: 1 }}>‹</span>} label="Back to rooms" size="sm" variant="ghost" onClick={onBack} />
         <Heading level={3} maxLines={1} style={{ minWidth: 0 }}>{`#${room.slug}`}</Heading>
         {/* WP-89: the linked project; the chip switches the dashboard to that project. */}
@@ -439,7 +447,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
             <IconButton icon={<span aria-hidden>⋯</span>} label="Room settings" size="sm" variant="ghost" />
           </Popover>
         )}
-      </HStack>
+      </HStack>}
       {room.archived && <Banner status="info" title="Archived — read-only" description="Restore it from the ⋯ menu to post again." />}
       {room.paused && !room.archived && (
         <Card padding={2} variant="yellow">
@@ -495,7 +503,14 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
         description={`@all delivers this to all ${room.members.length} members of #${room.slug}.`} actionLabel="Send to all" actionVariant="primary"
         isActionLoading={post.isPending} onAction={() => confirm && post.mutate({ text: confirm, confirmAll: true })} />
     </VStack>
+    </div>
   )
+}
+
+// WP-112: a dock window renders the last DOCK_LIMIT rows; "Show earlier" reveals the next DOCK_LIMIT from memory.
+export const DOCK_LIMIT = 100
+export function ShowEarlier({ onClick }: { onClick: () => void }) {
+  return <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 8px' }}><Button label="Show earlier" size="sm" variant="ghost" onClick={onClick} /></div>
 }
 
 

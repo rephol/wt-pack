@@ -1,5 +1,5 @@
 // WP-112 chat dock state: the agent and room chats opened on desktop, each a compact window or a minimised tab.
-// Pure (the reducer, the unread rule, load/save); Dock.tsx renders it. Remembered per device in localStorage.
+// Pure (the reducer, the unread rule, load/save); ChatDock.tsx renders it. Remembered per device in localStorage.
 export type DockItem = { key: string; kind: 'agent' | 'room'; min: boolean; openedAt: number }
 export type DockState = { items: DockItem[]; seen: Record<string, number> }
 export type DockAction = { type: 'open' | 'minimise' | 'close' | 'seen'; key: string; now: number }

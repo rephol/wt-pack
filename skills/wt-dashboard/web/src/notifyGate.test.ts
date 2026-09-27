@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { gate, collapseRepeats, shortAgo, DEFAULT_PREFS, type InboxItem, type Kind } from './notifyGate.ts'
 
 test('gate: per-kind native/inbox toggles, quiet items, open-panel suppression, dedupe, 30s per-target rate limit', () => {
-  const st = (over = {}) => ({ prefs: structuredClone(DEFAULT_PREFS), focused: false, openKey: null, seen: new Set<string>(), lastAt: new Map<string, number>(), now: 0, ...over })
+  const st = (over = {}) => ({ prefs: structuredClone(DEFAULT_PREFS), focused: false, openKeys: [] as string[], seen: new Set<string>(), lastAt: new Map<string, number>(), now: 0, ...over })
   const e = (kind: Kind, key: string, extra: Partial<InboxItem> = {}): InboxItem => ({ id: key, ts: '', kind, key, title: 't', body: 'b', read: false, resolvedAt: null, target: { agent: 'a' }, ...extra })
   const noNative = st(); noNative.prefs.native['agent-done'] = false
   assert.equal(gate(e('agent-done', 'd'), noNative), false) // native off (inbox may stay on)
@@ -11,8 +11,8 @@ test('gate: per-kind native/inbox toggles, quiet items, open-panel suppression, 
   assert.equal(gate(e('agent-done', 'd'), noInbox), false) // hidden kinds never pop either
   assert.equal(gate(e('question', 'q', { quiet: true }), st()), false)
   assert.equal(gate(e('room-suggestion', 's'), st()), false) // off natively by default
-  assert.equal(gate(e('agent-done', 'd'), st({ focused: true, openKey: 'a' })), false)
-  assert.equal(gate(e('agent-done', 'd'), st({ focused: false, openKey: 'a' })), true)
+  assert.equal(gate(e('agent-done', 'd'), st({ focused: true, openKeys: ['a'] })), false)
+  assert.equal(gate(e('agent-done', 'd'), st({ focused: false, openKeys: ['a'] })), true)
   const s = st()
   assert.equal(gate(e('question', 'n1'), s), true)
   assert.equal(gate(e('question', 'n1'), { ...s, now: 60_000 }), false)
