@@ -136,7 +136,11 @@ doctor() {
     && opt "~/.claude/settings.json runs a hook from $REPO/wt-shared/hooks (pre-WP-69 path) — change it to ~/.claude/skills/wt-shared/hooks/"
 
   mp=$(market_path)
-  if plugin_ok enabled; then
+  # WP-122: a plugin-only install (wt-pack@wt-pack) has no wt-memory@wt-pack by design.
+  root_plugin=$(claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).some(p=>p.id==="wt-pack@wt-pack"&&p.enabled)?1:"")}catch{}})')
+  if [ -n "$root_plugin" ] && ! plugin_ok enabled; then
+    ok "plugin wt-pack@wt-pack (plugin-only install; wt-memory's hooks come with it)"
+  elif plugin_ok enabled; then
     iv=$(plugin_ver); sv=$(src_ver "${mp:-$REPO}")
     # WP-118: a stale install silently lacks newer hooks (the WP-109 pkill guard shipped in 0.4.4).
     if [ -n "$sv" ] && [ "$iv" != "$sv" ]; then bad "plugin wt-memory@wt-pack $iv installed, checkout has $sv — ./setup install (then restart agents)"
@@ -151,7 +155,7 @@ doctor() {
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
   # WP-122: the root wt-pack plugin is the plugin-only path; with the ./setup plugin too, hooks run twice. Installed
   # from a local checkout it copies everything there (node_modules, .claude/worktrees = other tickets' code).
-  if claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-pack@wt-pack"&&p.enabled)?0:1)}catch{process.exit(1)}})'; then
+  if [ -n "$root_plugin" ]; then
     plugin_ok enabled && opt "both wt-pack@wt-pack (plugin-only install) and wt-memory@wt-pack (./setup) are enabled — hooks run twice; pick one: claude plugin disable wt-pack@wt-pack"
     [ -n "$mp" ] && { [ -d "$mp/.claude/worktrees" ] || [ -d "$mp/node_modules" ] || [ -d "$mp/skills/wt-dashboard/node_modules" ]; } \
       && opt "wt-pack@wt-pack was installed from the working checkout $mp — its worktrees and node_modules went into the plugin cache; install from GitHub (rephol/wt-pack) or a clean clone"
