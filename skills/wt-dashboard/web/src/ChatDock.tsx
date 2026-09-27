@@ -1,7 +1,8 @@
 // WP-112 chat dock (desktop): a full-width footer bar holding a tab per open agent or room chat; an open chat's
 // window pops up above its tab (at most MAX_WINDOWS). A minimised tab renders no chat body, so after the stream's
 // 30s grace it fetches nothing; its dot and unread marker come from the overview and rooms polls App already runs.
-// While the bar shows, <html> carries hd-has-dock: the app shell, toasts and the ⌘K button make room for it.
+// WP-119: the bar always shows on desktop (empty state when no chat is open), so the page reserves its height and
+// nothing jumps when the first chat opens; <html> carries hd-has-dock: the shell, toasts and the ⌘K button make room.
 import { useEffect, type ReactNode } from 'react'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -15,18 +16,16 @@ export function Dock({ state, dispatch, meta, unread, body, onExpand }: {
   state: DockState; dispatch: (a: DockAction) => void; meta: (key: string) => DockMeta; unread: Record<string, 'dot' | '!'>
   body: (key: string) => ReactNode; onExpand: (key: string) => void
 }) {
-  const shown = state.items.length > 0
   useEffect(() => {
-    document.documentElement.classList.toggle('hd-has-dock', shown)
+    document.documentElement.classList.add('hd-has-dock')
     return () => document.documentElement.classList.remove('hd-has-dock')
-  }, [shown])
-  if (!shown) return null
+  }, [])
   const act = (type: DockAction['type'], key: string) => dispatch({ type, key, now: Date.now() })
   // ⌘K is the switcher's own shortcut; the bar's button presses it (the floating button is hidden while the bar shows).
   const switcher = () => dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, ctrlKey: !/Mac/.test(navigator.platform) }))
   return (
     <div className="hd-dock" role="toolbar" aria-label="Chat dock">
-      <div className="hd-dock-slots">{state.items.map((i) => {
+      <div className="hd-dock-slots">{!state.items.length && <Text size="sm" color="secondary">No chats open</Text>}{state.items.map((i) => {
         const m = meta(i.key), u = unread[i.key]
         return (
           <div key={i.key} className="hd-dock-slot" data-open={i.min ? undefined : ''} data-unread={u ?? undefined}>
