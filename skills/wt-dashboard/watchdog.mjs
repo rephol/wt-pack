@@ -119,7 +119,7 @@ export function psStarts(text) {
   const m = new Map()
   for (const line of String(text).split('\n')) {
     const r = line.match(/^\s*\d+\s+\w{3}\s+(\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/)
-    const name = r && /(?:^|\/)claude(?:\s|$)/.test(r[2]) && r[2].match(/--name[ =](\S+)/)?.[1]
+    const name = r && /^(?:\S*\/)?claude\s/.test(r[2]) && r[2].match(/--name[ =](\S+)/)?.[1]
     const t = name && Date.parse(r[1])
     if (t && !(m.get(name) >= t)) m.set(name, t)
   }

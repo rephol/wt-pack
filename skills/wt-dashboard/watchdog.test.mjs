@@ -139,7 +139,7 @@ test('WP-120 stale-hooks: ps parse, agents started before the guard flagged, aft
     '29492 Sun Sep 27 11:31:40 2026 claude --name wt-pack-worker-01',
     '  812 Sun Sep 27 20:10:00 2026 /usr/local/bin/claude --dangerously-skip-permissions --name wt-pack-worker-02',
     '  900 Sun Sep 27 10:00:00 2026 node server.mjs --name wt-pack-worker-02',
-    '  901 Sun Sep 27 10:00:00 2026 zsh',
+    '  901 Sun Sep 27 10:00:00 2026 /bin/zsh -c eval claude --name wt-pack-worker-03',
   ].join('\n'))
   assert.equal(ps.size, 2)
   const guardAt = Date.parse('Sun Sep 27 19:37:40 2026')
