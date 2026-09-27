@@ -4,6 +4,7 @@
 import { readFile, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { unTag, attr } from '../wt-shared/scripts/wt-message.mjs' // WP-104: unTag also neutralises <wt-message>
 import { open, tx } from './store.mjs'
 
 export const DEFAULT_SETTINGS = {
@@ -136,8 +137,6 @@ export function withAttachments(text, atts, local) {
 export const replySnippet = (text) => { const l = String(text ?? '').trim().split('\n')[0]; return l.length > 80 ? `${l.slice(0, 79)}…` : l }
 // WP-67: each message is wrapped in a tag carrying a per-delivery nonce and the server-set author, so text
 // that imitates the user, the dashboard or a closing tag cannot pass for anything but that author's words.
-const unTag = (t) => String(t ?? '').replace(/<(\/?)(room-message)/gi, '<$1$2\u200b')
-const attr = (t) => String(t ?? '').replace(/["<>&\n]/g, '')
 export function batchPrompt(slug, msgs, broadcast = false, local = true, nonce = randomBytes(6).toString('hex')) {
   const lines = msgs.map((m) => {
     const kind = ['user', 'agent', 'system'].includes(m.author.kind) ? m.author.kind : 'agent'

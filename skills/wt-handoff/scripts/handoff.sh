@@ -2,7 +2,12 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
+#
+# WP-104: every prompt goes out wrapped as <wt-message id=… kind=handoff|dispatch|routine|reply|system from="…"
+# [ticket=…]>…</wt-message> (skills/wt-shared/scripts/wt-message.mjs), so the target knows it is wt-pack traffic,
+# not its user. --kind (default handoff) and --from (default: the sender's agent name) are for server callers.
 #
 # Handoff agents live in their own herdr workspace, "<repo>-workers" (override
 # with HANDOFF_WORKSPACE), created on demand. That workspace IS the pool: an
@@ -46,6 +51,11 @@ mode=auto
 role=
 pane_arg=
 clear=0
+kind=handoff
+from_arg=
+reply=
+PANE_RE='^[A-Za-z0-9:_][A-Za-z0-9:_-]*$'
+WTMSG="$(cd "$(dirname "$0")" && pwd)/../../wt-shared/scripts/wt-message-cli.mjs"
 goal=1
 task=
 mcp=
@@ -56,7 +66,13 @@ while :; do
     --list)  mode=list; shift ;;
     --new)   mode=new; shift ;;
     --clear) clear=1; shift ;;
-    --pane)  pane_arg=$2; mode=pane; shift 2 ;;
+    --pane)  pane_arg=$2; mode=pane; shift 2
+             printf '%s' "$pane_arg" | grep -qE "$PANE_RE" || { echo "--pane: bad pane id" >&2; exit 2; } ;;
+    --reply) reply=$2; shift 2
+             printf '%s' "$reply" | grep -qE "$PANE_RE" || { echo "--reply: bad pane id" >&2; exit 2; } ;;
+    --kind)  kind=$2; shift 2
+             case "$kind" in handoff|dispatch|routine|reply|system) ;; *) echo "--kind: handoff, dispatch, routine, reply or system" >&2; exit 2 ;; esac ;;
+    --from)  from_arg=$2; shift 2 ;;
     --no-goal) goal=0; shift ;;
     --task)  task=$2; shift 2 ;;
     --role)  role=$2; shift 2
@@ -70,6 +86,25 @@ done
 
 
 command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
+
+# Who is sending: $HERDR_PANE_ID may be herdr's stable id, so resolve it to the pane id
+# `agent list` uses. Outside herdr there is no sender and no sender-side tokens.
+pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // empty'; }
+name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
+
+# --reply: a plain answer to whoever sent us a wt-message — no /goal, no tokens, no worker selection.
+if [ -n "$reply" ]; then
+  text=${1:-}
+  [ -n "$text" ] || { [ -t 0 ] && { echo "--reply <pane> \"text\" (or text on stdin)" >&2; exit 2; }; text=$(cat); }
+  [ -n "$text" ] || { echo "--reply: no text" >&2; exit 2; }
+  me=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
+  nm=$( [ -n "$me" ] && name_of "$me" || true)
+  msg=$(printf '%s' "$text" | node "$WTMSG" --kind reply --from "${from_arg:-${nm:-${me:-wt-handoff}}}") || { echo "wt-message wrap failed" >&2; exit 1; }
+  [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
+  herdr agent prompt "$reply" "$msg" >/dev/null
+  echo "replied $reply"
+  exit 0
+fi
 
 cwd=$1
 [ "$mode" = list ] || prompt=$(cat "${2:-/dev/stdin}")
@@ -167,15 +202,11 @@ hand_to() {
   herdr agent prompt "$1" "$send" >/dev/null
 }
 
-# Who is sending: $HERDR_PANE_ID may be herdr's stable id, so resolve it to the pane id
-# `agent list` uses. Outside herdr there is no sender and no sender-side tokens.
-pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // empty'; }
-name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
 from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
 from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
 [ -n "$from_pane" ] && prompt="$prompt
 
-Handed off by ${from_name:-$from_pane} (pane $from_pane). To reach it: herdr agent prompt $from_pane \"...\""
+Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply $from_pane \"...\""
 
 # The task label starts with the ticket when there is one, and is cut to herdr's 80 characters here.
 # A ticket is <TEAM>-N for a Linear team in WT_LINEAR_TEAMS (~/.config/wt-dashboard/env) or <KEY>-N for a local
@@ -193,6 +224,10 @@ case "$(printf '%s' "$task" | tr '[:lower:]' '[:upper:]')" in
   *) task=$(printf '%s %s' "$ticket" "$task" | sed 's/^ *//; s/ *$//') ;;
 esac
 task=$(printf '%.80s' "$task")
+
+# Wrap once, before the goal/no-goal split (so --no-goal is tagged too); a failed wrap never sends untagged.
+prompt=$(printf '%s' "$prompt" | node "$WTMSG" --kind "$kind" --from "${from_arg:-${from_name:-${from_pane:-wt-handoff}}}" ${ticket:+--ticket "$ticket"}) \
+  || { echo "wt-message wrap failed" >&2; exit 1; }
 
 # The goal IS the directive: setting one starts a turn with the condition as the
 # instruction, so this is a single message, not a prompt followed by a goal.
@@ -234,12 +269,13 @@ finish() {  # <first output line> <target pane>
   fi
   echo "$line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
-  echo "reach: herdr agent prompt $to \"...\""
+  echo "reach: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply $to \"...\""
   [ -z "$routed" ] || echo "$routed"
 }
 
 dry() {  # <what would happen>
   echo "dry-run: $1"
+  echo "send: $send"
   echo "ticket=${ticket:-none}"
   [ -n "$local_ticket" ] && [ "$role" = worker ] && echo "board: would move $local_ticket building + assign the worker"
   echo "mcp: ${mcp:-none}${jev:+ (jev: $jev)}"

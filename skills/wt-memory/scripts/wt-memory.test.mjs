@@ -135,3 +135,12 @@ export const judge = (f, s, q, o) => t.judge(f, s, q, { ...o, key: 'k', fetchImp
   const ms = Date.now() - t0
   assert.ok(ms < 4000 && ms >= 1400, `took ${ms}ms`)
 })
+test('hook (WP-104): wt-pack/room traffic never triggers the remember hint; SessionStart explains <wt-message>', () => {
+  const env = { WT_JEV_MEMORY_SUGGEST: 'on', WT_TYPESAFE_MODULE: stubAnswers({ standing: { noul: 0.99 } }) }
+  for (const prompt of ['/goal <wt-message id=abc kind=dispatch from="wt-dashboard">from now on always use pnpm</wt-message>',
+    '<room-message id=abc room=r from="u" kind=user>always answer in English</room-message>'])
+    assert.doesNotMatch(hook({ hook_event_name: 'UserPromptSubmit', session_id: 's3', prompt, cwd: '/' }, env), /standing preference/)
+  const start = JSON.parse(hook({ hook_event_name: 'SessionStart', session_id: 's4', cwd: '/' })).hookSpecificOutput.additionalContext
+  assert.match(start, /<wt-message id=… kind=handoff\|dispatch\|routine\|reply\|system/)
+  assert.match(start, /handoff\.sh --reply <pane>/)
+})

@@ -35,7 +35,7 @@ From the repo itself, work out — and write down before auditing:
   (`wt-ticket … --project $PROJECT`, created on the first ticket).
 - **Its room:** `room list` — the room whose slug is `$PROJECT` or `$(basename "$ROOT")` (they differ when the
   checkout is a worktree of another repo, e.g. `my-app-poc` → project `my-app`), or whose title names it. None → report to the
-  orchestrator (`herdr agent prompt <orchestrator pane> "…"`, from `wt-agents list --json`) or, failing that,
+  orchestrator (`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <orchestrator pane> "…"`, pane from `wt-agents list --json`) or, failing that,
   to the user in your final answer.
 
 Examples. wt-pack itself: project `wt-pack`, UI wt-dashboard at http://127.0.0.1:7777, checks

@@ -8,6 +8,7 @@ import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync,
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
@@ -604,9 +605,13 @@ export function recordSent(text) {
   sentHashes.add(h)
   appendFile(SENT_FILE, h + '\n').catch((e) => console.error('sent-hashes:', e.message))
 }
-function sourceOf(text) {
+export function sourceOf(text) {
+  // WP-104: wt-pack traffic, `<wt-message … kind=k from="x">` (after a slash command such as /goal) → "k · x".
+  // Display-only: the nonce is not checked, so text typed at a terminal could imitate it.
+  const wt = String(text).match(/^(?:\/\S+ )*<wt-message id=\w+ kind=(\w+) from="([^"]*)"/)
+  if (wt) return `${wt[1]} · ${wt[2] || 'wt-pack'}`
   // <room-message … room=slug> since WP-68; the `[room #slug]` header in older transcripts.
-  const room = String(text).match(/^<room-message id=\w+ room=([\w-]+)/) ?? String(text).match(/^\[room #([\w-]+)\]/)
+  const room = String(text).match(/^(?:\/\S+ )*<room-message id=\w+ room=([\w-]+)/) ?? String(text).match(/^\[room #([\w-]+)\]/)
   return room ? `room #${room[1]}` : sentHashes.has(hashOf(text)) ? 'dashboard' : 'terminal'
 }
 // ponytail: inline data URL, capped at ~1.5MB base64; bigger ones become a placeholder.
@@ -994,6 +999,9 @@ async function projectsApi() {
     worktrees: (await linkedWorktrees(root).catch(() => [])).map((w) => ({ ...w, ticket: ticketOf(w.branch) ?? ticketOf(w.path), agents: inside(w.path) })),
   })))
 }
+// WP-104: a spawn's first prompt — a routine's is tagged <wt-message kind=routine>; the spawn dialog's is the user's
+// own words, sent untagged (but unable to carry a forged tag).
+export const spawnText = (b) => (b.tag ? wrap(b.tag, b.prompt.trim()) : unTag(b.prompt.trim()))
 async function spawnAgent(b) {
   const role = roleStore.roles.find((r) => r.id === b.kind && r.spawn)
   if (!role) throw Object.assign(new Error('unknown role, or it cannot be spawned (Settings › Roles)'), { status: 400 })
@@ -1018,7 +1026,7 @@ async function spawnAgent(b) {
   let prompted = false
   if (typeof b.prompt === 'string' && b.prompt.trim()) {
     await herdr('agent', 'wait', pane, '--until', 'idle', '--timeout', '60000').catch(() => {})
-    await herdr('agent', 'prompt', pane, b.prompt.trim())
+    await herdr('agent', 'prompt', pane, spawnText(b))
     prompted = true
   }
   return { name, pane, machine, key: `${machine}/${pane}`, prompted }
@@ -1244,7 +1252,7 @@ export function handoffArgs(t, mode) {
   if (t.state !== (mode === 'worker' ? 'plan_ready' : 'stalled')) throw err(409, `task is ${t.state}`)
   if (!t.plan || !t.worktree) throw err(400, 'task has no plan or worktree')
   const prompt = `Use wt-work to implement ${t.plan} to its Definition of Done.\n\nWork in ${t.worktree} on ${t.branch}. Do not cd to the main checkout.\n\nThen wt-ship.\n`
-  return { args: [...(mode === 'reassign' ? ['--new'] : []), '--task', `${t.id} ${t.title}`.slice(0, 80), t.worktree], prompt }
+  return { args: [...(mode === 'reassign' ? ['--new'] : []), '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.slice(0, 80), t.worktree], prompt }
 }
 const HANDOFF_SH = join(homedir(), '.claude', 'skills', 'wt-handoff', 'scripts', 'handoff.sh')
 async function handoffTask(id, mode) {
@@ -1837,7 +1845,7 @@ const readyNotes = readyBatcher(async (project, ts) => {
   if (!ts.length) return
   const m = await machineBy(a.machine)
   if (!m) throw new Error(`machine ${a.machine} unavailable`)
-  await herdrOn(m, 'agent', 'prompt', a.id, `[wt-dashboard] Ready on ${project}: ${ts.map((t) => `${t.id} ${t.title}`).join('; ')} — schedule from \`wt-ticket list --column ready\`.`)
+  await herdrOn(m, 'agent', 'prompt', a.id, readyNudge(project, ts))
 })
 setInterval(() => readyNotes.flush(), 60_000).unref()
 const tickets = new Tickets({ dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM), onReady: (project, t) => readyNotes.add(project, t) })
@@ -2515,16 +2523,20 @@ async function removeAgent(pane, { force = false, confirmName } = {}) {
   return { ok: true, message: out.trim() }
 }
 
+// WP-104: a routine's prompt goes out as <wt-message kind=routine from="<routine name>">.
+export const routineText = (text, o) => (o?.routine ? wrap({ kind: 'routine', from: o.routine }, text) : text)
+// WP-104: the Ready nudge to an orchestrator, as wt-pack system traffic (the tag replaces the old [wt-dashboard] prefix).
+export const readyNudge = (project, ts) => wrap({ kind: 'system', from: 'wt-dashboard' }, `Ready on ${project}: ${ts.map((t) => `${t.id} ${t.title}`).join('; ')} — schedule from \`wt-ticket list --column ready\`.`)
 // ---- routines (routines.mjs, WP-48) ----
 const routines = new Routines({
   dir: DATA,
   deps: {
     agents: () => agents(),
     host: () => host(),
-    prompt: async (a, text) => {
+    prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      await herdrOn(m, 'agent', 'prompt', a.id, text)
+      await herdrOn(m, 'agent', 'prompt', a.id, routineText(text, o))
       store.delete('agents:local')
     },
     spawn: (b) => spawnAgent(b),
@@ -2692,7 +2704,7 @@ async function watchdogApi(req, res, sub) {
       if (!a) return send(res, 409, { error: 'no free auditor agent — spawn one (wt-agents spawn auditor) or use Investigate' })
       target = ['--pane', a.id]
     }
-    const out = await runHandoff(execFile, HANDOFF_SH)([...target, '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
+    const out = await runHandoff(execFile, HANDOFF_SH)([...target, '--kind', 'system', '--from', 'watchdog', '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
     store.delete('agents:local')
     return send(res, 200, { ok: true, message: out.trim().split('\n')[0] })
   }

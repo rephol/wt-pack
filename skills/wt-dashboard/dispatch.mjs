@@ -26,7 +26,7 @@ export function mergeIds(subject, key) {
 export function reportLine(report) {
   const parts = [
     report?.room && `post a one-line result in #${report.room} with \`room post ${report.room} "…"\``,
-    report?.orch && `send a one-line result to ${report.orch.name} with \`herdr agent prompt ${report.orch.pane} "…"\``,
+    report?.orch && `send a one-line result to ${report.orch.name} with \`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply ${report.orch.pane} "…"\``,
   ].filter(Boolean)
   return parts.length ? `When done, ${parts.join(' and ')}.\n` : ''
 }
@@ -140,7 +140,7 @@ export class Dispatch {
     if (!claimed) return
     const role = roleFor(next)
     try {
-      const out = await this.deps.handoff(['--role', role, '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
+      const out = await this.deps.handoff(['--role', role, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
       const [first = '', second = ''] = out.trim().split('\n')
       const f = first.split(' ')
       const pane = f[0] === 'reused' ? f[1] : f[0] === 'created' ? f[2] : null
