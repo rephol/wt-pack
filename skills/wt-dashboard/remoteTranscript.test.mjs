@@ -15,7 +15,7 @@ test('ssh refuses a host that could become a flag or carry shell', async () => {
 })
 
 test("projectDir is Claude's encoding and only ever [A-Za-z0-9-]; hostile cwds cannot escape", () => {
-  assert.equal(projectDir('/work/projects/umkmall'), '-work-projects-umkmall')
+  assert.equal(projectDir('/work/projects/acmeapp'), '-work-projects-acmeapp')
   assert.equal(projectDir('/Users/x/my.repo_1'), '-Users-x-my-repo-1')
   for (const cwd of ['/x"; rm -rf ~; "', '/x$(id)', '/x\nid', '/../..', '/x`id`']) {
     const d = projectDir(cwd)
@@ -26,10 +26,10 @@ test("projectDir is Claude's encoding and only ever [A-Za-z0-9-]; hostile cwds c
 })
 
 test('scripts: only validated parts, double-quoted with $HOME; non-UUID ids and bad sizes refused', () => {
-  const d = projectDir('/work/projects/umkmall')
-  assert.equal(candidatesScript(d), `cd "$HOME/.claude/projects/-work-projects-umkmall" 2>/dev/null && find . -maxdepth 1 -name '*.jsonl' -mmin -10080 -printf '%T@ %s %f\\n'`)
-  assert.equal(tailScript(d, A, 65536), `tail -c 65536 "$HOME/.claude/projects/-work-projects-umkmall/${A}.jsonl"`)
-  assert.equal(readScript(d, A, 100, 4194304), `tail -c +101 "$HOME/.claude/projects/-work-projects-umkmall/${A}.jsonl" | head -c 4194304`)
+  const d = projectDir('/work/projects/acmeapp')
+  assert.equal(candidatesScript(d), `cd "$HOME/.claude/projects/-work-projects-acmeapp" 2>/dev/null && find . -maxdepth 1 -name '*.jsonl' -mmin -10080 -printf '%T@ %s %f\\n'`)
+  assert.equal(tailScript(d, A, 65536), `tail -c 65536 "$HOME/.claude/projects/-work-projects-acmeapp/${A}.jsonl"`)
+  assert.equal(readScript(d, A, 100, 4194304), `tail -c +101 "$HOME/.claude/projects/-work-projects-acmeapp/${A}.jsonl" | head -c 4194304`)
   assert.throws(() => tailScript(d, '../../etc/passwd', 10), /refused/)
   assert.throws(() => tailScript('-x"; id; "', A, 10), /refused/)
   assert.throws(() => candidatesScript('/abs'), /refused/)
@@ -98,7 +98,7 @@ test('locate: lists, tails and matches through the injected ssh', async () => {
     if (script.includes('find')) return Buffer.from(`2 10 ${A}.jsonl\n1 10 ${B}.jsonl\n`)
     return Buffer.from(`cut\n${user(script.includes(A) ? 'deploy it to staging' : 'hello from the other pane')}`)
   }
-  assert.equal((await locate({ host: 'herdr-box', cwd: '/work/projects/umkmall', prompt: 'hello from the other pane', run }))?.id, B)
+  assert.equal((await locate({ host: 'herdr-box', cwd: '/work/projects/acmeapp', prompt: 'hello from the other pane', run }))?.id, B)
   assert.equal(await locate({ host: 'herdr-box', cwd: 'nope', prompt: 'x', run }), null)
   assert.equal(calls.length, 3)
 })

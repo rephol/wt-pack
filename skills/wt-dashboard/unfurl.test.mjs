@@ -63,11 +63,11 @@ test('parseHtml: OpenGraph first, then <title>/description, absolute image and i
 })
 
 test('classifyUrl: our GitHub repo, Linear issues, Claude artifacts', () => {
-  const repo = 'UMKMall/umkmall'
-  assert.deepEqual(classifyUrl('https://github.com/umkmall/umkmall/pull/1181', repo), { kind: 'pr', number: 1181 })
-  assert.deepEqual(classifyUrl('https://github.com/UMKMall/umkmall/issues/12#x', repo), { kind: 'issue', number: 12 })
+  const repo = 'AcmeApp/acmeapp'
+  assert.deepEqual(classifyUrl('https://github.com/acmeapp/acmeapp/pull/1181', repo), { kind: 'pr', number: 1181 })
+  assert.deepEqual(classifyUrl('https://github.com/AcmeApp/acmeapp/issues/12#x', repo), { kind: 'issue', number: 12 })
   assert.equal(classifyUrl('https://github.com/other/repo/pull/1', repo), null)
-  assert.deepEqual(classifyUrl('https://linear.app/umkmall/issue/UMK-1177/fazpass-otp', repo), { kind: 'linear', identifier: 'UMK-1177' })
+  assert.deepEqual(classifyUrl('https://linear.app/acmeapp/issue/ACM-1177/paygate-otp', repo), { kind: 'linear', identifier: 'ACM-1177' })
   assert.deepEqual(classifyUrl('https://claude.ai/code/artifact/abc', repo), { kind: 'artifact' })
   assert.equal(classifyUrl('https://example.com/', repo), null)
 })

@@ -13,15 +13,15 @@ const agent = { name: 'wt-pack-worker-01', pane: 'w1:p2' }
 
 test('deriveKey', () => {
   assert.equal(deriveKey('wt-pack'), 'WP')
-  assert.equal(deriveKey('umkmall'), 'UMK')
-  assert.equal(deriveKey('umkmall', new Set(['UMK'])), 'UMKM')
+  assert.equal(deriveKey('acmeapp'), 'ACM')
+  assert.equal(deriveKey('acmeapp', new Set(['ACM'])), 'ACME')
   assert.equal(deriveKey('web-portal', new Set(['WP'])), 'WPB')
   assert.equal(deriveKey('my_app2'), 'MA')
 })
 
 test('create: sequential ids, history, next', async () => {
   const dir = await tmp()
-  const t = new Tickets({ dir, reserved: ['UMK'] })
+  const t = new Tickets({ dir, reserved: ['ACM'] })
   const a = await t.create('wt-pack', { title: ' First ', type: 'bug' }, user)
   const b = await t.create('wt-pack', { title: 'Second', column: 'ready' }, agent)
   assert.deepEqual([a.id, b.id, a.title, a.column, b.column], ['WP-1', 'WP-2', 'First', 'backlog', 'ready'])
@@ -43,10 +43,10 @@ test('20 concurrent creates → 20 distinct ids and a valid file', async () => {
 })
 
 test('two concurrent first-board creates get distinct keys; Linear key refused', async () => {
-  const t = new Tickets({ dir: await tmp(), reserved: ['UMK'] })
+  const t = new Tickets({ dir: await tmp(), reserved: ['ACM'] })
   const [a, b] = await Promise.all([t.board('web-portal'), t.board('wt-pack')])
   assert.notEqual(a.key, b.key)
-  assert.equal((await t.board('umkmall')).key, 'UMKM')
+  assert.equal((await t.board('acmeapp')).key, 'ACME')
 })
 
 test('move appends history; blocked needs a note; validation', async () => {
