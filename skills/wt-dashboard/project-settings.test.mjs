@@ -43,10 +43,12 @@ test('a process env var wins over the project value', async () => {
 test('invalid values are rejected', async () => {
   const ps = new ProjectSettings({ dir: await tmp(), cfg: cfgOf() })
   for (const [k, v] of [['githubAccount', 'a b'], ['reviewerGithubAccount', 'a/b'], ['githubAccount', 'x'.repeat(40)], ['baseBranch', 'a..b'], ['baseBranch', '-x'],
-    ['WT_AGENTS_MCP', 'mid'], ['maxWorking', '101'], ['maxWorking', '-1'], ['nope', 'x'], ['baseBranch', '']])
+    ['WT_AGENTS_MCP', 'mid'], ['maxWorking', '101'], ['maxWorking', '-1'], ['maxReviewers', '21'], ['maxReviewers', 'x'], ['nope', 'x'], ['baseBranch', '']])
     assert.throws(() => ps.set('p', k, v), (e) => e.status >= 400, `${k}=${v}`)
   assert.throws(() => ps.set('../x', 'baseBranch', 'main'), /bad project/)
   assert.equal(ps.set('p', 'baseBranch', 'develop').value, 'develop')
+  assert.deepEqual(ps.resolve('q', 'maxReviewers'), { value: '2', source: 'default' })
+  assert.deepEqual(ps.set('p', 'maxReviewers', '0'), { value: '0', source: 'project' })
   assert.deepEqual(ps.set('p', 'reviewerGithubAccount', 'review-bot'), { value: 'review-bot', source: 'project' })
 })
 

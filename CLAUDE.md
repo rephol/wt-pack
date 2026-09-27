@@ -37,7 +37,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 | wt-plan · wt-work · wt-review · wt-pr · wt-ship · wt-simplify · wt-compound · wt-research | ticket pipeline |
 | wt-finish | retire worktree; clears `task` token |
 | wt-babysit | watch PR to merge-ready |
-| wt-watch-prs | reviewer loop over a repo's open PRs; state `~/.local/share/wt-watch-prs/` → Inbox `pr-held` |
+| wt-watch-prs | reviewer loop over a repo's open PRs (`dispatch \| review <pr> \| [repo]`); state `~/.local/share/wt-watch-prs/` → Inbox `pr-held` |
 | wt-audit | auditor role loop (PM + QA findings) |
 | wt-ticket | local kanban board CLI (`WP-N`): new/list/show/move/comment/claim/assign/keys |
 | wt-room | rooms CLI: list/read/post/--attach/create |

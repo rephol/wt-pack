@@ -21,6 +21,9 @@ export const PKEYS = {
   WT_AGENTS_MCP: { scope: 'overridable', label: 'Agent MCP', cfg: true, default: 'full', check: oneOf('full', 'lean') },
   maxWorking: { scope: 'overridable', label: 'Max working agents', routine: true, default: '4',
     check: (v) => (/^\d{1,3}$/.test(v) && Number(v) <= 100) || '0–100' },
+  // WP-121: wt-watch-prs dispatch spawns reviewers only while fewer than this are live in <repo>-reviewers.
+  maxReviewers: { scope: 'overridable', label: 'Max reviewers', routine: true, default: '2',
+    check: (v) => (/^\d{1,2}$/.test(v) && Number(v) <= 20) || '0–20' },
   WT_JEV_TICKET_TRIAGE: jev('Ticket triage'),
 }
 

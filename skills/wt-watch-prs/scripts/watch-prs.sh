@@ -6,13 +6,17 @@
 #   poll-shas [--once]               "PR #n — new commits <sha> — …" / "PR #n — NO LONGER OPEN — …", every 60s
 #   poll-replies --session S [--once]  human replies on holds this session placed, every 90s
 #   claim N S | release N S          atomic per-PR claim (mkdir)
-#   record N <sha40> <state> <outcome|-> S   write reviewed[N] under the state lock (- = outcome from stdin)
+#   record N <sha40> <state> <outcome|-> S [--by NAME]   write reviewed[N] under the state lock (- = outcome
+#                                    from stdin); --by remembers the reviewer agent for re-dispatch (WP-121)
+#   mode [dispatch|review|owner/repo]  dispatch | review | standalone (no arg: the pane's role token)
+#   dispatch N --sha <40> --session D  claim under D, hand the head to a pool reviewer (never reads a diff);
+#                                    exit 1 held or handoff failed, exit 3 queued at maxReviewers
 #   gate N                           green | red | pending | none   (GitHub Actions check runs only)
 #   describes N                      ok | no-body | branch-title
 #   diff N S [--sha SHA]             pinned-ref diff: delta vs the recorded head when it is an ancestor, else full
 # State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/<owner>-<repo>/{state.json,claims/,state.lock}
 # The dashboard reads state.json for held PRs (Inbox pr-held). Test knobs: WATCH_PRS_POLLS, WATCH_PRS_SLEEP,
-# WATCH_PRS_TTL.
+# WATCH_PRS_TTL, WATCH_PRS_HANDOFF.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "watch-prs: $*" >&2; exit 1; }
@@ -82,16 +86,18 @@ claim|release)
   echo "held by ${o:-UNKNOWN (empty owner — suspect a dead session)} since $(sed -n 2p "$C/owner" 2>/dev/null)"; exit 1
   ;;
 record)
-  [ $# -eq 5 ] || die "usage: record N <sha40> <state> <outcome|-> S"
+  by=""; [ $# -eq 7 ] && [ "$6" = --by ] && { by=$7; set -- "$1" "$2" "$3" "$4" "$5"; }
+  [ $# -eq 5 ] || die "usage: record N <sha40> <state> <outcome|-> S [--by NAME]"
   num "$1"; sess "$5"; setup
+  [ -z "$by" ] || printf '%s' "$by" | grep -qE '^[a-z0-9_-]{1,32}$' || die "bad --by agent name: $by"
   printf '%s' "$2" | grep -qE '^[0-9a-f]{40}$' || die "record needs the full 40-char head SHA (gh pr view $1 --json headRefOid)"
   case "$3" in approved|changes-requested|commented|merged|closed|open) ;; *) die "bad state: $3";; esac
   note=$4; [ "$note" = - ] && note=$(cat)
   L="$SD/state.lock"; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir "$L" 2>/dev/null && break; sleep 1; done
   [ -d "$L" ] || die "state lock held (stale? check $L mtime and remove by hand)"
   trap 'rmdir "$L" 2>/dev/null' EXIT
-  jq --arg n "$1" --arg sha "$2" --arg st "$3" --arg note "$note" --arg s "$5" \
-    '.reviewed[$n] = {sha: $sha, state: $st, outcome: $note, reviewer_session: $s}' "$STATE" > "$STATE.tmp" \
+  jq --arg n "$1" --arg sha "$2" --arg st "$3" --arg note "$note" --arg s "$5" --arg by "$by" \
+    '.reviewed[$n] = ({sha: $sha, state: $st, outcome: $note, reviewer_session: $s} + (if $by == "" then {} else {reviewer: $by} end))' "$STATE" > "$STATE.tmp" \
     && mv "$STATE.tmp" "$STATE"
   ;;
 gate)
@@ -120,7 +126,7 @@ diff)
   base=$(node "$here/../../wt-shared/scripts/project-setting.mjs" get baseBranch --cwd . 2>/dev/null)
   [ -n "$base" ] || base=$(git -C "$MAIN" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
   [ -n "$base" ] || base=main
-  REF="refs/review/$S/pr-$P-head"; BASE="refs/review/$S/base"
+  REF="refs/review/$S/pr-$P-head"; BASE="refs/review/$S/pr-$P-base"  # per PR: dispatched reviews share one session
   for i in 1 2 3; do git -C "$MAIN" fetch --no-tags -f -q origin "refs/pull/$P/head:$REF" "$base:$BASE" && break; sleep 2; done
   head=$(git -C "$MAIN" rev-parse -q --verify "$REF") || die "could not fetch refs/pull/$P/head"
   [ -z "$want" ] || [ "$head" = "$want" ] || die "ref $head != reported head $want — aborting"
@@ -131,6 +137,44 @@ diff)
     [ -n "$old" ] && [ "$old" != "$head" ] && echo "# FULL review: $old is not an ancestor of $head (force-push/rebase)"
     echo "# FULL $base...$head"; git -C "$MAIN" diff "$BASE...$REF"
   fi
+  ;;
+mode)
+  case "${1:-}" in dispatch|review) echo "$1"; exit 0;; '') ;;
+    *) printf '%s' "$1" | grep -qE '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' && { echo standalone; exit 0; }; die "mode: dispatch, review or owner/repo, not $1";; esac
+  role=""; command -v herdr >/dev/null 2>&1 && [ -n "${HERDR_PANE_ID:-}" ] \
+    && role=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.tokens.role // empty' 2>/dev/null)
+  case "$role" in orchestrator) echo dispatch;; *) echo standalone;; esac
+  ;;
+dispatch)
+  num "${1:-}"; P=$1; shift; X=""; D=""
+  while [ $# -gt 0 ]; do case "$1" in --sha) X=${2:-}; shift 2;; --session) D=${2:-}; shift 2;; *) die "unknown arg $1";; esac; done
+  printf '%s' "$X" | grep -qE '^[0-9a-f]{40}$' || die "dispatch needs --sha <40-char head SHA>"
+  sess "$D"; setup
+  # The reviewer replies to this pane (handoff's footer), and only that reply releases the claim.
+  command -v herdr >/dev/null 2>&1 && [ -n "$(herdr pane get "${HERDR_PANE_ID:-none}" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)" ] \
+    || die "dispatch needs a herdr pane (the reviewer replies to it)"
+  # Held by D itself = an earlier dispatch whose reviewer never replied (died, stopped): hand it again, keep the claim.
+  c=$("$0" claim "$P" "$D") || { [ "$(head -1 "$CLAIMS/pr$P/owner" 2>/dev/null)" = "$D" ] || { echo "$c"; exit 1; }; }
+  undo() { "$0" release "$P" "$D" >/dev/null 2>&1; }
+  MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+  ag=$(herdr agent list 2>/dev/null) || ag='{}'
+  ws=$(herdr workspace list 2>/dev/null | jq -r --arg l "$(basename "$MAIN")-reviewers" '.result.workspaces[]? | select(.label == $l) | .workspace_id' | head -1)
+  # The reviewer that held this PR gets it back when free; else handoff reuses a free pool reviewer or spawns one.
+  prev=$(jq -r --arg n "$P" '.reviewed[$n].reviewer // ""' "$STATE")
+  pane=""; [ -n "$prev" ] && pane=$(printf '%s' "$ag" | jq -r --arg n "$prev" '.result.agents[]? | select(.name == $n and (.agent_status == "idle" or .agent_status == "done")) | .pane_id' | head -1)
+  if [ -z "$pane" ]; then
+    free=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w and (.agent_status == "idle" or .agent_status == "done"))] | length')
+    live=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w)] | length')
+    max=$(node "$here/../../wt-shared/scripts/project-setting.mjs" get maxReviewers --cwd "$MAIN" 2>/dev/null); max=${max:-2}
+    # ponytail: counts from one agent list — two dispatches in the same second can both spawn (cap +1 at worst).
+    { [ "$max" -gt 0 ] && { [ "${free:-0}" -gt 0 ] || [ "${live:-0}" -lt "$max" ]; }; } || { undo; echo "queued: at maxReviewers ($max)"; exit 3; }
+  fi
+  H=${WATCH_PRS_HANDOFF:-$here/../../wt-handoff/scripts/handoff.sh}
+  # --no-goal: a review is one run that stops. The body carries D: the reviewer records under it, no claim/release.
+  out=$(printf '/wt-watch-prs review %s --sha %s --session %s' "$P" "$X" "$D" \
+    | "$H" --role reviewer --kind dispatch --pr "$P" --sha "$X" ${pane:+--pane "$pane"} --no-goal "$MAIN") \
+    || { undo; die "handoff failed for #$P${out:+: $out}"; }
+  echo "dispatched #$P to $(printf '%s\n' "$out" | sed -n 's/^target \([^ ]*\) .*/\1/p' | head -1)"
   ;;
 poll-shas)
   [ "${1:-}" = --once ] && WATCH_PRS_POLLS=1
