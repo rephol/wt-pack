@@ -77,6 +77,9 @@ service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLI
 # JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
 market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).find(x=>x.name==="wt-pack");if(m)console.log(m.path||m.installLocation||"")}catch{}})'; }
 # plugin_ok [enabled]: wt-memory@wt-pack is installed (and enabled).
+# plugin_ver: installed wt-memory@wt-pack version; src_ver <checkout>: the version its plugin.json declares (WP-118).
+plugin_ver() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).find(p=>p.id==="wt-memory@wt-pack")?.version||"")}catch{}})'; }
+src_ver() { node -e 'try{console.log(require(process.argv[1]).version||"")}catch{}' "$1/skills/wt-memory/claude-plugin/.claude-plugin/plugin.json"; }
 plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
 # Install hint for a missing package, for this OS.
 # sudo only when needed: root (a container) often has no sudo at all.
@@ -134,7 +137,10 @@ doctor() {
 
   mp=$(market_path)
   if plugin_ok enabled; then
-    ok "plugin wt-memory@wt-pack${mp:+ (marketplace $mp)}"
+    iv=$(plugin_ver); sv=$(src_ver "${mp:-$REPO}")
+    # WP-118: a stale install silently lacks newer hooks (the WP-109 pkill guard shipped in 0.4.4).
+    if [ -n "$sv" ] && [ "$iv" != "$sv" ]; then bad "plugin wt-memory@wt-pack $iv installed, checkout has $sv — ./setup install (then restart agents)"
+    else ok "plugin wt-memory@wt-pack $iv${mp:+ (marketplace $mp)}"; fi
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
 
   # WP-98: commits here use a GitHub noreply identity (repo-local git config), so no personal/work email ships.
@@ -266,7 +272,12 @@ plugin() {
   elif [ "$mp" != "$REPO" ]; then bad "a marketplace named wt-pack points at $mp, which is not a wt-pack checkout"; return 1
   fi
   if plugin_ok; then
-    ok "already: wt-memory@wt-pack installed"
+    iv=$(plugin_ver); sv=$(src_ver "${mp:-$REPO}")
+    if [ -n "$sv" ] && [ "$iv" != "$sv" ]; then
+      claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-memory@wt-pack >/dev/null 2>&1
+      iv2=$(plugin_ver)
+      if [ "$iv2" = "$sv" ]; then ok "updated wt-memory@wt-pack $iv → $sv (restart agents to load it)"; else bad "claude plugin update wt-memory@wt-pack left $iv2, checkout has $sv"; fi
+    else ok "already: wt-memory@wt-pack $iv installed"; fi
   else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
 }
 
