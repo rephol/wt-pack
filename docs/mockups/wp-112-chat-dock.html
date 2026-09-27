@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chat dock mockup</title>
+<style>
+:root{--bg:#1b1b1d;--nav:#141416;--card:#232326;--card2:#2a2a2e;--line:#333338;--text:#dfe2e5;--sub:#aaafb5;--mute:#7c8187;--accent:#2f7bf5;--ok:#2fb35a;--warn:#e5a02a;--red:#e3193b;--r:10px}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.app{display:flex;height:100vh}
+nav{width:260px;background:var(--nav);padding:12px 8px;display:flex;flex-direction:column;gap:2px;flex:none}
+.brand{padding:4px 8px 10px}.brand b{font-size:17px;display:block}.brand small{color:var(--mute)}
+.picker{display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:8px;border-radius:8px}.ini{font-size:9px;font-weight:700;color:var(--sub)}
+.item{display:flex;gap:10px;align-items:center;padding:6px 10px;border-radius:8px;color:var(--sub)}.item.sel{background:#2a2a2e;color:var(--text)}
+.item i{width:16px;text-align:center;font-style:normal;opacity:.8}.grow{flex:1}.badge{background:var(--red);color:#fff;border-radius:9px;font-size:11px;padding:0 6px;font-weight:600}
+main{flex:1;padding:24px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.head{display:flex;justify-content:space-between;align-items:center}h1{font-size:26px;margin:0;font-weight:600}
+.btn{padding:6px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--line)}.btn.p{background:var(--accent);border-color:var(--accent);color:#fff}
+.cols{display:flex;gap:16px;flex:1;min-height:0}
+.col{flex:1;background:#1f1f22;border:1px solid var(--line);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.col h3{margin:0 0 4px;font-size:12px;color:var(--sub);display:flex;gap:6px;align-items:center;text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}.card .id{color:var(--mute);font-size:11px}.card .t{margin:2px 0 6px}
+.tags{display:flex;gap:4px;flex-wrap:wrap}.tag{font-size:11px;padding:0 6px;border-radius:6px;background:#2f2f34;color:var(--sub)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}.working{background:var(--accent)}.idle{background:#8a8f95}.need{background:var(--warn)}
+/* dock */
+.dock{position:fixed;right:16px;bottom:0;display:flex;gap:6px;align-items:flex-end;z-index:5}
+.tab{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;padding:8px 12px;max-width:190px;box-shadow:0 -4px 16px #0006}
+.tab.on{background:#303035;border-color:#45454c}.tab span.n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wins{position:fixed;right:16px;bottom:44px;display:flex;gap:10px;align-items:flex-end;z-index:6}
+.win{width:330px;height:420px;background:var(--card);border:1px solid #45454c;border-radius:12px;display:flex;flex-direction:column;box-shadow:0 12px 40px #000a;overflow:hidden}
+.wh{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border-bottom:1px solid var(--line);background:#26262a}.wh b{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wh small{color:var(--mute)}
+.ib{width:26px;height:26px;border-radius:6px;color:var(--sub)}.ib:hover{background:#34343a;color:var(--text)}
+.body{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.msg .who{font-size:11px;color:var(--mute)}.msg .b{background:var(--card2);border-radius:10px;padding:6px 10px;display:inline-block;max-width:100%}
+.msg.me{align-self:flex-end;text-align:right}.msg.me .b{background:var(--accent);color:#fff}
+.tool{font:11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--sub);background:#1c1c1f;border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+.tool b{color:#7fb0ff;font-weight:500}
+.chip{display:inline-flex;gap:4px;align-items:center;font-size:11px;padding:0 6px;border-radius:6px;background:#233452;color:#9cc2ff;border:1px solid #2f4a78}
+.comp{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}.comp input{flex:1;background:#1c1c1f;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 10px;font:inherit}
+.status{font-size:11px;color:var(--mute);padding:0 12px 6px}
+/* toggle */
+.view{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:9;background:#26262a;border:1px solid var(--line);border-radius:9px;padding:3px;display:flex}
+.view button{padding:4px 12px;border-radius:7px;color:var(--sub)}.view button.sel{background:#3a3a40;color:var(--text)}
+/* phone */
+body.phone{background:#0d0d0f}
+body.phone .app{width:390px;height:844px;margin:48px auto 0;border:1px solid #333;border-radius:28px;overflow:hidden;flex-direction:column;position:relative;background:var(--bg)}
+body.phone nav{width:auto;flex-direction:row;align-items:center;padding:10px 14px;gap:8px}body.phone nav>*:not(.picker){display:none}body.phone .picker{margin:0;flex:1}
+body.phone nav::after{content:"☰";font-size:18px;color:var(--sub)}
+body.phone main{padding:14px}body.phone .cols .col:not(:first-child){display:none}
+body.phone .dock,body.phone .wins{display:none}
+.bubble{display:none}
+body.phone .bubble{display:flex;position:absolute;right:16px;bottom:24px;width:56px;height:56px;border-radius:50%;background:var(--accent);align-items:center;justify-content:center;font-size:22px;box-shadow:0 8px 24px #000a}
+.bubble .badge{position:absolute;top:-2px;right:-2px}
+.note{position:fixed;left:284px;bottom:12px;color:var(--mute);font-size:11px}body.phone .note{display:none}
+</style></head>
+<body>
+<div class="view"><button class="sel" data-v="desk">Desktop</button><button data-v="phone">Phone 390</button></div>
+<div class="app">
+  <nav>
+    <div class="brand"><b>wt-dashboard</b><small>herdr agent control room</small></div>
+    <div class="picker"><span class="ini">WP</span><span class="grow">wt-pack ▾</span><span>⚙</span></div>
+    <div class="item"><i>▦</i>Overview</div><div class="item"><i>≡</i>Tasks</div><div class="item sel"><i>▥</i>Board</div>
+    <div class="item"><i>◎</i>Agents</div><div class="item"><i>▭</i>Rooms</div><div class="item"><i>◷</i>Routines</div>
+    <div class="grow"></div>
+    <div class="item"><i>🔔</i><span class="grow">Inbox</span><span class="badge">4</span></div><div class="item"><i>⚙</i>Settings</div>
+    <div class="item"><span class="dot" style="background:var(--ok)"></span><span class="grow">Server</span><small>healthy</small></div>
+  </nav>
+  <main>
+    <div class="head"><h1>Board</h1><div style="display:flex;gap:8px"><button class="btn">Auto off · Dispatch on</button><button class="btn p">New ticket</button></div></div>
+    <div class="cols">
+      <div class="col"><h3>Ready <span class="tag">2</span></h3>
+        <div class="card"><div class="id">WP-121</div><div class="t">Room search across archived threads</div><div class="tags"><span class="tag">feature</span><span class="tag">M</span><span class="tag">P2</span></div></div>
+        <div class="card"><div class="id">WP-124</div><div class="t">Usage chart: weekly view</div><div class="tags"><span class="tag">ux</span><span class="tag">S</span></div></div></div>
+      <div class="col"><h3>Planning <span class="tag">1</span></h3>
+        <div class="card"><div class="id">WP-119</div><div class="t">Routine templates</div><div class="tags"><span class="tag">feature</span><span class="tag">L</span><span class="tag">@planner-01</span></div></div></div>
+      <div class="col"><h3>Building <span class="tag">2</span></h3>
+        <div class="card"><div class="id">WP-118</div><div class="t">Chat dock for agents and rooms</div><div class="tags"><span class="tag">ux</span><span class="tag">M</span><span class="tag">@worker-01</span></div></div>
+        <div class="card"><div class="id">WP-120</div><div class="t">Doctor: check herdr version floor</div><div class="tags"><span class="tag">gap</span><span class="tag">S</span></div></div></div>
+      <div class="col"><h3>Review <span class="tag">1</span></h3>
+        <div class="card"><div class="id">WP-117</div><div class="t">Inbox snooze</div><div class="tags"><span class="tag">feature</span><span class="tag">S</span></div></div></div>
+      <div class="col"><h3>Done <span class="tag">3</span></h3>
+        <div class="card"><div class="id">WP-111</div><div class="t">Toasts unreadable in dark mode</div></div>
+        <div class="card"><div class="id">WP-110</div><div class="t">Project settings in the sidebar</div></div></div>
+    </div>
+  </main>
+  <div class="bubble">💬<span class="badge">3</span></div>
+</div>
+<div class="wins" id="wins"></div>
+<div class="dock" id="dock"></div>
+<div class="note">Mockup · click a dock tab to open/minimise · a 4th open window collapses the oldest</div>
+<script>
+const chats = {
+  w1: { name: 'wt-pack-worker-01', dot: 'working', sub: 'working · WP-118', body: `
+    <div class="msg me"><div class="b">Start on the dock tabs first, windows after.</div></div>
+    <div class="tool"><b>Read</b> web/src/App.tsx (lines 440–520)</div>
+    <div class="tool"><b>Edit</b> web/src/dock.tsx +84 −0</div>
+    <div class="tool"><b>Bash</b> npx tsc --noEmit -p . ✓</div>
+    <div class="msg"><div class="who">wt-pack-worker-01</div><div class="b">Tabs render; wiring open/minimise now.</div></div>`, status: '✻ Editing… (42s)' },
+  p1: { name: 'wt-pack-planner-01', dot: 'idle', sub: 'idle', body: `<div class="msg"><div class="who">wt-pack-planner-01</div><div class="b">Plan for <span class="chip">WP-119</span> committed. Ready for a worker.</div></div>` },
+  a1: { name: 'wt-pack-auditor-01', dot: 'need', sub: 'needs you', body: `<div class="msg"><div class="who">wt-pack-auditor-01</div><div class="b">Found 3 findings. File them as tickets?</div></div>` },
+  r1: { name: '#wt-pack', room: true, unread: 3, sub: '5 members', body: `
+    <div class="msg"><div class="who">wt-pack-orchestrator-01 · 2m</div><div class="b">Dispatched <span class="chip">WP-118</span> to worker-01.</div></div>
+    <div class="msg"><div class="who">wt-pack-worker-01 · 1m</div><div class="b">Merged <span class="chip">WP-111</span> — toasts readable in dark mode.</div></div>
+    <div class="msg me"><div class="b">Nice. Queue <span class="chip">WP-124</span> after the dock.</div></div>
+    <div class="msg"><div class="who">wt-pack-orchestrator-01 · now</div><div class="b">Queued. <span class="chip">WP-124</span> → Ready.</div></div>` },
+  r2: { name: '#war-room', room: true, sub: '3 members', body: `<div class="msg"><div class="who">wt-pack-auditor-01 · 1h</div><div class="b">All clear on the release checklist.</div></div>` },
+}
+let open = ['w1', 'r1'] // oldest first
+const dock = document.getElementById('dock'), wins = document.getElementById('wins')
+function render() {
+  dock.innerHTML = Object.entries(chats).map(([id, c]) => `<button class="tab ${open.includes(id) ? 'on' : ''}" data-id="${id}">
+    ${c.room ? '<span style="color:var(--sub)">#</span>' : `<span class="dot ${c.dot}"></span>`}<span class="n">${c.room ? c.name.slice(1) : c.name}</span>
+    ${c.unread && !open.includes(id) ? `<span class="badge">${c.unread}</span>` : ''}</button>`).join('')
+  wins.innerHTML = open.map((id) => { const c = chats[id]; return `<div class="win">
+    <div class="wh">${c.room ? '<span style="color:var(--sub)">#</span>' : `<span class="dot ${c.dot}"></span>`}<b>${c.room ? c.name.slice(1) : c.name}</b><small>${c.sub}</small>
+      <button class="ib" title="Minimise" data-min="${id}">–</button><button class="ib" title="Expand to panel">⤢</button><button class="ib" title="Close" data-close="${id}">✕</button></div>
+    <div class="body">${c.body}</div>${c.status ? `<div class="status">${c.status}</div>` : ''}
+    <div class="comp"><input placeholder="${c.room ? 'Message ' + c.name : 'Prompt ' + c.name}"><button class="btn p">Send</button></div></div>` }).join('')
+}
+dock.onclick = (e) => { const t = e.target.closest('.tab'); if (!t) return; const id = t.dataset.id
+  if (open.includes(id)) open = open.filter((x) => x !== id)
+  else { open.push(id); chats[id].unread = 0; if (open.length > 3) open.shift() }
+  render() }
+wins.onclick = (e) => { const id = e.target.dataset.min || e.target.dataset.close; if (id) { open = open.filter((x) => x !== id); render() } }
+document.querySelector('.view').onclick = (e) => { const v = e.target.dataset.v; if (!v) return
+  document.body.classList.toggle('phone', v === 'phone'); document.querySelectorAll('.view button').forEach((b) => b.classList.toggle('sel', b.dataset.v === v)) }
+const byHash = () => document.querySelector(`[data-v=${location.hash === "#phone" ? "phone" : "desk"}]`).click(); addEventListener("hashchange", byHash); byHash()
+render()
+</script>
+</body></html>

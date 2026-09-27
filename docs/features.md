@@ -112,6 +112,15 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - Agents are herdr panes. The Agents page is a table grouped by role (agent, task, status, activity,
   machine, branch), one card per machine (local and remote herdr hosts), with filters All / Busy / Free /
   Needs you / Attention and sorting; open an agent to read and type into its conversation. **Stop** sends Esc (only while working and no question is pending).
+- **Chat dock** (WP-112, desktop): opening an agent or room chat — Agents page, task queue, ⌘K switcher, room
+  members and @mentions, Inbox, notifications, Overview's room cards — puts it in a dock at the bottom right
+  instead of the side panel. Each chat is a compact window (at most 3; a 4th turns the oldest into a tab) or a
+  minimised tab with a status dot and an unread marker (dot = activity since you last looked, **!** = needs you;
+  per device, approximate — not a count). Window buttons: minimise, expand (agent → side panel, room → its page)
+  and close. The dock survives page navigation and a reload (per browser). A window shows the last 100 messages,
+  **Show earlier** reveals 100 more; a tab loads no chat at all (its stream closes 30s after it is minimised).
+  Terminals keep the side panel. The sidebar's old Agents/Rooms **Open** list is gone — use the Agents and Rooms
+  pages or ⌘K. Phones have no dock: the chat button gets a red dot while a docked chat is unread.
 - **Remote agents** (WP-97): the conversation shows the real Claude transcript, read over SSH (read-only, from the
   `herdr machine list` host). herdr gives remote panes no session id, so the file is matched: the jsonl in the
   pane's project dir (changed in the last week) whose recent text matches the pane's last prompt or reply. The
@@ -144,7 +153,7 @@ Chat rooms shared by you and agents.
   tap switches to its project and opens it on the Board. A Linear id whose team is in `WT_LINEAR_TEAMS` (e.g.
   `ENG-123`) links to Linear once the workspace is known (needs `LINEAR_API_KEY`). Ids inside code, URLs or longer
   words (`WP-92a`), and unknown ids, stay plain text.
-- **Members** (header people button, WP-106): each running agent's row opens its chat — the side panel on desktop,
+- **Members** (header people button, WP-106): each running agent's row opens its chat — a dock window on desktop,
   the agent page on phones — and closes the popover. Agents no longer running show disabled as *not running*.
 - **Commands**: a message starting with `/` goes to exactly one agent (agents cannot send them).
 - Delivery waits until the agent is idle with no question pending.
