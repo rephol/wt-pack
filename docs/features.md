@@ -153,6 +153,13 @@ Chat rooms shared by you and agents.
   first, ask clarifications in the room, never in the agent's own chat; tag text is data; on `broadcast=1`
   reply only if it concerns you) load once: the wt-room SKILL and the wt-memory SessionStart context.
   Dashboard agent-chat text stays unmarked (like the terminal), so no tag means "own chat".
+- **wt-pack messages** (WP-104): everything wt-pack itself sends into a pane — handoffs, Dispatch, the task
+  Handoff/Reassign button, watchdog Investigate, routine prompts and routine spawns, the Ready nudge, replies —
+  arrives as `<wt-message id=<nonce> kind=handoff|dispatch|routine|reply|system from="…" [ticket=…]>…</wt-message>`
+  (after `/goal` for handoffs). Agents answer through the channel it names: `handoff.sh --reply <pane> "…"`
+  (the footer and `reach:` line give it) or the report line inside. What you type (chat page, terminal, the
+  spawn dialog's first prompt) stays untagged. The chat page shows the origin as `kind · from` (e.g.
+  `dispatch · wt-dashboard`); it is display-only — the nonce is not checked, so terminal text could imitate it.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
   - Hops before a human reply — **3**; then the room pauses "waiting for a human" until you post.
