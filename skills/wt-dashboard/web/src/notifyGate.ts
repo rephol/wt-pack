@@ -5,7 +5,7 @@ export type Kind = (typeof KINDS)[number]
 export interface InboxItem {
   id: string; ts: string; kind: Kind; key: string; title: string; body: string; read: boolean; resolvedAt: string | null; quiet?: boolean
   urgency?: number // 0-3 from Jev (WT_JEV_INBOX_RANK); absent sorts as 1
-  target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null; memory?: string }
+  target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null; memory?: string; watchdog?: string; check?: string }
 }
 export type KindPrefs = Record<Kind, boolean>
 export interface Prefs { inbox: KindPrefs; native: KindPrefs }

@@ -61,3 +61,4 @@ Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
 - Room turns: agents answering in a room end their session turn with at most one line: `→ answered in #<slug>`.
 - Never prompt the user's real agents (other projects' panes) for tests; use throwaway agents/temp repos and clean up.
 - herdr names: lowercase, digits, `-`, `_`, ≤32 (`wt-agents spawn` breaks on capitalised repo dirs — open).
+- BSD pkill/pgrep: options after the pattern become patterns; `-f … -n` SIGTERMs every `claude --name` agent (WP-109). Kill by recorded pid (the wt-memory plugin hook denies misordered calls).

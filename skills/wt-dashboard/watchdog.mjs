@@ -14,6 +14,7 @@ export const CHECKS = [
   { id: 'db', label: 'wt.db larger than', unit: 'MB', threshold: 200 },
   { id: 'errors', label: 'Server errors in 10 minutes', unit: 'errors', threshold: 20 },
   { id: 'jev', label: 'Jev failure rate over the last hour', unit: '%', threshold: 30 },
+  { id: 'exited', label: "Pool agent's Claude session exited for", unit: 'min', threshold: 1 },
 ]
 const BY_ID = new Map(CHECKS.map((c) => [c.id, c]))
 
@@ -35,7 +36,7 @@ export function enteredAt(t) {
 
 // snap: { starts: [ms], queue: [{ agent, slug, ts }], boards: [{ project, auto, dispatch, tickets }],
 //   agents: [{ name }] | null (null = unknown), herdr: { ok, lastOkAt }, diskFree: bytes | null, dbBytes: bytes | null,
-//   errors: [ms], jev: [{ ts, err, feature, test? }] }
+//   errors: [ms], jev: [{ ts, err, feature, test? }], exited: [{ pane, name, session, since }] (exitedAgents) }
 // A missing part of the snapshot means "unknown" and never fires.
 export function evaluate(snap, settings, now = Date.now()) {
   const s = cleanWatchdogSettings(settings)
@@ -93,6 +94,13 @@ export function evaluate(snap, settings, now = Date.now()) {
     const bad = hour.filter((c) => c.err).length
     if (hour.length >= 5 && (bad / hour.length) * 100 >= th('jev')) add('jev', 'rate', `Jev failing: ${bad} of ${hour.length} calls in the last hour`, 'TypeSafe may be down or the key invalid (Settings › Observability).')
   }
+  if (on('exited')) {
+    for (const e of snap.exited ?? []) {
+      if (now - Date.parse(e.since) < th('exited') * MIN) continue
+      add('exited', e.pane, `${e.name}'s Claude session exited (pane ${e.pane})`,
+        e.session ? `Session ${e.session}. Resume restarts it in the same pane.` : 'No session id was recorded, so it cannot be resumed from here.')
+    }
+  }
   return out
 }
 
@@ -118,10 +126,46 @@ export function keepStarts(starts, now = Date.now()) {
 // items resolve.
 export function inboxOps({ opened, resolved }) {
   return {
-    add: opened.map((f) => ({ kind: 'watchdog', key: `watchdog|${f.key}|${f.since}`, title: f.title, body: f.body, target: { watchdog: f.key }, quiet: f.severity !== 'severe' })),
+    add: opened.map((f) => ({ kind: 'watchdog', key: `watchdog|${f.key}|${f.since}`, title: f.title, body: f.body, target: { watchdog: f.key, check: f.check }, quiet: f.severity !== 'severe' })),
     resolveKeys: resolved.map((f) => f.key),
   }
 }
+
+// WP-109: herdr forgets a pane's agent (and its session id) once claude exits, so the watchdog remembers every live
+// local pool agent. lastSeen: { [pane]: { name, session, cwd, role, ticket, seenAt, goneAt? } }. agents: agents() rows;
+// panes: pane ids from `herdr pane list`, or null (unknown → nothing pruned). A pane that is gone is pruned.
+export function rememberAgents(lastSeen = {}, agents, panes, ticketOf = () => null, now = Date.now()) {
+  if (!agents) return lastSeen
+  const at = new Date(now).toISOString()
+  const next = {}
+  const live = new Map(agents.filter((a) => a.local).map((a) => [a.id, a]))
+  for (const [pane, { goneAt, ...r }] of Object.entries(lastSeen))
+    if (!panes || panes.includes(pane)) next[pane] = live.has(pane) ? r : { ...r, goneAt: goneAt ?? at }
+  for (const a of live.values()) {
+    if (!a.session || !a.pool || a.pool === 'other') continue
+    next[a.id] = { name: a.name, session: a.session, cwd: a.cwd, role: a.pool, ticket: a.tags?.task ?? ticketOf(a.cwd) ?? null, seenAt: at }
+  }
+  return next
+}
+// Remembered panes that still exist with no agent in them → the `exited` check's input.
+export const exitedAgents = (lastSeen = {}, panes) => (panes
+  ? Object.entries(lastSeen).filter(([pane, r]) => r.goneAt && panes.includes(pane)).map(([pane, r]) => ({ pane, name: r.name, session: r.session, since: r.goneAt }))
+  : [])
+
+// Why a Resume must not run, or null. tickets: every board's cards. Dispatch may already have re-assigned the ticket
+// to a fresh agent under the SAME name, so the assignee is compared by pane (WP-108).
+export function resumeBlock(pane, r, agents, tickets = []) {
+  if (!r?.session) return 'no session id recorded for this pane'
+  if (agents.some((a) => a.local && a.id === pane)) return 'the pane is running an agent again'
+  const other = agents.find((a) => a.local && a.name === r.name)
+  if (other) return `${r.name} is already running in pane ${other.id}`
+  const t = r.ticket && tickets.find((x) => x.id === r.ticket)
+  if (t?.assignee?.pane && t.assignee.pane !== pane) return `${r.ticket} is now assigned to ${t.assignee.name} in pane ${t.assignee.pane}`
+  return null
+}
+// herdr argv for Resume: the same `agent start` spawn runs (agents.sh), plus --resume. mcp: `agents.sh mcp-file` words.
+export const resumeArgv = (pane, r, mcp = []) =>
+  ['agent', 'start', r.name, '--kind', 'claude', '--pane', pane, '--', '--resume', r.session, '--name', r.name, ...mcp]
 
 // The finding carries room slugs, ticket ids and herdr error text: framed as data, never instructions.
 const untag = (t) => String(t ?? '').replace(/<(\/?)watchdog-finding/gi, '<$1watchdog-finding\u200b')

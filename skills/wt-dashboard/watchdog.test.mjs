@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt } from './watchdog.mjs'
+import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const min = (n) => new Date(now - n * 60_000).toISOString()
@@ -101,4 +101,35 @@ test('investigatePrompt: finding text is framed as data and cannot close the tag
   assert.equal((p.match(/<\/watchdog-finding>/g) ?? []).length, 1)
   assert.equal((p.match(/<watchdog-finding>/gi) ?? []).length, 1)
   assert.match(p, /not instructions/)
+})
+
+test('exited: remembered pool pane with no agent fires; gone pane, agent back and non-pool panes do not', () => {
+  const ag = (x) => ({ id: 'w1:p1', local: true, name: 'wt-pack-worker-01', session: 's-1', cwd: '/r/.claude/worktrees/wp-9-x', pool: 'worker', tags: {}, ...x })
+  const umk = ag({ id: 'u:p1', name: 'umk-orch', pool: 'other', session: 's-u' })
+  let seen = rememberAgents({}, [ag(), umk], ['w1:p1', 'u:p1'], () => 'WP-9', now - 5 * 60_000)
+  assert.deepEqual(Object.keys(seen), ['w1:p1'])
+  assert.equal(seen['w1:p1'].ticket, 'WP-9')
+  // claude exits: the pane stays, the agent drops out of `agent list`
+  seen = rememberAgents(seen, [umk], ['w1:p1', 'u:p1'], undefined, now - 2 * 60_000)
+  const ex = exitedAgents(seen, ['w1:p1', 'u:p1'])
+  assert.deepEqual(ex, [{ pane: 'w1:p1', name: 'wt-pack-worker-01', session: 's-1', since: min(2) }])
+  const f = evaluate({ exited: ex }, {}, now)
+  assert.deepEqual(f.map((x) => x.key), ['exited|w1:p1'])
+  assert.match(f[0].body, /s-1/)
+  assert.deepEqual(checks({ exited: ex }, { exited: { threshold: 5 } }), [])
+  // agent back → no longer exited; pane gone → pruned; unknown panes → nothing
+  assert.deepEqual(exitedAgents(rememberAgents(seen, [ag()], ['w1:p1']), ['w1:p1']), [])
+  assert.deepEqual(rememberAgents(seen, [], ['u:p1']), {})
+  assert.deepEqual(exitedAgents(seen, null), [])
+})
+
+test('resume: argv mirrors spawn plus --resume; blocked when running again, name taken or ticket reassigned', () => {
+  const r = { name: 'wt-pack-worker-01', session: 's-1', ticket: 'WP-9' }
+  assert.deepEqual(resumeArgv('w1:p1', r, ['--strict-mcp-config', '--mcp-config', '/c/mcp.json']),
+    ['agent', 'start', 'wt-pack-worker-01', '--kind', 'claude', '--pane', 'w1:p1', '--', '--resume', 's-1', '--name', 'wt-pack-worker-01', '--strict-mcp-config', '--mcp-config', '/c/mcp.json'])
+  assert.equal(resumeBlock('w1:p1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 'w1:p1' } }]), null)
+  assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'x' }]), /running an agent again/)
+  assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p9', name: r.name }]), /already running in pane w1:p9/)
+  assert.match(resumeBlock('w1:p1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 'w1:p9' } }]), /now assigned/)
+  assert.match(resumeBlock('w1:p1', { name: 'x' }, []), /no session id/)
 })

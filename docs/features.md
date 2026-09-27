@@ -279,10 +279,15 @@ Projects, Terminals, Usage, Observability, Server, About.
   (**15** min), Ready card not dispatched with Dispatch on (**10** min, held cards excluded), Backlog card
   untriaged with Auto on (**30** min), Planning/Building card held by a gone or stalled agent (**10** min), herdr
   unreachable (**2** min), free disk (**5** GB), wt.db size (**200** MB), server errors in 10 min (**20**), Jev
-  failure rate over the last hour (**30**%, at least 5 calls). A finding opens once per condition as a
+  failure rate over the last hour (**30**%, at least 5 calls), pool agent's Claude session exited while its pane
+  stays open (**1** min). A finding opens once per condition as a
   `watchdog` Inbox item (native notification only for restarts, herdr and disk) and resolves itself when the
   condition clears. **Investigate** hands a finding to a worker (or **Ask auditor**) through wt-handoff, framed as
-  data, to diagnose and file a ticket — only when clicked.
+  data, to diagnose and file a ticket — only when clicked. For an exited session, **Resume** (on the finding and
+  its Inbox item) restarts the same session id in the same pane with the agent's name and MCP set (the watchdog
+  remembers each live pool agent's session, since herdr forgets it on exit); it refuses when the pane runs an
+  agent again, the name is live elsewhere, or the agent's ticket was re-dispatched to another pane. Never
+  automatic.
 - **Server**: state, pid, uptime, build time, per-source status; **Restart server** (or **Install as
   service** when not managed).
 - **Web build stays current** (WP-81): a server running from a checkout rebuilds `web/dist` itself when
