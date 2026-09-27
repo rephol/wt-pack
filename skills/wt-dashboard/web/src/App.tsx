@@ -20,6 +20,7 @@ import { ImageRow, FileCards, useAttachments, IMAGE_TYPES, MAX_IMAGES, type Shar
 import { useToast } from '@astryxdesign/core/Toast'
 import { useDesktop } from './desktop'
 import { SettingsHost, openSettings } from './settings'
+import { openProjectSettings } from './projects-settings'
 import { InboxButton, InboxHost } from './inbox'
 import { RoomsPage, useRoomsList } from './rooms'
 import { composerEnter } from './keys'
@@ -515,6 +516,7 @@ export default function App() {
               </Text>
             )}
             {(page === 'agents' || page === 'overview') && <IconButton label="New agent" tooltip="New agent" icon={<PlusIcon />} size="sm" variant="primary" onClick={openSpawn} />}
+            {project !== 'all' && <Button label="Project settings" size="sm" variant="ghost" onClick={() => openProjectSettings(project)} />}
             <IconButton label="Refresh" tooltip="Refresh" icon={<RefreshIcon />} size="sm" variant="ghost" onClick={() => q.refetch()} />
           </HStack>
         </HStack>}

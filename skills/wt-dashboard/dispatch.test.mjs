@@ -288,3 +288,20 @@ test('dispatch: tick() puts the resolved room and orchestrator in the prompt (WP
   assert.match(calls[0].prompt, /handoff\.sh --reply w1:p2/)
   assert.deepEqual(calls[0].args.slice(2, 6), ['--kind', 'dispatch', '--from', 'wt-dashboard']) // WP-104
 })
+
+test('project settings (WP-107): maxWorking and baseBranch are asked per project', async () => {
+  const { tickets, d, calls } = await setup({ agents: [{ name: 'w1', status: 'working', local: true }] })
+  const asked = [], git = []
+  d.deps.maxWorking = (p) => (asked.push(p), 1)
+  d.deps.baseBranch = (p) => (asked.push(p), 'develop')
+  d.deps.git = async (repo, ...a) => (git.push(a), a[0] === 'rev-parse' ? 'abc123\n' : '')
+  await ready(tickets, 'a')
+  await tickets.create('wt-pack', { title: 'rev', column: 'review' }, user)
+  await d.tick()
+  assert.equal(calls.length, 0)
+  assert.match(d.status('wt-pack').waiting, /^cap: 1 working ≥ 1/)
+  assert.deepEqual([...new Set(asked)], ['wt-pack'])
+  assert.ok(git.some((a) => a[0] === 'log' && a.at(-1) === 'origin/develop'))
+  assert.ok(git.some((a) => a[0] === 'rev-parse' && a[1] === 'origin/develop'))
+  assert.ok(!git.flat().includes('origin/main'))
+})

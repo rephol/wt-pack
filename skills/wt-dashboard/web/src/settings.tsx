@@ -34,6 +34,7 @@ import { InstallRow } from './pwa'
 import { RolesSection } from './roles'
 import { ObservabilitySection } from './observability'
 import { MemorySection } from './memory'
+import { ProjectsSection } from './projects-settings'
 import { UsageBreakdown } from './usage'
 import { useChatDensity, setChatDensity, useLinkPreviews, setLinkPreviews, type ChatDensity } from './density'
 import { isDesktop, loadPrefs, PREFS_KEY } from './desktop'
@@ -41,7 +42,7 @@ import type { Kind } from './notifyGate'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 import { SettingsCard, SettingsRow, CONTROL_WIDTH } from './settingsRows'
 
-export type Section = 'profile' | 'roles' | 'memory' | 'rooms' | 'notifications' | 'integrations' | 'observability' | 'usage' | 'terminals' | 'server' | 'about'
+export type Section = 'profile' | 'roles' | 'memory' | 'rooms' | 'notifications' | 'integrations' | 'projects' | 'observability' | 'usage' | 'terminals' | 'server' | 'about'
 type Panel = { id: Section; label: string; description: string }
 // The one list both shells read, as in the template: a panel can't drift out of the nav or the phone list.
 const GROUPS: { label: string; panels: Panel[] }[] = [
@@ -56,6 +57,7 @@ const GROUPS: { label: string; panels: Panel[] }[] = [
   ] },
   { label: 'System', panels: [
     { id: 'integrations', label: 'Integrations', description: 'API keys, projects, hosts and Jev judgments.' },
+    { id: 'projects', label: 'Projects', description: 'Per-project overrides: GitHub account, base branch, agent MCP, dispatch cap and board automation.' },
     { id: 'terminals', label: 'Terminals', description: 'Shells on this machine, mirrored into the dashboard.' },
     { id: 'usage', label: 'Usage', description: 'Claude usage by agent, project and model.' },
     { id: 'observability', label: 'Observability', description: 'Jev calls, outcomes, the server log, housekeeping and the watchdog.' },
@@ -180,6 +182,7 @@ function SectionBody({ section }: { section: Section }) {
           {section === 'rooms' && <RoomsSection />}
           {section === 'notifications' && <NotificationsSection />}
           {section === 'integrations' && <IntegrationsSection />}
+          {section === 'projects' && <ProjectsSection />}
           {section === 'observability' && <VStack gap={6}><ObservabilitySection /><RoutinesHistorySection {...scope} /><BoardHistorySection /><HousekeepingSection /><WatchdogSection /></VStack>}
           {section === 'usage' && <UsageBreakdown />}
           {section === 'terminals' && <TerminalsSection />}

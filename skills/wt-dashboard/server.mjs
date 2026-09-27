@@ -19,6 +19,7 @@ import { Inbox, itemFromTransition, toResolve, inboxRank } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
+import { ProjectSettings, PKEYS } from './project-settings.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
@@ -55,6 +56,7 @@ const BIND_OK = bindCheck(BIND, process.env.WT_ALLOW_REMOTE === '1')
 // Everything the dashboard writes lives outside the source tree: <root>/data and <root>/uploads.
 const DATA_ROOT = process.env.WT_DASHBOARD_DATA ?? join(homedir(), '.local', 'share', 'wt-dashboard')
 const DATA = join(DATA_ROOT, 'data')
+const psettings = new ProjectSettings({ dir: DATA, cfg }) // WP-107: per-project settings over cfg
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
 const STALL_MS = 20 * 60_000
@@ -931,17 +933,27 @@ async function pageCard(target) {
   for (const i of [c.image, c.icon]) if (i) unfurlImages.add(i)
   return { kind: 'page', url: target, ...c }
 }
-const repoName = () => cached('repoName', 3_600_000, async () => JSON.parse(await run('gh', ['repo', 'view', '--json', 'nameWithOwner'], REPO)).nameWithOwner).catch(() => null)
+// WP-107: the dashboard's gh calls (all on the default repo) run as its project's githubAccount via GH_TOKEN, else as gh's
+// active account. The token comes from gh's own keyring (gh auth token --user), cached 10 min; gh auth switch is never run.
+async function ghEnv(project = REPO_PROJECT) {
+  const acct = psettings.get(project, 'githubAccount')
+  if (!acct) return undefined
+  const tok = await cached(`ghToken:${acct}`, 600_000, async () => (await run('gh', ['auth', 'token', '--user', acct])).trim())
+    .catch((e) => (console.error(`gh auth token --user ${acct}:`, e.message.trim()), null))
+  return tok ? { GH_TOKEN: tok } : undefined
+}
+const gh = async (args) => run('gh', args, REPO, 20_000, await ghEnv())
+const repoName = () => cached('repoName', 3_600_000, async () => JSON.parse(await gh(['repo', 'view', '--json', 'nameWithOwner'])).nameWithOwner).catch(() => null)
 async function richCard(target) {
   const c = classifyUrl(target, await repoName())
   if (!c) return null
   if (c.kind === 'artifact') return { kind: 'artifact', url: target, title: 'Claude artifact', siteName: 'claude.ai' }
   if (c.kind === 'pr') {
-    const p = JSON.parse(await run('gh', ['pr', 'view', String(c.number), '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup'], REPO))
+    const p = JSON.parse(await gh(['pr', 'view', String(c.number), '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup']))
     return { kind: 'pr', url: target, number: p.number, title: p.title, state: p.isDraft && p.state === 'OPEN' ? 'DRAFT' : p.state, review: p.reviewDecision || null, ci: ciOf(p.statusCheckRollup ?? []), siteName: 'GitHub' }
   }
   if (c.kind === 'issue') {
-    const p = JSON.parse(await run('gh', ['issue', 'view', String(c.number), '--json', 'number,title,state'], REPO))
+    const p = JSON.parse(await gh(['issue', 'view', String(c.number), '--json', 'number,title,state']))
     return { kind: 'issue', url: target, number: p.number, title: p.title, state: p.state, siteName: 'GitHub' }
   }
   const key = cfg.get('LINEAR_API_KEY')
@@ -1064,14 +1076,13 @@ async function prs() {
   // ponytail: 30s TTL, not 3s — gh hits the GitHub API rate limit.
   return cached('prs', 30_000, async () => {
     const list = JSON.parse(
-      await run(
-        'gh',
+      await gh(
         ['pr', 'list', '--state', 'all', '--limit', '50', '--json',
           'number,title,headRefName,state,isDraft,baseRefName,createdAt,mergedAt,updatedAt,url,reviewDecision,statusCheckRollup,mergeCommit,mergeStateStatus,author'],
-        REPO,
       ),
     )
-    await git(REPO, 'fetch', '--quiet', 'origin', 'main').catch(() => {})
+    const base = psettings.get(REPO_PROJECT, 'baseBranch')
+    await git(REPO, 'fetch', '--quiet', 'origin', base).catch(() => {})
     const me = await ghUser()
     const threads = await unresolvedThreads(list.filter((p) => p.state === 'OPEN').map((p) => p.number))
     return Promise.all(
@@ -1080,7 +1091,7 @@ async function prs() {
         let shipped = false
         if (p.state === 'MERGED' && sha) {
           if (!shippedShas.has(sha))
-            await git(REPO, 'merge-base', '--is-ancestor', sha, 'origin/main').then(() => shippedShas.add(sha), () => {})
+            await git(REPO, 'merge-base', '--is-ancestor', sha, `origin/${base}`).then(() => shippedShas.add(sha), () => {})
           shipped = shippedShas.has(sha)
         }
         return {
@@ -1112,14 +1123,18 @@ async function unresolvedThreads(numbers) {
   if (!numbers.length) return {}
   return cached('prThreads', 60_000, async () => {
     const q = `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){${numbers.map((n) => `p${n}:pullRequest(number:${n}){reviewThreads(first:100){nodes{isResolved}}}`).join(' ')}}}`
-    const j = JSON.parse(await run('gh', ['api', 'graphql', '-f', `query=${q}`, '-F', 'owner={owner}', '-F', 'repo={repo}'], REPO))
+    const j = JSON.parse(await gh(['api', 'graphql', '-f', `query=${q}`, '-F', 'owner={owner}', '-F', 'repo={repo}']))
     return Object.fromEntries(numbers.map((n) => [n, j.data.repository[`p${n}`]?.reviewThreads.nodes.filter((t) => !t.isResolved).length ?? null]))
   }).catch((e) => (console.error('threads:', e.message), null))
 }
 
-// The gh active user, for PR authorship. Cached for the process; null if gh can't say.
-let ghLogin
-const ghUser = async () => (ghLogin ??= await run('gh', ['api', 'user', '--jq', '.login'], REPO).then((s) => s.trim() || null, () => null))
+// The gh user the PR calls run as, for PR authorship. Cached per account for the process; null if gh can't say.
+const ghLogins = new Map()
+const ghUser = async () => {
+  const acct = psettings.get(REPO_PROJECT, 'githubAccount') ?? ''
+  if (!ghLogins.has(acct)) ghLogins.set(acct, await gh(['api', 'user', '--jq', '.login']).then((s) => s.trim() || null, () => null))
+  return ghLogins.get(acct)
+}
 
 function ciOf(checks) {
   if (!checks.length) return null
@@ -1854,7 +1869,7 @@ const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values
 const boardRuns = new Set() // projects with a 'Run now' in progress
 // Board 'Run now' (route and the jev-run routine): { skipped } or { queued, done } — done settles when triage ends.
 async function runBoard(project) {
-  if (!jevOn('TICKET_TRIAGE')) return { skipped: 'Ticket triage is off (Settings › Integrations)' }
+  if (!jevOn('TICKET_TRIAGE', project)) return { skipped: 'Ticket triage is off (Settings › Integrations)' }
   if (boardRuns.has(project)) return { skipped: 'a run is already going on this board' }
   boardRuns.add(project)
   let backlog
@@ -1900,7 +1915,7 @@ async function ticketsApi(req, res, url, parts) {
     const t = await tickets.create(project, b, author)
     if (!boardKeys.includes(t.id.split('-')[0])) await refreshKeys()
     send(res, 200, t)
-    if (jevOn('TICKET_TRIAGE')) triage(project, t, empty)
+    if (jevOn('TICKET_TRIAGE', project)) triage(project, t, empty)
     return
   }
   // Board settings and 'Run now' (WP-39/46/52/75): PUT /api/tickets/board {project, auto?, minPriority?, dispatch?, stallMin?, reportRoom?, reportOrch?}; POST /api/tickets/board/run {project}.
@@ -1919,9 +1934,10 @@ async function ticketsApi(req, res, url, parts) {
   // On demand (wt-ticket triage): an existing ticket has no request to tell "left empty", so every field still at its
   // default and never edited counts as empty (jevApply's own check).
   if (req.method === 'POST' && parts[3] === 'triage') {
-    if (!jevOn('TICKET_TRIAGE')) return send(res, 409, { error: 'Ticket triage is off (Settings › Integrations)' })
     const t = await tickets.get(id)
-    const out = await triage(await tickets.project(t.id), t, ['type', 'size', 'priority'])
+    const project = await tickets.project(t.id)
+    if (!jevOn('TICKET_TRIAGE', project)) return send(res, 409, { error: 'Ticket triage is off (Settings › Integrations)' })
+    const out = await triage(project, t, ['type', 'size', 'priority'])
     return out ? send(res, 200, out) : send(res, 502, { error: 'Jev gave no answer (no key, timeout or error)' })
   }
   if (req.method === 'PATCH' && parts.length === 3) {
@@ -1946,7 +1962,8 @@ async function ticketsApi(req, res, url, parts) {
 // Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
 const triage = async (project, t, empty) => triageTicket(project, t, empty, { tickets, ...(await tickets.settings(project).catch(() => ({ auto: false }))), min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
   ask: (state, q, pick) => jevAsk('TICKET_TRIAGE', state, q, pick, { timeoutMs: 5000 }) })
-const jevOn = (feature) => cfg.get(`WT_JEV_${feature}`) === 'on'
+// project: the ticket's project, for the keys a project may override (PKEYS); the rest are global.
+const jevOn = (feature, project) => (PKEYS[`WT_JEV_${feature}`] ? psettings.get(project, `WT_JEV_${feature}`) : cfg.get(`WT_JEV_${feature}`)) === 'on'
 const jevAsk = (feature, state, questions, pick, opts) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick, ...opts })
 const rooms = new Rooms({
   dir: DATA,
@@ -2189,6 +2206,27 @@ async function configApi(req, res, parts) {
   send(res, 200, state())
 }
 
+// WP-107 project settings: GET /api/projects/:p/settings; PUT|DELETE /api/projects/:p/settings/:key {value}.
+// Saving githubAccount also points git's credential helper at that account in the project's checkout (repo-local,
+// every worktree shares it), so `git push` there matches the agents' GH_TOKEN.
+async function projectSettingsApi(req, res, parts) {
+  const [, , project, sub, key] = parts
+  if (sub !== 'settings') return send(res, 404, { error: 'not found' })
+  const state = () => ({ project, items: psettings.list(project) })
+  if (req.method === 'GET' && !key) return send(res, 200, state())
+  if (!key || !(req.method === 'PUT' || req.method === 'DELETE')) return send(res, 404, { error: 'not found' })
+  const b = req.method === 'PUT' ? JSON.parse((await body(req)) || '{}') : {}
+  if (req.method === 'PUT') psettings.set(project, key, b.value)
+  else psettings.reset(project, key)
+  const root = (await projectRoots()).get(project)
+  if (key === 'githubAccount' && root) {
+    const acct = psettings.get(project, key)
+    await (acct ? git(root, 'config', 'credential.https://github.com.username', acct)
+      : git(root, 'config', '--unset', 'credential.https://github.com.username')).catch(() => {})
+  }
+  send(res, 200, state())
+}
+
 // ---- Terminals (terminals.mjs): shells owned by herdr, mirrored and typed into from the dashboard ----
 const terms = new TerminalSettings(DATA)
 const hj = async (...a) => JSON.parse(await herdr(...a))
@@ -2364,6 +2402,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/observability' || url.pathname === '/api/logs/server') return await observabilityApi(req, res, url)
+      if (parts[0] === 'api' && parts[1] === 'projects' && parts[2]) return await projectSettingsApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
       if (url.pathname === '/api/uploads' && req.method === 'POST') {
@@ -2561,8 +2600,9 @@ const dispatcher = new Dispatch({
   deps: {
     agents: () => agents(),
     host: () => host(),
-    maxWorking: () => routines.settings().maxWorking,
-    triageOn: () => jevOn('TICKET_TRIAGE'),
+    maxWorking: (project) => Number(psettings.get(project, 'maxWorking')),
+    baseBranch: (project) => psettings.get(project, 'baseBranch'),
+    triageOn: (project) => jevOn('TICKET_TRIAGE', project),
     pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
     // The project's room is the one named after it (WP-74); archived rooms don't count.

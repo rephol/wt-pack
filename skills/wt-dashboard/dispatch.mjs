@@ -50,7 +50,7 @@ export function dispatchPrompt(t, role, report = null) {
 
 export class Dispatch {
   // deps: { agents(), host(), handoff(args, prompt, cwd) → stdout, repoOf(project) → path|null, git(repo, ...args) → stdout,
-  //   reportOf(project) → { room: slug|null, orch: {name, pane}|null }, maxWorking() → n, pending() → routine spawns in flight, ticketOf(agent) → ticket id|null }
+  //   reportOf(project) → { room: slug|null, orch: {name, pane}|null }, maxWorking(project) → n, baseBranch(project) → 'main' (WP-107), pending() → routine spawns in flight, ticketOf(agent) → ticket id|null }
   constructor({ tickets, deps, log = console.error }) {
     Object.assign(this, { tickets, deps, log, ticking: false, state: new Map(), gone: new Map(), fetched: new Map() })
   }
@@ -125,13 +125,13 @@ export class Dispatch {
     const open = (await this.tickets.list(project, 'ready')).tickets
       .filter((t) => !t.assignee && (!t.dispatch || (t.dispatch.state === 'failed' && now - Date.parse(t.dispatch.at) > 120_000)))
     // Jev triage may still add needs-plan (roleFor): t.jev marks it done; fail-open after 60s, nothing to wait for when off.
-    const triaging = this.deps.triageOn?.() ? (t) => !t.jev && now - Date.parse(t.created) < 60_000 : () => false
+    const triaging = this.deps.triageOn?.(project) ? (t) => !t.jev && now - Date.parse(t.created) < 60_000 : () => false
     const next = open.filter((t) => !triaging(t)).sort((a, b) => prio(a) - prio(b))[0] // stable: seq order within a priority
     if (!next) { s.waiting = open.length ? 'waiting for triage' : null; return }
     if (!ags) { s.waiting = 'agents unavailable'; return }
     const w = ags.filter((a) => a.status === 'working')
     const working = w.length
-    const why = await guard({ working, pending: this.inflight() + (this.deps.pending?.(new Set(w.map((a) => a.id))) ?? 0), max: this.deps.maxWorking(), host: this.deps.host })
+    const why = await guard({ working, pending: this.inflight() + (this.deps.pending?.(new Set(w.map((a) => a.id))) ?? 0), max: this.deps.maxWorking(project), host: this.deps.host })
     if (why) { s.waiting = why; return }
     const repo = await this.deps.repoOf(project)
     if (!repo) { s.waiting = `no checkout for ${project}`; return }
@@ -207,7 +207,7 @@ export class Dispatch {
     }
   }
 
-  // Merge commits on origin/main since the last scan (7 days on the first); fetch at most every 5 min per repo.
+  // Merge commits on origin/<baseBranch> since the last scan (7 days on the first); fetch at most every 5 min per repo.
   async #merged(project, key, cards, now) {
     if (!cards.some((t) => t.column === 'building' || t.column === 'review')) return
     const repo = await this.deps.repoOf(project)
@@ -219,9 +219,10 @@ export class Dispatch {
     const k = `reconcile:${project}`
     const last = this.db.prepare('SELECT v FROM routine_settings WHERE k = ?').get(k)?.v
     const log = (range) => this.deps.git(repo, 'log', '--merges', '--first-parent', '--since=7.days', '--format=%H%x09%ct%x09%s', range)
-    const out = await (last ? log(`${last}..origin/main`).catch(() => log('origin/main')) : log('origin/main'))
+    const base = `origin/${this.deps.baseBranch?.(project) ?? 'main'}`
+    const out = await (last ? log(`${last}..${base}`).catch(() => log(base)) : log(base))
     const lines = out.split('\n').filter(Boolean).map((l) => l.split('\t'))
-    const head = (await this.deps.git(repo, 'rev-parse', 'origin/main')).trim()
+    const head = (await this.deps.git(repo, 'rev-parse', base)).trim()
     for (const [sha, ct, subject = ''] of lines.reverse()) for (const id of mergeIds(subject, key)) {
       const t = cards.find((c) => c.id === id)
       if (!t || (t.column !== 'building' && t.column !== 'review')) continue

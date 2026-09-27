@@ -22,6 +22,7 @@ import { Link } from '@astryxdesign/core/Link'
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Selector } from '@astryxdesign/core/Selector'
+import { openProjectSettings } from './projects-settings'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
@@ -225,7 +226,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const dragged = drag ? tickets.find((t) => t.id === drag.id) : undefined
   const opened = openId && openId !== 'new' ? tickets.find((t) => t.id === openId) ?? null : null
   const shown = phone ? [col] : COLUMNS
-  const automation = <AutomationButton phone={phone} board={q.data} busy={setBoard.isPending} onSet={(b) => setBoard.mutate(b)} runNow={runNow} />
+  const automation = <AutomationButton project={project} phone={phone} board={q.data} busy={setBoard.isPending} onSet={(b) => setBoard.mutate(b)} runNow={runNow} />
 
   return (
     <Section className="hd-kb-page">
@@ -284,8 +285,8 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
 
 // WP-64: Auto and Dispatch settings live behind one status button — popover on desktop, bottom sheet on phones — so the header stays one row.
 type BoardSettings = { auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number; reportRoom?: string | null; reportOrch?: boolean }
-function AutomationButton({ phone, board, busy, onSet, runNow }: {
-  phone: boolean; board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void
+function AutomationButton({ project, phone, board, busy, onSet, runNow }: {
+  project: string; phone: boolean; board: BoardT; busy: boolean; onSet: (b: BoardSettings) => void
   runNow: { data?: { queued: number }; isPending: boolean; mutate: () => void }
 }) {
   const [open, setOpen] = useState(false)
@@ -310,6 +311,8 @@ function AutomationButton({ phone, board, busy, onSet, runNow }: {
       {board.dispatch && <StallMinutes value={board.stallMin ?? 45} onSave={(n) => onSet({ stallMin: n })} />}
       {board.dispatch && <ReportTo board={board} busy={busy} onSet={onSet} phone={phone} />}
       {board.dispatch && <Text type="supporting" color="secondary" className="hd-kb-dispatch-line">{dispatchLine(board.dispatchStatus)}</Text>}
+      <Divider />
+      <Button label="More project settings" variant="ghost" size="sm" onClick={() => { setOpen(false); openProjectSettings(project) }} />
     </VStack>
   )
   const trigger = <Button label={status} variant="secondary" size={phone ? 'sm' : 'md'} icon={<StatusDot variant={on ? 'success' : 'neutral'} label={on ? 'automation on' : 'automation off'} />}

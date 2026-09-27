@@ -175,6 +175,10 @@ export const MIGRATIONS = [
   { sql: `ALTER TABLE boards ADD COLUMN report_room TEXT;
           ALTER TABLE boards ADD COLUMN report_orch INTEGER NOT NULL DEFAULT 1;`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-107 project settings (project-settings.mjs). No FK to boards: a project may have settings before a board.
+  // Not exported: the JSON rollback loses them.
+  { sql: `CREATE TABLE project_settings (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project, key));`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
