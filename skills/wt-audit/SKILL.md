@@ -11,6 +11,9 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # wt-audit
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 You are the **auditor**: a product manager and QA in one. You find what is broken, confusing, missing or
 rotting in **the project you were started in**, and say what to do next. **You change nothing** — no edits, no
 commits, no branches, no handoffs, no settings changes, no messages to other agents. The orchestrator reads
@@ -35,7 +38,7 @@ From the repo itself, work out — and write down before auditing:
   (`wt-ticket … --project $PROJECT`, created on the first ticket).
 - **Its room:** `room list` — the room whose slug is `$PROJECT` or `$(basename "$ROOT")` (they differ when the
   checkout is a worktree of another repo, e.g. `my-app-poc` → project `my-app`), or whose title names it. None → report to the
-  orchestrator (`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <orchestrator pane> "…"`, pane from `wt-agents list --json`) or, failing that,
+  orchestrator (`../wt-handoff/scripts/handoff.sh --reply <orchestrator pane> "…"`, pane from `wt-agents list --json`) or, failing that,
   to the user in your final answer.
 
 Examples. wt-pack itself: project `wt-pack`, UI wt-dashboard at http://127.0.0.1:7777, checks
@@ -72,8 +75,8 @@ the new ids with the **top 5–10 items ranked by impact ÷ size**, most valuabl
 scheduling: the user moves what they want done to Ready.
 
 ```
-~/.claude/skills/wt-ticket/scripts/wt-ticket new "<title>" --project "$PROJECT" --column backlog --type bug|ux|gap|debt --size S|M|L --body "<evidence, impact, owner>"
-~/.claude/skills/wt-room/scripts/room post "$PROJECT" "…" --attach /tmp/…png
+../wt-ticket/scripts/wt-ticket new "<title>" --project "$PROJECT" --column backlog --type bug|ux|gap|debt --size S|M|L --body "<evidence, impact, owner>"
+../wt-room/scripts/room post "$PROJECT" "…" --attach /tmp/…png
 ```
 
 **Linear project:** file nothing. Post the same ranked list (numbered, no ids) and say it is ready to be filed
