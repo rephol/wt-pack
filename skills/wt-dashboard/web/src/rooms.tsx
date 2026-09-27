@@ -387,7 +387,7 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
       </HStack>
       <ScrollableArea label="Room settings" style={{ padding: `8px 16px calc(env(safe-area-inset-bottom) + 16px)` }}>
         <VStack gap={4}>
-          {!room.archived && <RoomName key={room.slug} room={room} onSave={(title) => patch.mutate({ title })} />}
+          {!room.archived && <RoomName key={`${room.slug}|${room.title}`} room={room} onSave={(title) => patch.mutate({ title })} />}
           {!room.archived && (
             <Selector label="Responder" width="100%" value={room.responder ?? ''}
               description={room.responder && !room.responderPinned ? 'Chosen automatically; pick one to pin it.' : 'Answers messages that mention nobody.'}

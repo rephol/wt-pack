@@ -1208,7 +1208,7 @@ test('sourceOf (WP-104): a /goal <wt-message> user entry shows "kind · from"; r
   assert.equal(m.src, 'dispatch · wt-dashboard')
 })
 
-test('WP-114 rooms: rename changes the title only (slug and posting by slug keep working); archive blocks posts; remove deletes', async () => {
+test('WP-114 rooms: rename changes the title only (slug and posting by slug keep working); archive blocks posts; the server API remove still deletes', async () => {
   const { Rooms } = await import('./rooms.mjs')
   const { mkdtempSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
