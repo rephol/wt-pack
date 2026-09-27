@@ -11,7 +11,9 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 ## Layout
 - `skills/wt-*` — the skills; `.claude-plugin/marketplace.json` — local marketplace `wt-pack` (serves
   `skills/wt-memory/claude-plugin`; also setup's marker for a wt-pack checkout); `setup` — installer;
-  `docs/` — features, handoff, `plans/` (point-in-time, not rewritten).
+  `docs/` — features, handoff, `plans/` (point-in-time, not rewritten). Root `.claude-plugin/plugin.json` +
+  `hooks/hooks.json` — the plugin-only install `wt-pack@wt-pack` (every skill + wt-memory hooks/MCP, WP-122); never
+  write `~/.claude/skills/…` in scripts, sent strings or SKILL prose (`wt-shared/scripts/paths.test.mjs`).
 
 ## Build and test
 - wt-dashboard (`skills/wt-dashboard`): `npm test` (server + web unit tests).

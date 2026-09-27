@@ -77,6 +77,28 @@ board, shared rooms, and the moments that need you.
 
 <sub>The screenshots use a throwaway demo project (`acme-shop`) with simulated agents.</sub>
 
+## Install
+
+Pick **one** of these. Don't combine 1 and 2: both load wt-memory's hooks, so every hook would run twice
+(`./setup doctor` warns about it).
+
+1. **Plugin only**: the skills, without the dashboard. In Claude Code:
+
+   ```
+   /plugin marketplace add rephol/wt-pack
+   /plugin install wt-pack@wt-pack
+   ```
+
+   You get every `wt-*` skill, plus wt-memory's hooks (standing preferences and the pkill guard) and its MCP
+   server. Agents still need [herdr](https://herdr.dev). There is no board, rooms or dashboard: `wt-ticket` and
+   `room` say so when you call them. Plugin skills are namespaced, so type `/wt-pack:wt-plan` instead of
+   `/wt-plan`. A prompt like "Use wt-plan …" works either way.
+   Add the marketplace from GitHub or a clean clone, never from a working checkout. A local-path install copies
+   everything in the directory, including `node_modules` and `.claude/worktrees`, which hold other tickets'
+   unmerged code.
+2. **Full `./setup`**: skills, board, rooms and the dashboard. See [Quick start](#quick-start).
+3. **Self-hosted on a Linux VM**: the full install on a server. See [docs/vm.md](docs/vm.md).
+
 ## Quick start
 
 You need macOS or Linux, Node ≥ 22.13, Git, [`gh`](https://cli.github.com),
