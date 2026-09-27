@@ -156,6 +156,8 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # WP-107: a project with a GitHub account (dashboard Settings › Projects) gets that account's token in the pane
   # env, so gh and git push inside it act as that account. From gh's keyring; never `gh auth switch` (global).
   # The token is a snapshot: a changed account or rotated token needs a respawn.
+  # ponytail: the token rides herdr's argv for the one tab-create call; the pane env (ps eww) already exposes it
+  # for the agent's life, accepted on a single-user Mac (plan risk). herdr has no env-file option to avoid either.
   set --
   acct=$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get githubAccount --cwd "$main" 2>/dev/null)
   if [ -n "$acct" ]; then
