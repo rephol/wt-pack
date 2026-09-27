@@ -48,8 +48,9 @@ test('matchCandidate: one hit → it; two hits → unmatched; no hit with one ca
   const tails = new Map([[A, tail('fix the  login\nbug please', 'other')], [B, tail('something else')]])
   assert.equal(matchCandidate(cands, tails, 'fix the login bug please')?.id, A) // whitespace-normalised
   assert.equal(matchCandidate(cands, new Map([[A, tail('same')], [B, tail('same')]]), 'same'), null)
-  assert.equal(matchCandidate([{ id: A }], new Map([[A, tail('x')]]), 'nope')?.id, A)
-  assert.equal(matchCandidate(cands, tails, 'nope'), null)
+  assert.equal(matchCandidate([{ id: A }], new Map([[A, tail('x')]]), 'nothing like it at all')?.id, A)
+  assert.equal(matchCandidate(cands, tails, 'nothing like it at all'), null)
+  assert.equal(matchCandidate(cands, new Map([[A, tail('Done.')], [B, tail('other')]]), 'Done. Merged #12 and pushed'), null) // a short line is not a match
   assert.equal(matchCandidate(cands, tails, null), null)
   // A pane with no visible prompt: its last reply, wrapped at the pane width, still matches the assistant text.
   const reply = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: "The new-commits watcher expired with nothing new, and I've re-armed it." }] } })
@@ -95,9 +96,9 @@ test('locate: lists, tails and matches through the injected ssh', async () => {
   const run = async (host, script) => {
     calls.push(script)
     if (script.includes('find')) return Buffer.from(`2 10 ${A}.jsonl\n1 10 ${B}.jsonl\n`)
-    return Buffer.from(`cut\n${user(script.includes(A) ? 'deploy it' : 'hello')}`)
+    return Buffer.from(`cut\n${user(script.includes(A) ? 'deploy it to staging' : 'hello from the other pane')}`)
   }
-  assert.equal((await locate({ host: 'herdr-box', cwd: '/work/projects/umkmall', prompt: 'hello', run }))?.id, B)
+  assert.equal((await locate({ host: 'herdr-box', cwd: '/work/projects/umkmall', prompt: 'hello from the other pane', run }))?.id, B)
   assert.equal(await locate({ host: 'herdr-box', cwd: 'nope', prompt: 'x', run }), null)
   assert.equal(calls.length, 3)
 })

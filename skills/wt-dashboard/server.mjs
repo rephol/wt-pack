@@ -746,7 +746,11 @@ export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, {
   const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
   req.on('close', () => { ac.abort(); clearInterval(beat) })
   const state = (st) => res.write(`event: remote\ndata: ${JSON.stringify({ state: st })}\n\n`)
-  const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); signal.addEventListener('abort', () => { clearTimeout(t); r() }, { once: true }) })
+  const sleep = (ms) => new Promise((r) => {
+    const stop = () => { clearTimeout(t); r() }
+    const t = setTimeout(() => { signal.removeEventListener('abort', stop); r() }, ms)
+    signal.addEventListener('abort', stop, { once: true })
+  })
   // One SSH job per pane at a time (null = another stream of this pane is busy: try again shortly).
   const job = (fn) => limiter.run(host, pane, fn)
   state('loading')
@@ -770,10 +774,13 @@ export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, {
   // First load: the last WINDOW bytes only (transcripts run to tens of MB), from the first whole line in them.
   const start = Math.max(0, size - REMOTE_WINDOW)
   let buf = null
-  while (!buf) {
-    try { buf = await job(() => run(host, remoteRead(dir, id, start, size - start), { signal })) } catch { if (!signal.aborted) state('unreachable'); return res.end() }
+  while (!buf) { // unreadable: wait and retry here (ending the stream would make EventSource re-locate every ~3s)
+    let down = false
+    try { buf = await job(() => run(host, remoteRead(dir, id, start, size - start), { signal })) } catch { down = true }
     if (signal.aborted) return
-    if (!buf) await sleep(pullMs)
+    if (down) state('unreachable')
+    if (!buf) await sleep(down ? retry.unreachable : pullMs)
+    if (signal.aborted) return
   }
   let from = start
   if (start > 0) { const nl = buf.indexOf(0x0a); buf = nl < 0 ? Buffer.alloc(0) : buf.subarray(nl + 1); from = nl < 0 ? start + buf.length : start + nl + 1 }
@@ -782,17 +789,21 @@ export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, {
   let offset = first.end ?? from, left = first.left
   state('ok')
   firstBatch(emit, res, first.text, from, offset, since, asks)
+  let down = false
   while (!signal.aborted) {
     await sleep(pullMs)
     if (signal.aborted) break
     const at = offset + left.length
     try {
       const b = await job(() => run(host, remoteRead(dir, id, at, REMOTE_WINDOW), { signal }))
+      if (down) { down = false; state('ok') }
       if (!b?.length) continue
       const r = cutLines(left, b, at)
       left = r.left
       if (r.end !== null) { emit(parseLines(r.text, asks), r.end); offset = r.end }
-    } catch { if (!signal.aborted) state('unreachable') }
+      // ponytail: a line over 16 MB is skipped (its tail parses as garbage and is dropped) rather than buffered.
+      if (left.length > 4 * REMOTE_WINDOW) { offset = at + b.length; left = Buffer.alloc(0) }
+    } catch { if (!signal.aborted && !down) { down = true; state('unreachable') } }
   }
 }
 

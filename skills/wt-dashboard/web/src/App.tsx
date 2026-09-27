@@ -1158,13 +1158,24 @@ const remoteStates = new Map<string, RemoteState>()
 const remoteSubs = new Set<() => void>()
 const subRemote = (f: () => void) => { remoteSubs.add(f); return () => { remoteSubs.delete(f) } }
 function agentStreamSpec(base: string, key: string, session: string | null) {
+  let file: string | null = null // remote: the matched transcript this stream's messages came from
   return {
     url: (cursor: string | null) => `${base}/stream${cursor ? `?since=${encodeURIComponent(cursor)}` : ''}`,
     // Remote (no session): not persisted; its cursor carries the matched file id, so a re-match starts clean.
     ...(session ? { persistKey: `agent|${key}`, persistTag: session } : {}),
     attach: (es: EventSource, apply: (fn: (items: Msg[]) => Msg[], cursor?: string | null) => void) => {
       es.onmessage = (ev) => apply((prev) => mergeAgentMsgs(prev, JSON.parse(ev.data)), ev.lastEventId || undefined)
-      es.addEventListener('remote', (ev) => { remoteStates.set(key, JSON.parse((ev as MessageEvent).data).state); remoteSubs.forEach((f) => f()) })
+      if (session) return
+      // Remote: a fresh stream starts at 'loading' (not a stale state from an earlier visit), and a re-match to
+      // another file (/clear, a restart) replaces the messages instead of merging two transcripts.
+      const set = (st: RemoteState) => { remoteStates.set(key, st); remoteSubs.forEach((f) => f()) }
+      set('loading')
+      es.addEventListener('remote', (ev) => set(JSON.parse((ev as MessageEvent).data).state))
+      es.addEventListener('session', (ev) => {
+        const f = JSON.parse((ev as MessageEvent).data)
+        if (file && f !== file) apply(() => [], null)
+        file = f
+      })
     },
   }
 }

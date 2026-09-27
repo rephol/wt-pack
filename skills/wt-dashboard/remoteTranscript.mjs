@@ -48,6 +48,7 @@ export function parseCandidates(out) {
     .sort((a, b) => b.mtime - a.mtime)
 }
 
+const MIN = 12 // shorter lines ("Done.", "Yes") are in every transcript
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
 // The text of user prompts and assistant replies in a tail (its first line is usually cut, so it is skipped).
 export function userTexts(tail) {
@@ -63,11 +64,11 @@ export function userTexts(tail) {
 }
 
 // The pane's transcript among `cands`: the one file whose recent prompts/replies start like the pane's `prompt` hint
-// (its last prompt, or paragraphs of its tail — any of them, each ≥4 chars);
+// (its last prompt, or paragraphs of its tail — any of them, each ≥12 chars, compared on their first 40, so a bare "Done." never matches);
 // with no prompt or no hit, a lone candidate; otherwise null (unmatched — never guess between panes).
 export function matchCandidate(cands, tails, prompt) {
-  const ps = (Array.isArray(prompt) ? prompt : [prompt]).map(norm).filter((p) => p.length >= 4)
-  const hits = ps.length ? cands.filter((c) => userTexts(tails.get(c.id)).some((t) => { const n = norm(t); return n.length >= 4 && ps.some((p) => n.startsWith(p) || p.startsWith(n)) })) : []
+  const ps = (Array.isArray(prompt) ? prompt : [prompt]).map(norm).filter((p) => p.length >= MIN)
+  const hits = ps.length ? cands.filter((c) => userTexts(tails.get(c.id)).some((t) => { const n = norm(t); return n.length >= MIN && ps.some((p) => n.startsWith(p) || p.startsWith(n)) })) : []
   if (hits.length === 1) return hits[0]
   if (!hits.length && cands.length === 1) return cands[0]
   return null
