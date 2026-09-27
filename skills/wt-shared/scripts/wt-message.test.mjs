@@ -37,3 +37,13 @@ test('a leading slash command stays first, so it still runs', () => {
   assert.equal(wrap({ kind: 'routine', from: 'r', id: 'n' }, '/wt-plan WP-3 please'), '/wt-plan <wt-message id=n kind=routine from="r">WP-3 please</wt-message>')
   assert.equal(wrap({ kind: 'handoff', from: 'a', id: 'n' }, 'a/b not a command'), '<wt-message id=n kind=handoff from="a">a/b not a command</wt-message>')
 })
+
+test('WP-121: pr and sha attrs after ticket; invalid dropped; the server prefix regex still matches', () => {
+  const sha = 'a'.repeat(40)
+  const w = wrap({ kind: 'dispatch', from: 'o', ticket: 'WP-1', pr: 12, sha, id: 'n' }, '/wt-watch-prs review 12')
+  assert.equal(w, `/wt-watch-prs <wt-message id=n kind=dispatch from="o" ticket=WP-1 pr=12 sha=${sha}>review 12</wt-message>`)
+  assert.match(w, /^(?:\/\S+ )*<wt-message id=\w+ kind=(\w+) from="([^"]*)"/) // server.mjs wt-message parse
+  assert.doesNotMatch(wrap({ kind: 'dispatch', pr: '12 x', sha: 'XYZ' }, 'b'), /pr=|sha=/)
+  const cli = fileURLToPath(new URL('./wt-message-cli.mjs', import.meta.url))
+  assert.match(execFileSync('node', [cli, '--kind', 'dispatch', '--pr', '7', '--sha', 'abc1234'], { input: 'x' }).toString(), / pr=7 sha=abc1234>/)
+})

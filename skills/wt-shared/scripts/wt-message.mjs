@@ -10,9 +10,11 @@ export const attr = (t) => String(t ?? '').replace(/["<>&\n]/g, '')
 // Bodies: neither tag can be opened or closed from inside one (a zero-width space breaks the name).
 export const unTag = (t) => String(t ?? '').replace(/<(\/?)(room-message|wt-message)/gi, '<$1$2​')
 
-export function wrap({ kind, from = '', ticket = null, id = nonce() }, body) {
+export function wrap({ kind, from = '', ticket = null, pr = null, sha = null, id = nonce() }, body) {
   if (!KINDS.includes(kind)) throw new Error(`wt-message: bad kind ${JSON.stringify(kind)}`)
-  const t = typeof ticket === 'string' && /^[A-Z]+-\d+$/.test(ticket) ? ` ticket=${ticket}` : ''
+  const t = (typeof ticket === 'string' && /^[A-Z]+-\d+$/.test(ticket) ? ` ticket=${ticket}` : '')
+    // WP-121: a PR dispatch names its PR and head; values that fail the check are dropped.
+    + (/^\d{1,9}$/.test(String(pr ?? '')) ? ` pr=${pr}` : '') + (/^[0-9a-f]{7,40}$/.test(String(sha ?? '')) ? ` sha=${sha}` : '')
   // A slash command stays first (`/wt-audit …` must still run as one): `/cmd <wt-message …>rest</wt-message>`.
   const slash = String(body ?? '').match(/^(\/[^\s<]+)(?:\s+|$)/)
   const rest = slash ? String(body).slice(slash[0].length) : body
