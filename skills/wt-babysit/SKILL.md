@@ -13,6 +13,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, Agent, AskUserQuestio
 
 # wt-babysit
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 The tail of the pack. `wt-ship` opens a draft PR and stops; this keeps it moving until it is ready for a
 human decision.
 
@@ -44,7 +47,7 @@ not open one.
 Label your pane so the dashboard's Tasks page shows the watch and keeps its Babysit button off:
 
 ```
-~/.claude/skills/wt-shared/scripts/task-state.sh state "babysitting PR #<N>"
+../wt-shared/scripts/task-state.sh state "babysitting PR #<N>"
 ```
 
 **Read the draft flag first; it decides what there is to watch.** A draft and a ready PR are two different
@@ -113,8 +116,8 @@ The order is the content of this step. Getting it wrong wastes a whole cycle.
 Two judgments that stop a tick burning turns on things that need none:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs triage comments.json   # actionable, per comment
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs ci failure.json        # our_change | flaky | stale_base | infrastructure
+node ../wt-shared/scripts/wt-judge.mjs triage comments.json   # actionable, per comment
+node ../wt-shared/scripts/wt-judge.mjs ci failure.json        # our_change | flaky | stale_base | infrastructure
 ```
 
 Praise, "not for this PR", and remarks already addressed score near zero; a question that blocks approval
@@ -127,7 +130,7 @@ decides that a comment can go unanswered.
 **With classes** (`WT_JEV_BABYSIT_TRIAGE`, on by default; dashboard Settings › Integrations):
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs triage comments.json --classes --json   # adds class, p
+node ../wt-shared/scripts/wt-judge.mjs triage comments.json --classes --json   # adds class, p
 ```
 
 Per comment: `must_fix` → fix it and reply with the fix; `question` → answer it (change code only if the
@@ -136,7 +139,7 @@ is enough. **Every thread still gets a reply** — the class sets the kind of re
 Exit 3 (switch off, no key, Jev unavailable) → read every comment, as above.
 
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
-`node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
+`node ../wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
 
 ## 3. Stop
