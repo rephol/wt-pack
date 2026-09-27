@@ -90,3 +90,9 @@ test('roomTurns: a non-room prompt is untouched; batches parse', () => {
   assert.equal(r.rooms.size + r.posts.size + r.collapse.size, 0)
   assert.equal(roomTurns([{ ...say('u', rm('a', 'p', 'one') + '\n' + rm('b', 'q', 'two'), 'user'), src: 'room #wt-pack' }]).rooms.get('u')!.items.length, 2)
 })
+test('roomTurns: a command that only mentions room post is not a post', () => {
+  const u = { ...say('u', rm('a', 'x', 'q'), 'user'), src: 'room #wt-pack' }
+  for (const c of ['echo room post x', 'git commit -m "fix room post wt-pack"'])
+    assert.equal(roomTurns([u, call('c', 't', c), res('r', 't'), say('a', 'x')]).posts.size, 0, c)
+  assert.equal(roomTurns([u, call('c', 't', 'cd /x && room post wt-pack "y"'), res('r', 't')]).posts.get('c'), 'wt-pack')
+})

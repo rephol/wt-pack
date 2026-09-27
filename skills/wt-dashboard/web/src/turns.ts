@@ -100,7 +100,8 @@ export function contextUsage(msgs: TMsg[]) {
 // Only `room #` turns (wt-messages are untouched); a failed or missing post collapses nothing.
 export interface RoomItem { from: string; text: string }
 export interface RoomTurns { rooms: Map<string, { slug: string; items: RoomItem[] }>; posts: Map<string, string>; postResults: Set<string>; collapse: Set<string> }
-const POST = /(?:^|[\s/;&])room\s+post\s+["']?([\w-]+)/
+// The room CLI itself: at command start, after ; & | or as …/wt-room/scripts/room — not `echo room post x`.
+const POST = /(?:^|[;&|]\s*|\/wt-room\/scripts\/)room\s+post\s+["']?([\w-]+)/
 const ITEM = /<room-message [^>]*from="([^"]*)"[^>]*>([\s\S]*?)<\/room-message>/g
 export function roomTurns(msgs: TMsg[]): RoomTurns {
   const out: RoomTurns = { rooms: new Map(), posts: new Map(), postResults: new Set(), collapse: new Set() }

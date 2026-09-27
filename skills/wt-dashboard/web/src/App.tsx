@@ -1225,9 +1225,9 @@ function RoomPrompt({ room }: { room: { slug: string; items: RoomItem[] } }) {
   )
 }
 // WP-105: chat text after the turn's room post, behind a toggle — the room has the answer.
-function Collapsed({ children }: { children: ReactNode }) {
+function Collapsed({ lines, children }: { lines: number; children: ReactNode }) {
   const [open, setOpen] = useState(false)
-  return open ? <>{children}</> : <Button label="show 1 more line" variant="ghost" size="sm" onClick={() => setOpen(true)} />
+  return open ? <>{children}</> : <Button label={`show ${lines} more line${lines === 1 ? '' : 's'}`} variant="ghost" size="sm" onClick={() => setOpen(true)} />
 }
 
 // One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
@@ -1457,8 +1457,9 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                   ) : (
                     <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
-                        {r.m.text && (r.collapsed ? <Collapsed><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown></Collapsed> : <ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown>)}
-                        {r.m.text && <LinkPreviews text={r.m.text} />}
+                        {r.m.text && (r.collapsed
+                          ? <Collapsed lines={r.m.text.trim().split('\n').filter(Boolean).length}><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown><LinkPreviews text={r.m.text} /></Collapsed>
+                          : <><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown><LinkPreviews text={r.m.text} /></>)}
                         {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
                         {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
                       </ChatMessageBubble>
