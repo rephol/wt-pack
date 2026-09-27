@@ -139,7 +139,8 @@ diff)
   fi
   ;;
 mode)
-  case "${1:-}" in dispatch|review) echo "$1"; exit 0;; ?*) echo standalone; exit 0;; esac
+  case "${1:-}" in dispatch|review) echo "$1"; exit 0;; '') ;;
+    *) printf '%s' "$1" | grep -qE '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' && { echo standalone; exit 0; }; die "mode: dispatch, review or owner/repo, not $1";; esac
   role=""; command -v herdr >/dev/null 2>&1 && [ -n "${HERDR_PANE_ID:-}" ] \
     && role=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.tokens.role // empty' 2>/dev/null)
   case "$role" in orchestrator) echo dispatch;; *) echo standalone;; esac
@@ -149,8 +150,11 @@ dispatch)
   while [ $# -gt 0 ]; do case "$1" in --sha) X=${2:-}; shift 2;; --session) D=${2:-}; shift 2;; *) die "unknown arg $1";; esac; done
   printf '%s' "$X" | grep -qE '^[0-9a-f]{40}$' || die "dispatch needs --sha <40-char head SHA>"
   sess "$D"; setup
-  command -v herdr >/dev/null 2>&1 || die "dispatch needs herdr (the reviewer replies to this pane)"
-  c=$("$0" claim "$P" "$D") || { echo "$c"; exit 1; }
+  # The reviewer replies to this pane (handoff's footer), and only that reply releases the claim.
+  command -v herdr >/dev/null 2>&1 && [ -n "$(herdr pane get "${HERDR_PANE_ID:-none}" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)" ] \
+    || die "dispatch needs a herdr pane (the reviewer replies to it)"
+  # Held by D itself = an earlier dispatch whose reviewer never replied (died, stopped): hand it again, keep the claim.
+  c=$("$0" claim "$P" "$D") || { [ "$(head -1 "$CLAIMS/pr$P/owner" 2>/dev/null)" = "$D" ] || { echo "$c"; exit 1; }; }
   undo() { "$0" release "$P" "$D" >/dev/null 2>&1; }
   MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
   ag=$(herdr agent list 2>/dev/null) || ag='{}'
@@ -161,8 +165,9 @@ dispatch)
   if [ -z "$pane" ]; then
     free=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w and (.agent_status == "idle" or .agent_status == "done"))] | length')
     live=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w)] | length')
-    max=$(node "$here/../../wt-shared/scripts/project-setting.mjs" get maxReviewers --cwd . 2>/dev/null); max=${max:-2}
-    [ "${free:-0}" -gt 0 ] || [ "${live:-0}" -lt "$max" ] || { undo; echo "queued: at maxReviewers ($max)"; exit 3; }
+    max=$(node "$here/../../wt-shared/scripts/project-setting.mjs" get maxReviewers --cwd "$MAIN" 2>/dev/null); max=${max:-2}
+    # ponytail: counts from one agent list — two dispatches in the same second can both spawn (cap +1 at worst).
+    { [ "$max" -gt 0 ] && { [ "${free:-0}" -gt 0 ] || [ "${live:-0}" -lt "$max" ]; }; } || { undo; echo "queued: at maxReviewers ($max)"; exit 3; }
   fi
   H=${WATCH_PRS_HANDOFF:-$here/../../wt-handoff/scripts/handoff.sh}
   # --no-goal: a review is one run that stops. The body carries D: the reviewer records under it, no claim/release.

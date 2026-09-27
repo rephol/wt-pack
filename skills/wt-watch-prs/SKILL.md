@@ -30,7 +30,8 @@ session id, as S below). Never open a diff — the review judgement is not the d
   `/wt-watch-prs review N --sha X --session D` (kind=dispatch, pr=/sha= on the tag) to the reviewer that last held
   N if it is free, else a free `<repo>-reviewers` agent, else a new one while fewer than the project's
   `maxReviewers` (default 2) are live. Exit 1: held by another session (do nothing) or handoff failed (claim
-  released). Exit 3 `queued`: at the cap, claim released — retry that head later (poll-shas re-fires it after
+  released). Held by D itself means an earlier reviewer never replied: `dispatch` hands it again under the same
+  claim. Exit 3 `queued`: at the cap, claim released — retry that head later (poll-shas re-fires it after
   15 min anyway).
 - Reviewer's reply (`#N: <verdict> (<sha7>)`) → `$W release N D`; when it held, post
   `room post <main checkout's basename> "Held PR #N: …"` (best effort — the Inbox Held PR item shows it anyway).
@@ -38,10 +39,12 @@ session id, as S below). Never open a diff — the review judgement is not the d
   same reviewer when free.
 - NO LONGER OPEN → §5, as the loop does.
 
-**Review** (a pool reviewer, from a dispatch message). One PR, one head, then stop — no claim (D holds it), no
-Monitors, no release (D releases on your reply):
+**Review** (a pool reviewer, from a dispatch message). The arguments arrive inside a
+`<wt-message kind=dispatch … pr=N sha=X>` tag: read `review N --sha X --session D` from its text (that is the
+mode — do not run `$W mode` on it), and the sender pane from its "Handed off by … (pane P)" footer. One PR, one
+head, then stop — no claim (D holds it), no Monitors, no release (D releases on your reply):
 `$W describes N` → `$W gate N` → `$W diff N D --sha X` → wt-review → post (§3) → record under D with your own agent
-name, `$W record N <sha40> <state> - D --by <your name>`, then
+name, `$W record N <sha40> <state> - D --by <your name> < "$TMPDIR/noteN.txt"` (§4: the note on stdin), then
 `~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <sender pane> "#N: <verdict> (<sha7>)"` and stop.
 The judgement is §2 (from Describes on), §3 and §4, unchanged.
 

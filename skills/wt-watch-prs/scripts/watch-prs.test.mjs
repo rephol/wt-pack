@@ -36,7 +36,7 @@ chmodSync(join(bin, 'gh'), 0o755)
 // WP-121: herdr and handoff stubs for mode/dispatch (fixture files; a missing agents.json means herdr is absent).
 writeFileSync(join(bin, 'herdr'), `#!/bin/sh
 case "$1 $2" in
-  "pane get") cat "${fx}/pane.json" ;;
+  "pane get") [ "$3" = none ] && exit 1; cat "${fx}/pane.json" ;;
   "agent list") cat "${fx}/agents.json" ;;
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
 esac
@@ -199,7 +199,7 @@ test('diff: delta when the recorded head is an ancestor, full review after a for
 })
 
 const agents = (...a) => fixture('agents.json', { result: { agents: a.map(([name, pane_id, agent_status, workspace_id = 'wR']) => ({ name, pane_id, agent_status, workspace_id })) } })
-const drun = (args, env = {}) => run(['dispatch', ...args], { WATCH_PRS_HANDOFF: handoff, ...env })
+const drun = (args, env = {}) => run(['dispatch', ...args], { WATCH_PRS_HANDOFF: handoff, HERDR_PANE_ID: 'wO:p1', ...env })
 const handed = () => readFileSync(join(fx, 'handoff'), 'utf8')
 
 test('WP-121 mode: explicit arg wins; orchestrator → dispatch; reviewer, none or no herdr → standalone', () => {
@@ -210,9 +210,11 @@ test('WP-121 mode: explicit arg wins; orchestrator → dispatch; reviewer, none 
   fixture('pane.json', { result: { pane: { tokens: { role: 'reviewer' } } } })
   assert.equal(run(['mode'], { HERDR_PANE_ID: 'x' }).stdout.trim(), 'standalone')
   assert.equal(run(['mode']).stdout.trim(), 'standalone') // not in a herdr pane
+  assert.equal(run(['mode', 'reveiw']).status, 1) // a typo is not standalone
 })
 
 test('WP-121 dispatch: claims under D, hands to a reviewer with pr/sha, cross-mode claim, cap and failure release', () => {
+  fixture('pane.json', { result: { pane: { pane_id: 'wO:p1', tokens: { role: 'orchestrator' } } } })
   reset(); agents()
   let r = drun(['12', '--sha', sha('c'), '--session', 'sess-d'])
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /dispatched #12 to demo-reviewer-01/)
@@ -221,17 +223,28 @@ test('WP-121 dispatch: claims under D, hands to a reviewer with pr/sha, cross-mo
   assert.ok(existsSync(join(sd, 'claims', 'pr12')))
   r = drun(['12', '--sha', sha('c'), '--session', 'sess-e'])
   assert.equal(r.status, 1); assert.match(r.stdout, /held by sess-d/)
+  assert.equal(drun(['12', '--sha', sha('c'), '--session', 'sess-d']).status, 0) // own claim, reviewer never replied: re-hand
   assert.equal(run(['claim', '12', 'sess-s']).status, 1) // a standalone watcher loses to the dispatch claim
   // at the cap (2 live reviewers, none free): release and exit 3
   reset(); agents(['r1', 'wR:p1', 'working'], ['r2', 'wR:p2', 'working'])
   r = drun(['13', '--sha', sha('d'), '--session', 'sess-d'])
   assert.equal(r.status, 3); assert.match(r.stdout, /queued: at maxReviewers \(2\)/); assert.ok(!existsSync(join(sd, 'claims', 'pr13')))
+  reset(); agents(['r1', 'wR:p1', 'idle'], ['r2', 'wR:p2', 'working']) // a free reviewer at the cap still dispatches
+  assert.equal(drun(['15', '--sha', sha('f'), '--session', 'sess-d']).status, 0)
+  // maxReviewers 0 (project setting) queues even with a free reviewer
+  const zero = join(tmp, 'zero'); mkdirSync(join(zero, 'data'), { recursive: true })
+  const zdb = new DatabaseSync(join(zero, 'data', 'wt.db'))
+  zdb.exec("CREATE TABLE project_settings (project TEXT, key TEXT, value TEXT); INSERT INTO project_settings VALUES ('demo', 'maxReviewers', '0')"); zdb.close()
+  reset(); agents(['r1', 'wR:p1', 'idle'])
+  assert.equal(drun(['16', '--sha', sha('f'), '--session', 'sess-d'], { WT_DASHBOARD_DATA: zero }).status, 3)
   reset(); agents()
+  assert.match(drun(['17', '--sha', sha('f'), '--session', 'sess-d'], { HERDR_PANE_ID: '' }).stderr, /needs a herdr pane/)
   r = drun(['14', '--sha', sha('e'), '--session', 'sess-d'], { HANDOFF_FAIL: '1' })
   assert.equal(r.status, 1); assert.ok(!existsSync(join(sd, 'claims', 'pr14')))
 })
 
 test('WP-121 re-dispatch: the recorded reviewer gets --pane when idle; working or gone → pool pick', () => {
+  fixture('pane.json', { result: { pane: { pane_id: 'wO:p1' } } })
   reset({ reviewed: { 12: { sha: sha('a'), state: 'changes-requested', reviewer: 'r1' } } }); agents(['r1', 'wR:p7', 'idle'])
   assert.equal(drun(['12', '--sha', sha('b'), '--session', 'sess-d']).status, 0); assert.match(handed(), /--pane wR:p7/)
   reset({ reviewed: { 12: { reviewer: 'r1' } } }); agents(['r1', 'wR:p7', 'working'])
