@@ -171,7 +171,8 @@ dispatch)
   fi
   H=${WATCH_PRS_HANDOFF:-$here/../../wt-handoff/scripts/handoff.sh}
   # --no-goal: a review is one run that stops. The body carries D: the reviewer records under it, no claim/release.
-  out=$(printf '/wt-watch-prs review %s --sha %s --session %s' "$P" "$X" "$D" \
+  # "Use wt-watch-prs …", not a /slash command: a plugin install namespaces it (/wt-pack:wt-watch-prs, WP-122).
+  out=$(printf 'Use wt-watch-prs to review %s --sha %s --session %s' "$P" "$X" "$D" \
     | "$H" --role reviewer --kind dispatch --pr "$P" --sha "$X" ${pane:+--pane "$pane"} --no-goal "$MAIN") \
     || { undo; die "handoff failed for #$P${out:+: $out}"; }
   echo "dispatched #$P to $(printf '%s\n' "$out" | sed -n 's/^target \([^ ]*\) .*/\1/p' | head -1)"

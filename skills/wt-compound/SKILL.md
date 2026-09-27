@@ -12,6 +12,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, ToolSearch
 
 # wt-compound
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Turns a finished piece of work into a learning the next person gets for free. **This is the step the whole
 pack exists to feed** — everything before it produces one change; this is the only part that makes the next
 change cheaper.
@@ -86,7 +89,7 @@ the reasoning is already recoverable, and whether the wording is findable — so
 its one call:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs learning LEARNING.md --against <diff> --against <plan>
+node ../wt-shared/scripts/wt-judge.mjs learning LEARNING.md --against <diff> --against <plan>
 ```
 
 `redundant` high means the artifacts already carry the reasoning — do not write it. `findable` low means
@@ -96,7 +99,7 @@ reword around the trigger situation, in the words someone hitting it would searc
 way; the tool is the fast path to it, never the reason for it.
 
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
-`node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
+`node ../wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
 
 ## 5. Commit and report

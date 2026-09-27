@@ -15,6 +15,9 @@ allowed-tools: Bash, Read, Glob, Grep, Agent, ToolSearch
 
 # wt-review
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Reviews a **plan** or a **diff**. Returns findings; **the caller applies them.**
 
 One sizing table serves both, deliberately. The triggers are properties of the change, not of the document —
@@ -49,12 +52,12 @@ bundling, the prohibitions — is identical.
 
 ## Optional: score the target first
 
-If it is configured, `~/.claude/skills/wt-shared/scripts/wt-eval.mjs` returns calibrated scores for the dimensions this pack keeps
+If it is configured, `../wt-shared/scripts/wt-eval.mjs` returns calibrated scores for the dimensions this pack keeps
 failing on — evidence, Definition of Done, scope, unit decomposition on a plan; evidence and actionability
 on findings. Use it to aim the review, never to replace it: it scores a document, it does not find defects.
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-eval.mjs <target> [--type plan|research|review|learning]
+node ../wt-shared/scripts/wt-eval.mjs <target> [--type plan|research|review|learning]
 ```
 
 **It is optional and unconfigured is the normal case.** It needs a TypeSafe API key, from
@@ -79,12 +82,12 @@ a false merge in `dedupe` loses a finding, a missed behaviour change in `simplif
 
 ## Optional: compute the lens set instead of matching triggers
 
-`~/.claude/skills/wt-shared/scripts/wt-judge.mjs lenses <target>` returns a probability per trigger and prints the lens set. It is the
+`../wt-shared/scripts/wt-judge.mjs lenses <target>` returns a probability per trigger and prints the lens set. It is the
 same table below, judged rather than string-matched — a docs-only diff fires nothing; a migration plan fires
 data and testing at 90%+.
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs lenses <target> [--mode plan|diff]
+node ../wt-shared/scripts/wt-judge.mjs lenses <target> [--mode plan|diff]
 ```
 
 **Exit 3 means no key: size from the trigger table below, exactly as before.** Never skip sizing.
@@ -209,11 +212,11 @@ whether each step can actually be performed, not at re-auditing the research.
 
 ## Return
 
-Before returning, deduplicate. `~/.claude/skills/wt-shared/scripts/wt-judge.mjs dedupe <findings.json>` compares every pair and groups
+Before returning, deduplicate. `../wt-shared/scripts/wt-judge.mjs dedupe <findings.json>` compares every pair and groups
 them transitively, so A~B and B~C come back as one group rather than two pairs you must merge yourself:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs dedupe <scratchpad>/findings.json --json
+node ../wt-shared/scripts/wt-judge.mjs dedupe <scratchpad>/findings.json --json
 ```
 
 Exit 3: deduplicate by reading, as before. The threshold is 0.6 and deliberately asymmetric — a false merge
@@ -225,7 +228,7 @@ silently drops a real finding, while a false split costs one duplicate line.
 something in them. It ranks; **it does not decide what you read.**
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs attention pr.diff --lens correctness
+node ../wt-shared/scripts/wt-judge.mjs attention pr.diff --lens correctness
 ```
 
 Read the cut list too, every time. This is an experiment with its own falsification: a confirmed finding
@@ -258,7 +261,7 @@ module whose manifest is empty, a "typo ships green" on a string a test pins. Ne
 Verify by reading, or let the judgment layer do the reading:
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs verify <scratchpad>/findings.json [--rev <sha>] --json
+node ../wt-shared/scripts/wt-judge.mjs verify <scratchpad>/findings.json [--rev <sha>] --json
 ```
 
 **Both modes.** `--rev` reads each cited file at that commit and is for diff mode; without it the working
@@ -276,7 +279,7 @@ Findings ranked most-severe first. Each one: what is wrong, the concrete failure
 verification state.
 
 Each run prints `run <id>`. **When you later find a judgment was wrong, say so** —
-`node ~/.claude/skills/wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
+`node ../wt-shared/scripts/wt-judge.mjs mark <run>#<i> yes|no` — using the observed outcome,
 never a second opinion from the same model. That log is the only thing that moves the thresholds.
 Deduplicate across lenses before returning — two agents finding the same thing is one finding, and reporting
 it twice inflates the apparent yield of a bigger panel.

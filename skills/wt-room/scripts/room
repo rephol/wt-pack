@@ -10,7 +10,12 @@ set -eu
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 die() { echo "room: $*" >&2; exit 1; }
 esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>1{print "\\n"} {gsub(/\t/,"\\t"); print}'; }
-call() { curl -sS --fail-with-body -H "x-herdr-pane: ${HERDR_PANE_ID:-}" "$@"; }
+# WP-122: an unreachable server says what is missing (a plugin-only install has no dashboard); an HTTP error still
+# prints its body (--fail-with-body) and exits 1, as wt-ticket's call() does.
+call() {
+  rc=0; curl -sS --max-time "${MAXT:-10}" --fail-with-body -H "x-herdr-pane: ${HERDR_PANE_ID:-}" "$@" || rc=$?
+  case $rc in 0) ;; 6|7|28) die "needs wt-dashboard running at $API (see README › Install)" ;; 22) die "request failed (see the error above)" ;; *) die "curl failed ($rc, see above)" ;; esac
+}
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case "$cmd" in
   list) call "$API/api/rooms?format=text" ;;
@@ -40,14 +45,14 @@ case "$cmd" in
       inv=$(printf '%s\n' "$2" | tr ',' '\n' | sed '/^$/d' | while read -r n; do printf '"%s",' "$(esc "$n")"; done); inv=${inv%,}
     fi
     out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
-      --data "{\"slug\":\"$(esc "$slug")\",\"title\":\"$(esc "$title")\"${inv:+,\"invite\":[$inv]}}" "$API/api/rooms") || die "server unreachable at $API"
+      --data "{\"slug\":\"$(esc "$slug")\",\"title\":\"$(esc "$title")\"${inv:+,\"invite\":[$inv]}}" "$API/api/rooms") || die "needs wt-dashboard running at $API (see README › Install)"
     code=$(printf '%s' "$out" | tail -n1); body=$(printf '%s' "$out" | sed '$d')
     if [ "$code" != 200 ]; then die "$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"; fi
     case "$body" in *'"existing":true'*) echo "#$slug already exists — post there" ;; *) echo "created #$slug (you are its responder)" ;; esac
     case "$body" in *'"unknown":["'*) echo "not invited (unknown agents): $(printf '%s' "$body" | sed -n 's/.*"unknown":\[\([^]]*\)\].*/\1/p')" ;; esac ;;
   delete)
     [ $# -ge 1 ] || die 'usage: room delete <tmp-slug>'
-    out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -X DELETE -w '\n%{http_code}' "$API/api/rooms/$1") || die "server unreachable at $API"
+    out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -X DELETE -w '\n%{http_code}' "$API/api/rooms/$1") || die "needs wt-dashboard running at $API (see README › Install)"
     [ "$(printf '%s' "$out" | tail -n1)" = 200 ] || die "$(printf '%s' "$out" | sed '$d' | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"
     echo "deleted #$1" ;;
   *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <image>]... | room create <slug> "title" [--invite a,b] | room delete <tmp-slug>' ;;

@@ -56,6 +56,8 @@ from_arg=
 reply=
 PANE_RE='^[A-Za-z0-9:_][A-Za-z0-9:_-]*$'
 WTMSG="$(cd "$(dirname "$0")" && pwd)/../../wt-shared/scripts/wt-message-cli.mjs"
+# WP-122: the path the target runs to reply — this install's own handoff.sh (symlinks or the plugin cache).
+SELF="$(cd "$(dirname "$0")" && pwd -P)/handoff.sh"
 goal=1
 task=
 mcp=
@@ -211,7 +213,7 @@ from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
 from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
 [ -n "$from_pane" ] && prompt="$prompt
 
-Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply $from_pane \"...\""
+Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: $SELF --reply $from_pane \"...\""
 
 # The task label starts with the ticket when there is one, and is cut to herdr's 80 characters here.
 # A ticket is <TEAM>-N for a Linear team in WT_LINEAR_TEAMS (~/.config/wt-dashboard/env) or <KEY>-N for a local
@@ -274,7 +276,7 @@ finish() {  # <first output line> <target pane>
   fi
   echo "$line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
-  echo "reach: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply $to \"...\""
+  echo "reach: $SELF --reply $to \"...\""
   [ -z "$routed" ] || echo "$routed"
 }
 

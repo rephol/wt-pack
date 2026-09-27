@@ -165,7 +165,7 @@ function RepoEditor({ it, app, put }: { it: Item; app: boolean; put: (k: string,
         </HStack>
         {restart && (app
           ? <HStack gap={2} align="center"><Text size="sm">Takes effect after a restart.</Text><Button label="Restart server" size="sm" variant="primary" isLoading={busy === 'restart'} onClick={() => run('restart')} /></HStack>
-          : <Text size="sm">Takes effect after a restart: stop the server and run <code>npm start</code> in ~/.claude/skills/wt-dashboard.</Text>)}
+          : <Text size="sm">Takes effect after a restart: stop the server and run <code>npm start</code> in <code>skills/wt-dashboard</code> of your wt-pack checkout.</Text>)}
       </VStack>
     </Field>
   )

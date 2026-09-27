@@ -256,9 +256,9 @@ test('dispatchPrompt: report line in four shapes, both roles; no "reply to the s
     const room = dispatchPrompt(t, role, { room: 'wt-pack', orch: null })
     assert.match(room, /When done, post a one-line result in #wt-pack with `room post wt-pack "…"`\.\n$/)
     const o = dispatchPrompt(t, role, { room: null, orch })
-    assert.match(o, /When done, send a one-line result to o with `~\/\.claude\/skills\/wt-handoff\/scripts\/handoff\.sh --reply w1:p2 "…"`\.\n$/)
+    assert.match(o, /When done, send a one-line result to o with `\/\S+\/wt-handoff\/scripts\/handoff\.sh --reply w1:p2 "…"`\.\n$/)
     const both = dispatchPrompt(t, role, { room: 'wt-pack', orch })
-    assert.match(both, /room post wt-pack "…"` and send a one-line result to o with `~\/\.claude\/skills\/wt-handoff\/scripts\/handoff\.sh --reply w1:p2/)
+    assert.match(both, /room post wt-pack "…"` and send a one-line result to o with `\/\S+\/wt-handoff\/scripts\/handoff\.sh --reply w1:p2/)
     const none = dispatchPrompt(t, role, { room: null, orch: null })
     assert.doesNotMatch(none, /When done/)
     assert.equal(none, dispatchPrompt(t, role))
@@ -304,4 +304,11 @@ test('project settings (WP-107): maxWorking and baseBranch are asked per project
   assert.ok(git.some((a) => a[0] === 'log' && a.at(-1) === 'origin/develop'))
   assert.ok(git.some((a) => a[0] === 'rev-parse' && a[1] === 'origin/develop'))
   assert.ok(!git.flat().includes('origin/main'))
+})
+
+test('WP-122: the report line names this pack\'s own handoff.sh, never a ~/.claude/skills link', async () => {
+  const { reportLine } = await import('./dispatch.mjs')
+  const l = reportLine({ orch: { name: 'o', pane: 'w1:p2' } })
+  assert.doesNotMatch(l, /~\/\.claude\/skills/)
+  assert.match(l, /\/wt-handoff\/scripts\/handoff\.sh --reply w1:p2/)
 })

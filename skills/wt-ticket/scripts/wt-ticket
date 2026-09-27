@@ -26,7 +26,7 @@ fmt() { [ $json = 1 ] && echo "" || echo "format=text"; }
 call() {
   local out code
   out=$(curl -sS --max-time "${MAXT:-5}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
-    ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API" >&2; exit 1; }
+    ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API — wt-ticket needs it running (see README › Install)" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ticket: $code $out" >&2; exit 1; fi
   [ -z "$out" ] || printf '%s\n' "$out"

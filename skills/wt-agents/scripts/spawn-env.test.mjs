@@ -69,3 +69,7 @@ test('WP-120: every spawn puts the kill shims first on PATH and sets CLAUDE_ENV_
   assert.match(s.tab, /--env CLAUDE_ENV_FILE=\S+\/wt-agents\/env-demo-worker-\d+\.sh/)
   assert.match(s.tab, /--env WT_KILL_SHIM_DIR=\S+\/bin/)
 })
+
+test('WP-122: spawn points WT_MEMORY_MCP at the sibling wt-memory server (plugin installs have no ~/.claude/skills)', () => {
+  assert.match(spawn().tab, /--env WT_MEMORY_MCP=\S+\/wt-memory\/mcp\/server\.mjs/)
+})

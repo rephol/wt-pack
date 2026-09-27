@@ -11,11 +11,14 @@ allowed-tools: Bash
 
 # wt-handoff
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 ```bash
-~/.claude/skills/wt-handoff/scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
-printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
+scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
+printf '%s\n' "$PROMPT" | scripts/handoff.sh \
   [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
-~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
+scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
 ```
 
 - **Every prompt is wrapped** (WP-104) as `<wt-message id=<nonce> kind=handoff|dispatch|routine|reply|system
@@ -28,14 +31,14 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. `--no-goal` sends a plain prompt instead of `/goal`
-  (why a goal, and its one-line / 4000-character rules: `~/.claude/skills/wt-plan/references/handoff.md`).
+  (why a goal, and its one-line / 4000-character rules: `../wt-plan/references/handoff.md`).
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
-  `target <name> <pane> — <task>` and `reach: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
+  `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
   sent; print the prompt for a human instead.
 
 ## Task label and awareness
 
-- `--mcp a,b` adds MCP servers from `~/.claude/skills/wt-agents/mcp/catalog.json` when the handoff SPAWNS a worker (see
+- `--mcp a,b` adds MCP servers from `../wt-agents/mcp/catalog.json` when the handoff SPAWNS a worker (see
   wt-agents "Lean MCP"). A reused worker keeps the set it started with, so pair it with `--new` when the
   task needs a server the pool's workers lack.
 - Jev's picks only run in lean MCP mode (dashboard Settings switch, or `WT_AGENTS_MCP=lean`); in the default
@@ -62,7 +65,8 @@ printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
   (`wt-ticket move` + `assign`, best effort; `--dry-run` prints `ticket=` and the move instead).
 - Target tokens: `task`, `ticket`, `handoff_from`, `handoff_from_pane`, `handoff_at`. Sender tokens (only
   inside herdr, from `$HERDR_PANE_ID`): `handoff_to`, `handoff_to_pane`.
-- The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: ~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <id> "..."`.
+- The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: <absolute path of this handoff.sh> --reply <id> "..."`
+  (resolved at send time, so it works from the `./setup` links and from a plugin install).
 - `handoff_at` is what lets the dashboard adopt the new `ticket` over its own mirrored copy
   (`data/agent-tags.json`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
 - `wt-finish` clears `task` when the work is retired.

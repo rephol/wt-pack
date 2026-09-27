@@ -107,6 +107,17 @@ Runs every tick on **every** board, whether Dispatch is on or not:
 
 Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards).
 
+## Install as a plugin
+
+- **Plugin-only install** (WP-122): `/plugin marketplace add rephol/wt-pack`, then `/plugin install wt-pack@wt-pack`.
+  This gives every `wt-*` skill (namespaced: `/wt-pack:wt-plan`), wt-memory's hooks and its MCP server, with no
+  `./setup`. Agents still need herdr. There is no board, rooms or dashboard: `wt-ticket` and `room` exit with
+  "needs wt-dashboard … (see README › Install)".
+  - Scripts and the strings sent to agents name sibling skills by resolved path, not `~/.claude/skills`. A path
+    guard test (`wt-shared/scripts/paths.test.mjs`) keeps it that way.
+  - `./setup doctor` warns when this plugin and `./setup`'s wt-memory plugin are both enabled, or when this plugin
+    was installed from a working checkout.
+
 ## Agents, roles and spawn
 
 - Agents are herdr panes. The Agents page is a table grouped by role (agent, task, status, activity,

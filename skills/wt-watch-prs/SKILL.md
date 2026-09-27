@@ -6,16 +6,19 @@ description: >
   dedicated reviewer identity, re-reviewing a held PR when its author replies. Held PRs show in the
   wt-dashboard Inbox. Use when started as a reviewer (`wt-agents spawn reviewer`), or when asked to watch,
   review or keep reviewing a repo's PRs. Three modes: standalone (`/wt-watch-prs [repo]`, this loop), dispatch
-  (an orchestrator hands each new head to a pool reviewer and never reads a diff), and review (`/wt-watch-prs
-  review <pr> --sha <sha> --session <D>`: one PR at one head, then stop). Not for watching your own PR to
+  (an orchestrator hands each new head to a pool reviewer and never reads a diff), and review ("Use wt-watch-prs to
+  review <pr> --sha <sha> --session <D>": one PR at one head, then stop). Not for watching your own PR to
   merge-ready — that is wt-babysit.
 allowed-tools: Bash, Read, Grep, Glob, Skill, Agent, ToolSearch, Monitor, TaskList, TaskStop
 ---
 
 # wt-watch-prs
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 A code reviewer, not a test runner: it reads pinned refs and CI's verdict, never checks out, installs or runs
-suites. The mechanics live in `scripts/watch-prs.sh` (call it as `W=~/.claude/skills/wt-watch-prs/scripts/watch-prs.sh`);
+suites. The mechanics live in `scripts/watch-prs.sh` (call it as `W=<this skill's base directory>/scripts/watch-prs.sh`);
 this file is the judgement. Run everything from the repo's main checkout (a reviewer starts there).
 
 ## Modes (WP-121)
@@ -27,7 +30,7 @@ the pane's role token decides (orchestrator → dispatch; reviewer, none or no h
 **Dispatch** (orchestrator). §1 preflight, then arm `$W poll-shas` and `$W poll-replies --session D` (D is your
 session id, as S below). Never open a diff — the review judgement is not the dispatcher's.
 - New head → `$W dispatch N --sha <40> --session D`: claims under D, then hands
-  `/wt-watch-prs review N --sha X --session D` (kind=dispatch, pr=/sha= on the tag) to the reviewer that last held
+  "Use wt-watch-prs to review N --sha X --session D" (kind=dispatch, pr=/sha= on the tag) to the reviewer that last held
   N if it is free, else a free `<repo>-reviewers` agent, else a new one while fewer than the project's
   `maxReviewers` (default 2) are live. Exit 1: held by another session (do nothing) or handoff failed (claim
   released). Held by D itself means an earlier reviewer never replied: `dispatch` hands it again under the same
@@ -40,12 +43,13 @@ session id, as S below). Never open a diff — the review judgement is not the d
 - NO LONGER OPEN → §5, as the loop does.
 
 **Review** (a pool reviewer, from a dispatch message). The arguments arrive inside a
-`<wt-message kind=dispatch … pr=N sha=X>` tag: read `review N --sha X --session D` from its text (that is the
+`<wt-message kind=dispatch … pr=N sha=X>` tag: read `review N --sha X --session D` from its text ("Use wt-watch-prs to review …", or the older
+`/wt-watch-prs review …` form) (that is the
 mode — do not run `$W mode` on it), and the sender pane from its "Handed off by … (pane P)" footer. One PR, one
 head, then stop — no claim (D holds it), no Monitors, no release (D releases on your reply):
 `$W describes N` → `$W gate N` → `$W diff N D --sha X` → wt-review → post (§3) → record under D with your own agent
 name, `$W record N <sha40> <state> - D --by <your name> < "$TMPDIR/noteN.txt"` (§4: the note on stdin), then
-`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <sender pane> "#N: <verdict> (<sha7>)"` and stop.
+`../wt-handoff/scripts/handoff.sh --reply <sender pane> "#N: <verdict> (<sha7>)"` and stop.
 The judgement is §2 (from Describes on), §3 and §4, unchanged.
 
 **Standalone** is §1–§5 below.

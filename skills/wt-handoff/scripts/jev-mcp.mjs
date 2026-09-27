@@ -8,7 +8,7 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import { judge } from '../../wt-shared/scripts/typesafe.mjs'
 
 // What each catalog server is FOR, in the words Jev judges against. A catalog name without an
@@ -37,7 +37,7 @@ async function main() {
   const out = (o) => console.log(JSON.stringify({ ...o, ms: Date.now() - t0 }))
   try {
     const prompt = readFileSync(0, 'utf8').trim()
-    const catalog = process.env.WT_AGENTS_CATALOG ?? join(homedir(), '.claude/skills/wt-agents/mcp/catalog.json')
+    const catalog = process.env.WT_AGENTS_CATALOG ?? fileURLToPath(new URL('../../wt-agents/mcp/catalog.json', import.meta.url)) // sibling skill (WP-122)
     const names = Object.keys(JSON.parse(readFileSync(catalog, 'utf8')).mcpServers ?? {})
     const qs = questions(names)
     if (!prompt || !Object.keys(qs).length) return out({ picks: [], error: 'nothing to ask' })

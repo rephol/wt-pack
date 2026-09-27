@@ -1,0 +1,14 @@
+{
+  "description": "wt-pack (root plugin, WP-122) — wt-memory: standing preferences as additionalContext; pkill argument-order guard",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 5 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 5 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/pkill-guard.mjs\"", "timeout": 5 }] }
+    ]
+  }
+}

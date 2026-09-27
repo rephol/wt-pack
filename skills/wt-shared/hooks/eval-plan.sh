@@ -27,7 +27,7 @@ if [ -f "$stamp" ]; then
 fi
 touch "$stamp"
 
-out=$(node "$HOME/.claude/skills/wt-shared/scripts/wt-eval.mjs" "$f" --type plan 2>/dev/null) || exit 0
+out=$(node "$(dirname "$0")/../scripts/wt-eval.mjs" "$f" --type plan 2>/dev/null) || exit 0
 
 # Only speak up about dimensions that are actually weak AND confident. A flat
 # distribution means the question did not apply, and reporting it as a finding

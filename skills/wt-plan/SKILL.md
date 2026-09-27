@@ -15,6 +15,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, Agent, AskUserQuestio
 
 # wt-plan
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Orchestrator for the `wt-*` pack. Produces a worktree and a reviewed plan. **It never writes implementation
 code** — that is `wt-work`, reached through the handoff.
 
@@ -55,9 +58,9 @@ Jira / GitHub MCP tool, `gh issue view`, the API. Read the **whole** description
 an active ticket often carries re-prioritisation notes that change what the work is. No tracker tool available
 → ask for a paste. Never invent a ticket's contents.
 
-**Local board ticket** (`<KEY>-N` whose prefix is not a Linear team key, e.g. `WP-12`; `~/.claude/skills/wt-ticket/scripts/wt-ticket keys` lists the keys): the
-board is the tracker. `~/.claude/skills/wt-ticket/scripts/wt-ticket show <ID>` is the ticket (its body and comments are the description), then take it
-and mark it — `~/.claude/skills/wt-ticket/scripts/wt-ticket claim <ID> || true` and `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> planning || true`. The branch starts with the lowercase
+**Local board ticket** (`<KEY>-N` whose prefix is not a Linear team key, e.g. `WP-12`; `../wt-ticket/scripts/wt-ticket keys` lists the keys): the
+board is the tracker. `../wt-ticket/scripts/wt-ticket show <ID>` is the ticket (its body and comments are the description), then take it
+and mark it — `../wt-ticket/scripts/wt-ticket claim <ID> || true` and `../wt-ticket/scripts/wt-ticket move <ID> planning || true`. The branch starts with the lowercase
 id: `wp-12-<slug>`, so the dashboard and wt-handoff join the worktree to the card.
 
 **Described work**: that description is the input. Do not invent a ticket id.
@@ -90,7 +93,7 @@ Override when the ticket belongs somewhere else: `WT_BASE=origin/preview scripts
 overwrites both; silent outside herdr):
 
 ```
-~/.claude/skills/wt-shared/scripts/task-state.sh own "<TICKET> <title>"        # task_state = planning
+../wt-shared/scripts/task-state.sh own "<TICKET> <title>"        # task_state = planning
 ```
 
 The label then follows the work without you: wt-handoff sets `handed to <worker>`, the worker's `wt-ship`
@@ -193,7 +196,7 @@ says, not for its shape as a plan. These four dimensions are the ones this pack 
 and they were written from plans produced by this very step.
 
 ```bash
-node ~/.claude/skills/wt-shared/scripts/wt-eval.mjs <plan> --type plan
+node ../wt-shared/scripts/wt-eval.mjs <plan> --type plan
 ```
 
 It reports; it decides nothing, and the scores never appear in the plan — the four answers above are owed
@@ -206,7 +209,8 @@ ignore that row rather than editing the plan to satisfy it.
 **Exit 3 means no key: answer the four by reading.** The contract is unchanged; the tool is the fast path
 to it, never the reason for it. Never block on it, never ask for a key.
 
-**A hook may have scored it already.** `~/.claude/skills/wt-shared/hooks/eval-plan.sh` runs on every write to
+**A hook may have scored it already.** `../wt-shared/hooks/eval-plan.sh`, when registered in your settings (a
+manual opt-in; neither `./setup` nor the plugin registers it), runs on every write to
 `docs/plans/*.md` and says something only when a dimension is both weak and confidently scored, at most once
 per plan per ten minutes. If it spoke, that IS this step's scoring — read what it said and fix the plan.
 It exists because prose did not work: three framings of this instruction were measured over 40 hours across
