@@ -1,5 +1,8 @@
 # Handoff
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 ## The prompt
 
 Copy this verbatim. Substitute the three angle-bracketed values and change **nothing else**.
@@ -56,7 +59,7 @@ tabs and finished workers are recycled instead of piling up. List the free ones 
 in the repo's **main checkout**; a worker parked inside a worktree is work already in flight:
 
 ```bash
-~/.claude/skills/wt-handoff/scripts/handoff.sh --list <worktree>   # pane-id, worker name, cwd
+../wt-handoff/scripts/handoff.sh --list <worktree>   # pane-id, worker name, cwd
 ```
 
 Put that list in the question. With candidates, ask **which worker, and whether to clear it**, and carry a
@@ -72,7 +75,7 @@ Clearing is not free either: a `SessionStart` memory hook re-injects project con
 to spawn one.
 
 ```bash
-printf '%s\n' "$PROMPT" | ~/.claude/skills/wt-handoff/scripts/handoff.sh \
+printf '%s\n' "$PROMPT" | ../wt-handoff/scripts/handoff.sh \
   [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] <worktree>
 ```
 
