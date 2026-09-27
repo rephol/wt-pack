@@ -9,7 +9,7 @@ import { open, tx } from './store.mjs'
 export const DEFAULT_SETTINGS = {
   agentToAgent: false, // agents may @mention other agents (delivered)
   maxHops: 3, // agent→agent deliveries in a row before a human must reply
-  ticketRooms: 'suggest', // 'off' | 'suggest' | 'auto' — rooms #umk-NNNN per ticket
+  ticketRooms: 'suggest', // 'off' | 'suggest' | 'auto' — rooms #<ticket id> per ticket, e.g. #wp-12
   dismissedTickets: [], // suggestions the user dismissed
   profile: { name: 'user', handle: 'user', avatar: null }, // how agents address the human (@handle)
   rateCount: 12, // agent posts… (an ack-first reply is two posts)

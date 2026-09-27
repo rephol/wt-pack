@@ -116,7 +116,7 @@ export function parsePane(text, raw = '') {
   const footer = lines.slice(cut).join('\n')
 
   const ctx = footer.match(/Context:.*?(\d+(?:\.\d+)?[kM]?)\/(\d+[kM]?)\s*\((\d+)%\)/)
-  // A cwd the status line cut short ('…/umkmall...') is dropped, so herdr's own cwd is used instead.
+  // A cwd the status line cut short ('…/my-app...') is dropped, so herdr's own cwd is used instead.
   const cwd = footer.match(/^\s*cwd:\s*(\S.*?)\s*$/m)?.[1]?.replace(/^.*(\.\.\.|…)$/, '') || undefined
 
   // Turns: ❯ = user, ⏺ = assistant; continuation lines belong to the current turn.
@@ -397,7 +397,7 @@ export function remoteName(label, cwd, paneId) {
   return room > 0 ? `${head}-${mid.slice(0, room).replace(/-$/, '')}-${tail}` : `${head.slice(0, 32 - tail.length - 1)}-${tail}`
 }
 export function agentName(m, a, cwd) {
-  // Local agents without a herdr name are often named by their title (umkmall-orchestrator); a title that is not
+  // Local agents without a herdr name are often named by their title (my-app-orchestrator); a title that is not
   // name-shaped is a session topic → <cwd>-<pane>. Remote titles are always topics → <machine>-<cwd>-<pane>.
   if (a.name) return a.name
   const t = a.terminal_title_stripped?.trim()
