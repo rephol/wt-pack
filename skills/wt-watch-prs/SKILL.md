@@ -5,7 +5,10 @@ description: >
   after the first review), and post the verdict — approve, comment, or hold with request-changes — under a
   dedicated reviewer identity, re-reviewing a held PR when its author replies. Held PRs show in the
   wt-dashboard Inbox. Use when started as a reviewer (`wt-agents spawn reviewer`), or when asked to watch,
-  review or keep reviewing a repo's PRs. Not for watching your own PR to merge-ready — that is wt-babysit.
+  review or keep reviewing a repo's PRs. Three modes: standalone (`/wt-watch-prs [repo]`, this loop), dispatch
+  (an orchestrator hands each new head to a pool reviewer and never reads a diff), and review (`/wt-watch-prs
+  review <pr> --sha <sha> --session <D>`: one PR at one head, then stop). Not for watching your own PR to
+  merge-ready — that is wt-babysit.
 allowed-tools: Bash, Read, Grep, Glob, Skill, Agent, ToolSearch, Monitor, TaskList, TaskStop
 ---
 
@@ -14,6 +17,35 @@ allowed-tools: Bash, Read, Grep, Glob, Skill, Agent, ToolSearch, Monitor, TaskLi
 A code reviewer, not a test runner: it reads pinned refs and CI's verdict, never checks out, installs or runs
 suites. The mechanics live in `scripts/watch-prs.sh` (call it as `W=~/.claude/skills/wt-watch-prs/scripts/watch-prs.sh`);
 this file is the judgement. Run everything from the repo's main checkout (a reviewer starts there).
+
+## Modes (WP-121)
+
+`$W mode [arg]` picks: `dispatch` or `review` when given, `standalone` for an `owner/repo` argument; with none,
+the pane's role token decides (orchestrator → dispatch; reviewer, none or no herdr → standalone). All three share
+`state.json` and the claims, so no head is reviewed twice across modes.
+
+**Dispatch** (orchestrator). §1 preflight, then arm `$W poll-shas` and `$W poll-replies --session D` (D is your
+session id, as S below). Never open a diff — the review judgement is not the dispatcher's.
+- New head → `$W dispatch N --sha <40> --session D`: claims under D, then hands
+  `/wt-watch-prs review N --sha X --session D` (kind=dispatch, pr=/sha= on the tag) to the reviewer that last held
+  N if it is free, else a free `<repo>-reviewers` agent, else a new one while fewer than the project's
+  `maxReviewers` (default 2) are live. Exit 1: held by another session (do nothing) or handoff failed (claim
+  released). Exit 3 `queued`: at the cap, claim released — retry that head later (poll-shas re-fires it after
+  15 min anyway).
+- Reviewer's reply (`#N: <verdict> (<sha7>)`) → `$W release N D`; when it held, post
+  `room post <main checkout's basename> "Held PR #N: …"` (best effort — the Inbox Held PR item shows it anyway).
+- Reply on a held PR (poll-replies) → `$W dispatch N --sha <current head> --session D` again; it re-picks the
+  same reviewer when free.
+- NO LONGER OPEN → §5, as the loop does.
+
+**Review** (a pool reviewer, from a dispatch message). One PR, one head, then stop — no claim (D holds it), no
+Monitors, no release (D releases on your reply):
+`$W describes N` → `$W gate N` → `$W diff N D --sha X` → wt-review → post (§3) → record under D with your own agent
+name, `$W record N <sha40> <state> - D --by <your name>`, then
+`~/.claude/skills/wt-handoff/scripts/handoff.sh --reply <sender pane> "#N: <verdict> (<sha7>)"` and stop.
+The judgement is §2 (from Describes on), §3 and §4, unchanged.
+
+**Standalone** is §1–§5 below.
 
 ## 1. Preflight, then arm
 
@@ -107,7 +139,7 @@ $W release 12 "$S"
 - **Reply on a held PR** — verify the answer against the code (an answer is a claim), then approve superseding
   the hold, or hold again naming only what is still open, and `record`.
 - **NO LONGER OPEN** — `record` it `merged`/`closed` and delete `refs/review/S/pr-N-head`
-  (`git update-ref -d`). **Merged while you held a blocker → say so loudly, immediately.**
+  and `refs/review/S/pr-N-base` (`git update-ref -d`). **Merged while you held a blocker → say so loudly, immediately.**
 - **Negative results need a live probe**: a grep that finds nothing proves nothing until the pattern matches
   something you know is there; a ref must equal the reported head before you trust a file read from it.
 
