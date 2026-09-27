@@ -112,6 +112,12 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - Agents are herdr panes. The Agents page is a table grouped by role (agent, task, status, activity,
   machine, branch), one card per machine (local and remote herdr hosts), with filters All / Busy / Free /
   Needs you / Attention and sorting; open an agent to read and type into its conversation. **Stop** sends Esc (only while working and no question is pending).
+- **Remote agents** (WP-97): the conversation shows the real Claude transcript, read over SSH (read-only, from the
+  `herdr machine list` host). herdr gives remote panes no session id, so the file is matched: the jsonl in the
+  pane's project dir (changed in the last week) whose recent text matches the pane's last prompt or reply. The
+  first load reads the last 4 MB, then pulls every 3s while the page is open (one SSH call per pane, 4 per host).
+  A badge says `remote · transcript`, `loading transcript…`, `transcript not matched — pane view` or
+  `unreachable — pane view`; until messages arrive the pane view shows.
 - **Roles** (Settings › Roles): Orchestrator (purple, not spawnable), Planner (blue, starts in the main
   checkout, workspace `<repo>-planners`), Worker (green, starts in a worktree, `<repo>-workers`), Auditor
   (orange, main checkout, `<repo>-auditors`). Editable: name, id, letter, colour, workspace/name patterns,
