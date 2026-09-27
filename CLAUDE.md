@@ -6,7 +6,7 @@ secrets, uninstall). Scripts refer to each other sibling-relatively (`../wt-shar
 Branch `main`, remote `origin` = github.com/rephol/wt-pack; commits are authored as rephol via
 repo-local git config — **push after committing** (`git push`).
 User-facing feature reference: `docs/features.md` — a user-visible change updates it in the same merge.
-Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
+Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory, not here.
 
 ## Layout
 - `skills/wt-*` — the skills; `.claude-plugin/marketplace.json` — local marketplace `wt-pack` (serves
@@ -37,6 +37,7 @@ Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
 | wt-plan · wt-work · wt-review · wt-pr · wt-ship · wt-simplify · wt-compound · wt-research | ticket pipeline |
 | wt-finish | retire worktree; clears `task` token |
 | wt-babysit | watch PR to merge-ready |
+| wt-watch-prs | reviewer loop over a repo's open PRs; state `~/.local/share/wt-watch-prs/` → Inbox `pr-held` |
 | wt-audit | auditor role loop (PM + QA findings) |
 | wt-ticket | local kanban board CLI (`WP-N`): new/list/show/move/comment/claim/assign/keys |
 | wt-room | rooms CLI: list/read/post/--attach/create |
