@@ -8,7 +8,7 @@
 #   task-state.sh planner --clear                   # … clear that planner's task + task_state
 #
 # `planner` finds the planner through this pane's handoff_from_pane token (role=planner only) and changes it only while
-# the planner's task is still this work: it starts with the same ticket (UMK-NNN), or, without one,
+# the planner's task is still this work: it starts with the same ticket (ENG-123 or WP-12), or, without one,
 # is the same label. Every failure is silent and exits 0 (not in herdr, pane gone, old herdr).
 [ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null && command -v jq >/dev/null || exit 0
 
@@ -38,10 +38,14 @@ case "${1:-}" in
     ptask=$(tok "$theirs" task)
     [ -n "$ptask" ] || exit 0
     task=$(tok "$mine" task)
-    # UMK-N or a local board key (wt-ticket keys; empty when the server is down).
+    # <TEAM>-N for a Linear team in WT_LINEAR_TEAMS, or a local board key (wt-ticket keys; empty when the server
+    # is down) — the same rule as wt-handoff's handoff.sh.
     T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+    teams=$(sed -n 's/^[[:space:]]*WT_LINEAR_TEAMS=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tail -1 | tr -d '"' | tr ',' '\n' \
+      | sed 's/=.*//; s/[[:space:]]//g' | grep -E '^[A-Za-z][A-Za-z0-9]*$' | tr '\n' '|' || true)
     keys=$( [ -x "$T" ] && "$T" keys 2>/dev/null | tr '\n' '|' || true)
-    ticket=$(printf '%s\n%s\n' "$(tok "$mine" ticket)" "$task" | grep -oiE "(^|[^a-z])(umk${keys:+|${keys%|}})-[0-9]+" | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]')
+    all="$teams$keys"
+    ticket=$( [ -n "$all" ] && printf '%s\n%s\n' "$(tok "$mine" ticket)" "$task" | grep -oiE "(^|[^a-z])(${all%|})-[0-9]+" | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]' || true)
     if [ -n "$ticket" ]; then
       case "$(printf '%s' "$ptask" | tr '[:lower:]' '[:upper:]')" in "$ticket"*) ;; *) exit 0 ;; esac
     else
