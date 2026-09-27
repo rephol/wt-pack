@@ -284,7 +284,8 @@ Projects, Terminals, Usage, Observability, Server, About.
   a snapshot — respawn after changing it), **Reviewer GitHub account** (wt-watch-prs posts reviews as this
   account, token from gh's keyring per call, so it can approve PRs your agents opened; unset → the
   `GH_REVIEWER_TOKEN_FILE` token, else the default identity, which only comments), **Base branch** (default `main`; wt-watch-prs diffs against it too; dispatch reconcile and the PR list's
-  shipped check), **Agent MCP** (`WT_AGENTS_MCP`), **Max working agents** (dispatch cap; global = Routines'),
+  shipped check), **Agent MCP** (`WT_AGENTS_MCP`), **Max working agents** (dispatch cap; global = Routines'), **Max reviewers** (`maxReviewers`, default 2,
+  0–20: wt-watch-prs dispatch spawns a reviewer only below it — WP-121),
   **Ticket triage** (`WT_JEV_TICKET_TRIAGE`); plus the board's Auto and Dispatch switches. Stored in `wt.db`
   (`project_settings`, not in the JSON rollback); shell scripts read it via
   `wt-shared/scripts/project-setting.mjs get <key> [--project P|--cwd DIR]`.
@@ -428,7 +429,7 @@ current repo; `--json` on any command. Exit 0 ok, 1 API error / server down, 2 u
 | wt-simplify · wt-review · wt-compound · wt-pr | The steps wt-ship runs in order |
 | wt-ship | Simplify → review → record learnings → PR (this repo merges to main instead) |
 | wt-babysit | Watch a PR until merge-ready |
-| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity |
+| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity. Modes (WP-121): standalone `/wt-watch-prs [repo]`; dispatch (orchestrator role: hands each new head to a `<repo>-reviewers` agent, never reads a diff, capped by Max reviewers); review `/wt-watch-prs review <pr> --sha <sha> --session <D>` (one head, records under the dispatcher, replies, stops) |
 | wt-finish | Retire a merged worktree and its branch |
 | wt-handoff | Hand a prompt to an agent, or a freshly spawned one |
 | wt-audit | PM+QA pass that files board cards; proposals only |
