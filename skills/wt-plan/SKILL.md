@@ -209,7 +209,8 @@ ignore that row rather than editing the plan to satisfy it.
 **Exit 3 means no key: answer the four by reading.** The contract is unchanged; the tool is the fast path
 to it, never the reason for it. Never block on it, never ask for a key.
 
-**A hook may have scored it already.** `../wt-shared/hooks/eval-plan.sh` runs on every write to
+**A hook may have scored it already.** `../wt-shared/hooks/eval-plan.sh`, when registered in your settings (a
+manual opt-in; neither `./setup` nor the plugin registers it), runs on every write to
 `docs/plans/*.md` and says something only when a dimension is both weak and confidently scored, at most once
 per plan per ten minutes. If it spoke, that IS this step's scoring — read what it said and fix the plan.
 It exists because prose did not work: three framings of this instruction were measured over 40 hours across
