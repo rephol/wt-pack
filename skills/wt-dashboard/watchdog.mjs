@@ -15,6 +15,7 @@ export const CHECKS = [
   { id: 'errors', label: 'Server errors in 10 minutes', unit: 'errors', threshold: 20 },
   { id: 'jev', label: 'Jev failure rate over the last hour', unit: '%', threshold: 30 },
   { id: 'exited', label: "Pool agent's Claude session exited for", unit: 'min', threshold: 1 },
+  { id: 'stale-hooks', label: 'Pool agent started before the installed wt-memory guard by', unit: 'min', threshold: 0 },
 ]
 const BY_ID = new Map(CHECKS.map((c) => [c.id, c]))
 
@@ -36,7 +37,8 @@ export function enteredAt(t) {
 
 // snap: { starts: [ms], queue: [{ agent, slug, ts }], boards: [{ project, auto, dispatch, tickets }],
 //   agents: [{ name }] | null (null = unknown), herdr: { ok, lastOkAt }, diskFree: bytes | null, dbBytes: bytes | null,
-//   errors: [ms], jev: [{ ts, err, feature, test? }], exited: [{ pane, name, session, since }] (exitedAgents) }
+//   errors: [ms], jev: [{ ts, err, feature, test? }], exited: [{ pane, name, session, since }] (exitedAgents),
+//   stale: { guardAt: ms, agents: [{ pane, name, startedAt: ms }] } (staleAgents) | null }
 // A missing part of the snapshot means "unknown" and never fires.
 export function evaluate(snap, settings, now = Date.now()) {
   const s = cleanWatchdogSettings(settings)
@@ -101,8 +103,32 @@ export function evaluate(snap, settings, now = Date.now()) {
         e.session ? `Session ${e.session}. Resume restarts it in the same pane.` : 'No session id was recorded, so it cannot be resumed from here.')
     }
   }
+  if (on('stale-hooks') && snap.stale) {
+    for (const a of snap.stale.agents) {
+      if (snap.stale.guardAt - a.startedAt <= th('stale-hooks') * MIN) continue
+      add('stale-hooks', a.pane, `${a.name} runs without the pkill guard (pane ${a.pane})`,
+        `Its Claude session started ${new Date(a.startedAt).toISOString()}, before wt-memory ${snap.stale.version ?? ''} was installed; plugin hooks load at session start. Restart to load the pkill guard (WP-120).`)
+    }
+  }
   return out
 }
+
+// WP-120: `LC_ALL=C ps -axo pid=,lstart=,command=` → Map claude --name → process start (ms; the latest when a name
+// runs twice). lstart is "Sun Sep 27 19:02:41 2026" (local time).
+export function psStarts(text) {
+  const m = new Map()
+  for (const line of String(text).split('\n')) {
+    const r = line.match(/^\s*\d+\s+\w{3}\s+(\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/)
+    const name = r && /^(?:\S*\/)?claude\s/.test(r[2]) && r[2].match(/--name[ =](\S+)/)?.[1]
+    const t = name && Date.parse(r[1])
+    if (t && !(m.get(name) >= t)) m.set(name, t)
+  }
+  return m
+}
+// Local pool agents whose claude started before guardAt (the installed wt-memory version's install time); null guardAt → none.
+export const staleAgents = (agents, pidStart, guardAt) => (guardAt == null ? [] : (agents ?? [])
+  .filter((a) => a.local && a.pool && a.pool !== 'other' && pidStart.get(a.name) < guardAt)
+  .map((a) => ({ pane: a.id, name: a.name, startedAt: pidStart.get(a.name) })))
 
 // open: { [key]: finding & { since } }. Returns the next open set and what changed. A finding that stays open keeps
 // its `since` and takes the latest title/body.
