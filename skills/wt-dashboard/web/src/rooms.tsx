@@ -371,7 +371,7 @@ function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, o
               metadata={<RoomMeta m={m} onReply={startReply} />}>
               <span id={`rm-${m.id}`} />
               {m.replyTo && <Link onClick={() => jumpTo(m.replyTo!.id)}><Text type="supporting" size="sm" maxLines={1}>{`↪ ${m.replyTo.name}: ${m.replyTo.text}`}</Text></Link>}
-              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions}>{m.text}</ChatMarkdown></ChatMessageBubble>}
+              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions} breaks={m.author.kind === 'user'}>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.text && <LinkPreviews text={m.text} />}
               {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
             </ChatMessage>

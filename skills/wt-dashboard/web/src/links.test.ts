@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ChatMarkdown, linkClick, linksIn } from './links.ts'
+import { ChatMarkdown, hardBreaks, linkClick, linksIn } from './links.ts'
 
 const FIXTURE = 'Published: https://claude.ai/artifact/3ZmJRZFzrSvfrYFXAPGiVs. See [the docs](https://example.com/docs) but not `https://in.code/x`.'
 
@@ -41,4 +41,11 @@ test('linksIn: max 3, duplicates collapsed, code skipped, punctuation trimmed', 
   assert.deepEqual(linksIn('see https://a.dev/x. and https://a.dev/x/ and `https://code.dev` then (https://b.dev/p) https://c.dev https://d.dev'),
     ['https://a.dev/x', 'https://b.dev/p', 'https://c.dev'])
   assert.deepEqual(linksIn('```\nhttps://in.block\n``` https://out.dev#frag https://out.dev'), ['https://out.dev#frag'])
+})
+
+test('ChatMarkdown breaks: typed newlines render as <br>, code fences and agent text untouched', () => {
+  assert.equal(hardBreaks('a\nb\n\nc\n```\nx\ny\n```'), 'a  \nb\n\nc\n```\nx\ny\n```')
+  const html = (breaks: boolean) => renderToStaticMarkup(createElement(ChatMarkdown, { breaks, children: 'one\ntwo' }))
+  assert.match(html(true), /one<br\/?>\s*two/)
+  assert.doesNotMatch(html(false), /<br/)
 })

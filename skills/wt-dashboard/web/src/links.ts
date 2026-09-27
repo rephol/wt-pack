@@ -44,8 +44,14 @@ export function linksIn(text: string, max = 3): string[] {
   return out
 }
 
-export function ChatMarkdown({ children, density, inlinePlugins }: { children: string; density?: 'default' | 'compact'; inlinePlugins?: MarkdownInlinePlugin[] }): ReactNode {
+// Typed text keeps its line breaks: Markdown joins single newlines into one paragraph, so each one outside a code
+// fence becomes a hard break (two trailing spaces). Agent text is left as CommonMark.
+export const hardBreaks = (text: string) =>
+  text.split(/(^```[\s\S]*?^```)/m).map((part, i) => i % 2 ? part : part.replace(/([^\n])\n(?=[^\n])/g, '$1  \n')).join('')
+
+export function ChatMarkdown({ children, density, inlinePlugins, breaks }: { children: string; density?: 'default' | 'compact'; inlinePlugins?: MarkdownInlinePlugin[]; breaks?: boolean }): ReactNode {
   const chat = useChatDensity()
   density ??= markdownDensity(chat)
+  if (breaks) children = hardBreaks(children)
   return createElement(Markdown as unknown as ComponentType<Record<string, unknown>>, { density, inlinePlugins, autolink: 'gfm', onLinkClick: (h: string, e: { metaKey?: boolean; ctrlKey?: boolean; preventDefault?: () => void }) => linkClick(h, e), style: { overflowWrap: 'anywhere' } }, children)
 }

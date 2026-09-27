@@ -1447,7 +1447,7 @@ function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, mode = '
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
                         return (
                           <>
-                            {u.text && <ChatMessageBubble>{u.text}</ChatMessageBubble>}
+                            {u.text && <ChatMessageBubble><span style={{ whiteSpace: 'pre-wrap' }}>{u.text}</span></ChatMessageBubble>}
                             {u.text && <LinkPreviews text={u.text} />}
                             {imgs.length > 0 && <ChatMessageBubble variant="ghost"><ImageRow srcs={imgs} /></ChatMessageBubble>}
                           </>
