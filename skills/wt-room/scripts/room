@@ -13,8 +13,8 @@ esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>
 # WP-122: an unreachable server says what is missing (a plugin-only install has no dashboard); an HTTP error still
 # prints its body (--fail-with-body) and exits 1, as wt-ticket's call() does.
 call() {
-  rc=0; curl -s --max-time "${MAXT:-10}" --fail-with-body -H "x-herdr-pane: ${HERDR_PANE_ID:-}" "$@" || rc=$?
-  case $rc in 0) ;; 6|7|28) die "needs wt-dashboard running at $API (see README › Install)" ;; 22) echo >&2; die "request failed (HTTP error above)" ;; *) die "curl failed ($rc)" ;; esac
+  rc=0; curl -sS --max-time "${MAXT:-10}" --fail-with-body -H "x-herdr-pane: ${HERDR_PANE_ID:-}" "$@" || rc=$?
+  case $rc in 0) ;; 6|7|28) die "needs wt-dashboard running at $API (see README › Install)" ;; 22) die "request failed (see the error above)" ;; *) die "curl failed ($rc, see above)" ;; esac
 }
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case "$cmd" in
