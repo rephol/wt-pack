@@ -20,7 +20,7 @@ invokes one name instead of four.
 3. **`wt-compound`** — so the learning records what survived scrutiny, not what was merely believed
 4. **`wt-pr`** — last, because it is the only step that publishes
 
-**Local board ticket** (the branch starts with a `<KEY>-N` from `~/.claude/skills/wt-ticket/scripts/wt-ticket keys`, not UMK): once the PR is open,
+**Local board ticket** (the branch starts with a `<KEY>-N` from `~/.claude/skills/wt-ticket/scripts/wt-ticket keys`, not a Linear team key): once the PR is open,
 `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> review || true` and `~/.claude/skills/wt-ticket/scripts/wt-ticket comment <ID> "PR <url>" || true`. A merge-direct project (wt-pack: no PR)
 moves it straight to `done` on the merge to main, with the merge commit as the comment.
 
