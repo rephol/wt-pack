@@ -245,7 +245,7 @@ Projects, Terminals, Usage, Observability, Server, About.
 - **Rooms**, **Roles**: see above.
 - **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries (the list scrolls in its own box as it grows), Accept/Reject pending
   global proposals, **Preview for agent…** shows what an agent receives. Warns when the plugin is missing.
-- **Projects** (WP-107): per-project overrides, opened from Settings, the page header's **Project settings**
+- **Projects** (WP-107): per-project overrides, opened from Settings, the gear next to the sidebar project picker (a project picked; phone top bar too — WP-110), the page header's **Project settings**
   (a project picked) or the board's Automation › **More project settings**. Order: server env var › project ›
   global › default; each row shows *overridden*, *inherited from global/default* or *locked by env var*, with
   **Reset**. Keys: **GitHub account** (agents spawned for the project get `GH_TOKEN` for that account from gh's
