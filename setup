@@ -141,6 +141,13 @@ doctor() {
     # WP-118: a stale install silently lacks newer hooks (the WP-109 pkill guard shipped in 0.4.4).
     if [ -n "$sv" ] && [ "$iv" != "$sv" ]; then bad "plugin wt-memory@wt-pack $iv installed, checkout has $sv — ./setup install (then restart agents)"
     else ok "plugin wt-memory@wt-pack $iv${mp:+ (marketplace $mp)}"; fi
+    # WP-120: plugin hooks load at session start — sessions older than the installed version run without its guard.
+    ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json")
+    if [ -n "$ip" ] && [ -d "$ip" ]; then
+      g=$(stat -f %B "$ip" 2>/dev/null || true)
+      n=$(LC_ALL=C ps -axo lstart=,command= | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const g=+process.argv[1]*1000;console.log(s.split("\n").filter(l=>/^(\S*\/)?claude\s.*--name[ =]/.test(l.slice(25).trim())&&Date.parse(l.slice(4,24))<g).length)})' "${g:-0}")
+      [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — restart them"
+    fi
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
 
   # WP-98: commits here use a GitHub noreply identity (repo-local git config), so no personal/work email ships.

@@ -63,4 +63,4 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 - Never prompt the user's real agents (other projects' panes) for tests; use throwaway agents/temp repos and clean up.
 - herdr names: lowercase, digits, `-`, `_`, ≤32 (`wt-agents spawn` breaks on capitalised repo dirs — open).
 - macOS is case-insensitive: `Dock.tsx` beside `dock.ts` makes `./Dock` resolve to `dock.ts` (tsc: implicit any) — give sibling modules distinct names (WP-112).
-- BSD pkill/pgrep: options after the pattern become patterns; `-f … -n` SIGTERMs every `claude --name` agent (WP-109). Kill by recorded pid (the wt-memory plugin hook denies misordered calls).
+- BSD pkill/pgrep: options after the pattern become patterns; `-f … -n` SIGTERMs every `claude --name` agent (WP-109). Kill by recorded pid (the wt-memory plugin hook denies misordered calls). Plugin hooks load at session start: a guard shipped in git protects nothing until the plugin cache has it AND the session restarted (WP-120).

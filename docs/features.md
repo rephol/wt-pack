@@ -141,7 +141,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **New agent** (Overview or palette): pick role and project, optional **first prompt** (sent once the agent
   is idle, up to 60s). It can reuse a free agent instead of spawning. Working directory is always the main
   checkout or one of the project's worktrees.
-- Names: `<repo>-<role>-NN`, numbered across all pools (herdr names are global; repo slug cut to 20 chars).
+- Names: `<repo>-<role>-NN`, numbered across all pools (herdr names are global; repo slug cut to 20 chars). Numbers
+  held by exited agents the watchdog still remembers are skipped, so their Resume stays possible (WP-120).
 - **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
   closes; a worktree it used stays on disk.
 - CLI: `wt-agents spawn <role>`, `list --json`, `rm <name|pane> [--force]`.
@@ -306,7 +307,8 @@ Projects, Terminals, Usage, Observability, Server, About.
   untriaged with Auto on (**30** min), Planning/Building card held by a gone or stalled agent (**10** min), herdr
   unreachable (**2** min), free disk (**5** GB), wt.db size (**200** MB), server errors in 10 min (**20**), Jev
   failure rate over the last hour (**30**%, at least 5 calls), pool agent's Claude session exited while its pane
-  stays open (**1** min). A finding opens once per condition as a
+  stays open (**1** min), pool agent whose Claude session started before the installed wt-memory version (so it runs
+  without the pkill guard — plugin hooks load at session start; restart it; **0** min, WP-120). A finding opens once per condition as a
   `watchdog` Inbox item (native notification only for restarts, herdr and disk) and resolves itself when the
   condition clears. **Investigate** hands a finding to a worker (or **Ask auditor**) through wt-handoff, framed as
   data, to diagnose and file a ticket — only when clicked. For an exited session, **Resume** (on the finding and
