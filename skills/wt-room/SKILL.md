@@ -32,8 +32,9 @@ in that room with `room post <slug>`, never in your own chat. A prompt without `
 your own chat (the dashboard's agent chat page or the terminal — deliberately unmarked): answer there.
 Its sibling `<wt-message kind=… from=…>` (WP-104) is wt-pack traffic (a handoff, Dispatch, a routine): answer the
 way it says — `handoff.sh --reply <pane>` or its report line — not in a room unless it names one.
-Answer with `room post <slug> "…"`, not in your own conversation. After posting, end the turn with NO text —
-not even "posted": the user reads the room, and anything written in your session only spends your context.
+Answer with `room post <slug> "…"`, not in your own conversation. After posting, end the turn with at most one
+line: `→ answered in #<slug>` — the user reads the room (the dashboard's chat collapses the rest), and anything
+more written in your session only spends your context.
 
 **Never @mention yourself** — you are not a recipient; the server drops a leading `@<your name>`.
 

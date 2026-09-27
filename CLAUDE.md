@@ -58,6 +58,6 @@ Role rules (orchestrator, planner, worker, auditor) live in wt-memory, not here.
 - Pane tokens: ≤32 keys, values ≤80 chars; `task`/`handoff_*` never mirrored to `agent-tags.json`;
   unknown roles dropped.
 - WKWebView `window.confirm` is always false — native dialogs banned (`noNativeDialogs.test.ts`).
-- Room turns: agents answering in a room end their session turn with NO text.
+- Room turns: agents answering in a room end their session turn with at most one line: `→ answered in #<slug>`.
 - Never prompt the user's real agents (other projects' panes) for tests; use throwaway agents/temp repos and clean up.
 - herdr names: lowercase, digits, `-`, `_`, ≤32 (`wt-agents spawn` breaks on capitalised repo dirs — open).

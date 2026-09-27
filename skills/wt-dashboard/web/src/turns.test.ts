@@ -66,3 +66,33 @@ test('contextUsage: latest call in + cache read + cache write over 200k, or 1M o
   assert.deepEqual(contextUsage([u('claude-opus-5-5[1m]', 0, 100_000, 0)]), { used: 100_000, window: 1_000_000, pct: 10 })
   assert.deepEqual(contextUsage([u('claude-opus-5-5', 0, 300_000, 0), u('claude-opus-5-5', 0, 20_000, 0)]), { used: 20_000, window: 1_000_000, pct: 2 })
 })
+
+// WP-105
+import { roomTurns } from './turns.ts'
+const rm = (id: string, from: string, t: string) => `<room-message id=${id} room=wt-pack from="${from}" kind=user>${t}</room-message>`
+const call = (id: string, tid: string, summary: string): TMsg => ({ id, role: 'tool', text: '', ts: '', tool: { name: 'Bash', summary }, toolUseId: tid })
+const res = (id: string, tid: string, isError = false): TMsg => ({ id, role: 'tool', text: '', ts: '', tool: { name: 'result' }, toolUseId: tid, isError })
+const say = (id: string, text: string, role = 'assistant'): TMsg => ({ id, role, text, ts: '' })
+test('roomTurns: a posted room turn collapses the trailing text', () => {
+  const r = roomTurns([{ ...say('u', rm('a', 'user', 'hi'), 'user'), src: 'room #wt-pack' }, say('a1', 'thinking'), call('c', 't', '~/.claude/skills/wt-room/scripts/room post wt-pack "yo"'), res('r', 't'), say('a2', '→ answered in #wt-pack')])
+  assert.deepEqual(r.rooms.get('u'), { slug: 'wt-pack', items: [{ from: 'user', text: 'hi' }] })
+  assert.equal(r.posts.get('c'), 'wt-pack'); assert.ok(r.postResults.has('r'))
+  assert.deepEqual([...r.collapse], ['a2'])
+})
+test('roomTurns: no post or a failed post collapses nothing; other slug counts', () => {
+  const u = { ...say('u', rm('a', 'x', 'q'), 'user'), src: 'room #wt-pack' }
+  assert.equal(roomTurns([u, say('a', 'answer')]).collapse.size, 0)
+  assert.equal(roomTurns([u, call('c', 't', 'room post wt-pack "x"'), res('r', 't', true), say('a', 'x')]).collapse.size, 0)
+  assert.equal(roomTurns([u, call('c', 't', 'room post other "x"'), res('r', 't'), say('a', 'x')]).posts.get('c'), 'other')
+})
+test('roomTurns: a non-room prompt is untouched; batches parse', () => {
+  const r = roomTurns([say('u', 'plain', 'user'), call('c', 't', 'room post wt-pack "x"'), res('r', 't'), say('a', 'x')])
+  assert.equal(r.rooms.size + r.posts.size + r.collapse.size, 0)
+  assert.equal(roomTurns([{ ...say('u', rm('a', 'p', 'one') + '\n' + rm('b', 'q', 'two'), 'user'), src: 'room #wt-pack' }]).rooms.get('u')!.items.length, 2)
+})
+test('roomTurns: a command that only mentions room post is not a post', () => {
+  const u = { ...say('u', rm('a', 'x', 'q'), 'user'), src: 'room #wt-pack' }
+  for (const c of ['echo room post x', 'git commit -m "fix room post wt-pack"'])
+    assert.equal(roomTurns([u, call('c', 't', c), res('r', 't'), say('a', 'x')]).posts.size, 0, c)
+  assert.equal(roomTurns([u, call('c', 't', 'cd /x && room post wt-pack "y"'), res('r', 't')]).posts.get('c'), 'wt-pack')
+})

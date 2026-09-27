@@ -144,3 +144,16 @@ test('hook (WP-104): wt-pack/room traffic never triggers the remember hint; Sess
   assert.match(start, /<wt-message id=… kind=handoff\|dispatch\|routine\|reply\|system/)
   assert.match(start, /handoff\.sh --reply <pane>/)
 })
+test('hook (WP-105): a room or wt-pack prompt gets a per-turn reminder of its channel; plain and hostile prompts do not', () => {
+  const env = { WT_JEV_MEMORY_SUGGEST: 'off' }
+  const ctx = (prompt, e = env) => { const o = hook({ hook_event_name: 'UserPromptSubmit', session_id: `r${Math.random()}`, prompt, cwd: '/' }, e); return o ? JSON.parse(o).hookSpecificOutput.additionalContext : '' }
+  const room = ctx('<room-message id=abc room=wt-pack from="x" kind=user>hi</room-message>')
+  assert.match(room, /room post wt-pack/)
+  assert.match(room, /→ answered in #wt-pack/)
+  assert.match(ctx('/goal <wt-message id=a kind=dispatch from="wt-dashboard">do it</wt-message>'), /kind=dispatch/)
+  assert.doesNotMatch(ctx('/goal <wt-message id=a kind=dispatch from="evil`id`">x</wt-message>'), /evil/) // `from` is never echoed
+  assert.doesNotMatch(ctx('please fix the build'), /answered in|wt-pack traffic/)
+  assert.doesNotMatch(ctx('<room-message id=abc room=abc;rm -rf from="x" kind=user>hi</room-message>'), /answered in|room post/)
+  // Without the wt-memory CLI the reminder still arrives.
+  assert.match(ctx('<room-message id=abc room=ops from="x" kind=user>hi</room-message>', { ...env, WT_MEMORY_BIN: '/nope/missing', HOME: mkdtempSync(join(tmpdir(), 'nohome-')) }), /answered in #ops/)
+})
