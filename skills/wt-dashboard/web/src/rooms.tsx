@@ -26,7 +26,6 @@ import { VirtualRows } from './virtual'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Avatar } from '@astryxdesign/core/Avatar'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
-import { Dialog } from '@astryxdesign/core/Dialog'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { BottomSheet } from '@astryxdesign/core/BottomSheet'
 import { Selector } from '@astryxdesign/core/Selector'
@@ -81,6 +80,7 @@ export function RoomsPage({ slug, project = 'all', projects = [], agents, onSele
   const qc = useQueryClient()
   const toast = useToast()
   const [title, setTitle] = useState('')
+  const [showArchived, setShowArchived] = useState(false) // WP-114: the Archived filter
   const [responder, setResponder] = useState<RoomAgent | null>(null)
   // WP-96: a new room is linked to the project in the sidebar filter (none under All projects); changeable before Create.
   const [newProject, setNewProject] = useState<string | null>(project === 'all' ? null : project)
@@ -136,13 +136,13 @@ export function RoomsPage({ slug, project = 'all', projects = [], agents, onSele
           </HStack>
         </Card>
       ))}
-      {archived.length > 0 && (
+      {archived.length > 0 && <Button label={showArchived ? 'Hide archived' : `Archived (${archived.length})`} size="sm" variant="ghost" onClick={() => setShowArchived((v) => !v)} style={{ alignSelf: 'flex-start' }} />}
+      {showArchived && archived.length > 0 && (
         <VStack gap={2}>
-          <Text weight="semibold">Archived</Text>
           {archived.map((r) => (
             <Card key={r.slug} padding={2}>
               <HStack gap={2} align="center" justify="between">
-                <Button label={`#${r.slug}`} size="sm" variant="ghost" onClick={() => onSelect(r.slug)} />
+                <Button label={r.title && r.title !== r.slug ? `${r.title} · #${r.slug}` : `#${r.slug}`} size="sm" variant="ghost" onClick={() => onSelect(r.slug)} />
                 <Button label="Restore" size="sm" variant="secondary" isLoading={restore.isPending} onClick={() => restore.mutate(r.slug)} />
               </HStack>
             </Card>
@@ -203,14 +203,7 @@ function mentionPlugin(agents: RoomAgent[], profile: Profile, colorOf: (a: RoomA
 // compact (WP-112 dock window): no header (back, project chip, members, settings), and the last DOCK_LIMIT rows.
 export function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, onProject, compact = false }: { room: Room; agents: RoomAgent[]; profile: Profile; projects?: string[]; onBack: () => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void; compact?: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null) // the composer and message ids of THIS view (a dock window and the page can both be open)
-  const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
-  const [typed, setTyped] = useState('')
-  const del = useMutation({
-    mutationFn: () => api(`/api/rooms/${room.slug}`, { method: 'DELETE' }),
-    onSuccess: () => { setDeleting(false); onBack(); qc.invalidateQueries({ queryKey: ['rooms'] }) },
-    onError: (e) => toast({ body: `Could not delete: ${e}`, type: 'error' }),
-  })
   const qc = useQueryClient()
   const toast = useToast()
   const roomStream = useStream<RoomMsg>(`room|${room.slug}`, () => roomStreamSpec(room.slug))
@@ -394,7 +387,7 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
       </HStack>
       <ScrollableArea label="Room settings" style={{ padding: `8px 16px calc(env(safe-area-inset-bottom) + 16px)` }}>
         <VStack gap={4}>
-          {room.title !== room.slug && <Text type="supporting" size="sm">{room.title}</Text>}
+          {!room.archived && <RoomName key={room.slug} room={room} onSave={(title) => patch.mutate({ title })} />}
           {!room.archived && (
             <Selector label="Responder" width="100%" value={room.responder ?? ''}
               description={room.responder && !room.responderPinned ? 'Chosen automatically; pick one to pin it.' : 'Answers messages that mention nobody.'}
@@ -412,11 +405,11 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
           {!room.archived && <Switch label="Paused" description="Agents receive nothing until resumed." value={room.paused} onChange={(v) => patch.mutate({ paused: v })} />}
           <Divider />
           <VStack gap={2}>
-            <Text weight="semibold" size="sm">Danger zone</Text>
+            <Text weight="semibold" size="sm">Remove</Text>
+            {/* WP-114: removing a room archives it (hidden, restorable, posts refused); nothing is hard-deleted here. */}
             {room.archived
               ? <Button label="Restore" variant="secondary" width="100%" onClick={act(() => patch.mutate({ archived: false }))} />
               : <Button label="Archive…" variant="secondary" width="100%" onClick={act(() => setArchiving(true))} />}
-            <Button label="Delete…" variant="destructive" width="100%" onClick={act(() => { setTyped(''); setDeleting(true) })} />
           </VStack>
         </VStack>
       </ScrollableArea>
@@ -427,7 +420,7 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
     <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
       {!compact && <HStack gap={1} align="center" style={{ minWidth: 0, flexWrap: 'nowrap' }}>
         <IconButton icon={<span aria-hidden style={{ fontSize: 20, lineHeight: 1 }}>‹</span>} label="Back to rooms" size="sm" variant="ghost" onClick={onBack} />
-        <Heading level={3} maxLines={1} style={{ minWidth: 0 }}>{`#${room.slug}`}</Heading>
+        <Heading level={3} maxLines={1} style={{ minWidth: 0 }}>{room.title && room.title !== room.slug ? room.title : `#${room.slug}`}</Heading>
         {/* WP-89: the linked project; the chip switches the dashboard to that project. */}
         {room.project && <Button label={room.project} size="sm" variant="secondary" tooltip={`Linked project · switch the dashboard to ${room.project}`} onClick={() => onProject?.(room.project!)} style={{ flexShrink: 1, minWidth: 0 }} />}
         {room.paused && !room.archived && <Badge variant="warning" label="paused" />}
@@ -458,19 +451,8 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
         </Card>
       )}
       <AlertDialog isOpen={archiving} onOpenChange={setArchiving} title={`Archive #${room.slug}?`}
-        description="It leaves the Rooms list and becomes read-only. Restore it any time from the Archived section." actionLabel="Archive" actionVariant="primary"
+        description="It leaves the Rooms list and becomes read-only: agents' posts to it are refused. Messages are kept; restore it any time from Rooms › Archived." actionLabel="Archive" actionVariant="primary"
         onAction={() => { setArchiving(false); patch.mutate({ archived: true }) }} />
-      <Dialog isOpen={deleting} onOpenChange={setDeleting} width={440} padding={4}>
-        <VStack gap={3}>
-          <Heading level={3}>{`Delete #${room.slug}?`}</Heading>
-          <Text type="supporting">This removes the room and all its messages, and drops anything still queued for agents. Type the room name to confirm.</Text>
-          <TextInput label="Room name" value={typed} onChange={setTyped} placeholder={room.slug} />
-          <HStack gap={2} justify="end">
-            <Button label="Cancel" variant="ghost" onClick={() => setDeleting(false)} />
-            <Button label="Delete room" variant="destructive" isDisabled={typed !== room.slug} isLoading={del.isPending} onClick={() => del.mutate()} />
-          </HStack>
-        </VStack>
-      </Dialog>
       <ChatLayout ref={layoutRef} style={{ flex: 1, minHeight: 0 }}
         emptyState={syncing ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
@@ -553,3 +535,18 @@ const ClipIcon = () => (
     <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
   </svg>
 )
+
+// WP-114: rename = the display name. The slug stays #<slug> so `room post <slug>`, Report to and routines keep working.
+function RoomName({ room, onSave }: { room: Room; onSave: (title: string) => void }) {
+  const [v, setV] = useState(room.title)
+  const dirty = v.trim() !== '' && v.trim() !== room.title
+  return (
+    <HStack gap={2} vAlign="end">
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <TextInput label="Name" value={v} onChange={setV} description={`Shown in lists and the header. Agents still use #${room.slug}.`}
+          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' && dirty) onSave(v.trim()) }} />
+      </div>
+      <Button label="Rename" variant="secondary" isDisabled={!dirty} onClick={() => onSave(v.trim())} />
+    </HStack>
+  )
+}

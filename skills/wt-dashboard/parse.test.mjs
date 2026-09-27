@@ -1207,3 +1207,22 @@ test('sourceOf (WP-104): a /goal <wt-message> user entry shows "kind · from"; r
   const [m] = normalizeEntry({ type: 'user', uuid: 'u', timestamp: 't', message: { content: '/goal <wt-message id=abc kind=dispatch from="wt-dashboard">x</wt-message>' } })
   assert.equal(m.src, 'dispatch · wt-dashboard')
 })
+
+test('WP-114 rooms: rename changes the title only (slug and posting by slug keep working); archive blocks posts; remove deletes', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const rooms = new Rooms({ dir: mkdtempSync(join(tmpdir(), 'wtd-rooms-')), agents: async () => [], prompt: async () => {}, log: () => {} })
+  await rooms.create({ title: 'Old name', slug: 'ops' })
+  const r = await rooms.update('ops', { title: '  New name  ' })
+  assert.equal(r.title, 'New name')
+  assert.equal(r.slug, 'ops')
+  assert.equal((await rooms.update('ops', { title: '   ' })).title, 'New name') // blank is ignored
+  await rooms.post('ops', { author: { kind: 'user', name: 'Rep' }, text: 'still here' })
+  assert.equal((await rooms.messages('ops')).at(-1).text, 'still here')
+  await rooms.update('ops', { archived: true })
+  await assert.rejects(rooms.post('ops', { author: { kind: 'user', name: 'Rep' }, text: 'x' }), /archived/)
+  await rooms.remove('ops')
+  assert.equal(rooms.room('ops'), undefined)
+})
