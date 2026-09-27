@@ -12,16 +12,19 @@ allowed-tools: Bash
 
 # wt-agents
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Manages the two agent pools — `<repo>-workers` and `<repo>-planners` — each a herdr workspace created
 on demand.
 
 ```bash
-~/.claude/skills/wt-agents/scripts/agents.sh list [role] [--json]    # name, pane, status, cwd (--json: + pane tokens)
-~/.claude/skills/wt-agents/scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
-~/.claude/skills/wt-agents/scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
-~/.claude/skills/wt-agents/scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
-~/.claude/skills/wt-agents/scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
-~/.claude/skills/wt-agents/scripts/agents.sh rm <name|pane> [--force]
+scripts/agents.sh list [role] [--json]    # name, pane, status, cwd (--json: + pane tokens)
+scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
+scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
+scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
+scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
+scripts/agents.sh rm <name|pane> [--force]
 ```
 
 Run it from anywhere inside the repo; it resolves the main checkout itself, so a worktree works.
@@ -65,7 +68,7 @@ the second agent never starts.
 
 **Off by default.** On when the dashboard's Settings › Integrations switch "Lean MCP for new agents" is on
 (`WT_AGENTS_MCP=lean` in `~/.config/wt-dashboard/env`); the env var `WT_AGENTS_MCP=full|lean` overrides it
-(`~/.claude/skills/wt-shared/scripts/mcp-mode.sh` resolves it). Off, agents start with claude's full set plus any `--mcp` picks.
+(`../wt-shared/scripts/mcp-mode.sh` resolves it). Off, agents start with claude's full set plus any `--mcp` picks.
 `agents.sh mcp-args <role> [cwd] [--mcp a,b]` prints the MCP args a spawn would use.
 A project's own Agent MCP (dashboard Settings › Projects) sits between the env var and the env file.
 
