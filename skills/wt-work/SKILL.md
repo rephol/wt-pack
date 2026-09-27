@@ -12,6 +12,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, Agent, AskUserQuestio
 
 # wt-work
 
+Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
+work both from the `./setup` links and from a plugin install (WP-122).
+
 Implements a plan. Does not re-plan it, and does not ship it — the tail is `wt-ship`.
 
 **This skill is the heaviest in the pack on purpose.** Everywhere else the pack trades prose for structure;
@@ -81,10 +84,10 @@ Stop and report, rather than working around:
 When you stop on a blocker, also put it on the planner's label (a no-op if no planner handed you this):
 
 ```
-~/.claude/skills/wt-shared/scripts/task-state.sh planner "blocked: <reason, a few words>"
+../wt-shared/scripts/task-state.sh planner "blocked: <reason, a few words>"
 ```
 
-On a local board ticket (`<KEY>-N`, not a Linear team key), also move its card: `~/.claude/skills/wt-ticket/scripts/wt-ticket move <ID> blocked --note "<reason>" || true`.
+On a local board ticket (`<KEY>-N`, not a Linear team key), also move its card: `../wt-ticket/scripts/wt-ticket move <ID> blocked --note "<reason>" || true`.
 
 A real defect found inside a settled approach is still reported at full strength. The label never suppresses
 defect evidence.
