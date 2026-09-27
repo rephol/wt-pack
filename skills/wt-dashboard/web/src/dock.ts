@@ -13,7 +13,9 @@ export const dockKind = (key: string): DockItem['kind'] | null => (key.startsWit
 export function openChat(s: DockState, key: string, now: number): DockState {
   const kind = dockKind(key)
   if (!kind) return s
-  const items = [...s.items.filter((i) => i.key !== key), { key, kind, min: false, openedAt: now }]
+  const item = { key, kind, min: false, openedAt: now }
+  // A tab keeps its place in the bar; a new chat goes on the end.
+  const items = s.items.some((i) => i.key === key) ? s.items.map((i) => (i.key === key ? item : i)) : [...s.items, item]
   const wins = items.filter((i) => !i.min).sort((a, b) => a.openedAt - b.openedAt)
   const drop = new Set(wins.slice(0, Math.max(0, wins.length - MAX_WINDOWS)).map((i) => i.key))
   return { items: items.map((i) => (drop.has(i.key) ? { ...i, min: true } : i)), seen: { ...s.seen, [key]: now, ...Object.fromEntries([...drop].map((k) => [k, now])) } }

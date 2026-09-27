@@ -161,15 +161,21 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
   --color-icon-primary: var(--color-on-dark) !important; --color-icon-secondary: color-mix(in srgb, var(--color-on-dark) 70%, transparent) !important;
 }
 
-/* WP-112 chat dock (desktop): windows and tabs along the bottom, left of the quick-switcher button. */
-.hd-dock { position: fixed; right: 88px; bottom: 0; z-index: 30; display: flex; align-items: flex-end; gap: 12px; pointer-events: none; max-width: calc(100vw - 104px); }
-.hd-dock > * { pointer-events: auto; }
-.hd-dock-tabs { display: flex; flex-direction: column-reverse; gap: 6px; padding-bottom: 16px; max-height: 70vh; overflow-y: auto; }
-.hd-dock-tab { display: flex; align-items: center; gap: 2px; max-width: 220px; padding: 2px 2px 2px 10px; border-radius: 20px; background: var(--color-background-surface, #fff); border: 1px solid var(--color-border-default, rgba(127,127,127,.3)); box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-.hd-dock-tab-open { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; background: none; border: none; padding: 4px 0; cursor: pointer; color: inherit; font: inherit; }
+/* WP-112 chat dock (desktop): a full-width footer bar of tabs; an open chat's window pops up above its tab.
+   While it shows (html.hd-has-dock) the shell stops above it, toasts sit over it and the floating ⌘K button hides. */
+.hd-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; box-sizing: border-box; background: var(--color-background-surface, #fff); border-top: 1px solid var(--color-border-default, rgba(127,127,127,.3)); }
+html.hd-has-dock .astryx-app-shell { height: calc(100dvh - 36px); }
+html.hd-has-dock [role="region"]:has([data-toast-id]) { bottom: 52px !important; }
+html.hd-has-dock button[aria-label^="Agent conversations"] { display: none !important; }
+.hd-dock-chats { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 28px; padding: 0 8px; border-radius: 6px; background: none; border: none; cursor: pointer; color: inherit; font: inherit; }
+.hd-dock-chats:hover, .hd-dock-tab:hover { background: var(--color-background-muted, rgba(127,127,127,.15)); }
+.hd-dock-slots { flex: 1; min-width: 0; height: 100%; display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.hd-dock-slot { position: relative; display: flex; align-items: center; min-width: 56px; max-width: 200px; flex: 0 1 auto; height: 28px; }
+.hd-dock-slot[data-open] { width: 320px; max-width: 320px; flex-shrink: 0; }
+.hd-dock-tab { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; height: 28px; padding: 0 8px; border-radius: 6px; background: none; border: none; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.hd-dock-slot[data-open] .hd-dock-tab { background: var(--color-background-muted, rgba(127,127,127,.15)); }
 .hd-dock-unread { flex-shrink: 0; min-width: 8px; height: 8px; border-radius: 4px; background: var(--color-background-accent, #3b82f6); }
-.hd-dock-tab[data-unread="!"] .hd-dock-unread { min-width: 16px; height: 16px; border-radius: 8px; background: var(--color-background-error, #dc2626); color: #fff; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
-.hd-dock-win { width: 320px; height: min(440px, calc(100vh - 80px)); display: flex; flex-direction: column; border-radius: 10px 10px 0 0; overflow: hidden; background: var(--color-background-surface, #fff); border: 1px solid var(--color-border-default, rgba(127,127,127,.3)); border-bottom: none; box-shadow: 0 4px 20px rgba(0,0,0,.2); }
-.hd-dock-win-head { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border-bottom: 1px solid var(--color-border-default, rgba(127,127,127,.3)); flex-shrink: 0; }
-.hd-dock-win-title { flex: 1; min-width: 0; display: flex; background: none; border: none; padding: 4px 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.hd-dock-slot[data-unread="!"] .hd-dock-unread { min-width: 16px; height: 16px; border-radius: 8px; background: var(--color-background-error, #dc2626); color: #fff; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
+.hd-dock-win { position: absolute; right: 0; bottom: 32px; width: 320px; height: min(440px, calc(100vh - 80px)); display: flex; flex-direction: column; border-radius: 10px 10px 0 0; overflow: hidden; background: var(--color-background-surface, #fff); border: 1px solid var(--color-border-default, rgba(127,127,127,.3)); border-bottom: none; box-shadow: 0 -4px 20px rgba(0,0,0,.2); }
+.hd-dock-win-head { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border-bottom: 1px solid var(--color-border-default, rgba(127,127,127,.3)); flex-shrink: 0; min-width: 0; }
 .hd-dock-win-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
