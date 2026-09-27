@@ -492,7 +492,7 @@ export default function App() {
         height="fill"
         content={
       <LayoutContent>
-      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || page === 'board' || fullKey || termPage ? { height: '100%', minHeight: 0 } : fabHidden ? undefined : { paddingBottom: 88 }}>
+      <VStack gap={phone ? 3 : 6} padding={phone ? 3 : 6} style={page === 'rooms' || page === 'board' || fullKey || termPage ? { height: '100%', minHeight: 0 } : fabHidden || !narrow ? undefined : { paddingBottom: 88 }}>
         {fullKey && (fullAgent
           ? <AgentPanelBody key={`full-${fullAgent.key}`} agent={fullAgent} task={all?.tasks.find((t) => t.id === fullAgent.task) ?? null}
               mode="page" onCollapse={leaveFull} onAsPanel={narrow ? undefined : () => fullToPanel(fullAgent.key)} autoFocus={!phone} />
@@ -564,7 +564,7 @@ export default function App() {
       <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
-      {!narrow && <Dock state={dock} dispatch={dockDispatch} unread={dockMarks}
+      {!narrow && <Dock state={dock} dispatch={dockDispatch} unread={dockMarks} need={(all?.agents ?? []).filter(needsYou).length}
         meta={(key) => {
           if (key.startsWith('room:')) { const r = roomsQ.data?.rooms.find((x) => x.slug === key.slice(5)); return { name: `#${key.slice(5)}`, dot: r?.needsYou?.length ? 'error' : 'neutral', label: r?.needsYou?.length ? 'needs you' : 'room' } }
           const a = all?.agents.find((x) => x.key === key)
