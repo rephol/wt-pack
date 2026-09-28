@@ -70,17 +70,32 @@ const projectSetting = (cwd, key) => {
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).trim().split('\n').pop()
   } catch { return '' }
 }
+// WP-139: G's real default is Claude Code's own effective effort setting, not the hardcoded 'high' — wt-pack's
+// own WT_EFFORT/model-routing.json layers below still win when a caller explicitly sets one. Same source order
+// Claude Code itself uses: its live session env var, else its settings.json `effortLevel` (project over user).
+function claudeCodeEffort(root, env) {
+  if (isEffort(env.CLAUDE_EFFORT)) return env.CLAUDE_EFFORT
+  const proj = root && readJson(join(root, '.claude', 'settings.json'))
+  if (isEffort(proj?.effortLevel)) return proj.effortLevel
+  const user = readJson(join(home(), '.claude', 'settings.json'))
+  if (isEffort(user?.effortLevel)) return user.effortLevel
+  return null
+}
 
 // The merged config; `from`/`effortFrom` name where the mode/effort came from (for explain).
 export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
   let cfg = merge(DEFAULTS, readJson(paths().user))
   let from = readJson(paths().user)?.mode ? 'user' : 'default'
   let effortFrom = readJson(paths().user)?.effort ? 'user' : 'default'
+  const root = repoRoot(cwd) // one shell-out, shared with the repo config-file read below
+  if (effortFrom === 'default') {
+    const ce = claudeCodeEffort(root, env)
+    if (isEffort(ce)) { cfg = { ...cfg, effort: ce }; effortFrom = 'claude' }
+  }
   const pm = projectSetting(cwd, 'WT_MODEL_ROUTING')
   if (MODES.includes(pm)) { cfg = { ...cfg, mode: pm }; from = 'project' }
   const pe = projectSetting(cwd, 'WT_EFFORT')
   if (isEffort(pe)) { cfg = { ...cfg, effort: pe }; effortFrom = 'project' }
-  const root = repoRoot(cwd)
   const repo = root && readJson(join(root, '.wt-pack', 'model-routing.json'))
   if (repo) { cfg = merge(cfg, repo); if (repo.mode) from = 'repo'; if (repo.effort) effortFrom = 'repo' }
   const e = env.WT_MODEL_ROUTING
@@ -151,16 +166,24 @@ function baseEffort(tier, state) {
   return e
 }
 
-// E = the tier's base effort, +2 levels (capped at 'high') when `tier` is a downgrade below the default tier
-// (sonnet), else unraised — then clamped to the global ceiling G either way.
-export function computeEffort(tier, state, ceiling) {
+// E = Jev's own effort pick when it made one (the local-rule path has none), else the tier's base effort — then,
+// when `tier` is a downgrade below the default tier (sonnet), capped at base +2 levels (never past 'high'); an
+// unchanged or upgraded tier keeps the pick uncapped by base, only by 'high'. Either way, clamped to G last.
+export function computeEffort(tier, state, ceiling, jevEffort) {
   const base = baseEffort(tier, state)
-  const e = rank(tier) < rank(DEFAULT_TIER) ? emin(EFFORTS[erank(base) + 2], 'high') : base
-  return emin(e, isEffort(ceiling) ? ceiling : DEFAULTS.effort)
+  const downgrade = rank(tier) < rank(DEFAULT_TIER)
+  const cap = downgrade ? emin(EFFORTS[erank(base) + 2], 'high') : 'high'
+  const pick = isEffort(jevEffort) ? jevEffort : downgrade ? cap : base
+  return emin(emin(pick, cap), isEffort(ceiling) ? ceiling : DEFAULTS.effort)
 }
 
 const QUESTION = choice('Which Claude model tier does this agent task need? haiku: mechanical and bounded (look something up, run a known command, format, small obvious edit). sonnet: normal software work. opus: judgement-heavy or risky (design, planning, security, data migration, subtle bugs, reviewing others\' code).',
   { haiku: 'Mechanical, bounded, low-risk work', sonnet: 'Normal implementation or analysis work', opus: 'Judgement-heavy, ambiguous or high-risk work' })
+// WP-139: Jev's own effort pick, asked in the SAME call as the tier question (independent questions run in one
+// request, no extra latency, only input tokens). computeEffort() still clamps it (≤ G; a downgraded model gets
+// at most +2 above base, never past 'high').
+const EFFORT_QUESTION = choice('How much reasoning effort does this task need? low: trivial or mechanical, the answer is obvious. medium: normal work needing some judgement. high: complex, ambiguous or risky work needing careful reasoning. xhigh: deep multi-step reasoning over a lot of context. max: the hardest, highest-stakes reasoning the model can do.',
+  { low: 'Trivial or mechanical, the answer is obvious', medium: 'Normal work needing some judgement', high: 'Complex, ambiguous or risky work needing careful reasoning', xhigh: 'Deep multi-step reasoning over a lot of context', max: 'The hardest, highest-stakes reasoning the model can do' })
 
 // Durable cache: every hook call is a new process, so judge()'s in-memory cache never hits there.
 const CACHE_TTL = 7 * 24 * 3600 * 1000, CACHE_MAX = 2000
@@ -180,6 +203,7 @@ function cachePut(h, v) {
 }
 
 // Jev's pick: haiku/opus only when that choice clears its threshold; anything else (incl. failure) → sonnet.
+// Its effort pick (WP-139) rides the same call, unclamped here — computeEffort() applies the G/downgrade rules.
 export async function jevDecide(state, cfg, { fetchImpl, timeoutMs = 1500 } = {}) {
   const h = hashOf(state)
   let a = cacheGet(h), cached = !!a
@@ -187,27 +211,32 @@ export async function jevDecide(state, cfg, { fetchImpl, timeoutMs = 1500 } = {}
     // Jev sees the notes sentence, not the raw booleans/keyword array — those read as "easy" to it (WP-133).
     const jevState = { skill: state.skill, role: state.role, agent_description: state.agent_description, task: state.task,
       lens: state.signals.lens, notes: state.signals.notes }
-    const ans = await judge('model_route', jevState, { tier: QUESTION }, { timeoutMs, fetchImpl })
-    const t = ans?.tier
-    if (t && isTier(t.choice)) { a = { choice: t.choice, confidence: t.confidence ?? 0 }; cachePut(h, a) }
+    const ans = await judge('model_route', jevState, { tier: QUESTION, effort: EFFORT_QUESTION }, { timeoutMs, fetchImpl })
+    const t = ans?.tier, e = ans?.effort
+    if (t && isTier(t.choice)) {
+      a = { choice: t.choice, confidence: t.confidence ?? 0 }
+      if (e && isEffort(e.choice)) { a.effort = e.choice; a.effortP = e.confidence ?? 0 }
+      cachePut(h, a)
+    }
   }
   if (!a) return { tier: 'sonnet', source: 'jev-failopen', p: null, cached }
   const th = cfg.thresholds ?? DEFAULTS.thresholds
   // `p` (here and in the log/tuning) is always this same confidence — the one number gated against thresholds,
   // never a separate "probability" (WP-133): keep any future metric change to this one line.
   const tier = a.choice === 'haiku' && a.confidence >= th.haiku ? 'haiku' : a.choice === 'opus' && a.confidence >= th.opus ? 'opus' : 'sonnet'
-  return { tier, source: 'jev', p: a.confidence, choice: a.choice, cached }
+  return { tier, source: 'jev', p: a.confidence, choice: a.choice, jevEffort: a.effort, effortP: a.effortP, cached }
 }
 
-// jev-eval's evaluator pair (EVALUATORS.routing): the same question production asks.
-export const modelRoute = { questions: () => ({ tier: QUESTION }), decide: (a) => a?.tier?.choice ?? null }
+// jev-eval's evaluator pair (EVALUATORS.routing): the same question(s) production asks, in the same call shape
+// (WP-139: jevDecide asks tier+effort together, so tuning must judge the tier answer under that same shape).
+export const modelRoute = { questions: () => ({ tier: QUESTION, effort: EFFORT_QUESTION }), decide: (a) => a?.tier?.choice ?? null }
 
 function logDecision(d) {
   try {
     const p = paths().log
     mkdirSync(dirname(p), { recursive: true })
     appendFileSync(p, JSON.stringify({ run: d.run, i: 0, ts: new Date().toISOString(), cmd: 'routing', p: d.p, t: d.t,
-      decided: d.tier !== 'sonnet', item: { skill: d.state.skill, role: d.state.role, tier: d.tier, effort: d.effort, mode: d.mode, source: d.source, choice: d.choice ?? null }, state: d.state }) + '\n') // state (≤1.2 KB) lets routing-eval seed fixtures
+      decided: d.tier !== 'sonnet', item: { skill: d.state.skill, role: d.state.role, tier: d.tier, effort: d.effort, mode: d.mode, source: d.source, choice: d.choice ?? null, jevEffort: d.jevEffort ?? null, effortP: d.effortP ?? null }, state: d.state }) + '\n') // state (≤1.2 KB) lets routing-eval seed fixtures
   } catch {}
 }
 
@@ -232,7 +261,7 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   }
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
-  const effort = computeEffort(d.tier, state, cfg.effort)
+  const effort = computeEffort(d.tier, state, cfg.effort, d.jevEffort)
   const out = { ...d, effort, mode, from: cfg.from, effortFrom: cfg.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
   if (log) logDecision(out)
   return { ...out, apply: mode === 'live' ? out.tier : null, applyEffort: mode === 'live' ? out.effort : null }
