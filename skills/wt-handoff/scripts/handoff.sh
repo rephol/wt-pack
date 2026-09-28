@@ -242,9 +242,11 @@ if [ "$mode" != pane ]; then
     | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
   skill=$(printf '%s' "$task_text" | grep -oE 'wt-[a-z]+(-[a-z]+)*' | head -1 || true)
   r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-$role}" --role "$role" \
-    ${esc:+--model "$esc"} --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
+    ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
+  rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
+  [ "$rmode" = live ] || esc= # an escalation applies only while routing is live
   route_tier=${esc:-$(printf '%s' "$r" | jq -r '.apply // empty' 2>/dev/null || true)}
-  route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
+  [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
   [ -z "$esc" ] || route_line="routing: $esc (escalated)"
 fi
 
