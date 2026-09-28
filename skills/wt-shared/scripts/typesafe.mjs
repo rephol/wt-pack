@@ -25,7 +25,7 @@ export const NO_KEY = 3;
 // WP-136 (reopened): 401s persisted after the ordering fix above, from calls with no key argument
 // (judge()'s keyFor() path). Since the key itself is never logged, resolveKeyed() also returns which
 // source produced it, so an auth_error log line can name env/keychain/file/none instead of a guess.
-function resolveKeyed() {
+export function resolveKeyed() {
   if (process.env.TYPESAFE_API_KEY) return { key: process.env.TYPESAFE_API_KEY, source: 'env' };
   try {
     const k = execFileSync('security', ['find-generic-password', '-s', 'wt-dashboard', '-a', 'TYPESAFE_API_KEY', '-w'],

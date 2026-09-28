@@ -14,8 +14,8 @@
 //   2  usage error
 //   3  no API key configured — SKIP SILENTLY, this tool is not set up here
 import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { homedir } from 'node:os';
+import { basename } from 'node:path';
+import { resolveKeyed } from './typesafe.mjs';
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const MODEL = 'jev-latest';
@@ -122,21 +122,7 @@ if (!file) {
   console.error('usage: wt-eval.mjs <file> [--type plan|research|review|learning] [--json]');
   process.exit(2);
 }
-// The key normally lives in ~/.claude/.env rather than the shell, so read that
-// when the variable is absent. Minimal parse: KEY=value lines, no export, no
-// quotes handling beyond stripping a matched pair — anything fancier belongs in
-// a dotenv dependency this does not need.
-function keyFromEnvFile() {
-  try {
-    for (const line of readFileSync(join(homedir(), '.claude', '.env'), 'utf8').split('\n')) {
-      const m = line.match(/^\s*(?:export\s+)?TYPESAFE_API_KEY\s*=\s*(.*)$/);
-      if (m) return m[1].trim().replace(/^(['"])(.*)\1$/, '$2');
-    }
-  } catch {}
-  return null;
-}
-
-const key = process.env.TYPESAFE_API_KEY || keyFromEnvFile();
+const { key, source: keySource } = resolveKeyed();
 if (!key) {
   console.error('TYPESAFE_API_KEY is not set, and no TYPESAFE_API_KEY line in ~/.claude/.env');
   process.exit(3);
@@ -158,7 +144,8 @@ const res = await fetch(ENDPOINT, {
 });
 
 if (!res.ok) {
-  console.error(`TypeSafe ${res.status}: ${(await res.text()).slice(0, 400)}`);
+  const authNote = res.status === 401 || res.status === 403 ? ` (key from ${keySource})` : '';
+  console.error(`TypeSafe ${res.status}${authNote}: ${(await res.text()).slice(0, 400)}`);
   process.exit(1);
 }
 const body = await res.json();
