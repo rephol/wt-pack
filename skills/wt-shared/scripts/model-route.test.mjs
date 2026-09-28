@@ -64,6 +64,30 @@ test('explicit model wins; pin beats Jev but not a floor; kill switch', async ()
   assert.equal((await route({ task: TASK, env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).apply, null)
 })
 
+// WP-168: a dispatch to an already-running worker (handoff.sh's mode=pane) has a known tier and nothing to
+// apply — reuse logs it anyway (no Jev) so eval has a decision and `outcome` has a ref to mark.
+test('WP-168: --reuse logs the known tier with no Jev call; plain --model stays unlogged', async () => {
+  calls = 0
+  const before = existsSync(paths().log) ? readFileSync(paths().log, 'utf8') : ''
+  const d = await route({ model: 'opus', reuse: true, task: TASK, env: { WT_MODEL_ROUTING: 'shadow' }, cwd: repo, fetchImpl: jev('haiku', 0.99) })
+  assert.equal(d.tier, 'opus'); assert.equal(d.apply, null); assert.equal(d.source, 'reuse'); assert.equal(calls, 0)
+  assert.match(d.run, /^[a-z0-9]+$/)
+  const after = readFileSync(paths().log, 'utf8')
+  assert.ok(after.length > before.length)
+  const last = JSON.parse(after.trim().split('\n').pop())
+  assert.equal(last.item.source, 'reuse'); assert.equal(last.item.tier, 'opus')
+  // outcome() accepts the ref this produced (throws on a malformed one — this is the round trip WP-168 fixes).
+  outcome(`${d.run}#0`, 'ok', 'reused worker finished the ticket')
+  assert.match(readFileSync(paths().outcomes, 'utf8'), /reused worker finished the ticket/)
+  // a plain --model (escalation) is unaffected: still no run/log entry, same as before WP-168.
+  const before2 = readFileSync(paths().log, 'utf8')
+  const plain = await route({ model: 'opus', task: TASK, env: { WT_MODEL_ROUTING: 'shadow' }, cwd: repo })
+  assert.equal(plain.run, undefined)
+  assert.equal(readFileSync(paths().log, 'utf8'), before2)
+  // off is still the kill switch for reuse too.
+  assert.equal((await route({ model: 'opus', reuse: true, task: TASK, env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).source, 'off')
+})
+
 test('Jev thresholds, durable cache (no second fetch), shadow applies nothing', async () => {
   const env = { WT_MODEL_ROUTING: 'live' }
   calls = 0
