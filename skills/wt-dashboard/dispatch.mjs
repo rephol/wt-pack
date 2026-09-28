@@ -59,6 +59,17 @@ export const routeRef = (t) => (t.history ?? []).map((h) => String(h.text ?? '')
 export const strikes = (t) => (t.history ?? []).filter((h) => /^returned: /.test(h.text ?? '') || /^routing: send-back\b/.test(h.text ?? '')).length
 export const escalated = (t) => (t.history ?? []).some((h) => /^routing: escalate /.test(h.text ?? ''))
 
+// handoff.sh stdout: "created|reused …" first, then optional lines (e.g. WP-128 "routing: …"), a "target <name> <pane>"
+// line and more. Find lines by prefix, never by position (WP-131: a routing line in 2nd place made the pane the name).
+export function parseHandoff(out) {
+  const lines = String(out).trim().split('\n')
+  const f = (lines[0] ?? '').split(' ')
+  const pane = f[0] === 'reused' ? f[1] : f[0] === 'created' ? f[2] : null
+  if (!pane) throw new Error(`unparseable handoff output: ${(lines[0] ?? '').slice(0, 100)}`)
+  const t = lines.find((l) => l.startsWith('target '))?.split(' ')
+  return { pane, name: t && t[1] !== '?' ? t[1] : pane }
+}
+
 export class Dispatch {
   // deps: { agents(), host(), handoff(args, prompt, cwd) → stdout, repoOf(project) → path|null, git(repo, ...args) → stdout,
   //   reportOf(project) → { room: slug|null, orch: {name, pane}|null }, maxWorking(project) → n, baseBranch(project) → 'main' (WP-107), pending() → routine spawns in flight, ticketOf(agent) → ticket id|null,
@@ -153,12 +164,16 @@ export class Dispatch {
     const role = roleFor(next)
     try {
       const out = await this.deps.handoff(['--role', role, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
-      const [first = '', second = ''] = out.trim().split('\n')
-      const f = first.split(' ')
-      const pane = f[0] === 'reused' ? f[1] : f[0] === 'created' ? f[2] : null
-      if (!pane) throw new Error(`unparseable handoff output: ${first.slice(0, 100)}`)
-      const name = second.split(' ')[0] === 'target' && second.split(' ')[1] !== '?' ? second.split(' ')[1] : pane
-      await this.#sent(next.id, role, { name, pane }, now)
+      const { name, pane } = parseHandoff(out)
+      this.log(`dispatch ${next.id} → ${name} ${pane}`)
+      try { await this.#sent(next.id, role, { name, pane }, now) } catch (e) {
+        // WP-131: the work was already sent; never re-dispatch it. Hold for a human.
+        await this.tickets.mutate(next.id, (t, at) => {
+          t.dispatch = { state: 'held', at, fails: 3, reason: `sent to ${name} but not recorded: ${String(e?.message ?? e).slice(0, 120)}` }
+          return t
+        })
+        throw e
+      }
     } catch (e) {
       const reason = String(e?.message ?? e).split('\n')[0].slice(0, 200)
       const fails = (claimed.dispatch.fails ?? 0) + 1
