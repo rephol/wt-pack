@@ -3,7 +3,10 @@ export const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'd
 export type Column = (typeof COLUMNS)[number]
 export const TYPES = ['bug', 'ux', 'gap', 'debt', 'feature'] as const
 export const SIZES = ['S', 'M', 'L'] as const
-export interface HistoryEntry { at: string; author: string; kind: 'create' | 'move' | 'comment' | 'edit' | 'assign'; from?: string; to?: string; text?: string }
+export interface HistoryEntry { at: string; author: string; kind: 'create' | 'move' | 'comment' | 'edit' | 'assign' | 'pair'; from?: unknown; to?: unknown; text?: string }
+// WP-147: worker + buddy pairing. `buddy` is optional (the worker may pair alone); a gone member without a
+// replacement leaves that side null but the pairing itself stays until the ticket is Done.
+export interface TicketPair { worker: { name: string; pane: string } | null; buddy?: { name: string; pane: string; role: string } | null }
 export interface Ticket {
   id: string
   title: string
@@ -15,6 +18,7 @@ export interface Ticket {
   links?: string[]
   column: Column
   assignee?: { name: string; pane?: string } | null
+  pair?: TicketPair | null
   created?: string
   updated?: string
   history?: HistoryEntry[]

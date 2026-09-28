@@ -1383,3 +1383,10 @@ test('WP-143 retireIdle: keeps the N most-recently-handed-off idle/done agents p
   assert.deepEqual(retireIdle(agents, 5), []) // every tier has <= 5
   assert.deepEqual(retireIdle([idle('solo', 'opus', 1)], 1), []) // the only one of its tier is never removed
 })
+
+test('WP-147 retireIdle: a DND or paired agent is never a candidate', async () => {
+  const { retireIdle } = await import('./server.mjs')
+  const idle = (pane, model, at, extra = {}) => ({ pane_id: pane, agent_status: 'idle', tokens: { role: 'worker', model, handoff_at: String(at), ...extra } })
+  const agents = [idle('p1', 'sonnet', 100), idle('p2', 'sonnet', 200, { dnd: '1' }), idle('p3', 'sonnet', 300, { pair: 'WP-9' })]
+  assert.deepEqual(retireIdle(agents, 0), ['p1']) // p2 (dnd) and p3 (paired) are excluded, not just kept
+})

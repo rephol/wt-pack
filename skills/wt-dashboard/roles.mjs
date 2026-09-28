@@ -27,7 +27,7 @@ export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink
 // here would not actually persist them. A herdr restart wipes them like any other pane token, and an existing
 // agent then falls back to old behaviour (never reused by tier, never retired) until it is next spawned fresh.
 export const MIRRORED_KEYS = ['role', 'project', 'ticket', 'branch', 'spawned_by', 'created', 'handoff_at']
-export const LIVE_KEYS = ['task', 'task_state', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane']
+export const LIVE_KEYS = ['task', 'task_state', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane', 'dnd', 'pair']
 export const TAG_KEYS = [...MIRRORED_KEYS, ...LIVE_KEYS]
 const ID = /^[a-z][a-z0-9-]{0,20}$/
 

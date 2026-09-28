@@ -1011,6 +1011,7 @@ const AGENTS_SH = fileURLToPath(new URL('../wt-agents/scripts/agents.sh', import
 // (including the pane that just went idle), nothing in it is removed.
 export function retireIdle(agents, n) {
   const eligible = agents.filter((a) => a.tokens?.role === 'worker' && a.tokens?.model && !a.tokens?.task
+    && !a.tokens?.dnd && !a.tokens?.pair
     && (a.agent_status === 'idle' || a.agent_status === 'done'))
   return [...Map.groupBy(eligible, (a) => a.tokens.model).values()].flatMap((list) =>
     list.sort((a, b) => Number(b.tokens.handoff_at ?? 0) - Number(a.tokens.handoff_at ?? 0)).slice(n).map((a) => a.pane_id))
@@ -1611,8 +1612,23 @@ async function jevAuthAlerts() {
   }
 }
 
+// WP-147: a DND value past its time (dndAutoOffHours) auto-clears; "1" (no auto-off) is never touched.
+async function autoOffDnd() {
+  const now = Date.now()
+  for (const a of await agents()) {
+    const v = a.paneTokens?.dnd
+    if (!v || v === '1') continue
+    const at = Date.parse(v)
+    if (!Number.isFinite(at) || at > now) continue
+    const m = await machineBy(a.machine)
+    if (!m) continue
+    await herdrOn(m, 'pane', 'report-metadata', a.id, '--source', 'wt-dashboard', '--clear-token', 'dnd').catch((e) => console.error('dnd auto-off:', e.message))
+    store.delete('paneMeta'); store.delete('agents:local')
+  }
+}
 async function tick() {
   try {
+    await autoOffDnd().catch((e) => console.error('dnd auto-off:', e.message))
     await usageAlerts().catch((e) => console.error('usage alerts:', e.message))
     await jevAuthAlerts().catch((e) => console.error('jev auth alerts:', e.message))
     const o = await overview()
@@ -1960,6 +1976,18 @@ const tickets = new Tickets({
           store.delete('paneMeta')
         }
       } catch (e) { console.error('tokens:', t.assignee.name, e.message) }
+    }
+    // WP-147: a card reaching Done releases its pair — clear the `pair` pane token on both members (each
+    // compare-and-clear against this ticket, same as the assignee's task/ticket above) and the ticket's own field.
+    if (t.pair) {
+      for (const p of [t.pair.worker, t.pair.buddy]) {
+        if (!p?.pane) continue
+        try {
+          const tok = JSON.parse(await herdr('pane', 'get', p.pane)).result?.pane?.tokens ?? {}
+          if (tok.pair === t.id) { await herdr('pane', 'report-metadata', p.pane, '--source', 'wt-dashboard', '--clear-token', 'pair'); store.delete('paneMeta') }
+        } catch (e) { console.error('tokens:', p.name, e.message) }
+      }
+      await tickets.patch(t.id, { pair: null }, { name: 'dispatch' }).catch((e) => console.error('tickets:', e.message))
     }
     // WP-143: retire idle routed workers past what this tier keeps, now that this one is free again.
     await retireIdleWorkers(project).catch((e) => console.error('retire idle:', e.message))
@@ -2601,6 +2629,19 @@ const server = http.createServer(async (req, res) => {
           store.delete('agents:local'); store.delete('overview')
           return send(res, 200, { tags: roleStore.tags[a.name] })
         }
+        // WP-147: DND toggle. `on` sets the token to "1" (never auto-off); a project's dndAutoOffHours
+        // instead writes an ISO time, cleared by the 4s tick (autoOffDnd) once it's past.
+        if (parts[4] === 'dnd' && req.method === 'POST') {
+          if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
+          const a = (await agents()).find((x) => x.machine === m.label && x.id === pane && x.local)
+          if (!a) return send(res, 404, { error: 'unknown local agent' })
+          const { on } = JSON.parse(await body(req))
+          const hours = Number(psettings.get(a.project, 'dndAutoOffHours')) || 0
+          const value = on && hours > 0 ? new Date(Date.now() + hours * 3_600_000).toISOString() : on ? '1' : ''
+          await herdrOn(m, 'pane', 'report-metadata', pane, '--source', 'wt-dashboard', ...(value ? ['--token', `dnd=${value}`] : ['--clear-token', 'dnd']))
+          store.delete('paneMeta'); store.delete('agents:local'); store.delete('overview')
+          return send(res, 200, { dnd: value || null })
+        }
         if (parts[4] === 'commands' && req.method === 'GET') {
           const a = (await agents()).find((x) => x.machine === m.label && x.id === pane)
           return send(res, 200, await commandsFor(a))
@@ -2726,6 +2767,9 @@ const dispatcher = new Dispatch({
     routeMode: async (project) => { const repo = (await projectRoots()).get(project); return repo ? routeConfig({ cwd: repo }).mode : 'off' },
     routeOutcome,
     notify: (item) => inbox.add(item),
+    // WP-147: tag a pair-replacement pane with the ticket it now pairs on (or clear it with a null ticket).
+    tagPair: (pane, ticket) => herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', ...(ticket ? ['--token', `pair=${ticket}`] : ['--clear-token', 'pair']))
+      .then(() => store.delete('paneMeta'), (e) => console.error('tokens:', pane, e.message)),
     handoff: async (args, prompt, cwd) => {
       try { return await runHandoff(execFile, HANDOFF_SH)(args, prompt, cwd) } finally { store.delete('agents:local'); store.delete('overview') }
     },

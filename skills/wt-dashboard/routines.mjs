@@ -227,7 +227,8 @@ export class Routines {
       const why = await guard({ working, pending, max: this.settings().maxWorking, host: this.deps.host })
       if (why) return skip(why)
       if (t.kind === 'prompt') {
-        a = ags.find((x) => t.agent ? x.name === t.agent : x.pool === t.role && x.project === t.project)
+        // WP-147: DND or paired agents are unavailable to a routine's free pick, same as wt-handoff's candidates().
+        a = ags.find((x) => (t.agent ? x.name === t.agent : x.pool === t.role && x.project === t.project) && !x.paneTokens?.dnd && !x.paneTokens?.pair)
         if (!a) return skip('no agent')
         if (a.status === 'working') return skip('agent busy')
         this.db.prepare('UPDATE routine_runs SET agent = ? WHERE id = ?').run(a.name, runId)

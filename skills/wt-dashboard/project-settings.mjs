@@ -33,6 +33,9 @@ export const PKEYS = {
     check: (v) => (/^\d{1,3}$/.test(v) && Number(v) <= 100) || 'a non-negative integer (0–100)' },
   WT_WORKERS_MAX: { scope: 'project', label: 'Max workers (unset = no cap)',
     check: (v) => (/^\d{1,4}$/.test(v) && Number(v) >= 1 && Number(v) <= 1000) || 'a positive integer (1–1000)' },
+  // WP-147: hours until a DND toggle auto-clears; 0 (default) means never.
+  dndAutoOffHours: { scope: 'project', label: 'DND auto-off (hours, 0 = never)', default: '0',
+    check: (v) => (/^\d{1,4}$/.test(v) && Number(v) <= 720) || '0–720' },
 }
 
 export class ProjectSettings {

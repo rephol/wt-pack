@@ -622,8 +622,10 @@ function AgentLink({ machine, name, pane }: { machine: string; name?: string; pa
   if (!name) return null
   return pane ? <Link href={`#${agentHash(`${machine}/${pane}`)}`}>{`@${name}`}</Link> : <Text size="sm" weight="medium">{`@${name}`}</Text>
 }
-function AgentSummary({ agent, task }: { agent: Agent; task: Task | null }) {
+function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: Task | null; dnd?: boolean; onToggleDnd?: () => void }) {
   const t = agent.tags ?? {}
+  // WP-147: `pair` is just the paired ticket id (the pane token) — read-only here; editing lives in the ticket drawer.
+  const pairTicket = t.pair ?? null
   const ticket = task && !task.adHoc ? task.id : (t.ticket ?? t.task?.match(/^[A-Z]+-\d+/i)?.[0] ?? null)
   const title = task && !task.adHoc && task.title !== task.id ? task.title : t.task && ticket && t.task.startsWith(ticket) ? t.task.slice(ticket.length).trim() : t.task ?? null
   const state = task && !task.adHoc ? STATE[task.state] : null
@@ -634,6 +636,13 @@ function AgentSummary({ agent, task }: { agent: Agent; task: Task | null }) {
   return (
     <VStack gap={5} isScrollable style={{ paddingTop: 4 }}>
       {agent.question && <Card variant="red"><VStack gap={1}><Text size="sm" weight="semibold">Waiting on you</Text><Text>{agent.question}</Text></VStack></Card>}
+
+      {agent.local && (
+        <HStack gap={2} align="center" wrap="wrap">
+          <Button label={dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb'} size="sm" variant={dnd ? 'secondary' : 'ghost'} onClick={onToggleDnd} />
+          {pairTicket && <Badge variant="neutral" label={`paired · ${pairTicket}`} />}
+        </HStack>
+      )}
 
       <VStack gap={2}>
         {ticket ? (
@@ -1428,6 +1437,16 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     const t = setTimeout(() => { setStopping(false); toast({ body: `${agent.name} is still working 10s after Stop`, type: 'error' }) }, 10_000)
     return () => clearTimeout(t)
   }, [stopping]) // eslint-disable-line react-hooks/exhaustive-deps
+  // WP-147: DND skips this agent for every free-pick hand-off (wt-handoff candidates(), retireIdle, routines).
+  const dnd = Boolean(agent.tags?.dnd)
+  const dndM = useMutation({
+    mutationFn: async (on: boolean) => {
+      const r = await fetch(`${agentUrl(agent)}/dnd`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on }) })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }),
+    onError: (e) => toast({ body: `DND not sent: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   const send = useMutation({
     mutationFn: (body: { text?: string; keys?: string[] }) => postAgent(agent, body),
     onSuccess: (_d, body) => {
@@ -1497,7 +1516,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   ), [rows, allRows.length, working, density, noneYet])
 
   const page = mode === 'page'
-  const summary = <AgentSummary agent={agent} task={task} />
+  const summary = <AgentSummary agent={agent} task={task} dnd={dnd} onToggleDnd={() => dndM.mutate(!dnd)} />
   const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
             {!live && <Text type="supporting" size="sm">no transcript · pane view</Text>}
@@ -1591,10 +1610,12 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             {page && <IconButton label="Back" icon={<BackIcon />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Back" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />}
             <RoleBadge role={byId(agent.pool)} />
             <StatusDot variant={needsYou(agent) ? 'error' : AGENT_DOT[agent.status]} label={agent.status} isPulsing={agent.status === 'working'} />
+            {dnd && <Tooltip content="Do Not Disturb"><span style={{ display: 'inline-flex', flexShrink: 0 }}><MoonIcon /></span></Tooltip>}
             <VStack gap={0.5} style={{ minWidth: 0 }}>
               <HStack gap={1} align="center" style={{ minWidth: 0 }}>
                 <Text weight="semibold" maxLines={1}>{agent.name}</Text>
                 {agent.background > 0 && <Badge label={`${agent.background} background`} />}
+                {agent.tags?.pair && <Badge variant="neutral" label={`paired · ${agent.tags.pair}`} />}
               </HStack>
               {agent.tags?.task && <Text size="sm" weight="medium" maxLines={1}>{taskLabel(agent.tags)}</Text>}
               <Text type="supporting" size="sm" maxLines={1}>{narrow
@@ -1610,6 +1631,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             ...(agent.local ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
+              { label: dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb', description: dnd ? undefined : 'Skip this agent for free-pick hand-offs', onClick: () => dndM.mutate(!dnd) },
             ] : []),
             agent.local
               ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
@@ -1647,4 +1669,5 @@ const ClipIcon = () => <svg {...svg}><path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8
 const PlusIcon = () => <svg {...svg}><path d="M12 5v14M5 12h14" /></svg>
 const RefreshIcon = () => <svg {...svg}><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8M21 3v5h-5" /></svg>
 const NudgeIcon = () => <svg {...svg}><path d="m6 17 5-5-5-5M13 17l5-5-5-5" /></svg>
+const MoonIcon = () => <svg {...svg}><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" /></svg>
 const GearIcon = () => <svg {...svg}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>

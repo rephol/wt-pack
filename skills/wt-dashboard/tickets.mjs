@@ -55,6 +55,14 @@ export function clean(b, { create = false } = {}) {
   }
   if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 20_000)) throw err(400, 'note: up to 20000 chars')
   if (b.note !== undefined) out.note = b.note
+  // WP-147: { worker: {name,pane}, buddy: {name,pane,role} } | null — a paired ticket's worker + buddy.
+  if (b.pair !== undefined) {
+    const person = (x) => x === null || x === undefined || (typeof x.name === 'string' && typeof x.pane === 'string')
+    const buddy = (x) => person(x) && (x == null || typeof x.role === 'string')
+    if (b.pair !== null && !(person(b.pair.worker) && buddy(b.pair.buddy)))
+      throw err(400, 'pair: {worker:{name,pane}|null, buddy:{name,pane,role}|null} or null')
+    out.pair = b.pair
+  }
   return out
 }
 
@@ -176,7 +184,7 @@ export class Tickets {
     return this.mutate(id, (t, at) => {
       // Back to Backlog: nobody holds it any more, unless the same call names one (WP-49).
       if (f.column === 'backlog' && t.column !== 'backlog' && assignee === undefined) assignee = null
-      const { column, note, ...rest } = f
+      const { column, note, pair, ...rest } = f
       if (column && column !== t.column) {
         if (column === 'blocked' && !note?.trim()) throw err(400, 'moving to blocked needs a note (the reason)')
         t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: column, ...(note ? { text: note } : {}) })
@@ -191,6 +199,10 @@ export class Tickets {
       if (assignee !== undefined && assignee?.name !== t.assignee?.name) {
         t.history.push({ at, author: author.name, kind: 'assign', from: t.assignee?.name ?? null, to: assignee?.name ?? null })
         t.assignee = assignee
+      }
+      if (pair !== undefined && JSON.stringify(pair) !== JSON.stringify(t.pair ?? null)) {
+        t.history.push({ at, author: author.name, kind: 'pair', from: t.pair ?? null, to: pair })
+        t.pair = pair
       }
       return t
     })

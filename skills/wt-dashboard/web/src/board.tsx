@@ -382,6 +382,11 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
         {t.updated ? <>Edited <Timestamp value={t.updated} format="relative" /></> : null}
         {t.updated && t.assignee ? ' · ' : ''}{t.assignee ? `@${t.assignee.name}` : ''}
       </Text>
+      {t.pair && (t.pair.worker || t.pair.buddy) && (
+        <Tooltip content={`Paired: ${t.pair.worker?.name ?? '—'} + ${t.pair.buddy?.name ?? '—'}`}>
+          <Badge label={`${t.pair.worker?.name ?? '—'} + ${t.pair.buddy?.name ?? '—'}`} variant="neutral" />
+        </Tooltip>
+      )}
     </VStack>
   )
 }
@@ -449,6 +454,18 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
 
   // ponytail: unset type/size are omitted (the API rejects null), so they cannot be cleared once set.
   const patch = useMutation({ mutationFn: (body: object) => send<Ticket>(tUrl(ticket!.id), 'PATCH', body), onSuccess: () => { done(); setEditing(false) } })
+  // WP-147: pairing's buddy is edited here; the worker side just follows the ticket's own assignee.
+  const { data: agentsForPair } = useQuery({ queryKey: ['agents'], queryFn: () => api<{ local: boolean; project: string | null; pool: string; name: string; id: string }[]>('/api/agents'), staleTime: 30_000 })
+  const buddyOptions = useMemo(() => [{ value: '', label: '— none —' }, ...(agentsForPair ?? [])
+    .filter((a) => a.local && a.project === project && (a.pool === 'worker' || a.pool === 'reviewer') && a.name !== ticket?.assignee?.name)
+    .map((a) => ({ value: `${a.name}\t${a.id}\t${a.pool}`, label: `${a.name} (${a.pool})` }))], [agentsForPair, project, ticket?.assignee?.name])
+  const setBuddy = (v: string) => {
+    if (!ticket?.assignee) return
+    const worker = { name: ticket.assignee.name, pane: ticket.assignee.pane ?? '' }
+    if (!v) { patch.mutate({ pair: ticket.pair ? { worker, buddy: null } : null }); return }
+    const [name, pane, role] = v.split('\t')
+    patch.mutate({ pair: { worker, buddy: { name, pane, role } } })
+  }
   const undo = useMutation({ mutationFn: (field: string) => send<Ticket>(`${tUrl(ticket!.id)}/jev-undo`, 'POST', { field }), onSuccess: done })
   const create = useMutation({
     mutationFn: () => send<Ticket>('/api/tickets', 'POST', {
@@ -577,6 +594,12 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
         <MetadataListItem label="Priority"><PriorityBadge p={ticket.priority} /></MetadataListItem>
         <MetadataListItem label="Assignee">
           {ticket.assignee ? <HStack gap={2} vAlign="center"><Avatar name={ticket.assignee.name} size="xsm" /><Text type="body">{ticket.assignee.name}</Text></HStack> : <Text type="body" color="secondary">None</Text>}
+        </MetadataListItem>
+        <MetadataListItem label="Buddy">
+          {ticket.assignee
+            ? <Selector label="Buddy" isLabelHidden width={220} value={ticket.pair?.buddy ? `${ticket.pair.buddy.name}\t${ticket.pair.buddy.pane}\t${ticket.pair.buddy.role}` : ''}
+                onChange={setBuddy} options={buddyOptions} />
+            : <Text type="body" color="secondary">Needs an assignee first</Text>}
         </MetadataListItem>
         <MetadataListItem label="Type"><Text type="body">{ticket.type ?? '—'}</Text></MetadataListItem>
         <MetadataListItem label="Size"><Text type="body">{ticket.size ?? '—'}</Text></MetadataListItem>
