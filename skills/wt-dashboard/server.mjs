@@ -2828,34 +2828,42 @@ async function watchdogSnapshot() {
   const fs = await statfs(DATA).catch(() => null)
   // WP-109: remember live pool agents' sessions; a remembered pane still open without an agent has exited.
   const panes = await herdr('pane', 'list').then((t) => JSON.parse(t).result.panes.map((x) => x.pane_id), () => null)
-  // WP-150: re-read lastSeen from disk instead of trusting this process's in-memory copy — agents.sh's `rm`
-  // edits watchdog.json directly (drops the removed agent's name) between ticks; merging from the stale
-  // in-memory value would clobber that edit and resurrect the name on this tick's write.
-  const diskLastSeen = await readFile(WD_FILE, 'utf8').then((t) => JSON.parse(t).lastSeen ?? wd.lastSeen, () => wd.lastSeen)
-  wd.lastSeen = rememberAgents(diskLastSeen, ag, panes, (c) => ticketOf(c ?? ''))
+  wd.lastSeen = await mergeLastSeen(ag, panes)
   return {
     exited: exitedAgents(wd.lastSeen, panes),
     stale: await staleHooks(ag).catch(() => null),
     starts: await readFile(join(DATA, 'server-starts.json'), 'utf8').then(JSON.parse, () => null),
     queue: [...rooms.queue].flatMap(([key, items]) => items.map((it) => ({ agent: nameOf.get(key) ?? key, slug: it.slug, ts: it.msg.ts }))),
-    boards, agents: ag, herdr: SOURCES.herdr,
+    boards, agents: ag, panes, herdr: SOURCES.herdr,
     diskFree: fs ? fs.bavail * fs.bsize : null,
     dbBytes: await stat(join(DATA, 'wt.db')).then((x) => x.size, () => null),
     errors: serverErrors,
     jev: await readCalls().catch(() => null),
   }
 }
+// WP-150: agents.sh's `rm` edits watchdog.json's lastSeen directly on disk (drops the removed agent's name)
+// independently of this process. Re-read it from disk instead of merging from the stale in-memory copy, so
+// that edit isn't clobbered by this tick's next write.
+async function mergeLastSeen(ag, panes) {
+  const diskLastSeen = await readFile(WD_FILE, 'utf8').then((t) => JSON.parse(t).lastSeen ?? wd.lastSeen, () => wd.lastSeen)
+  return rememberAgents(diskLastSeen, ag, panes, (c) => ticketOf(c ?? ''))
+}
 let wdRunning = null // the 60s timer and Run now share one run, so a finding never opens twice
 function runWatchdog() { return (wdRunning ??= runWatchdogOnce().finally(() => { wdRunning = null })) }
 async function runWatchdogOnce() {
   await wdLoaded
-  const d = diffFindings(wd.open, wdEvaluate(await watchdogSnapshot(), wd.settings))
+  const snap = await watchdogSnapshot()
+  const d = diffFindings(wd.open, wdEvaluate(snap, wd.settings))
   const ops = inboxOps(d)
   for (const it of ops.add) await inbox.add(it)
   if (ops.resolveKeys.length) {
     await inbox.load()
     await inbox.resolve(inbox.items.filter((it) => it.kind === 'watchdog' && !it.resolvedAt && ops.resolveKeys.includes(it.target?.watchdog)).map((it) => it.id))
   }
+  // WP-150: re-merge right before the write — watchdogSnapshot()'s merge is minutes^Wseconds stale by now
+  // (staleHooks' ps exec and the inbox I/O above ran in between), wide enough for agents.sh's rm to land its
+  // disk edit in that window. This second merge closes the gap to (read → sync merge → write), no more awaits.
+  wd.lastSeen = await mergeLastSeen(snap.agents, snap.panes)
   const at = new Date().toISOString()
   wd = { ...wd, open: d.open, resolved: [...d.resolved.map((f) => ({ ...f, resolvedAt: at })), ...wd.resolved].slice(0, 20), lastRun: at }
   await writeFile(WD_FILE, JSON.stringify(wd, null, 2))
