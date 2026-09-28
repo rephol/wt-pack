@@ -80,7 +80,7 @@ function Integrations() {
         <VStack gap={2}>
           {q.data.routingSavings && q.data.routingSavings.n > 0 && (
             <Text type="supporting" size="sm">
-              {`Estimated savings vs sonnet: ${fmtTok(Math.max(0, q.data.routingSavings.tokens))} tokens`}
+              {`Estimated savings vs sonnet: ${fmtTok(q.data.routingSavings.tokens)} tokens`}
               {q.data.routingSavings.priced ? `, ${fmtUsd(q.data.routingSavings.cost)} notional` : ''}
               {` over ${q.data.routingSavings.n} applied decision${q.data.routingSavings.n === 1 ? '' : 's'}`}
             </Text>

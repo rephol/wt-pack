@@ -69,7 +69,9 @@ export class UsageAgg {
     }
   }
   // Read what was appended to one file since last time (only complete lines; a partial tail waits).
-  async readFile(path, size, kind) {
+  // `session` is the id to fall back to when a record carries none of its own (the owning session's uuid,
+  // for both a session's own transcript and any subagent transcript under it — not the subagent file's name).
+  async readFile(path, size, session, kind) {
     let off = this.files.get(path) ?? 0
     if (size < off) off = 0 // truncated or replaced: start over (records dedupe by id)
     if (size === off) return
@@ -79,12 +81,13 @@ export class UsageAgg {
       await fh.read(buf, 0, buf.length, off)
       const end = buf.lastIndexOf(0x0a)
       if (end < 0) return
-      this.ingest(buf.subarray(0, end).toString('utf8'), path.split('/').pop().replace(/\.jsonl$/, ''), kind)
+      this.ingest(buf.subarray(0, end).toString('utf8'), session, kind)
       this.files.set(path, off + end + 1)
     } finally { await fh.close() }
   }
   // Every project transcript touched within the keep window: a session's own <uuid>.jsonl, plus any subagent
-  // transcripts it spawned under <uuid>/subagents/*.jsonl.
+  // transcripts it spawned under <uuid>/subagents/*.jsonl (only for a session directory touched since — new
+  // subagent files bump their parent directory's mtime, so a directory untouched since stays unread).
   async refresh(root, now = Date.now()) {
     const since = now - this.keepMs
     const fresh = async (p) => { const st = await stat(p).catch(() => null); return st && st.mtimeMs >= since ? st : null }
@@ -92,12 +95,17 @@ export class UsageAgg {
       const dir = join(root, d)
       for (const f of await readdir(dir).catch(() => [])) {
         const p = join(dir, f)
-        if (f.endsWith('.jsonl')) { const st = await fresh(p); if (st) await this.readFile(p, st.size, 'session').catch(() => {}); continue }
+        if (f.endsWith('.jsonl')) {
+          const st = await fresh(p)
+          if (st) await this.readFile(p, st.size, f.replace(/\.jsonl$/, ''), 'session').catch(() => {})
+          continue
+        }
+        if (!(await fresh(p))) continue // session directory untouched in the keep window: skip its subagents too
         for (const sf of await readdir(join(p, 'subagents')).catch(() => [])) {
           if (!sf.endsWith('.jsonl')) continue
           const sp = join(p, 'subagents', sf)
           const st = await fresh(sp)
-          if (st) await this.readFile(sp, st.size, 'subagent').catch(() => {})
+          if (st) await this.readFile(sp, st.size, f, 'subagent').catch(() => {})
         }
       }
     }

@@ -22,7 +22,7 @@ type By = 'agent' | 'project' | 'model'
 type Range = 'today' | 'week' | 'month'
 interface Usage { limits: Limits | null; today: Record<By, Summary>; week: Record<By, Summary>; month: Record<By, Summary> }
 
-export const fmtTok = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n))
+export const fmtTok = (n: number) => `${n < 0 ? '-' : ''}${Math.abs(n) >= 1e9 ? `${(Math.abs(n) / 1e9).toFixed(2)}B` : Math.abs(n) >= 1e6 ? `${(Math.abs(n) / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${Math.round(Math.abs(n) / 1e3)}k` : String(Math.abs(n))}`
 export const fmtUsd = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toLocaleString() : Math.abs(n).toFixed(2)}`
 const until = (iso: string | null) => {
   if (!iso) return null
