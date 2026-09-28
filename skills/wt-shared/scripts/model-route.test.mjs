@@ -111,6 +111,36 @@ test('CLI: pick prints a tier only in live; explain is JSON; outcome writes the 
   assert.ok(existsSync(paths().cache))
 })
 
+// WP-129: six fixtures from live-round misses. Expected tiers: haiku, haiku, sonnet, opus, opus, haiku.
+test('WP-129: sharper local signals — read verbs, security keywords, docs-lens haiku', () => {
+  const s1 = buildState({ lens: 'docs', task: 'check the README wording against the CLI help text' })
+  assert.equal(localDecide(s1), 'haiku') // 1: docs lens, no Jev call
+
+  const s2 = buildState({ task: 'list the open PRs and report which ones are stale' })
+  assert.equal(s2.signals.reads, true); assert.equal(s2.signals.edits, false)
+  assert.equal(localDecide(s2), 'haiku') // 2: read-only, no security keyword
+
+  const s3 = buildState({ task: TASK })
+  assert.equal(localDecide(s3), null) // 3: normal edit work falls through to Jev (sonnet)
+
+  const s4 = buildState({ role: 'planner', task: 'plan the migration' })
+  assert.equal(applyFloors('haiku', s4, DEFAULTS), 'opus') // 4: role floor
+
+  const s5 = buildState({ task: 'impact sweep of the session cookie format across the auth handlers' })
+  assert.equal(s5.signals.reads, true) // 'sweep' now counts as a read
+  assert.deepEqual(s5.signals.keywords.sort(), ['auth', 'cookie', 'session'].sort())
+  assert.equal(localDecide(s5), null) // security keyword present: no shortcut, goes to Jev
+  assert.equal(applyFloors('haiku', s5, DEFAULTS), 'sonnet') // 5: the security floor applies (docs: floors only raise to sonnet)
+
+  const s6 = buildState({ lens: 'naming', task: 'rename the variable to match the convention' })
+  assert.equal(localDecide(s6), 'haiku') // 6: naming lens, no Jev call
+
+  // verify/compare/csrf/cookie/permission all now recognized
+  assert.equal(buildState({ task: 'verify the output' }).signals.reads, true)
+  assert.equal(buildState({ task: 'compare the two configs' }).signals.reads, true)
+  assert.deepEqual(buildState({ task: 'add csrf and permission checks' }).signals.keywords.sort(), ['csrf', 'permission'].sort())
+})
+
 test('global off beats a per-skill live mode (kill switch)', async () => {
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ skills: { 'wt-work': { mode: 'live' } } }))
   assert.equal((await route({ skill: 'wt-work', task: 'list files', env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).mode, 'off')
