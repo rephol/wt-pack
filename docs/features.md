@@ -131,8 +131,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   it, toasts sit over it, and its **Chats** button replaces the floating ⌘K button) holds a tab per chat, right to left (**Chats** far right, the newest chat just left of it — WP-113), and an open
   chat's window pops up above its tab. Each chat is a compact window (at most 3; a 4th turns the oldest into a tab) or a
   minimised tab with a status dot and an unread marker (dot = activity since you last looked, **!** = needs you;
-  per device, approximate — not a count). Window buttons (Esc minimises): minimise, expand (agent → side panel, room → its page)
-  and close. The dock survives page navigation and a reload (per browser). A window shows the last 100 messages,
+  per device, approximate — not a count). Window buttons (Esc minimises): minimise, two expand actions — **Open in side panel**
+  (docks it into the right-hand panel; rooms get their normal header there too) and **Open full page** (the agent's or room's
+  own page) — and close. The dock survives page navigation and a reload (per browser). A window shows the last 100 messages,
   **Show earlier** reveals 100 more; a tab loads no chat at all (its stream closes 30s after it is minimised).
   Terminals keep the side panel. The sidebar's old Agents/Rooms **Open** list is gone — use the Agents and Rooms
   pages or ⌘K. Narrower windows and phones have no dock (chats open as pages, as before) but remember what you opened: the
