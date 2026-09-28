@@ -20,7 +20,10 @@ const repo = join(tmp, 'repo'); mkdirSync(repo); execFileSync('git', ['-C', repo
 const cli = join(import.meta.dirname, 'model-route.mjs')
 
 let calls = 0
-const jev = (choice, confidence) => async () => { calls++; return { ok: true, status: 200, json: async () => ({ answers: { tier: { choice, confidence } } }) } }
+const jev = (choice, confidence, effort, effortP = 0.9) => async () => {
+  calls++
+  return { ok: true, status: 200, json: async () => ({ answers: { tier: { choice, confidence }, ...(effort ? { effort: { choice: effort, confidence: effortP } } : {}) } }) }
+}
 const TASK = 'Implement the plan unit U2: add a column to the tickets table and update the handlers and tests accordingly.'
 
 test('state stays small and the question text is constant', () => {
@@ -198,6 +201,41 @@ test('WP-137: effort clamp table — downgrade raise, no raise on upgrade/unchan
   assert.equal(computeEffort('haiku', rw, 'max'), 'high') // read-only lowers base (low → nothing lower), then +2
   assert.equal(computeEffort('sonnet', rw, 'max'), 'low') // read-only lowers sonnet's base a step
   assert.equal(computeEffort('sonnet', edit, undefined), 'medium') // no G override: falls back to the default ceiling
+})
+
+// WP-139: Jev's own effort pick (the second question in the same call) drives E, clamped by the same rules —
+// not the tier-derived base the local-rule path still uses.
+test('WP-139: Jev\'s effort pick is used and clamped (≤ G; downgrade capped at base+2/high)', async () => {
+  const env = { WT_MODEL_ROUTING: 'live' }
+  // distinct task text per case: the durable cache keys on state, so identical tasks would hit an earlier case's cache
+  // haiku pick (downgrade from sonnet, base 'low'): Jev asks for 'max', capped to base+2='high'
+  const d1 = await route({ skill: 'a', task: `${TASK} (case 1)`, env, cwd: repo, fetchImpl: jev('haiku', 0.99, 'max') })
+  assert.equal(d1.tier, 'haiku'); assert.equal(d1.effort, 'high')
+  // opus pick (upgrade, base 'high'): Jev's 'low' pick is honoured, not forced back up to base
+  const d2 = await route({ skill: 'a', task: `${TASK} (case 2)`, env, cwd: repo, fetchImpl: jev('opus', 0.99, 'low') })
+  assert.equal(d2.tier, 'opus'); assert.equal(d2.effort, 'low')
+  // sonnet pick (unchanged), Jev asks 'xhigh': still clamped to G ('high' here, the default ceiling)
+  const d3 = await route({ skill: 'a', task: `${TASK} (case 3)`, env, cwd: repo, fetchImpl: jev('sonnet', 0.99, 'xhigh') })
+  assert.equal(d3.tier, 'sonnet'); assert.equal(d3.effort, 'high')
+  // and the whole thing still respects a lower G, e.g. the orchestrator's WP-139 report (G='medium')
+  const d4 = await route({ skill: 'a', task: `${TASK} (case 4)`, env: { ...env, WT_EFFORT: 'medium' }, cwd: repo, fetchImpl: jev('haiku', 0.99, 'max') })
+  assert.equal(d4.effort, 'medium')
+})
+
+// WP-139: G defaults to Claude Code's own effective effort setting (its live env var, else settings.json
+// effortLevel, project over user) instead of the hardcoded 'high' — wt-pack's own overrides still win.
+test('WP-139: G reads Claude Code settings.json / env when wt-pack has no override', () => {
+  writeFileSync(paths().user, '{}')
+  mkdirSync(join(tmp, '.claude'), { recursive: true })
+  writeFileSync(join(tmp, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'medium' }))
+  assert.equal(loadConfig({ cwd: repo, env: {} }).effort, 'medium')
+  assert.equal(loadConfig({ cwd: repo, env: {} }).effortFrom, 'claude')
+  mkdirSync(join(repo, '.claude'), { recursive: true })
+  writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'low' }))
+  assert.equal(loadConfig({ cwd: repo, env: {} }).effort, 'low') // project over user
+  assert.equal(loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'xhigh' } }).effort, 'xhigh') // live session env wins
+  writeFileSync(join(repo, '.claude', 'settings.json'), '{}')
+  writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
 })
 
 test('WT_EFFORT config precedence and route() carries effort/applyEffort', async () => {
