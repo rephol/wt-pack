@@ -454,18 +454,16 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
 
   // ponytail: unset type/size are omitted (the API rejects null), so they cannot be cleared once set.
   const patch = useMutation({ mutationFn: (body: object) => send<Ticket>(tUrl(ticket!.id), 'PATCH', body), onSuccess: () => { done(); setEditing(false) } })
-  // WP-147: pairing's buddy is edited here; the worker side just follows the ticket's own assignee.
-  const { data: agentsForPair } = useQuery({ queryKey: ['agents'], queryFn: () => api<{ local: boolean; project: string | null; pool: string; name: string; id: string }[]>('/api/agents'), staleTime: 30_000 })
+  // WP-147: pairing's buddy is edited here; the worker side just follows the ticket's own assignee. The
+  // POST .../buddy endpoint (not a plain PATCH) also tags/clears the `pair` pane token on both agents — the
+  // thing every free-agent picker actually gates on — so the exclusivity holds for a buddy set this way too.
+  const { data: agentsForPair } = useQuery({ queryKey: ['agents'], queryFn: () => api<{ local: boolean; project: string | null; pool: string; name: string; id: string; tags?: Record<string, string> }[]>('/api/agents'), staleTime: 30_000 })
   const buddyOptions = useMemo(() => [{ value: '', label: '— none —' }, ...(agentsForPair ?? [])
-    .filter((a) => a.local && a.project === project && (a.pool === 'worker' || a.pool === 'reviewer') && a.name !== ticket?.assignee?.name)
-    .map((a) => ({ value: `${a.name}\t${a.id}\t${a.pool}`, label: `${a.name} (${a.pool})` }))], [agentsForPair, project, ticket?.assignee?.name])
-  const setBuddy = (v: string) => {
-    if (!ticket?.assignee) return
-    const worker = { name: ticket.assignee.name, pane: ticket.assignee.pane ?? '' }
-    if (!v) { patch.mutate({ pair: ticket.pair ? { worker, buddy: null } : null }); return }
-    const [name, pane, role] = v.split('\t')
-    patch.mutate({ pair: { worker, buddy: { name, pane, role } } })
-  }
+    .filter((a) => a.local && a.project === project && (a.pool === 'worker' || a.pool === 'reviewer') && a.name !== ticket?.assignee?.name
+      && !a.tags?.dnd && (!a.tags?.pair || a.tags.pair === ticket?.id))
+    .map((a) => ({ value: a.name, label: `${a.name} (${a.pool})` }))], [agentsForPair, project, ticket?.assignee?.name, ticket?.id])
+  const setBuddyM = useMutation({ mutationFn: (buddy: string | null) => send<Ticket>(`${tUrl(ticket!.id)}/buddy`, 'POST', { buddy }), onSuccess: done })
+  const setBuddy = (v: string) => setBuddyM.mutate(v || null)
   const undo = useMutation({ mutationFn: (field: string) => send<Ticket>(`${tUrl(ticket!.id)}/jev-undo`, 'POST', { field }), onSuccess: done })
   const create = useMutation({
     mutationFn: () => send<Ticket>('/api/tickets', 'POST', {
@@ -479,7 +477,7 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
   })
   const block = useMutation({ mutationFn: () => send(tUrl(ticket!.id), 'PATCH', { column: 'blocked', note: note.trim() }), onSuccess: () => { setNote(''); setBlockTo(false); done() } })
   const say = useMutation({ mutationFn: () => send(`${tUrl(ticket!.id)}/comments`, 'POST', { text: comment.trim() }), onSuccess: () => { setComment(''); done() } })
-  const err = patch.error ?? create.error ?? block.error ?? say.error
+  const err = patch.error ?? create.error ?? block.error ?? say.error ?? setBuddyM.error
   const setStatus = (v: string) => { if (v === 'blocked') setBlockTo(true); else { setBlockTo(false); if (v !== ticket!.column) patch.mutate({ column: v }) } }
   const label = isNew ? 'New ticket' : ticket?.id ?? 'Ticket'
 
@@ -597,7 +595,7 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
         </MetadataListItem>
         <MetadataListItem label="Buddy">
           {ticket.assignee
-            ? <Selector label="Buddy" isLabelHidden width={220} value={ticket.pair?.buddy ? `${ticket.pair.buddy.name}\t${ticket.pair.buddy.pane}\t${ticket.pair.buddy.role}` : ''}
+            ? <Selector label="Buddy" isLabelHidden width={220} value={ticket.pair?.buddy?.name ?? ''} isDisabled={setBuddyM.isPending}
                 onChange={setBuddy} options={buddyOptions} />
             : <Text type="body" color="secondary">Needs an assignee first</Text>}
         </MetadataListItem>

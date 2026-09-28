@@ -153,6 +153,27 @@ test('WP-147: a paired agent is not a free candidate, only reachable for its own
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
+test('WP-147: --task <TICKET> with no --pane routes to the pair — the worker, or the buddy for --role reviewer', () => {
+  // wt-ticket's own HTTP calls (curl) don't route through the herdr stub, so this one test gets a dedicated
+  // curl stub ahead of it on PATH: `-w '\n%{http_code}'` means the body is followed by a newline and a status.
+  const curlBin = join(tmp, 'curlbin')
+  mkdirSync(curlBin, { recursive: true })
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+for a in "$@"; do url=$a; done
+case "$url" in
+  *"/api/tickets/keys"*) printf 'WP\\n200' ;;
+  *"/api/tickets/WP-9"*) printf '%s\\n200' '{"id":"WP-9","pair":{"worker":{"name":"demo-worker-09","pane":"wW:p9"},"buddy":{"name":"demo-reviewer-09","pane":"wR:p9","role":"reviewer"}}}' ;;
+  *) printf '{}\\n404' ;;
+esac
+`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off' }
+  let out = execFileSync(join(here, 'handoff.sh'), ['--no-goal', '--dry-run', '--task', 'WP-9 fix it', repo], { input: 'x', encoding: 'utf8', env })
+  assert.match(out, /would hand to pane wW:p9$/m)
+  out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', '--task', 'WP-9 fix it', repo], { input: 'x', encoding: 'utf8', env })
+  assert.match(out, /would hand to pane wR:p9$/m)
+})
+
 test('WP-132: --cancel resolves a name to its pane and reports what it did', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))

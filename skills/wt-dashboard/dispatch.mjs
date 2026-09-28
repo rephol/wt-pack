@@ -168,9 +168,9 @@ export class Dispatch {
     const claimed = await this.tickets.dispatchClaim(next.id, now)
     if (!claimed) return
     const role = roleFor(next)
-    // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy.
+    // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy (idle/done, like candidates()).
     const buddy = role === 'worker' && !next.pair
-      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && a.status !== 'working' && !a.paneTokens?.dnd && !a.paneTokens?.pair)
+      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair)
       : null
     try {
       const args = ['--role', role, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
@@ -267,13 +267,17 @@ export class Dispatch {
   // WP-147 escalation: a gone pair member is replaced by a free agent of the same role, with a ticket comment
   // ("pair: <old> → <new> (gone)"); no replacement → an Inbox item to the orchestrator, card left where it is.
   // Re-reads the ticket: the worker and buddy checks share one `cards` snapshot per tick, and either can
-  // already have replaced the other's pair field earlier in the same pass.
+  // already have replaced the other's pair field earlier in the same pass. `local` is likewise shared and
+  // mutated in place on a pick, so two tickets losing a member in the same tick never get the same agent —
+  // `tagPair()` below only updates the live pane token, which this pass would not see again until the next tick.
   async #pairReplace(project, t, role, local, now) {
     const cur = await this.tickets.get(t.id)
     const p = cur.pair?.[role]
     if (!p) return
     const wantPool = role === 'worker' ? 'worker' : (p.role || 'reviewer')
-    const repl = local.find((x) => x.pool === wantPool && x.project === project && x.status !== 'working' && !x.paneTokens?.dnd && !x.paneTokens?.pair)
+    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair)
+    const repl = i < 0 ? null : local[i]
+    if (repl) local.splice(i, 1)
     const pair = { ...cur.pair, [role]: repl ? { name: repl.name, pane: repl.id, ...(role === 'buddy' ? { role: wantPool } : {}) } : null }
     await this.tickets.patch(t.id, { pair }, { name: 'dispatch' })
     if (!repl) {

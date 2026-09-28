@@ -402,6 +402,22 @@ test('WP-147 reconcile: a gone paired worker is replaced in place, not returned 
   assert.deepEqual(tagged, [['w2:p1', T.id]])
 })
 
+test('WP-147 reconcile: two tickets losing their worker in the same tick never get the same replacement', async () => {
+  const repl = { name: 'wt-pack-worker-02', id: 'w2:p1', local: true, pool: 'worker', project: 'wt-pack', status: 'idle', paneTokens: {} }
+  const { tickets, d } = await setup({ agents: [repl] })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t1 = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t1.id, { pair: { worker: { name: 'wt-pack-worker-07', pane: 'w7:p1' } } }, user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  const t2 = await tickets.create('wt-pack', { title: 'b', column: 'building' }, user)
+  await tickets.patch(t2.id, { pair: { worker: { name: 'wt-pack-worker-08', pane: 'w8:p1' } } }, user, { name: 'wt-pack-worker-08', pane: 'w8:p1' })
+  await d.tick(); await d.tick() // two misses, both tickets, same tick
+  const [T1, T2] = await Promise.all([tickets.get(t1.id), tickets.get(t2.id)])
+  const winners = [T1.pair.worker?.name, T2.pair.worker?.name].filter(Boolean)
+  assert.equal(new Set(winners).size, winners.length) // never the same agent twice
+  assert.ok(winners.includes('wt-pack-worker-02')) // the one free worker went to exactly one of them
+  assert.ok([T1.pair.worker, T2.pair.worker].includes(null)) // the other has no replacement
+})
+
 test('WP-147 reconcile: a gone buddy is replaced too, worker untouched', async () => {
   const worker = { name: 'wt-pack-worker-07', id: 'w7:p1', local: true, pool: 'worker', project: 'wt-pack', status: 'working', paneTokens: {} }
   const replBuddy = { name: 'wt-pack-reviewer-02', id: 'wR:p2', local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: {} }

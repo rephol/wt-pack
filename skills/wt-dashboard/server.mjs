@@ -2080,6 +2080,29 @@ async function ticketsApi(req, res, url, parts) {
     }
     return send(res, 200, await tickets.patch(id, b, author, assignee))
   }
+  // WP-147: set/clear the ticket's buddy (worker follows the ticket's own assignee). Unlike the generic PATCH
+  // above, this also tags/clears the `pair` pane token on both agents — the thing every free-agent picker
+  // (candidates(), retireIdle, routines) actually gates on, so a buddy set from the drawer is exclusive too.
+  if (req.method === 'POST' && parts[3] === 'buddy') {
+    const t = await tickets.get(id)
+    if (!t.assignee?.name) return send(res, 400, { error: 'needs an assignee first' })
+    const worker = { name: t.assignee.name, pane: t.assignee.pane ?? '' }
+    let buddy = null
+    if (b.buddy) {
+      const a = (await agents()).find((x) => x.local && x.name === b.buddy)
+      if (!a) return send(res, 400, { error: `unknown agent ${b.buddy}` })
+      if (a.paneTokens?.dnd) return send(res, 400, { error: `${b.buddy} is DND` })
+      if (a.paneTokens?.pair && a.paneTokens.pair !== id) return send(res, 400, { error: `${b.buddy} is already paired on ${a.paneTokens.pair}` })
+      buddy = { name: a.name, pane: a.id, role: a.pool }
+    }
+    const oldBuddy = t.pair?.buddy
+    const out = await tickets.patch(id, { pair: worker.pane || buddy ? { worker, buddy } : null }, author)
+    if (worker.pane) await herdr('pane', 'report-metadata', worker.pane, '--source', 'wt-dashboard', '--token', `pair=${id}`).catch((e) => console.error('tokens:', worker.name, e.message))
+    if (buddy) await herdr('pane', 'report-metadata', buddy.pane, '--source', 'wt-dashboard', '--token', `pair=${id}`).catch((e) => console.error('tokens:', buddy.name, e.message))
+    if (oldBuddy?.pane && oldBuddy.pane !== buddy?.pane) await herdr('pane', 'report-metadata', oldBuddy.pane, '--source', 'wt-dashboard', '--clear-token', 'pair').catch((e) => console.error('tokens:', oldBuddy.name, e.message))
+    store.delete('paneMeta'); store.delete('agents:local')
+    return send(res, 200, out)
+  }
   if (req.method === 'POST' && parts[3] === 'comments') return send(res, 200, await tickets.comment(id, b.text, author))
   if (req.method === 'POST' && parts[3] === 'jev-undo') return send(res, 200, await tickets.jevUndo(id, b.field, author))
   if (req.method === 'POST' && parts[3] === 'dispatch-retry') return send(res, 200, await tickets.dispatchRetry(id))
