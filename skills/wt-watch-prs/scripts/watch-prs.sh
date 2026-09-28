@@ -179,6 +179,18 @@ dispatch)
   # The reviewer that held this PR gets it back when free; else handoff reuses a free pool reviewer or spawns one.
   prev=$(jq -r --arg n "$P" '.reviewed[$n].reviewer // ""' "$STATE")
   pane=""; [ -n "$prev" ] && pane=$(printf '%s' "$ag" | jq -r --arg n "$prev" '.result.agents[]? | select(.name == $n and (.agent_status == "idle" or .agent_status == "done")) | .pane_id' | head -1)
+  # WP-147: a paired ticket's branch (wp-N-…) routes the review to its buddy instead — the pairing is the
+  # deliberate choice, so it wins over both the last reviewer and a free pool pick.
+  T="$here/../../wt-ticket/scripts/wt-ticket"
+  branch=$(rgh pr view "$P" --repo "$REPO" --json headRefName 2>/dev/null | jq -r '.headRefName // empty')
+  if [ -n "$branch" ] && [ -x "$T" ]; then
+    keys=$("$T" keys 2>/dev/null | tr '\n' '|')
+    tk=$(printf '%s' "$branch" | { [ -n "$keys" ] && grep -oiE "(^|[^a-z])(${keys%|})-[0-9]+" || true; } | grep -oiE '[a-z]+-[0-9]+$' | head -1 | tr '[:lower:]' '[:upper:]')
+    if [ -n "$tk" ]; then
+      bpane=$("$T" show "$tk" --json 2>/dev/null | jq -r '.pair.buddy.pane // empty')
+      [ -n "$bpane" ] && pane=$bpane
+    fi
+  fi
   if [ -z "$pane" ]; then
     free=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w and (.agent_status == "idle" or .agent_status == "done"))] | length')
     live=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w)] | length')
