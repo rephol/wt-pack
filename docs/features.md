@@ -135,6 +135,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     guard test (`wt-shared/scripts/paths.test.mjs`) keeps it that way.
   - `./setup doctor` warns when this plugin and `./setup`'s wt-memory plugin are both enabled, or when this plugin
     was installed from a working checkout.
+  - `.claude-plugin/plugin.json`'s `version` is the only signal `claude plugin update` has that this plugin's
+    bundled skills changed — bump it whenever a skill inside the plugin changes materially. `./setup doctor`
+    flags a mismatch between the installed version and what the checkout declares (WP-155).
 
 ## Agents, roles and spawn
 
