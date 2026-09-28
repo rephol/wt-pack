@@ -51,7 +51,7 @@ test('load joins outcomes by run; report groups skill×tier', () => {
   writeFileSync(paths().outcomes, JSON.stringify({ run: 'r1', i: 0, outcome: 'send-back' }) + '\n')
   const ds = load()
   assert.equal(ds.length, 2)
-  assert.deepEqual(report(ds), [{ skill: 'wt-work', tier: 'haiku', picks: 2, applied: 1, sendBack: 1, returned: 0, escalated: 0, ok: 0 }])
+  assert.deepEqual(report(ds), [{ skill: 'wt-work', tier: 'haiku', effort: null, picks: 2, applied: 1, sendBack: 1, returned: 0, escalated: 0, ok: 0 }])
 })
 
 test('estimateSavings: applied non-default picks compare to the sonnet average; shadow and sonnet picks do not count', () => {

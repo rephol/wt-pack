@@ -1,18 +1,24 @@
 #!/usr/bin/env node
 // WP-128: pick the model tier (haiku | sonnet | opus) for a session or subagent from its task.
+// WP-137: also pick its effort level (low < medium < high < xhigh < max), gated by the global ceiling G. Local rules
+// (tier, lens, read-only) set the base; a tier picked BELOW the default tier (sonnet) may raise effort up to 2
+// levels to compensate, capped at 'high'; an unchanged or upgraded tier never raises. Either way E is clamped to G.
 //   model-route.mjs pick --skill S [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task
-//       live: prints the tier; off/shadow: prints nothing (--json: always the decision, plus "run#i"). Exit 0 always.
+//       live: prints the tier; off/shadow: prints nothing (--json: always the decision incl. effort, plus "run#i").
+//       Exit 0 always.
 //   model-route.mjs explain …same flags… < task   the whole decision as JSON
-//   model-route.mjs floor --role R [--cwd DIR]   live: the role's floor tier (planner → opus), else nothing (spawn
-//       has no task text to route, so this is all it applies without a --model)
+//   model-route.mjs floor --role R [--cwd DIR] [--json]   live: the role's floor tier (planner → opus) and its
+//       effort, else nothing (spawn has no task text to route, so this is all it applies without a --model)
 //   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
 //   model-route.mjs usage [--days N]   tokens/notional cost by model, split session vs subagent (WP-130; dashboard-
 //       free equivalent of Settings › Usage; N defaults to 7)
 // Order: kill switch / mode off → explicit model → skill pin → local obvious case → Jev choice → floors (only raise).
-// Config layers, first wins: env WT_MODEL_ROUTING (mode) › <repo>/.wt-pack/model-routing.json › dashboard project
-// setting WT_MODEL_ROUTING (mode) › ~/.config/wt-pack/model-routing.json › defaults (mode shadow).
+// Config layers, first wins: env WT_MODEL_ROUTING (mode) / WT_EFFORT (G) › <repo>/.wt-pack/model-routing.json ›
+// dashboard project setting WT_MODEL_ROUTING / WT_EFFORT › ~/.config/wt-pack/model-routing.json › defaults (mode
+// shadow, effort high).
 // Every decision past the explicit check is logged to the judge log as cmd 'routing' (wt-judge calibrate skips it;
 // routing-eval.mjs tunes it). Nothing here may throw into a caller: failures pick sonnet or nothing.
+// A subagent (the Agent tool) has no effort parameter to pass through — E applies to the spawned session only.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -26,11 +32,20 @@ const rank = (t) => TIERS.indexOf(t)
 const max = (a, b) => (rank(b) > rank(a) ? b : a)
 const isTier = (t) => TIERS.includes(t)
 const MODES = ['off', 'shadow', 'live']
+// WP-137: E, gated by the global effort G. base tier is 'sonnet' (model-route's own assumed default for normal
+// work); a pick below it is a downgrade that may raise effort to compensate, at most 2 levels, never past 'high'.
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const erank = (e) => EFFORTS.indexOf(e)
+const isEffort = (e) => EFFORTS.includes(e)
+const emin = (a, b) => (erank(b) < erank(a) ? b : a)
+const DEFAULT_TIER = 'sonnet'
+const TIER_BASE_EFFORT = { haiku: 'low', sonnet: 'medium', opus: 'high' }
 export const DEFAULTS = {
   mode: 'shadow', skills: {},
   floors: { correctness: 'sonnet', security: 'sonnet', data: 'sonnet', migration: 'sonnet' },
   roleFloors: { planner: 'opus' },
   thresholds: { haiku: 0.8, opus: 0.6 },
+  effort: 'high', // the global ceiling G, same config layering as `mode`
 }
 const home = () => process.env.HOME || homedir()
 export const paths = () => ({
@@ -47,26 +62,32 @@ const merge = (a, b) => {
   return o
 }
 const repoRoot = (cwd) => { try { return execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { return null } }
-const projectMode = (cwd) => {
+const projectSetting = (cwd, key) => {
   try {
-    return execFileSync(process.execPath, [fileURLToPath(new URL('./project-setting.mjs', import.meta.url)), 'get', 'WT_MODEL_ROUTING', '--cwd', cwd],
+    return execFileSync(process.execPath, [fileURLToPath(new URL('./project-setting.mjs', import.meta.url)), 'get', key, '--cwd', cwd],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 }).trim().split('\n').pop()
   } catch { return '' }
 }
 
-// The merged config; `layers` names where the mode came from (for explain).
+// The merged config; `from`/`effortFrom` name where the mode/effort came from (for explain).
 export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
   let cfg = merge(DEFAULTS, readJson(paths().user))
   let from = readJson(paths().user)?.mode ? 'user' : 'default'
-  const pm = projectMode(cwd)
+  let effortFrom = readJson(paths().user)?.effort ? 'user' : 'default'
+  const pm = projectSetting(cwd, 'WT_MODEL_ROUTING')
   if (MODES.includes(pm)) { cfg = { ...cfg, mode: pm }; from = 'project' }
+  const pe = projectSetting(cwd, 'WT_EFFORT')
+  if (isEffort(pe)) { cfg = { ...cfg, effort: pe }; effortFrom = 'project' }
   const root = repoRoot(cwd)
   const repo = root && readJson(join(root, '.wt-pack', 'model-routing.json'))
-  if (repo) { cfg = merge(cfg, repo); if (repo.mode) from = 'repo' }
+  if (repo) { cfg = merge(cfg, repo); if (repo.mode) from = 'repo'; if (repo.effort) effortFrom = 'repo' }
   const e = env.WT_MODEL_ROUTING
   if (MODES.includes(e)) { cfg = { ...cfg, mode: e }; from = 'env' }
+  const ee = env.WT_EFFORT
+  if (isEffort(ee)) { cfg = { ...cfg, effort: ee }; effortFrom = 'env' }
   if (!MODES.includes(cfg.mode)) cfg.mode = 'shadow'
-  return { ...cfg, from }
+  if (!isEffort(cfg.effort)) cfg.effort = DEFAULTS.effort
+  return { ...cfg, from, effortFrom }
 }
 
 const EDIT = /\b(implement|fix|edit|write|add|change|refactor|rename|delete|remove|migrate|update|commit|merge|build)\b/i
@@ -121,6 +142,21 @@ export function applyFloors(tier, state, cfg) {
   return t
 }
 
+// Local rules: tier, lens and read-only decide the base effort, before the downgrade-compensation and G clamps.
+function baseEffort(tier, state) {
+  let e = TIER_BASE_EFFORT[tier] ?? 'medium'
+  if (state?.signals?.reads && !state?.signals?.edits) e = EFFORTS[Math.max(0, erank(e) - 1)]
+  return e
+}
+
+// E = the tier's base effort, +2 levels (capped at 'high') when `tier` is a downgrade below the default tier
+// (sonnet), else unraised — then clamped to the global ceiling G either way.
+export function computeEffort(tier, state, ceiling) {
+  const base = baseEffort(tier, state)
+  const e = rank(tier) < rank(DEFAULT_TIER) ? emin(EFFORTS[erank(base) + 2], 'high') : base
+  return emin(e, isEffort(ceiling) ? ceiling : DEFAULTS.effort)
+}
+
 const QUESTION = choice('Which Claude model tier does this agent task need? haiku: mechanical and bounded (look something up, run a known command, format, small obvious edit). sonnet: normal software work. opus: judgement-heavy or risky (design, planning, security, data migration, subtle bugs, reviewing others\' code).',
   { haiku: 'Mechanical, bounded, low-risk work', sonnet: 'Normal implementation or analysis work', opus: 'Judgement-heavy, ambiguous or high-risk work' })
 
@@ -169,7 +205,7 @@ function logDecision(d) {
     const p = paths().log
     mkdirSync(dirname(p), { recursive: true })
     appendFileSync(p, JSON.stringify({ run: d.run, i: 0, ts: new Date().toISOString(), cmd: 'routing', p: d.p, t: d.t,
-      decided: d.tier !== 'sonnet', item: { skill: d.state.skill, role: d.state.role, tier: d.tier, mode: d.mode, source: d.source, choice: d.choice ?? null }, state: d.state }) + '\n') // state (≤1.2 KB) lets routing-eval seed fixtures
+      decided: d.tier !== 'sonnet', item: { skill: d.state.skill, role: d.state.role, tier: d.tier, effort: d.effort, mode: d.mode, source: d.source, choice: d.choice ?? null }, state: d.state }) + '\n') // state (≤1.2 KB) lets routing-eval seed fixtures
   } catch {}
 }
 
@@ -191,9 +227,10 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   }
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
-  const out = { ...d, mode, from: cfg.from, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
+  const effort = computeEffort(d.tier, state, cfg.effort)
+  const out = { ...d, effort, mode, from: cfg.from, effortFrom: cfg.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
   if (log) logDecision(out)
-  return { ...out, apply: mode === 'live' ? out.tier : null }
+  return { ...out, apply: mode === 'live' ? out.tier : null, applyEffort: mode === 'live' ? out.effort : null }
 }
 
 const MARK = { ok: 'yes', 'send-back': 'no', returned: 'no', escalated: 'no' }
@@ -227,15 +264,17 @@ async function main() {
   if (cmd === 'floor') {
     const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
     const t = cfg.roleFloors?.[opt('role')]
-    if (cfg.mode === 'live' && isTier(t)) console.log(t)
+    const live = cfg.mode === 'live' && isTier(t)
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, effort: live ? computeEffort(t, buildState({ role: opt('role') }), cfg.effort) : null }))
+    else if (live) console.log(t)
     return
   }
-  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N]'); process.exitCode = 2; return }
+  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
   const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log') })
   if (cmd === 'explain') { const { state, ...rest } = d; console.log(JSON.stringify({ ...rest, state })); return }
-  if (a.includes('--json')) console.log(JSON.stringify({ tier: d.tier ?? null, apply: d.apply, mode: d.mode, source: d.source, ref: d.run ? `${d.run}#0` : null }))
+  if (a.includes('--json')) console.log(JSON.stringify({ tier: d.tier ?? null, apply: d.apply, effort: d.effort ?? null, applyEffort: d.applyEffort ?? null, mode: d.mode, source: d.source, ref: d.run ? `${d.run}#0` : null }))
   else if (d.apply) console.log(d.apply)
 }
 
