@@ -333,3 +333,13 @@ for (const [mode, n, want] of [['live', 2, true], ['live', 1, false], ['shadow',
     if (want) { assert.equal(notes[0].kind, 'routing-escalation'); assert.deepEqual(outcomes[0].slice(0, 2), ['abc12#0', 'escalated']) }
   })
 }
+
+// WP-131: WP-128 put a "routing:" line second; the agent name must still come from the target line.
+test('handoff output with a routing line: name from the target line, card claimed once', async () => {
+  const { tickets, d, calls } = await setup({ handoff: () => 'created wt-pack-worker-09 w9:p1\nrouting: sonnet (live, jev, ref ab1#0)\ntarget wt-pack-worker-09 w9:p1 — x\nreach: …\n' })
+  const t = await ready(tickets, 'a')
+  await d.tick(); await d.tick()
+  const got = await tickets.get(t.id)
+  assert.equal(got.assignee.name, 'wt-pack-worker-09'); assert.equal(got.assignee.pane, 'w9:p1')
+  assert.equal(calls.length, 1)
+})
