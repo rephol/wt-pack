@@ -135,9 +135,11 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     guard test (`wt-shared/scripts/paths.test.mjs`) keeps it that way.
   - `./setup doctor` warns when this plugin and `./setup`'s wt-memory plugin are both enabled, or when this plugin
     was installed from a working checkout.
-  - `.claude-plugin/plugin.json`'s `version` is the only signal `claude plugin update` has that this plugin's
-    bundled skills changed — bump it whenever a skill inside the plugin changes materially. `./setup doctor`
-    flags a mismatch between the installed version and what the checkout declares (WP-155).
+  - Neither `.claude-plugin/plugin.json` (this plugin) nor `skills/wt-memory/claude-plugin/.claude-plugin/plugin.json`
+    (wt-memory@wt-pack) pins a `version` — with none set, Claude Code computes one from the source's git commit,
+    so every push is an update and nobody has to remember to bump a number (WP-156; WP-155 tried a manually
+    bumped version first, then dropped it for this). `./setup doctor` flags an installed plugin whose reported
+    commit doesn't match the checkout's current `HEAD`.
 
 ## Agents, roles and spawn
 
