@@ -51,6 +51,8 @@ test('WP-128: shadow logs a routing line and changes nothing; live spawns a fres
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8',
     env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' } })
   assert.match(out, /would spawn a reviewer in \S+ with --model haiku/) // a reused agent can't switch model without a picker
+  // WP-137: the same live spawn also carries its computed effort (haiku is a downgrade from sonnet, capped at 'high')
+  assert.match(out, /would spawn a reviewer in \S+ with --model haiku --effort high/)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
