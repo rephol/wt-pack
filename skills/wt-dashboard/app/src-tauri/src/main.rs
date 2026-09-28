@@ -246,14 +246,14 @@ fn error_page(msg: &str) -> WebviewUrl {
     WebviewUrl::External(format!("data:text/html,{enc}").parse().unwrap())
 }
 
-#[derive(serde::Deserialize, Default, Clone)]
+#[derive(serde::Deserialize, Default, Clone, PartialEq)]
 struct TrayAgent {
     key: String,
     name: String,
     #[serde(default)]
     question: Option<String>,
 }
-#[derive(serde::Deserialize, Default, Clone)]
+#[derive(serde::Deserialize, Default, Clone, PartialEq)]
 struct TrayState {
     needs: Vec<TrayAgent>,
     working: Vec<TrayAgent>,
@@ -600,7 +600,10 @@ fn main() {
             app.listen("tray", move |e| {
                 if EXITING.load(Ordering::Relaxed) { return }
                 let Ok(st) = serde_json::from_str::<TrayState>(e.payload()) else { return };
-                *lock(&LAST_TRAY) = Some(st.clone());
+                let mut guard = lock(&LAST_TRAY);
+                if guard.as_ref() == Some(&st) { return } // unchanged: skip the NSMenu rebuild (WP-146)
+                *guard = Some(st.clone());
+                drop(guard);
                 let n = st.needs.len();
                 NEEDS.store(n, Ordering::Relaxed);
                 let _ = tray.set_title(tray_title(n));

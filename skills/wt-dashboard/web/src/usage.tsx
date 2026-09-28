@@ -8,6 +8,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
 import { Badge } from '@astryxdesign/core/Badge'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
+import { isDesktop } from './desktop'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { api } from './rooms'
 import { Delayed, LoadError } from './skeletons'
@@ -47,7 +48,9 @@ function Gauge({ label, pct, resetAt }: { label: string; pct: number | null; res
   )
 }
 
-const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/usage'), refetchInterval: 30_000, refetchIntervalInBackground: true })
+// WP-146: the app window keeps polling forever while hidden if this stays true for the desktop app; a stale
+// value while hidden is harmless, and the browser/PWA tab pause is unaffected.
+const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>('/api/usage'), refetchInterval: 30_000, refetchIntervalInBackground: !isDesktop })
 // the first transcript scan takes ~1.6s
 const Loading = ({ h }: { h: number }) => <Delayed><VStack gap={2}><Skeleton width={120} height={16} radius={1} /><Skeleton width="100%" height={h} radius={2} /></VStack></Delayed>
 

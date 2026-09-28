@@ -1530,6 +1530,17 @@ const trayOfInbox = () => ({
   working: lastSnap ? [...lastSnap.agents.values()].filter((a) => a.state === 'working').map((a) => ({ key: a.key, name: a.name })) : [],
 })
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
+// WP-146: the app rebuilds a whole native NSMenu per 'tray' event — broadcast only on change (~15/min otherwise).
+let lastTraySent = null
+export const traySame = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+// Exported (and parameterized rather than reading trayOfInbox() itself) so a test can drive the real
+// dedupe gate tick() calls without needing the inbox/DATA state trayOfInbox() depends on.
+export const sendTrayIfChanged = (tray) => {
+  if (traySame(tray, lastTraySent)) return false
+  lastTraySent = tray
+  broadcastEvent('tray', tray)
+  return true
+}
 inbox.subs.add((it) => broadcastEvent('notification', it))
 // Scored once, async, after it is stored; the web reads `urgency` on its next list fetch (no re-broadcast: that
 // would notify twice). No answer → no urgency, which sorts as FYI.
@@ -1623,7 +1634,7 @@ async function tick() {
     for (const h of holds) await inbox.add(h)
     const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket)), proposals, new Set(holds.map((h) => h.key))))
     if (resolved) broadcastEvent('inbox', { changed: true })
-    broadcastEvent('tray', trayOfInbox())
+    sendTrayIfChanged(trayOfInbox())
   } catch (e) { console.error('inbox:', e.message) }
 }
 // WP-55: the loaded build (index.html mtime) and what changed since `since` (ms) — wt-dashboard commit subjects.
