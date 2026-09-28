@@ -356,7 +356,12 @@ async function main() {
     // before WP-157 — the floor guards what gets spawned with no explicit tier, not an explicit override.
     const effortTier = isTier(opt('model')) ? opt('model') : t
     const effortLive = cfg.mode === 'live' && isTier(effortTier)
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, source: live ? source : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null }))
+    // WP-158: the explicit model id for whichever tier ends up spawned (the caller's own --model, or else the
+    // role/session floor tier) — independent of `live`, since a caller-given tier gets its id regardless of
+    // routing mode. Folded into this same call (rather than a separate `model-id` one) so a spawn/respawn that
+    // already needs floor's tier/effort doesn't pay for loadConfig()'s git/project-setting shell-outs twice.
+    const model = isTier(effortTier) ? modelIdFor(effortTier, cfg) : null
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, source: live ? source : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null, model }))
     else if (live) console.log(t)
     return
   }

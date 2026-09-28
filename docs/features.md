@@ -445,7 +445,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   `routing: <tier> (…, ref <run#i>)` on the ticket; `wt-agents spawn --model` (or the role floor); wt-review
   and wt-research pass the tier as each lens agent's or shard's `model`. A running session is never switched
   (`/model` asks interactively) and a watchdog resume keeps the session's model. `wt-agents spawn` (and
-  respawn) resolve the tier to an explicit model id (`model-route.mjs model-id`, WP-158 — `claude --model
+  respawn) resolve the tier to an explicit model id (`floor`'s own `.model` field, WP-158 — `claude --model
   <tier>` would otherwise hand Claude Code a bare alias to resolve on its own) before starting claude; pane
   tokens, reuse-matching and escalation all still work in tiers, never ids.
 - **Escalation**: a return or a review send-back (`routing: send-back …`) is a strike; at two, dispatch comments

@@ -321,14 +321,17 @@ test('CLI: pick --json and floor --json carry effort', () => {
   assert.equal(j.tier, 'haiku'); assert.equal(j.effort, 'high'); assert.equal(j.applyEffort, 'high') // downgrade from sonnet raises to the 'high' cap
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { planner: 'opus' } }))
   const f = JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
-  assert.equal(f.tier, 'opus'); assert.equal(f.effort, 'high')
+  assert.equal(f.tier, 'opus'); assert.equal(f.effort, 'high'); assert.equal(f.model, 'claude-opus-5-5') // WP-158
   // plain-text (no --json): unchanged from pre-WP-137 — just the bare floor tier, live only
   assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'live' }).trim(), 'opus')
   assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'shadow' }).trim(), '')
-  // --model: effort for the caller's actual tier, not the role's own floor tier when they diverge; the
-  // printed/`tier` floor itself is unaffected
+  // --model: effort/id for the caller's actual tier, not the role's own floor tier when they diverge; the
+  // printed/`tier` floor itself is unaffected. The id is independent of live/shadow (an explicit tier resolves
+  // to its id regardless of routing mode).
   const div = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
-  assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium') // sonnet's own base, not opus's
+  assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium'); assert.equal(div.model, 'claude-sonnet-5') // sonnet's own base, not opus's
+  const shadowDiv = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'shadow' }))
+  assert.equal(shadowDiv.tier, null); assert.equal(shadowDiv.effort, null); assert.equal(shadowDiv.model, 'claude-sonnet-5')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
 })
 
