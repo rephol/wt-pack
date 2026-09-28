@@ -270,7 +270,7 @@ rm)
   # WP-148: a deliberate rm is not a crash to resume, so drop its name from the watchdog's memory too —
   # otherwise WP-120's Resume-collision guard keeps the number reserved forever and numbering only climbs.
   wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
-  if [ -n "$name" ] && [ -f "$wd" ]; then
+  if [ -n "$name" ] && [ -r "$wd" ]; then
     tmp_wd="$wd.tmp.$$"
     jq --arg n "$name" '.lastSeen |= with_entries(select(.value.name != $n))' "$wd" > "$tmp_wd" \
       && mv "$tmp_wd" "$wd" || rm -f "$tmp_wd"

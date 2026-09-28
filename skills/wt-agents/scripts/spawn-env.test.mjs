@@ -63,6 +63,15 @@ test('WP-120: numbering skips a name held by an exited agent in watchdog.json; n
   assert.match(spawn().out, /^demo-worker-01 /)
 })
 
+test('WP-120: an entry with no goneAt (not exited) does NOT reserve its number', () => {
+  const wd = join(tmp, 'data', 'watchdog.json')
+  // demo-worker-01 has no goneAt: if select(.goneAt) were dropped or broken, it would wrongly occupy 01
+  // and the next spawn would land on 02 instead.
+  writeFileSync(wd, JSON.stringify({ lastSeen: { 'w1:p1': { name: 'demo-worker-01' } } }))
+  assert.match(spawn().out, /^demo-worker-01 /)
+  rmSync(wd)
+})
+
 test('WP-148: numbering reuses the LOWEST free number, not max+1', () => {
   const wd = join(tmp, 'data', 'watchdog.json')
   writeFileSync(wd, JSON.stringify({ lastSeen: { 'w1:p2': { name: 'demo-worker-02', goneAt: '2026-09-27T12:04:09Z' } } }))
