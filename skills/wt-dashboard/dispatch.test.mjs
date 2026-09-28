@@ -185,6 +185,23 @@ test('reconcile: gone twice → Ready with assignee null; gone once, herdr down 
   assert.equal((await tickets.get(u.id)).column, 'building')
 })
 
+test('reconcile: a gone assignee unassigns from Ready/Review/Blocked too, without a dispatch tag or a column move (WP-140)', async () => {
+  const other = { name: 'someone-else', local: true, status: 'working' }
+  const { tickets, d } = await setup({ agents: [other] })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const r = await tickets.create('wt-pack', { title: 'r', column: 'ready' }, user)
+  await tickets.patch(r.id, {}, user, { name: 'wt-pack-worker-12', pane: 'w12:p1' }) // by-hand assign, no dispatch tag
+  const v = await tickets.create('wt-pack', { title: 'v', column: 'review' }, user)
+  await tickets.patch(v.id, {}, user, { name: 'wt-pack-worker-12', pane: 'w12:p2' })
+  const b = await tickets.create('wt-pack', { title: 'x', column: 'blocked', note: 'stuck' }, user)
+  await tickets.patch(b.id, {}, user, { name: 'wt-pack-worker-12', pane: 'w12:p3' })
+  await d.tick(); await d.tick() // two misses
+  const [R, V, B] = await Promise.all([tickets.get(r.id), tickets.get(v.id), tickets.get(b.id)])
+  assert.deepEqual([R.column, R.assignee], ['ready', null])
+  assert.deepEqual([V.column, V.assignee], ['review', null]) // unassigned, but not moved
+  assert.deepEqual([B.column, B.assignee], ['blocked', null])
+})
+
 test('reconcile: stalled sets a flag without moving the card, noted once', async () => {
   const now = Date.now()
   const a = { name: 'wt-pack-worker-05', id: 'w5:p1', local: true, status: 'done', lastActivity: now - 60 * 60_000 }

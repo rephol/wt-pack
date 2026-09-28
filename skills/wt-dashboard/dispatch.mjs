@@ -198,20 +198,26 @@ export class Dispatch {
     const local = ags?.filter((a) => a.local) ?? []
     if (!local.length) return
     for (const t of cards) {
-      if (!t.assignee?.name) continue
+      if (!t.assignee?.name || t.column === 'done') continue
       const a = local.find((x) => x.name === t.assignee.name)
       const g = `${t.id}|${t.assignee.name}`
-      if (!a && t.dispatch?.state === 'sent' && t.assignee.pane && (t.column === 'building' || t.column === 'planning')) {
+      // WP-140: any open card an agent (not a human — those assignees have no pane) still holds when it's
+      // gone unassigns; Planning/Building also return to Ready since nobody is working them and Dispatch
+      // skips assigned cards (a Ready/Review/Blocked card just loses its stale assignee).
+      if (!a && t.assignee.pane) {
         const n = (this.gone.get(g) ?? 0) + 1
         this.gone.set(g, n)
         if (n < 2) continue // one miss may be a herdr blip
         this.gone.delete(g)
         const name = t.assignee.name
         await this.tickets.mutate(t.id, (t, at) => {
-          if (t.assignee?.name !== name || !['building', 'planning'].includes(t.column)) return t
-          t.history.push({ at, author: 'dispatch', kind: 'move', from: t.column, to: 'ready', text: `returned: ${name} is gone` })
+          if (t.assignee?.name !== name) return t
+          if (t.column === 'building' || t.column === 'planning') {
+            t.history.push({ at, author: 'dispatch', kind: 'move', from: t.column, to: 'ready', text: `returned: ${name} is gone` })
+            t.column = 'ready'; delete t.dispatch
+          }
           t.history.push({ at, author: 'dispatch', kind: 'assign', from: name, to: null })
-          t.column = 'ready'; t.assignee = null; delete t.dispatch
+          t.assignee = null
           return t
         })
         this.event(project, 'returned', t.id, `${name} is gone`, now)
