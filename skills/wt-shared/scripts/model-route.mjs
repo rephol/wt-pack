@@ -73,9 +73,8 @@ const projectSetting = (cwd, key) => {
 // WP-139: G's real default is Claude Code's own effective effort setting, not the hardcoded 'high' — wt-pack's
 // own WT_EFFORT/model-routing.json layers below still win when a caller explicitly sets one. Same source order
 // Claude Code itself uses: its live session env var, else its settings.json `effortLevel` (project over user).
-function claudeCodeEffort(cwd, env) {
+function claudeCodeEffort(root, env) {
   if (isEffort(env.CLAUDE_EFFORT)) return env.CLAUDE_EFFORT
-  const root = repoRoot(cwd)
   const proj = root && readJson(join(root, '.claude', 'settings.json'))
   if (isEffort(proj?.effortLevel)) return proj.effortLevel
   const user = readJson(join(home(), '.claude', 'settings.json'))
@@ -88,15 +87,15 @@ export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
   let cfg = merge(DEFAULTS, readJson(paths().user))
   let from = readJson(paths().user)?.mode ? 'user' : 'default'
   let effortFrom = readJson(paths().user)?.effort ? 'user' : 'default'
+  const root = repoRoot(cwd) // one shell-out, shared with the repo config-file read below
   if (effortFrom === 'default') {
-    const ce = claudeCodeEffort(cwd, env)
+    const ce = claudeCodeEffort(root, env)
     if (isEffort(ce)) { cfg = { ...cfg, effort: ce }; effortFrom = 'claude' }
   }
   const pm = projectSetting(cwd, 'WT_MODEL_ROUTING')
   if (MODES.includes(pm)) { cfg = { ...cfg, mode: pm }; from = 'project' }
   const pe = projectSetting(cwd, 'WT_EFFORT')
   if (isEffort(pe)) { cfg = { ...cfg, effort: pe }; effortFrom = 'project' }
-  const root = repoRoot(cwd)
   const repo = root && readJson(join(root, '.wt-pack', 'model-routing.json'))
   if (repo) { cfg = merge(cfg, repo); if (repo.mode) from = 'repo'; if (repo.effort) effortFrom = 'repo' }
   const e = env.WT_MODEL_ROUTING
@@ -228,8 +227,9 @@ export async function jevDecide(state, cfg, { fetchImpl, timeoutMs = 1500 } = {}
   return { tier, source: 'jev', p: a.confidence, choice: a.choice, jevEffort: a.effort, effortP: a.effortP, cached }
 }
 
-// jev-eval's evaluator pair (EVALUATORS.routing): the same question production asks.
-export const modelRoute = { questions: () => ({ tier: QUESTION }), decide: (a) => a?.tier?.choice ?? null }
+// jev-eval's evaluator pair (EVALUATORS.routing): the same question(s) production asks, in the same call shape
+// (WP-139: jevDecide asks tier+effort together, so tuning must judge the tier answer under that same shape).
+export const modelRoute = { questions: () => ({ tier: QUESTION, effort: EFFORT_QUESTION }), decide: (a) => a?.tier?.choice ?? null }
 
 function logDecision(d) {
   try {

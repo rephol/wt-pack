@@ -234,6 +234,9 @@ test('WP-139: G reads Claude Code settings.json / env when wt-pack has no overri
   writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'low' }))
   assert.equal(loadConfig({ cwd: repo, env: {} }).effort, 'low') // project over user
   assert.equal(loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'xhigh' } }).effort, 'xhigh') // live session env wins
+  // wt-pack's own WT_EFFORT override still wins over a Claude Code effortLevel present at the same time
+  assert.equal(loadConfig({ cwd: repo, env: { WT_EFFORT: 'max' } }).effort, 'max')
+  assert.equal(loadConfig({ cwd: repo, env: { WT_EFFORT: 'max' } }).effortFrom, 'env')
   writeFileSync(join(repo, '.claude', 'settings.json'), '{}')
   writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
 })
