@@ -585,7 +585,9 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
   const details = ticket && (
     <VStack gap={4}>
       <Heading level={3}>Details</Heading>
-      <MetadataList>
+      {/* The desktop rail is a fixed 300px LayoutPanel; the Buddy Selector's 220px width leaves
+          too little room for side labels there, so stack labels above values on that rail only. */}
+      <MetadataList label={!phone ? { position: 'top' } : undefined}>
         <MetadataListItem label="Status">
           <HStack gap={2} vAlign="center"><StatusDot variant={COLUMN_META[ticket.column].variant} label={columnLabel(ticket.column)} /><Text type="body">{columnLabel(ticket.column)}</Text></HStack>
         </MetadataListItem>
