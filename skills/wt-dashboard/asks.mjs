@@ -79,25 +79,28 @@ export class Asks {
     this.broadcast('asks', { id: a.id, action: 'created' })
     return { ...a, notified: !!it }
   }
-  // Conditional UPDATE ... WHERE status = 'open' (Risks: races a terminal answer/resolve in one statement).
+  // Conditional UPDATE ... WHERE status = 'open' claims the ask BEFORE delivering: two answers racing (e.g.
+  // one from the room chip, one from the Inbox) must not both reach `deliver` just because both read
+  // status='open' first — only the winner of the claim gets to send a reply to the pane.
   async answer(id, body, author) {
     const a = this.row(id)
     const ans = cleanAnswer(body, a.questions)
     const text = a.questions.map((q, i) => `${q.header}: ${ans.selected[i].join(', ')}`).join('\n') + (ans.text ? `\n\n${ans.text}` : '')
-    let status = 'answered'
+    const at = new Date().toISOString()
+    const claimed = { ...a, status: 'answered', answer: { ...ans, by: author.name, at }, closed: at }
+    const changes = this.db.prepare("UPDATE asks SET json = ? WHERE id = ? AND json_extract(json, '$.status') = 'open'").run(JSON.stringify(claimed), id).changes
+    if (!changes) throw err(409, `${id} is no longer open`)
+    let next = claimed
     try {
       await this.deliver(a.pane, text)
     } catch (e) {
-      status = 'undeliverable'
+      next = { ...claimed, status: 'undeliverable' }
+      this.db.prepare('UPDATE asks SET json = ? WHERE id = ?').run(JSON.stringify(next), id)
       this.log(`asks: deliver to ${a.pane} failed: ${e.message}`)
     }
-    const at = new Date().toISOString()
-    const next = { ...a, status, answer: { ...ans, by: author.name, at }, closed: at }
-    const changes = this.db.prepare("UPDATE asks SET json = ? WHERE id = ? AND json_extract(json, '$.status') = 'open'").run(JSON.stringify(next), id).changes
-    if (!changes) throw err(409, `${id} is no longer open`)
     await this.resolveNotify(`ask:${id}`)
-    if (status === 'undeliverable') await this.notify({ kind: 'server', key: `ask-undeliverable:${id}`, title: `Answer to ${a.agent} could not be delivered`, body: `Pane ${a.pane} is gone. The answer is saved on the ask.`, target: { ask: id } })
-    this.broadcast('asks', { id, action: status })
+    if (next.status === 'undeliverable') await this.notify({ kind: 'server', key: `ask-undeliverable:${id}`, title: `Answer to ${a.agent} could not be delivered`, body: `Pane ${a.pane} is gone. The answer is saved on the ask.`, target: { ask: id } })
+    this.broadcast('asks', { id, action: next.status })
     return next
   }
   // Only the asking pane may resolve (close without answering); also conditional on status = 'open'.

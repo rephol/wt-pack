@@ -5,7 +5,7 @@
 // (the chip stays until the ask/picker itself closes). No native dialogs here (window.confirm/alert): Astryx's
 // Dialog/BottomSheet only.
 import { useEffect, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { BottomSheet } from '@astryxdesign/core/BottomSheet'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
@@ -43,12 +43,16 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
   // picker (B), which only ever pre-checks an option the terminal itself already marked answered.
   const [selected, setSelected] = useState<string[][]>(() => ask.questions.map(() => []))
   const [text, setText] = useState('')
+  const qc = useQueryClient()
   const answer = useMutation({
     mutationFn: async () => {
       const r = await fetch(`/api/asks/${ask.id}/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ selected, ...(text.trim() ? { text: text.trim() } : {}) }) })
+      if (r.status === 409) throw new Error('Already answered — this ask closed before your answer went through.')
       if (!r.ok) throw new Error((await r.json()).error ?? r.status)
     },
-    onSuccess: () => { onAnswered(); onClose() },
+    // WP-169: a second surface (room chip vs. Inbox) racing this one must see the ask close right away, not
+    // after the next 5s poll — invalidate both caches the ask can appear in.
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inbox'] }); qc.invalidateQueries({ queryKey: ['asks'] }); onAnswered(); onClose() },
   })
   const q = ask.questions[step]
   const sorted = [...q.options].sort((a, b) => Number(b.label === q.recommended) - Number(a.label === q.recommended))

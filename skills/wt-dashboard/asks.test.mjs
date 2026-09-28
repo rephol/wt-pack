@@ -48,6 +48,20 @@ test('answer on a closed ask → 409', async () => {
   await assert.rejects(a.answer(created.id, { selected: [['B']] }, { name: 'Rep' }), (e) => e.status === 409)
 })
 
+// WP-169: a second answer (e.g. one from the room chip, one from the Inbox, both reading status='open')
+// must be rejected before it reaches `deliver` — otherwise the pane gets two conflicting replies even
+// though only the first answer is ever saved.
+test('answer on a closed ask → does not deliver a second time', async () => {
+  const dir = await tmp()
+  const delivered = []
+  const a = new Asks({ dir, notify: async (d) => ({ id: 'n1', ...d }), deliver: async (pane, text) => delivered.push([pane, text]) })
+  const created = await a.create(q(), author)
+  await a.answer(created.id, { selected: [['A']] }, { name: 'Rep' })
+  await assert.rejects(a.answer(created.id, { selected: [['B']] }, { name: 'Rep' }), (e) => e.status === 409)
+  assert.equal(delivered.length, 1)
+  assert.match(delivered[0][1], /A/)
+})
+
 test('resolve by a different pane → 403', async () => {
   const dir = await tmp()
   const a = new Asks({ dir, notify: async (d) => ({ id: 'n1', ...d }) })
