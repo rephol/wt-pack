@@ -82,15 +82,19 @@ $W identity           # "<login> <source>" — the account reviews post as
     its own holds).
 - **A Monitor that fails to arm is silent, not absent** — the tool can come back with no task id and no error
   the reader would notice (the harness's own auto-mode classifier gave no verdict). Treat that exactly like an
-  error: retry arming that one Monitor up to twice more (an immediate re-issue, then again next turn) before
-  giving up on it. Never report §1 done, or start draining the backlog, while either Monitor's task id is
-  still unconfirmed.
-- **Both retries exhausted → this repo is unwatched.** Say so where it will be noticed, not just in your own
+  error, per Monitor: retry arming *that one* up to twice more (an immediate re-issue, then again next turn)
+  before giving up on it specifically. Never report §1 done, or start draining the backlog, while either
+  Monitor's task id is still unconfirmed.
+- **One Monitor exhausted, the other armed → keep going, degraded.** Report the failed one as DEGRADED
+  (alongside the identity DEGRADED lines) rather than tearing down a Monitor that is working — losing
+  `poll-replies` still leaves new-head detection running, which is most of the loop's value. Keep retrying the
+  failed one occasionally between events instead of dropping it for good.
+- **Both Monitors exhausted → this repo is unwatched.** Say so where it will be noticed, not just in your own
   reply: `room post <main checkout's basename> "wt-watch-prs: could not arm monitoring for <repo> after 3
-  attempts — this repo is unwatched until re-started"` (dispatch mode: also tell the orchestrator pane
-  directly, since nothing will poll it back into the loop). Then stop the session — continuing with one or
-  zero Monitors armed is silent coverage loss dressed up as a running loop, the exact failure this exists to
-  prevent.
+  attempts each — this repo is unwatched until re-started"`, and reply through whatever channel started you
+  (a wt-message dispatch/handoff footer), if any — nothing else will tell that sender the loop never started.
+  Then stop the session — continuing with zero Monitors armed is silent coverage loss dressed up as a running
+  loop, the exact failure this exists to prevent.
 - Report: both task ids, the repo, the identity and its source, S, and every DEGRADED line.
 
 The first poll fires every open unreviewed PR — a backlog. **That is a work queue, not a report.** Drain it
