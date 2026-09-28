@@ -76,7 +76,7 @@ to spawn one.
 
 ```bash
 printf '%s\n' "$PROMPT" | ../wt-handoff/scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] <worktree>
+  [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] --skill wt-plan <worktree>
 ```
 
 Pass `--task` with the ticket and a few-word title; it labels the worker in wt-dashboard. The script lives in
