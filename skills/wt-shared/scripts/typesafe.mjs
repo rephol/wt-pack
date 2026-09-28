@@ -22,20 +22,27 @@ export const NO_KEY = 3;
 // The key normally lives in the Keychain or ~/.claude/.env rather than the shell. Minimal
 // parse for the .env file: KEY=value lines, optional export, a matched quote pair stripped —
 // anything fancier belongs in a dotenv dependency this does not need.
-export function apiKey() {
-  if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY;
+// WP-136 (reopened): 401s persisted after the ordering fix above, from calls with no key argument
+// (judge()'s keyFor() path). Since the key itself is never logged, resolveKeyed() also returns which
+// source produced it, so an auth_error log line can name env/keychain/file/none instead of a guess.
+function resolveKeyed() {
+  if (process.env.TYPESAFE_API_KEY) return { key: process.env.TYPESAFE_API_KEY, source: 'env' };
   try {
     const k = execFileSync('security', ['find-generic-password', '-s', 'wt-dashboard', '-a', 'TYPESAFE_API_KEY', '-w'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500 }).trim();
-    if (k) return k;
+    if (k) return { key: k, source: 'keychain' };
   } catch {}
   try {
     for (const line of readFileSync(join(homedir(), '.claude', '.env'), 'utf8').split('\n')) {
       const m = line.match(/^\s*(?:export\s+)?TYPESAFE_API_KEY\s*=\s*(.*)$/);
-      if (m) return m[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+      if (m) return { key: m[1].trim().replace(/^(['"])(.*)\1$/, '$2'), source: 'file' };
     }
   } catch {}
-  return null;
+  return { key: null, source: 'none' };
+}
+
+export function apiKey() {
+  return resolveKeyed().key;
 }
 
 export function requireKey() {
@@ -183,15 +190,18 @@ export async function judge(feature, state, questions, { timeoutMs = 2000, key, 
   const rec = (answers, err, cached) => {
     // WP-136: a 401/403 means the key itself is rejected, not an ordinary fail-open (timeout, 5xx, bad key
     // config) — record it distinctly so Observability and routing tuning don't read it as normal Jev noise.
-    let outcome = err === 'http_401' || err === 'http_403' ? 'auth_error' : 'failopen';
+    const isAuthError = err === 'http_401' || err === 'http_403';
+    let outcome = isAuthError ? 'auth_error' : 'failopen';
     if (answers != null) try { outcome = !pick || pick(answers) ? 'picked' : 'not'; } catch { outcome = 'not'; }
     logCall({ ts: new Date().toISOString(), feature, outcome, p: headline(answers), ms: Date.now() - t0, cache: cached, err,
-      in: h.slice(0, 12), ...(isTestCall(feature) ? { test: true } : {}), ...(envSetting('WT_JEV_LOG_SNIPPETS') === 'on' ? { snippet: JSON.stringify(state).slice(0, 120) } : {}) });
+      in: h.slice(0, 12), ...(isAuthError ? { keySource } : {}),
+      ...(isTestCall(feature) ? { test: true } : {}), ...(envSetting('WT_JEV_LOG_SNIPPETS') === 'on' ? { snippet: JSON.stringify(state).slice(0, 120) } : {}) });
     return answers;
   };
   const hit = cache.get(ck);
   if (hit && Date.now() - hit.t < CACHE_TTL) return rec(hit.a, null, true);
-  const k = key ?? keyFor();
+  const resolved = key != null ? { key, source: 'explicit' } : resolveKeyed();
+  const k = resolved.key, keySource = resolved.source;
   if (!k) return rec(null, 'nokey', false);
   try {
     const call = (ms) => fetchImpl(ENDPOINT, {
