@@ -218,6 +218,15 @@ doctor() {
   else opt "TypeSafe key not set (optional: ./setup secrets)"; fi
   if has security && security find-generic-password -s wt-dashboard -a LINEAR_API_KEY >/dev/null 2>&1; then ok "Linear key (optional)"
   else opt "Linear key not set (optional: dashboard Settings › Integrations)"; fi
+  # WP-136: a stale ~/.claude/.env key is used ahead of a rotated Keychain one nowhere any more (typesafe.mjs
+  # checks env, then Keychain, then the .env file), but a mismatch still means one of the two is stale.
+  if has security; then
+    envkey=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=//p' "$HOME/.claude/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'')
+    keykey=$(security find-generic-password -s wt-dashboard -a TYPESAFE_API_KEY -w 2>/dev/null)
+    if [ -n "$envkey" ] && [ -n "$keykey" ] && [ "$envkey" != "$keykey" ]; then
+      opt "TypeSafe key mismatch: ~/.claude/.env and the wt-dashboard Keychain entry hold different values — rotate whichever is stale"
+    fi
+  fi
   has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
   has agent-browser && ok "agent-browser (optional, preferred for browser checks)" || opt "agent-browser not installed (optional, preferred for browser checks): npm i -g agent-browser && agent-browser install"
   has cargo && ok "cargo (optional, Tauri app)" || opt "cargo not installed (optional, only for the Tauri app)"
