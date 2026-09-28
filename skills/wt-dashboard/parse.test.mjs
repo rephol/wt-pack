@@ -85,6 +85,24 @@ test('parsePicker: single question header without a tab bar', async () => {
   assert.deepEqual(pk.options.map((o) => o.label), ['Red', 'Blue', 'Green'])
 })
 
+test('WP-165 parsePicker: a 4-question tab bar wrapped onto two lines by a narrow pane still parses', async () => {
+  const { parsePicker, stripAnsi } = await import('./server.mjs')
+  const { readFileSync } = await import('node:fs')
+  // Plain (stripped) text: the tab bar has no ← ... → single line, only a line starting with ←
+  // and a later line ending with →.
+  const plain = parsePicker(readFileSync(new URL('./test-fixtures/picker-4-tabs-wrapped.txt', import.meta.url), 'utf8'))
+  assert.deepEqual(plain.tabs.map((t) => t.header), ['A', 'B', 'C', 'D'])
+  assert.equal(plain.question, 'A?')
+  assert.deepEqual(plain.options.map((o) => o.label), ['Yes', 'No'])
+  // ANSI: the focused tab's SGR 48 background highlight sits on the FIRST physical line of the
+  // wrapped bar, not the line with →  — focusedTab must search the whole wrapped span, not just
+  // the single line the old single-line regex required.
+  const raw = readFileSync(new URL('./test-fixtures/picker-4-tabs-wrapped.ansi.txt', import.meta.url), 'utf8')
+  const withAnsi = parsePicker(stripAnsi(raw), raw)
+  assert.deepEqual(withAnsi.tabs.map((t) => t.header), ['A', 'B', 'C', 'D'])
+  assert.equal(withAnsi.current, 0) // "A" is focused
+})
+
 test('parsePicker: the exact Next up / Polish pair (focused tab from ANSI, revisit ✔, review)', async () => {
   const { parsePicker, stripAnsi } = await import('./server.mjs')
   const { readFileSync } = await import('node:fs')

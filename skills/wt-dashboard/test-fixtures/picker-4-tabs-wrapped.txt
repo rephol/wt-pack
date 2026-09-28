@@ -1,0 +1,37 @@
+ ▝▝   ▝▝   /private/tmp/wp165-repro · /rc
+
+  ⎿  SessionStart:startup says: # claude-mem status
+
+     This project has no memory yet. The current session will seed it; subsequent sessions will receive auto-injected context for relevant past
+     work.
+
+     Memory injection starts on your second session in a project.
+
+     `/learn-codebase` is available if the user wants to front-load the entire repo into memory in a single pass (~5 minutes on a typical repo,
+     optional). Otherwise memory builds passively as work happens.
+
+     Live activity: http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=welcome-hint&trial=30
+     How it works: `/how-it-works`
+
+     This message disappears once the first observation lands.
+
+     View Observations Live @ http://localhost:37701
+     ✨ Get up to 100% more usage from your plan — memory runs off-plan, free for 30 days https://cmem.ai/pro?from=session-start&trial=30
+
+❯ Call AskUserQuestion now (no other tools) with 4 questions, each single select with 2 short options, headers A, B, C and D, no previews,
+  no descriptions. The pane is narrow enough that the tab bar wraps onto two lines.
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ A  ☐ B
+   ☐ C  ☐ D  ✔ Submit  →
+
+A?
+
+❯ 1. Yes
+  2. No
+  3. Type something.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

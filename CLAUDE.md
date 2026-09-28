@@ -103,3 +103,14 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   they DO carry a Jev judgment. Enforced by `skills/wt-shared/scripts/model-route.test.mjs` ("floor never
   spawns a role on haiku, in any mode") and `skills/wt-agents/scripts/spawn-env.test.mjs` (`--model`/`--effort`/
   pane tokens all asserted present in shadow and off, not just live).
+- `herdr pane split`/`resize` change a pane's reported layout (`herdr pane layout`) but not what `herdr agent
+  read --ansi` returns for a process already running in it, and starting a fresh `claude` process into an
+  already-narrow pane (`herdr agent start ... --pane <id>`) didn't render narrower either — WP-165 tried both
+  to reproduce a pane-width-dependent parsing bug (a 4-question AskUserQuestion tab bar wrapping in a narrow
+  terminal) and got the same wide render every time, confirmed by the transcript's own prompt-line wrap point
+  staying identical across a 120-col and a claimed-54-col pane. Whatever herdr renders back through this
+  command isn't reading the actual pty width the running TUI sees, at least in this environment/version — a
+  ticket asking to "reproduce at a narrow pane" via herdr CLI tooling alone should expect this and budget for
+  a hand-constructed fixture (built from a confirmed real single-line capture plus an existing multi-line
+  fixture's real wrap conventions, per `skills/wt-dashboard/test-fixtures/picker-4-tabs-wrapped*.txt`) rather
+  than spending time on split/resize/restart attempts expecting a genuinely narrower live render.
