@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
 #
 # WP-104: every prompt goes out wrapped as <wt-message id=… kind=handoff|dispatch|routine|reply|system from="…"
@@ -36,6 +36,9 @@
 # is printed after the target lines. A prompt starting "Use wt-work" (wt-plan's own handoff) is never re-routed.
 # --role worker|planner forces the role (also with --new). --pane and --list are untouched.
 #
+# --skill names the caller's own skill for model routing (WP-129: routing/tuning stats key
+# on this, not a guess scraped from the task text); without it, routing sees "wt-handoff".
+#
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
 # ticket is taken from <cwd>'s branch (ENG-123 or WP-12). Both panes are told about each other through
 # tokens (target: task, ticket, handoff_from[_pane], handoff_at; sender: handoff_to[_pane]), and
@@ -63,6 +66,7 @@ task=
 mcp=
 pr=
 sha=
+skill=
 dry=0
 while :; do
   case "${1:-}" in
@@ -84,6 +88,7 @@ while :; do
     --pr)    pr=$2; shift 2 ;;   # WP-121: pr=/sha= on the wt-message (wt-watch-prs dispatch)
     --sha)   sha=$2; shift 2 ;;
     --mcp)   mcp=$2; shift 2 ;;
+    --skill) skill=$2; shift 2 ;;   # WP-129: the caller's own skill name, for routing/tuning stats
     --dry-run) dry=1; shift ;;
     *) break ;;
   esac
@@ -240,8 +245,7 @@ route_tier=; route_line=
 if [ "$mode" != pane ]; then
   esc=$( [ -n "$local_ticket" ] && [ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null \
     | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
-  skill=$(printf '%s' "$task_text" | grep -oE 'wt-[a-z]+(-[a-z]+)*' | head -1 || true)
-  r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-$role}" --role "$role" \
+  r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
     ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
   rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
   [ "$rmode" = live ] || esc= # an escalation applies only while routing is live

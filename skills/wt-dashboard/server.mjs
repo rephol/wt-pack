@@ -1286,7 +1286,7 @@ export function handoffArgs(t, mode) {
   if (t.state !== (mode === 'worker' ? 'plan_ready' : 'stalled')) throw err(409, `task is ${t.state}`)
   if (!t.plan || !t.worktree) throw err(400, 'task has no plan or worktree')
   const prompt = `Use wt-work to implement ${t.plan} to its Definition of Done.\n\nWork in ${t.worktree} on ${t.branch}. Do not cd to the main checkout.\n\nThen wt-ship.\n`
-  return { args: [...(mode === 'reassign' ? ['--new'] : []), '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.slice(0, 80), t.worktree], prompt }
+  return { args: [...(mode === 'reassign' ? ['--new'] : []), '--from', 'wt-dashboard', '--skill', 'wt-work', '--task', `${t.id} ${t.title}`.slice(0, 80), t.worktree], prompt }
 }
 const HANDOFF_SH = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import.meta.url)) // sibling skill (WP-122)
 async function handoffTask(id, mode) {

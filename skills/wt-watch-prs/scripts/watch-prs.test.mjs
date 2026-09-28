@@ -238,7 +238,7 @@ test('WP-121 dispatch: claims under D, hands to a reviewer with pr/sha, cross-mo
   reset(); agents()
   let r = drun(['12', '--sha', sha('c'), '--session', 'sess-d'])
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /dispatched #12 to demo-reviewer-01/)
-  assert.match(handed(), new RegExp(`ARGS --role reviewer --kind dispatch --pr 12 --sha ${sha('c')} --no-goal`))
+  assert.match(handed(), new RegExp(`ARGS --role reviewer --kind dispatch --pr 12 --sha ${sha('c')} --skill wt-watch-prs --no-goal`))
   assert.match(handed(), new RegExp(`BODY Use wt-watch-prs to review 12 --sha ${sha('c')} --session sess-d`))
   assert.ok(existsSync(join(sd, 'claims', 'pr12')))
   r = drun(['12', '--sha', sha('c'), '--session', 'sess-e'])

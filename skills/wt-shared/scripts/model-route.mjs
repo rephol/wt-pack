@@ -68,14 +68,18 @@ export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
 }
 
 const EDIT = /\b(implement|fix|edit|write|add|change|refactor|rename|delete|remove|migrate|update|commit|merge|build)\b/i
-const KEYWORDS = ['security', 'auth', 'secret', 'token', 'migration', 'schema', 'data', 'backfill', 'refactor', 'architecture', 'plan', 'review', 'test']
+const READ = /\b(read|find|search|grep|list|look|explore|locate|check|compare|verify|sweep|report)\b/i
+const KEYWORDS = ['security', 'auth', 'secret', 'token', 'session', 'cookie', 'permission', 'csrf', 'migration', 'schema', 'data', 'backfill', 'refactor', 'architecture', 'plan', 'review', 'test']
+// A security-sensitive subset of KEYWORDS: floors the tier (applyFloors) and blocks the read-only local haiku rule.
+const SECURITY = ['security', 'auth', 'secret', 'token', 'session', 'cookie', 'permission', 'csrf', 'migration', 'schema']
+const LOCAL_HAIKU_LENS = /^(docs|naming|formatting)$/i
 // ≤ ~300 tokens: skill, description, the first 600 chars of the task, and cheap signals.
 export function buildState({ skill = '', role = '', lens = '', description = '', task = '' } = {}) {
   const t = String(task)
   return {
     skill: String(skill).slice(0, 60), role: String(role).slice(0, 30), agent_description: String(description).slice(0, 120),
     task: t.slice(0, 600),
-    signals: { edits: EDIT.test(t), reads: /\b(read|find|search|grep|list|look|explore|locate)\b/i.test(t), lens: String(lens).slice(0, 30),
+    signals: { edits: EDIT.test(t), reads: READ.test(t), lens: String(lens).slice(0, 30),
       keywords: KEYWORDS.filter((k) => new RegExp(`\\b${k}`, 'i').test(t)), len: t.length },
   }
 }
@@ -83,7 +87,11 @@ export function buildState({ skill = '', role = '', lens = '', description = '',
 // A cheap, certain answer with no Jev call, or null.
 export function localDecide(state) {
   if (/^explore$/i.test(state.skill)) return 'haiku'
+  const secure = state.signals.keywords.some((k) => SECURITY.includes(k))
+  if (secure) return null // a security-sensitive task always goes to Jev (and the floor), never a local shortcut
+  if (LOCAL_HAIKU_LENS.test(state.signals.lens)) return 'haiku'
   if (state.signals.len > 0 && state.signals.len < 80 && !state.signals.edits) return 'haiku'
+  if (state.signals.reads && !state.signals.edits) return 'haiku'
   return null
 }
 
@@ -92,6 +100,7 @@ export function applyFloors(tier, state, cfg) {
   let t = tier
   const s = state.signals
   for (const k of [s.lens, ...s.keywords]) if (k && isTier(cfg.floors?.[k])) t = max(t, cfg.floors[k])
+  if (s.keywords.some((k) => SECURITY.includes(k)) && isTier(cfg.floors?.security)) t = max(t, cfg.floors.security)
   if (isTier(cfg.roleFloors?.[state.role])) t = max(t, cfg.roleFloors[state.role])
   if (isTier(cfg.skills?.[state.skill]?.floor)) t = max(t, cfg.skills[state.skill].floor)
   return t
