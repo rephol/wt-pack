@@ -41,6 +41,11 @@
 # --skill names the caller's own skill for model routing (WP-129: routing/tuning stats key
 # on this, not a guess scraped from the task text); without it, routing sees "wt-handoff".
 #
+# WP-143: a routed hand-off reuses a free worker only when its `model`/`effort` pane tokens already match the
+# picked tier (else a fresh one is spawned on it). WT_WORKERS_MAX (project setting or env, worker role only) caps
+# the pool: at the cap, exits 3 with "pool full: <n>/<cap> workers in <repo>" and sends nothing (no queue —
+# dispatch's card stays in Ready and retries later).
+#
 # --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
 # ticket is taken from <cwd>'s branch (ENG-123 or WP-12). Both panes are told about each other through
 # tokens (target: task, ticket, handoff_from[_pane], handoff_at; sender: handoff_to[_pane]), and
@@ -392,6 +397,23 @@ if [ "$mode" = auto ]; then
     hand_to "$reuse"
     finish "reused $reuse" "$reuse"
     exit 0
+  fi
+fi
+
+# WP-143: a pool cap, worker role only. $WT_WORKERS_MAX wins over the project setting (as $WT_AGENTS_MCP does);
+# unset/non-numeric = no cap (today's behaviour). No queue: the caller (dispatch) keeps the card in Ready and
+# retries it on its next pass.
+if [ "$role" = worker ]; then
+  cap=${WT_WORKERS_MAX:-$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get WT_WORKERS_MAX --cwd "${main_checkout:-$cwd}" 2>/dev/null)}
+  case "$cap" in ''|*[!0-9]*) cap= ;; esac
+  if [ -n "$cap" ]; then
+    n=$(herdr agent list | jq --arg ws "$(worker_ws)" '[.result.agents[] | select(.workspace_id == $ws)] | length')
+    if [ "$n" -ge "$cap" ]; then
+      full="pool full: $n/$cap workers in $(basename "${main_checkout:-$cwd}")"
+      [ "$dry" -eq 1 ] && dry "$full"
+      echo "$full" >&2
+      exit 3
+    fi
   fi
 fi
 

@@ -96,6 +96,20 @@ test('WP-143: live routing reuses a free worker already on the routed tier/effor
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
+test('WP-143: WT_WORKERS_MAX caps the worker pool; a full pool exits 3 and never tab-creates', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
+  assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'do a thing', encoding: 'utf8', env }),
+    (e) => { assert.equal(e.status, 3); assert.match(e.stderr, /pool full: 1\/1 workers in demo/); return true })
+  assert.ok(!readFileSync(log, 'utf8').includes('tab create'))
+
+  const out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'do a thing', encoding: 'utf8', env })
+  assert.match(out, /dry-run: pool full: 1\/1 workers in demo/)
+
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
 test('WP-132: --cancel resolves a name to its pane and reports what it did', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
