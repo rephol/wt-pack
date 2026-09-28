@@ -834,7 +834,7 @@ test('jevlog: per-feature stats — p50/p95 over live calls, cache hits and fail
     { ts: '2026-09-20T11:00:00Z', feature: 'a', outcome: 'picked', ms: 5, cache: false, err: null },
   ]
   const [a, b] = featureStats(calls, 86_400_000, now)
-  assert.deepEqual({ ...a }, { feature: 'a', calls: 12, cacheHits: 1, failOpen: 1, picked: 11, errorRate: 0.09, timeoutRate: 0.09, p50ms: 600, p95ms: 2000 })
+  assert.deepEqual({ ...a }, { feature: 'a', calls: 12, cacheHits: 1, failOpen: 1, authError: 0, picked: 11, errorRate: 0.09, timeoutRate: 0.09, p50ms: 600, p95ms: 2000 })
   assert.equal(b.failOpen, 1)
   assert.equal(featureStats(calls, 7 * 86_400_000, now)[0].calls, 13)
   assert.equal(recentCalls(calls, { feature: 'a', err: 'timeout' }).length, 1)

@@ -24,7 +24,7 @@ import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeam
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt-shared/scripts/model-route.mjs'
 import { load as routeDecisions, report as routeReport, estimateSavings as routeSavings } from '../wt-shared/scripts/routing-eval.mjs'
-import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
+import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
 import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
@@ -1556,9 +1556,22 @@ async function usageAlerts() {
   }
 }
 
+// WP-136: a 401/403 means the Jev key itself is rejected — not an ordinary fail-open — so it gets one Inbox
+// item per day per feature rather than silently degrading every routing/triage call in that window.
+async function jevAuthAlerts() {
+  const errs = authErrors(await readCalls())
+  const day = new Date().toISOString().slice(0, 10)
+  for (const feature of new Set(errs.map((e) => e.feature))) {
+    const key = `jev-auth|${feature}|${day}`
+    if (!inbox.items.some((it) => it.key === key))
+      await inbox.add({ kind: 'jev-auth', key, title: 'Jev key rejected', body: `${feature}: TypeSafe API key returned 401/403 — rotate ~/.claude/.env or the wt-dashboard Keychain entry`, target: {} })
+  }
+}
+
 async function tick() {
   try {
     await usageAlerts().catch((e) => console.error('usage alerts:', e.message))
+    await jevAuthAlerts().catch((e) => console.error('jev auth alerts:', e.message))
     const o = await overview()
     const snap = snapshot(o)
     const first = !lastSnap

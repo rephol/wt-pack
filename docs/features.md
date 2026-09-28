@@ -231,7 +231,10 @@ Chat rooms shared by you and agents.
 
 - A drawer from the sidebar bell; Escape or going to another page closes it (WP-87).
 - Kinds include questions, mentions of you, room suggestions, memory proposals, agent done/stalled, CI
-  failed, server, usage and watchdog notices.
+  failed, server, usage, watchdog and Jev auth-error notices.
+- **Jev auth error**: the TypeSafe API key was rejected (401/403) rather than timing out — once per feature
+  per day (Observability logs it as `auth_error`, separate from an ordinary fail-open); `./setup doctor`
+  also warns when `~/.claude/.env` and the wt-dashboard Keychain entry hold different keys.
 - **Held PR** (`pr-held`, WP-116): each PR a wt-watch-prs reviewer holds for clarification (state
   `changes-requested` in `~/.local/share/wt-watch-prs/<owner>-<repo>/state.json`) is an item titled
   `Held PR #n (<owner>-<repo>)` with the reviewer's note; it resolves when the reviewer records a new verdict.
@@ -317,11 +320,13 @@ Projects, Terminals, Usage, Observability, Server, About.
   grouped by agent, project or model (model rows split session vs subagent transcripts). Dollar figures are
   notional list prices. CLI equivalent for installs without the dashboard: `model-route.mjs usage [--days N]`
   (default 7) prints the same by-model/kind breakdown.
-- **Observability**: Jev calls by feature (24h / 7d), **Model routing** (7 days: picks, applied, send-backs,
-  returns, escalations and merges per skill × tier, plus an estimated tokens/cost saved vs running every applied
-  non-sonnet pick at sonnet instead — from each tier's actual average cost per message over the same window, so
-  it is an estimate, not exact per-decision spend) and recent calls, the Jev log-snippets switch, sources,
-  server log (last 500 lines), Routines history, Board history, and **Housekeeping**:
+- **Observability**: Jev calls by feature (24h / 7d, fail-opens and **auth errors** — a rejected 401/403
+  key, kept separate from an ordinary timeout/5xx fail-open — counted apart), **Model routing** (7 days: picks,
+  applied, send-backs, returns, escalations and merges per skill × tier, plus an estimated tokens/cost saved vs
+  running every applied non-sonnet pick at sonnet instead — from each tier's actual average cost per message over
+  the same window, so it is an estimate, not exact per-decision spend) and recent calls (filterable by outcome,
+  including `auth_error`), the Jev log-snippets switch, sources, server log (last 500 lines), Routines history,
+  Board history, and **Housekeeping**:
   - Hourly (first 60s after start) plus **Run now** and a routine action. Defaults: delete unreferenced
     uploads after **30** days, drop resolved inbox items after **14** days, rotate logs at **5** MB keeping
     **2**, clear stale agent caches after **7** days (each 1–3650).
