@@ -11,8 +11,9 @@ const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'wt-handoff-')))
 const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'demo')
 mkdirSync(bin); mkdirSync(repo)
 writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$1 $2" in
-  "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
+  "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"},{"label":"demo-workers","workspace_id":"wW"}]}}' ;;
   "agent list") cat "${tmp}/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
+  "pane list") cat "${tmp}/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
   "pane get") cat "${tmp}/pane-$(echo "$3" | tr : _).json" 2>/dev/null || echo '{"result":{"pane":{"tokens":{}}}}' ;;
   "agent prompt") case " $* " in *" --wait "*) [ -f "${tmp}/goal-clear-fails" ] && exit 1 || exit 0 ;; esac ;;
@@ -74,6 +75,26 @@ test('WP-129: routing sees --skill, or "wt-handoff" by default, never a word scr
 // and by hand against a throwaway agent, not here.
 const runCancel = (args) => execFileSync(join(here, 'handoff.sh'), args, { encoding: 'utf8',
   env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:1' } })
+
+test('WP-143: live routing reuses a free worker already on the routed tier/effort; a different tier spawns fresh', () => {
+  const liveEnv = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' }
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
+    { pane_id: 'wW:p1', tokens: { model: 'haiku', effort: 'high' } }] } }))
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
+  let calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr agent prompt wW:p1 /m)
+  assert.ok(!calls.includes('tab create'))
+
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
+    { pane_id: 'wW:p1', tokens: { model: 'sonnet', effort: 'high' } }] } }))
+  const out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
+  assert.match(out, /would spawn a worker in \S+ with --model haiku/)
+
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
 
 test('WP-132: --cancel resolves a name to its pane and reports what it did', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [

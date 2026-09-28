@@ -198,30 +198,26 @@ worker_ws() {
 }
 
 # Every free agent (idle or done) whose own toplevel IS that main checkout, as
-# "<pane-id>\t<tab label>\t<cwd>".
+# "<pane-id>\t<tab label>\t<cwd>\t<model token>\t<effort token>".
 candidates() {
   [ -n "$main_checkout" ] || return 0
   tab=$(printf '\t')
   ws=$(worker_ws)
+  panes=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')
   herdr agent list \
-    | jq -r --arg ws "$ws" '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws) | .pane_id + "\t" + .tab_id + "\t" + .cwd' \
-    | while read -r line; do
-        # Parameter expansion, not IFS+read: a two-field read splits on the
-        # shell's IFS, and getting that wrong silently leaves the cwd empty —
-        # which makes `git -C ""` answer for the CURRENT directory and every
-        # agent look eligible.
+    | jq -r --arg ws "$ws" --argjson panes "$panes" \
+      '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws)
+       | . as $a | ($panes[$a.pane_id] // {}) as $t
+       | [$a.pane_id, $a.tab_id, $a.cwd, ($t.model // ""), ($t.effort // "")] | @tsv' \
+    | while IFS="$tab" read -r id tid acwd amodel aeffort; do
         # Target by PANE ID, not name: an agent started by hand rather than by
         # `herdr agent start <name>` has an empty name, and most do.
-        id=${line%%"$tab"*}
-        rest=${line#*"$tab"}
-        tid=${rest%%"$tab"*}
-        acwd=${rest#*"$tab"}
-        [ -n "$id" ] && [ -n "$acwd" ] && [ "$acwd" != "$rest" ] || continue
+        [ -n "$id" ] && [ -n "$acwd" ] || continue
         [ -d "$acwd" ] || continue
         top=$(git -C "$acwd" rev-parse --show-toplevel 2>/dev/null) || continue
         [ "$top" = "$main_checkout" ] || continue
         tlabel=$(herdr tab get "$tid" 2>/dev/null | jq -r '.result.tab.label // "?"')
-        printf '%s\t%s\t%s\n' "$id" "$tlabel" "$acwd"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$tlabel" "$acwd" "$amodel" "$aeffort"
       done
 }
 
@@ -297,8 +293,9 @@ esac
 task=$(printf '%.80s' "$task")
 
 # WP-128 model routing (wt-shared/scripts/model-route.mjs; shadow by default = logged, nothing applied). A ticket
-# escalated by dispatch ("routing: escalate opus" in its history) is an explicit tier. A reused agent cannot change
-# model without an interactive picker, so an applied tier always spawns a fresh agent with --model.
+# escalated by dispatch ("routing: escalate opus" in its history) is an explicit tier. Reuse is fine when the free
+# worker already runs that tier (its `model`/`effort` pane tokens, WP-143); otherwise a fresh agent spawns with
+# --model to get on it.
 # WP-137: route_effort rides the same live-only gate as route_tier (an escalated tier still gets its own computed
 # effort, not the escalation's — the escalation is a tier override only).
 route_tier=; route_effort=; route_line=
@@ -384,10 +381,14 @@ if [ "$mode" = pane ]; then
   exit 0
 fi
 
-if [ "$mode" = auto ] && [ -z "$route_tier" ]; then
-  reuse=$(candidates | while IFS= read -r c; do p=${c%%"$(printf '\t')"*}; has_picks "$(name_of "$p")" && { echo "$p"; break; }; done)
+if [ "$mode" = auto ]; then
+  tab=$(printf '\t')
+  reuse=$(candidates | while IFS="$tab" read -r p _ _ cmodel ceffort; do
+    [ -z "$route_tier" ] || { [ "$cmodel" = "$route_tier" ] && { [ -z "$route_effort" ] || [ "$ceffort" = "$route_effort" ]; }; } || continue
+    has_picks "$(name_of "$p")" && { echo "$p"; break; }
+  done)
   if [ -n "$reuse" ]; then
-    [ "$dry" -eq 1 ] && dry "would reuse $role $(name_of "$reuse") ($reuse)"
+    [ "$dry" -eq 1 ] && dry "would reuse $role $(name_of "$reuse") ($reuse)${route_tier:+ (model $route_tier)}"
     hand_to "$reuse"
     finish "reused $reuse" "$reuse"
     exit 0
