@@ -430,12 +430,17 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - **Modes**: `shadow` (default) logs each pick and applies nothing; `live` applies it; `off` never routes.
   Precedence, first wins: env `WT_MODEL_ROUTING` › the repo's `.wt-pack/model-routing.json` › the project setting
   › `~/.config/wt-pack/model-routing.json` › default. The JSON files also hold `thresholds`, `floors`,
-  `roleFloors` and per-skill `{pin, mode}`.
+  `roleFloors`, `sessionFloor` (default `sonnet`) and per-skill `{pin, mode}`.
 - **Order**: an explicit model always wins (`--model`, an Agent call's `model`) › a skill pin › local rules
   (Explore, a docs/naming/formatting lens, or any read-only task with no security keyword → haiku, unless a
   security keyword is present) › Jev (haiku only at ≥ 0.8 confidence, opus at ≥ 0.6, else sonnet; fail-open →
   sonnet). Floors only raise: correctness, security (also triggered by auth/secret/token/session/cookie/
   permission/csrf/migration/schema), data and migration work run on sonnet at least, planners on opus.
+- **Session floor** (WP-157): `model-route.mjs floor` (spawn/session picks, no task text to route) never
+  returns haiku for any role — every role floors to sonnet at least, planners still to opus. This applies
+  only to a *spawned session's own default* tier (no explicit `--model`); subagent routing (`pick`/`explain`,
+  used by wt-review's lens agents and wt-research's shards) is untouched and may still choose haiku. `floor
+  --json` adds `source` (`role-floor` or `session-floor`) showing which one set the printed tier.
 - **Where it applies** (live): `wt-handoff` spawns a fresh agent with `--model` and comments
   `routing: <tier> (…, ref <run#i>)` on the ticket; `wt-agents spawn --model` (or the role floor); wt-review
   and wt-research pass the tier as each lens agent's or shard's `model`. A running session is never switched

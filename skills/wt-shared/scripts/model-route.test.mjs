@@ -332,6 +332,33 @@ test('CLI: pick --json and floor --json carry effort', () => {
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
 })
 
+test('WP-157: floor never spawns a role on haiku — every role gets at least sonnet, a role floor only raises further', () => {
+  const run = (args, env) => execFileSync(process.execPath, [cli, ...args], { input: 'list the files', encoding: 'utf8', env: { ...process.env, ...env } })
+  // A role with no roleFloors entry (everything but planner, today) used to print nothing live — now sonnet.
+  const worker = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(worker.tier, 'sonnet'); assert.equal(worker.source, 'session-floor'); assert.equal(worker.effort, 'medium')
+  // shadow (default): still nothing, unaffected by the floor existing
+  const shadow = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'shadow' }))
+  assert.equal(shadow.tier, null); assert.equal(shadow.source, null)
+  // A role floor above sonnet (planner -> opus) still wins and reports as role-floor, not session-floor.
+  const planner = JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(planner.tier, 'opus'); assert.equal(planner.source, 'role-floor')
+  // A misconfigured role floor BELOW sonnet (e.g. haiku) is still raised to the session floor, not honored.
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { worker: 'haiku' } }))
+  const misfloored = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(misfloored.tier, 'sonnet'); assert.equal(misfloored.source, 'session-floor')
+  // A role floor set EQUAL to the session floor attributes to the role's own config, not the session default.
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { worker: 'sonnet' } }))
+  const tied = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(tied.tier, 'sonnet'); assert.equal(tied.source, 'role-floor')
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
+})
+
+test('WP-157: subagent routing (pick/explain) is unaffected — it may still choose haiku for any role', async () => {
+  const d = await route({ skill: 'x', role: 'worker', task: TASK, env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('haiku', 0.99) })
+  assert.equal(d.tier, 'haiku'); assert.equal(d.apply, 'haiku')
+})
+
 test('global off beats a per-skill live mode (kill switch)', async () => {
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ skills: { 'wt-work': { mode: 'live' } } }))
   assert.equal((await route({ skill: 'wt-work', task: 'list files', env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).mode, 'off')

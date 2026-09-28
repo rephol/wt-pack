@@ -8,9 +8,11 @@
 //       Exit 0 always.
 //   model-route.mjs explain …same flags… < task   the whole decision as JSON
 //   model-route.mjs floor --role R [--model M] [--cwd DIR] [--json]   live: the role's floor tier (planner →
-//       opus) and its effort, else nothing (spawn has no task text to route, so this is all it applies without
-//       an explicit tier). --model computes the printed effort for that tier instead of the role's floor tier
+//       opus, every other role → sonnet, WP-157: a session never spawns on haiku with no explicit tier) and
+//       its effort, else nothing (spawn has no task text to route, so this is all it applies without an
+//       explicit tier). --model computes the printed effort for that tier instead of the role's floor tier
 //       (e.g. the caller already picked one some other way) without changing the printed/`tier` floor itself.
+//       --json adds `source` (role-floor | session-floor).
 //   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
 //   model-route.mjs usage [--days N]   tokens/notional cost by model, split session vs subagent (WP-130; dashboard-
 //       free equivalent of Settings › Usage; N defaults to 7)
@@ -46,6 +48,10 @@ export const DEFAULTS = {
   mode: 'shadow', skills: {},
   floors: { correctness: 'sonnet', security: 'sonnet', data: 'sonnet', migration: 'sonnet' },
   roleFloors: { planner: 'opus' },
+  // WP-157: a hard floor on the `floor` command only (spawn/session picks) — never haiku for a main agent,
+  // whatever role or explicit tier was asked for it. Subagent routing (pick/explain) never reads this, so
+  // wt-review/wt-research lens and shard picks may still choose haiku.
+  sessionFloor: 'sonnet',
   thresholds: { haiku: 0.8, opus: 0.6 },
   effort: 'high', // the global ceiling G, same config layering as `mode`
 }
@@ -323,13 +329,20 @@ async function main() {
   if (cmd === 'usage') { const days = Number(opt('days')); await usageReport(Number.isFinite(days) && days > 0 ? days : 7); return }
   if (cmd === 'floor') {
     const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
-    const t = cfg.roleFloors?.[opt('role')]
+    // WP-157: sessionFloor is the hard minimum for every role (a session never spawns on haiku); a role's own
+    // floor (e.g. planner → opus) only ever raises further, same as everywhere else floors are applied.
+    const sessionFloor = isTier(cfg.sessionFloor) ? cfg.sessionFloor : 'sonnet'
+    const roleFloor = cfg.roleFloors?.[opt('role')]
+    const t = isTier(roleFloor) ? max(sessionFloor, roleFloor) : sessionFloor
+    const source = isTier(roleFloor) && rank(roleFloor) >= rank(sessionFloor) ? 'role-floor' : 'session-floor'
     const live = cfg.mode === 'live' && isTier(t)
     // --model: the caller's actual tier (an explicit override away from the role's floor), effort only —
-    // never changes the printed/`tier` floor itself.
+    // never changes the printed/`tier` floor itself. The session floor applies to the default (no --model)
+    // case via `t` above; an explicit --model is the caller's own choice and keeps its own effort, same as
+    // before WP-157 — the floor guards what gets spawned with no explicit tier, not an explicit override.
     const effortTier = isTier(opt('model')) ? opt('model') : t
     const effortLive = cfg.mode === 'live' && isTier(effortTier)
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null }))
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, source: live ? source : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null }))
     else if (live) console.log(t)
     return
   }
