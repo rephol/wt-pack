@@ -25,6 +25,8 @@ export const PKEYS = {
   maxReviewers: { scope: 'overridable', label: 'Max reviewers', routine: true, default: '2',
     check: (v) => (/^\d{1,2}$/.test(v) && Number(v) <= 20) || '0–20' },
   WT_JEV_TICKET_TRIAGE: jev('Ticket triage'),
+  // WP-128: read by wt-shared/scripts/model-route.mjs (below env and the repo's .wt-pack/model-routing.json).
+  WT_MODEL_ROUTING: { scope: 'project', label: 'Model routing', check: oneOf('off', 'shadow', 'live') },
 }
 
 export class ProjectSettings {

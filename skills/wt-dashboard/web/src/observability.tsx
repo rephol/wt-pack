@@ -18,7 +18,8 @@ import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 type Stat = { feature: string; calls: number; cacheHits: number; failOpen: number; picked: number; errorRate: number; timeoutRate: number; p50ms: number | null; p95ms: number | null }
 type Call = { ts: string; feature: string; outcome: 'picked' | 'not' | 'failopen'; p: number | null; ms: number; cache: boolean; err: string | null; in: string; snippet?: string }
 type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: string; message: string } | null }
-interface Obs { stats: Record<'24h' | '7d', Stat[]>; recent: Call[]; features: string[]; sources: Record<string, Source> }
+type Route = { skill: string; tier: string; picks: number; applied: number; sendBack: number; returned: number; escalated: number; ok: number }
+interface Obs { stats: Record<'24h' | '7d', Stat[]>; recent: Call[]; features: string[]; sources: Record<string, Source>; routing?: Route[] }
 
 const ALL = ''
 const opts = (xs: string[], all: string) => [{ value: ALL, label: all }, ...xs.map((x) => ({ value: x, label: x }))]
@@ -28,6 +29,7 @@ const time = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'sh
 const box = { overflowX: 'auto', maxWidth: '100%' } as const
 const STAT_COLS = ['Feature', 'Calls', 'Cache', 'Fail-open', 'Picked', 'Errors', 'Timeouts', 'p50', 'p95']
 const RECENT_COLS = ['Time', 'Feature', 'Outcome', 'p', 'ms', 'Error', 'Input']
+const ROUTE_COLS = ['Skill', 'Tier', 'Picks', 'Applied', 'Send-backs', 'Returns', 'Escalations', 'Merged']
 const cell = { padding: '4px 8px', textAlign: 'start', whiteSpace: 'nowrap', fontSize: 13 } as const
 
 export function ObservabilitySection() {
@@ -65,6 +67,21 @@ function Integrations() {
                 <td style={cell}><code>{s.feature}</code></td><td style={cell}>{s.calls}</td><td style={cell}>{s.cacheHits}</td>
                 <td style={cell}>{s.failOpen}</td><td style={cell}>{s.picked}</td><td style={cell}>{pct(s.errorRate)}</td><td style={cell}>{pct(s.timeoutRate)}</td>
                 <td style={cell}>{s.p50ms == null ? '—' : `${s.p50ms} ms`}</td><td style={cell}>{s.p95ms == null ? '—' : `${s.p95ms} ms`}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+
+      <Heading level={4}>Model routing (7 days)</Heading>
+      {!q.data.routing?.length ? <Text type="supporting" size="sm">No routing decisions yet. Shadow mode logs them without applying.</Text> : (
+        <div className="hd-obs-box" style={{ ...box, maxHeight: 320, overflowY: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead><tr>{ROUTE_COLS.map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
+            <tbody>{q.data.routing.map((r) => (
+              <tr key={`${r.skill}|${r.tier}`}>
+                <td style={cell}><code>{r.skill}</code></td><td style={cell}>{r.tier}</td><td style={cell}>{r.picks}</td><td style={cell}>{r.applied}</td>
+                <td style={cell}>{r.sendBack}</td><td style={cell}>{r.returned}</td><td style={cell}>{r.escalated}</td><td style={cell}>{r.ok}</td>
               </tr>
             ))}</tbody>
           </table>

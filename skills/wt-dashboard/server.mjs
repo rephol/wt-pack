@@ -23,6 +23,7 @@ import { ProjectSettings, PKEYS } from './project-settings.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { loadConfig as routeConfig, outcome as routeOutcome } from '../wt-shared/scripts/model-route.mjs'
+import { load as routeDecisions, report as routeReport } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
@@ -2189,6 +2190,7 @@ async function observabilityApi(req, res, url) {
     recent: recentCalls(calls, q),
     features: [...new Set(calls.map((c) => c.feature))].sort(),
     sources: SOURCES,
+    routing: routeReport(routeDecisions({ sinceDays: 7 })), // WP-128, from the judge log + routing outcomes
   })
 }
 
