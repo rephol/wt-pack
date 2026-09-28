@@ -1,0 +1,99 @@
+// The popup a room chip or an Inbox 'ask'/'question' item opens (WP-164 U3): a wt-ask card ('A', steps +
+// free text, the recommended option first and marked) or a mirrored native picker ('B', reusing PickerCard).
+// A dialog on desktop, fullscreen on a phone — the same pattern routines.tsx and spawn.tsx already use, not a
+// separate sheet component. No native dialogs here (window.confirm/alert): Astryx's Dialog only.
+import { useEffect, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { Dialog } from '@astryxdesign/core/Dialog'
+import { Badge } from '@astryxdesign/core/Badge'
+import { Banner } from '@astryxdesign/core/Banner'
+import { Button } from '@astryxdesign/core/Button'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { HStack } from '@astryxdesign/core/HStack'
+import { VStack } from '@astryxdesign/core/VStack'
+import { Stepper, Step } from '@astryxdesign/core/Stepper'
+import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
+import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { Text } from '@astryxdesign/core/Text'
+import { ChatMarkdown } from './links'
+import { PickerCard, type Picker, type PickerAgent } from './pickerCard'
+
+export interface AskQuestion { question: string; header: string; options: { label: string; description?: string }[]; multiSelect: boolean; recommended?: string }
+export interface Ask { id: string; agent: string; room: string | null; ticket: string | null; questions: AskQuestion[]; status: string }
+export type PopupTarget = { kind: 'ask'; ask: Ask } | { kind: 'picker'; agent: PickerAgent; picker: Picker }
+
+function useNarrow(q = '(max-width: 639px)') {
+  const [n, setN] = useState(() => matchMedia(q).matches)
+  useEffect(() => { const m = matchMedia(q); const on = () => setN(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on) }, [q])
+  return n
+}
+const recommendedLabel = (o: { label: string }, recommended?: string) =>
+  o.label === recommended ? <HStack gap={2} align="center" wrap="wrap"><Text weight="medium">{o.label}</Text><Badge variant="success" label="Recommended" /></HStack> : o.label
+
+function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; onAnswered: () => void }) {
+  const [step, setStep] = useState(0)
+  const [selected, setSelected] = useState<string[][]>(() => ask.questions.map((q) => (q.recommended ? [q.recommended] : [])))
+  const [text, setText] = useState('')
+  const answer = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/asks/${ask.id}/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ selected, ...(text.trim() ? { text: text.trim() } : {}) }) })
+      if (!r.ok) throw new Error((await r.json()).error ?? r.status)
+    },
+    onSuccess: () => { onAnswered(); onClose() },
+  })
+  const q = ask.questions[step]
+  const sorted = [...q.options].sort((a, b) => Number(b.label === q.recommended) - Number(a.label === q.recommended))
+  const set = (labels: string[]) => setSelected((s) => s.map((v, i) => (i === step ? labels : v)))
+  const canNext = selected[step].length > 0
+  const last = step === ask.questions.length - 1
+  return (
+    <VStack gap={3}>
+      <HStack gap={2} align="center">
+        <StatusDot variant="warning" label="Waiting for your answer" isPulsing />
+        <Text weight="semibold">{ask.agent} asks</Text>
+      </HStack>
+      {ask.questions.length > 1 && (
+        <Stepper activeStep={step} density="compact" label="Questions" onStepClick={setStep}
+          horizontalOptions={{ minimumStepWidth: 64, collapsedVariant: 'withLabel' }}>
+          {ask.questions.map((qq, i) => <Step key={qq.header + i} step={i} label={qq.header} />)}
+        </Stepper>
+      )}
+      {answer.isError && <Banner status="error" title="Could not send the answer" description={String(answer.error)} />}
+      <ChatMarkdown>{q.question}</ChatMarkdown>
+      {q.multiSelect ? (
+        <CheckboxList label="Choose any" isLabelHidden value={selected[step]} onChange={set}>
+          {sorted.map((o) => (
+            <CheckboxListItem key={o.label} value={o.label} label={recommendedLabel(o, q.recommended)}
+              description={o.description ? <Text type="supporting">{o.description}</Text> : undefined} isDisabled={answer.isPending} />
+          ))}
+        </CheckboxList>
+      ) : (
+        <RadioList label="Choose one" isLabelHidden value={selected[step][0] ?? ''} onChange={(v) => set([v])}>
+          {sorted.map((o) => (
+            <RadioListItem key={o.label} value={o.label} label={recommendedLabel(o, q.recommended)}
+              description={o.description ? <Text type="supporting">{o.description}</Text> : undefined} isDisabled={answer.isPending} />
+          ))}
+        </RadioList>
+      )}
+      {last && <TextInput label="Anything else? (optional)" value={text} onChange={setText} isDisabled={answer.isPending} placeholder="Type something" />}
+      <HStack gap={2} justify="end">
+        {step > 0 && <Button label="Back" size="sm" variant="ghost" isDisabled={answer.isPending} onClick={() => setStep((s) => s - 1)} />}
+        {last
+          ? <Button label="Answer" variant="primary" isLoading={answer.isPending} isDisabled={!canNext} onClick={() => answer.mutate()} />
+          : <Button label="Next" variant="primary" isDisabled={!canNext} onClick={() => setStep((s) => s + 1)} />}
+      </HStack>
+    </VStack>
+  )
+}
+
+export function QuestionPopup({ target, onClose, onDone }: { target: PopupTarget; onClose: () => void; onDone: () => void }) {
+  const phone = useNarrow()
+  return (
+    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={phone ? undefined : 480} variant={phone ? 'fullscreen' : undefined} padding={phone ? 3 : 4}>
+      {target.kind === 'ask'
+        ? <AskCard ask={target.ask} onClose={onClose} onAnswered={onDone} />
+        : <PickerCard agent={target.agent} picker={target.picker} onSent={onDone} />}
+    </Dialog>
+  )
+}
