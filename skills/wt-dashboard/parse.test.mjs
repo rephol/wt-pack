@@ -710,7 +710,7 @@ test('handoffArgs: worker/reassign, never --mcp, state-gated', async () => {
   const { handoffArgs } = await import('./server.mjs')
   const t = { id: 'ACM-9', title: 'Thing', state: 'plan_ready', plan: 'docs/plans/x.md', worktree: '/wt/acm-9', branch: 'acm-9' }
   const w = handoffArgs(t, 'worker')
-  assert.deepEqual(w.args, ['--from', 'wt-dashboard', '--task', 'ACM-9 Thing', '/wt/acm-9'])
+  assert.deepEqual(w.args, ['--from', 'wt-dashboard', '--skill', 'wt-work', '--task', 'ACM-9 Thing', '/wt/acm-9'])
   assert.match(w.prompt, /^Use wt-work to implement docs\/plans\/x.md .*\n\nWork in \/wt\/acm-9 on acm-9\. .*\n\nThen wt-ship\.\n$/s)
   assert.deepEqual(handoffArgs({ ...t, state: 'stalled' }, 'reassign').args[0], '--new')
   assert.ok(![w, handoffArgs({ ...t, state: 'stalled' }, 'reassign')].some((r) => r.args.includes('--mcp')))
