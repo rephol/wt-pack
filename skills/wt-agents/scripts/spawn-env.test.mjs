@@ -115,21 +115,25 @@ test('WP-122: spawn points WT_MEMORY_MCP at the sibling wt-memory server (plugin
   assert.match(spawn().tab, /--env WT_MEMORY_MCP=\S+\/wt-memory\/mcp\/server\.mjs/)
 })
 
-test('WP-128/158: --model is passed to claude as its explicit id, not the bare tier; no flag without it; live routing gives a planner its opus floor', () => {
+test('WP-128/158/160: --model is passed to claude as its explicit id, not the bare tier; the role floor applies in every mode, not just live', () => {
   const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
   assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /--model claude-haiku-4-5-20251001/)
-  assert.doesNotMatch(start(spawn()), /--model/)
-  assert.doesNotMatch(start(spawn(['spawn', 'planner'])), /--model/) // shadow (default): nothing applied
+  // WP-160: the floor is a fixed computation, not Jev, so it applies with no explicit --model in every mode —
+  // a worker gets its session floor (sonnet) even in shadow (default).
+  assert.match(start(spawn()), /--model claude-sonnet-5/)
+  assert.match(start(spawn(['spawn', 'planner'])), /--model claude-opus-5-5/) // shadow (default): floor still applies
+  assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'off' })), /--model claude-opus-5-5/) // off: same
   assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--model claude-opus-5-5/)
   assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model claude-sonnet-5/) // explicit wins
   assert.throws(() => spawn(['spawn', 'worker', '--model', 'gpt']), (e) => e.status === 2)
 })
 
-test('WP-137: --effort is passed to claude; falls back to the role floor\'s effort, for the tier actually spawned', () => {
+test('WP-137/160: --effort is passed to claude; falls back to the role floor\'s effort, for the tier actually spawned, in every mode', () => {
   const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
   assert.match(start(spawn(['spawn', 'worker', '--effort', 'low'])), /--effort low/)
-  assert.doesNotMatch(start(spawn()), /--effort/)
-  assert.doesNotMatch(start(spawn(['spawn', 'planner'])), /--effort/) // shadow (default): nothing applied
+  assert.match(start(spawn()), /--effort medium/) // WP-160: worker's session-floor effort, shadow included
+  assert.match(start(spawn(['spawn', 'planner'])), /--effort high/) // shadow (default): floor's own base still applies
+  assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'off' })), /--effort high/) // off: same
   assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--effort high/) // opus floor's own base
   // an explicit --model diverging from the role's floor gets that MODEL's effort, not the floor role's
   assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--effort medium/)
@@ -138,12 +142,16 @@ test('WP-137: --effort is passed to claude; falls back to the role floor\'s effo
   assert.throws(() => spawn(['spawn', 'worker', '--effort', 'urgent']), (e) => e.status === 2)
 })
 
-test('WP-143: the final model/effort actually spawned are written as pane tokens', () => {
+test('WP-143/160: the final model/effort actually spawned are written as pane tokens, in every mode', () => {
   let s = spawn(['spawn', 'worker', '--model', 'haiku', '--effort', 'low'])
   assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=haiku/.test(l)))
   assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=low/.test(l)))
-  s = spawn() // shadow (default): floor computes nothing, no tokens written
-  assert.ok(!s.calls.some((l) => l.startsWith('herdr pane report-metadata') && /--token (model|effort)=/.test(l)))
+  s = spawn() // WP-160: shadow (default) still records the session floor's tier/effort — not nothing
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=sonnet/.test(l)))
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=medium/.test(l)))
+  s = spawn(['spawn', 'worker'], { WT_MODEL_ROUTING: 'off' }) // off: same
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=sonnet/.test(l)))
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=medium/.test(l)))
   s = spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' }) // live routing: floor's tier/effort recorded
   assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=opus/.test(l)))
   assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=high/.test(l)))

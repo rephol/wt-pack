@@ -445,7 +445,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   rather than by role floor (`wt-handoff`'s spawn path): it applies the same sonnet floor to that pick
   (and to an explicit `--model`, unlike the unflagged case), while a call with no `--session` — every
   wt-review/wt-research subagent pick — stays unaffected and may still choose haiku.
-- **Where it applies** (live): `wt-handoff` spawns a fresh agent with `--model` and comments
+- **Session floor applies in every mode** (WP-160): `floor` never uses Jev — it's a fixed computation, not a
+  task-routed pick — so it applies in shadow and off too, not just live; a spawn with no explicit `--model`
+  never falls back to Claude Code's own default (which can be haiku) regardless of `WT_MODEL_ROUTING`. Only a
+  task-routed `pick`/`explain` (Jev's own choice) stays live-gated, unchanged.
+- **Where it applies**: `wt-agents spawn`/`respawn` always resolve `floor`'s tier for a role with no explicit
+  `--model`; `wt-handoff`'s fresh-spawn path inherits this by delegating an unrouted spawn to `agents.sh spawn`.
+  In live mode, `wt-handoff` additionally spawns with a task-routed `--model` and comments
   `routing: <tier> (…, ref <run#i>)` on the ticket; `wt-agents spawn --model` (or the role floor); wt-review
   and wt-research pass the tier as each lens agent's or shard's `model`. A running session is never switched
   (`/model` asks interactively) and a watchdog resume keeps the session's model. `wt-agents spawn` (and
