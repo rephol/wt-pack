@@ -1,6 +1,6 @@
 {
   "name": "wt-pack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "wt-pack: every wt-* skill for running herdr agents on a ticket pipeline, plus wt-memory's hooks (preferences, pkill guard) and MCP server. The dashboard, board and rooms need the full ./setup.",
   "author": {
     "name": "rephol",

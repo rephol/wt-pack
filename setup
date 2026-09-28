@@ -77,9 +77,11 @@ service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLI
 # JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
 market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).find(x=>x.name==="wt-pack");if(m)console.log(m.path||m.installLocation||"")}catch{}})'; }
 # plugin_ok [enabled]: wt-memory@wt-pack is installed (and enabled).
-# plugin_ver: installed wt-memory@wt-pack version; src_ver <checkout>: the version its plugin.json declares (WP-118).
-plugin_ver() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).find(p=>p.id==="wt-memory@wt-pack")?.version||"")}catch{}})'; }
+# plugin_ver <id>: installed version of that plugin id; src_ver <checkout>: the version its plugin.json
+# declares (WP-118); root_src_ver <checkout>: the same, for the root wt-pack@wt-pack plugin (WP-155).
+plugin_ver() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).find(p=>p.id===process.argv[1])?.version||"")}catch{}})' "$1"; }
 src_ver() { node -e 'try{console.log(require(process.argv[1]).version||"")}catch{}' "$1/skills/wt-memory/claude-plugin/.claude-plugin/plugin.json"; }
+root_src_ver() { node -e 'try{console.log(require(process.argv[1]).version||"")}catch{}' "$1/.claude-plugin/plugin.json"; }
 plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
 # Install hint for a missing package, for this OS.
 # sudo only when needed: root (a container) often has no sudo at all.
@@ -139,9 +141,9 @@ doctor() {
   # WP-122: a plugin-only install (wt-pack@wt-pack) has no wt-memory@wt-pack by design.
   root_plugin=$(claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).some(p=>p.id==="wt-pack@wt-pack"&&p.enabled)?1:"")}catch{}})')
   if [ -n "$root_plugin" ] && ! plugin_ok enabled; then
-    ok "plugin wt-pack@wt-pack (plugin-only install; wt-memory's hooks come with it)"
+    : # status printed below, alongside the root plugin's own version check
   elif plugin_ok enabled; then
-    iv=$(plugin_ver); sv=$(src_ver "${mp:-$REPO}")
+    iv=$(plugin_ver wt-memory@wt-pack); sv=$(src_ver "${mp:-$REPO}")
     # WP-118: a stale install silently lacks newer hooks (the WP-109 pkill guard shipped in 0.4.4).
     if [ -n "$sv" ] && [ "$iv" != "$sv" ]; then bad "plugin wt-memory@wt-pack $iv installed, checkout has $sv — ./setup install (then restart agents)"
     else ok "plugin wt-memory@wt-pack $iv${mp:+ (marketplace $mp)}"; fi
@@ -156,6 +158,12 @@ doctor() {
   # WP-122: the root wt-pack plugin is the plugin-only path; with the ./setup plugin too, hooks run twice. Installed
   # from a local checkout it copies everything there (node_modules, .claude/worktrees = other tickets' code).
   if [ -n "$root_plugin" ]; then
+    riv=$(plugin_ver wt-pack@wt-pack); rsv=$(root_src_ver "${mp:-$REPO}")
+    # WP-155: every skill ships inside this plugin (WP-122), so any skill content change makes the cached
+    # copy stale — plugin.json's version is the only signal `claude plugin update` has to notice.
+    if [ -n "$rsv" ] && [ "$riv" != "$rsv" ]; then bad "plugin wt-pack@wt-pack $riv installed, checkout has $rsv — ./setup install (then restart agents) or: claude plugin update wt-pack@wt-pack"
+    elif ! plugin_ok enabled; then ok "plugin wt-pack@wt-pack $riv (plugin-only install; wt-memory's hooks come with it)"
+    else ok "plugin wt-pack@wt-pack $riv"; fi
     plugin_ok enabled && opt "both wt-pack@wt-pack (plugin-only install) and wt-memory@wt-pack (./setup) are enabled — hooks run twice; pick one: claude plugin disable wt-pack@wt-pack"
     [ -n "$mp" ] && { [ -d "$mp/.claude/worktrees" ] || [ -d "$mp/node_modules" ] || [ -d "$mp/skills/wt-dashboard/node_modules" ]; } \
       && opt "wt-pack@wt-pack was installed from the working checkout $mp — its worktrees and node_modules went into the plugin cache; install from GitHub (rephol/wt-pack) or a clean clone"
@@ -308,10 +316,10 @@ plugin() {
   elif [ "$mp" != "$REPO" ]; then bad "a marketplace named wt-pack points at $mp, which is not a wt-pack checkout"; return 1
   fi
   if plugin_ok; then
-    iv=$(plugin_ver); sv=$(src_ver "${mp:-$REPO}")
+    iv=$(plugin_ver wt-memory@wt-pack); sv=$(src_ver "${mp:-$REPO}")
     if [ -n "$sv" ] && [ "$iv" != "$sv" ]; then
       claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-memory@wt-pack >/dev/null 2>&1
-      iv2=$(plugin_ver)
+      iv2=$(plugin_ver wt-memory@wt-pack)
       if [ "$iv2" = "$sv" ]; then ok "updated wt-memory@wt-pack $iv → $sv (restart agents to load it)"; else bad "claude plugin update wt-memory@wt-pack left $iv2, checkout has $sv"; fi
     else ok "already: wt-memory@wt-pack $iv installed"; fi
   else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
