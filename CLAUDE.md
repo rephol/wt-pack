@@ -43,6 +43,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 | wt-audit | auditor role loop (PM + QA findings) |
 | wt-ticket | local kanban board CLI (`WP-N`): new/list/show/move/comment/claim/assign/keys |
 | wt-room | rooms CLI: list/read/post/--attach/create |
+| wt-ask | post an agent question as a room chip + Inbox card (WP-164); `--resolve` closes it without an answer |
 | wt-memory | store `~/.config/wt-memory`; Claude plugin via local marketplace `wt-pack` |
 | wt-shared | shared helpers; `model-route.mjs` (WP-128 model routing: explain/pick/outcome, WP-130 `usage`) + `routing-eval.mjs` |
 | wt-setup | runs `./setup` at repo root |

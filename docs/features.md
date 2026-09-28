@@ -265,12 +265,22 @@ Chat rooms shared by you and agents.
 - Messages ≤ 8000 chars.
 - CLI (`wt-room`): `room list`, `read <slug> [--since N]`, `post <slug> "text" [--attach <img>]…`,
   `create <slug> "title" [--invite a,b]`, `delete <tmp-slug>`.
+- **Agent questions** (WP-164): an agent asking you something shows as a chip — `? <agent> · <header or
+  ticket>` — above the message box, oldest first in a sideways-scrolling row. On a phone, more than 3 chips
+  collapse into one **N questions** chip with a list. The chip pulses until you open it once (per browser).
+  Two kinds share one popup (a dialog on desktop, fullscreen on a phone): a `wt-ask` card, posted with the
+  `wt-ask` CLI from a room, handoff or dispatch context (1–4 questions, steps, the recommended option marked,
+  free text always allowed — your answer is delivered back as a `kind=reply` message); and a mirrored native
+  `AskUserQuestion` picker from an agent's own chat session (its terminal stays the source of truth). Use your
+  session's native question tool in your own chat — it already shows there; `wt-ask` is for everywhere else.
+  Clicking a chip or an Inbox **question**/**ask** item opens the same popup in place. `wt-ask --resolve <id>`
+  closes a card without an answer.
 
 ## Inbox
 
 - A drawer from the sidebar bell; Escape or going to another page closes it (WP-87).
-- Kinds include questions, mentions of you, room suggestions, memory proposals, agent done/stalled, CI
-  failed, server, usage, watchdog and Jev auth-error notices.
+- Kinds include questions, `wt-ask` questions (`ask`, WP-164), mentions of you, room suggestions, memory
+  proposals, agent done/stalled, CI failed, server, usage, watchdog and Jev auth-error notices.
 - **Jev auth error**: the TypeSafe API key was rejected (401/403) rather than timing out — once per feature
   per day (Observability logs it as `auth_error`, separate from an ordinary fail-open); `./setup doctor`
   also warns when `~/.claude/.env` and the wt-dashboard Keychain entry hold different keys.
@@ -278,7 +288,7 @@ Chat rooms shared by you and agents.
   `changes-requested` in `~/.local/share/wt-watch-prs/<owner>-<repo>/state.json`) is an item titled
   `Held PR #n (<owner>-<repo>)` with the reviewer's note; it resolves when the reviewer records a new verdict.
   Holds that predate a server restart appear too.
-- **Needs you** = unresolved **and** actionable (needs-you, question, mention-user, room-suggestion,
+- **Needs you** = unresolved **and** actionable (needs-you, question, ask, mention-user, room-suggestion,
   memory-proposal, pr-held), regardless of read state; pinned at the top. Items resolve themselves when the condition
   clears (a room suggestion also when its ticket reaches Done on the board).
 - Grouping: repeats of a non-actionable kind with the same title collapse with a count; rows group by memory,

@@ -134,22 +134,26 @@ plan**, so the next reader does not re-derive the wrong answer.
 
 ## 4. Shape-changing questions only
 
-Use the platform's blocking question tool, or — when the request itself came through a room or a wt-message
-with a reachable sender (see below) — `room post <slug>`. Ask when different answers produce materially
-different plans — an architecture fork, a scope boundary, a tradeoff the user owns. Do **not** ask what the
-code or research can answer, and do not ask permission to proceed. Two or three is the ceiling. Recommend one,
-say why, give each option its real cost. If research has already made an option unworkable, do not offer it.
+Use the platform's blocking question tool in your own chat session (WP-164 decision 4: it already shows there
+as a mirrored picker card). When the request itself came through a room or a wt-message with a reachable
+sender (see below), use `wt-ask` instead — it posts a structured card the user answers from a room chip or
+the Inbox, rather than free text they have to parse out of a room post (see the wt-ask skill). Ask when
+different answers produce materially different plans — an architecture fork, a scope boundary, a tradeoff the
+user owns. Do **not** ask what the code or research can answer, and do not ask permission to proceed. Two or
+three is the ceiling. Recommend one, say why, give each option its real cost. If research has already made an
+option unworkable, do not offer it.
 
 **A reachable user is not "no synchronous user."** A `<room-message room=<slug> …>` you are answering, or a
 `<wt-message kind=dispatch|handoff …>` whose own reply instructions name a room (`post a one-line result in
 #<slug>`) or an orchestrator pane, both have a human on the other end — the dashboard's chat page or the
-terminal that started them. **Post the user-owned questions there**, one message per question, each with a
-recommendation and why: `room post <slug> "…"` for the room case (see the wt-room skill for the reply
-convention), or `handoff.sh --reply <pane> "…"` for the pane case (see the wt-handoff skill) — use whichever
-channel the request actually named, never `room post` for a pane with no slug. **End the turn** and resume when
-the answer arrives, the same as any other delivery. Do not read "goal-driven" or "dispatched" alone as headless
-— a dispatch is still someone's request, relayed, not authored by nobody. Say so in the plan when you resume
-("<user/room/orchestrator> chose X over Y, because Z").
+terminal that started them. **Ask the user-owned questions there** with `wt-ask "<question>" --option … --room
+<slug> --ticket <id>` (the room case) or `wt-ask "<question>" --option … --ticket <id>` with no `--room` (the
+pane case — the ask still reaches the user through the Inbox); a plain `room post <slug> "…"` or `handoff.sh
+--reply <pane> "…"` is the fallback only when the question has no clean option set `wt-ask` can carry. Use
+whichever channel the request actually named, never `wt-ask --room` for a pane with no slug. **End the turn**
+and resume when the answer arrives, the same as any other delivery. Do not read "goal-driven" or "dispatched"
+alone as headless — a dispatch is still someone's request, relayed, not authored by nobody. Say so in the plan
+when you resume ("<user/room/orchestrator> chose X over Y, because Z").
 
 **No synchronous user** applies only when neither is true: a routine, a scheduled trigger, or any run whose
 prompt carries no room and no reply channel to a person. There, do not block — state the assumption you are
