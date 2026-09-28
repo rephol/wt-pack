@@ -20,7 +20,7 @@ import { ChatMarkdown } from './links'
 import { PickerCard, type Picker, type PickerAgent } from './pickerCard'
 
 export interface AskQuestion { question: string; header: string; options: { label: string; description?: string }[]; multiSelect: boolean; recommended?: string }
-export interface Ask { id: string; agent: string; room: string | null; ticket: string | null; questions: AskQuestion[]; status: string }
+export interface Ask { id: string; agent: string; room: string | null; ticket: string | null; questions: AskQuestion[]; status: string; created: string }
 export type PopupTarget = { kind: 'ask'; ask: Ask } | { kind: 'picker'; agent: PickerAgent; picker: Picker }
 
 function useNarrow(q = '(max-width: 639px)') {
