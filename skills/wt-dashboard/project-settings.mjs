@@ -27,6 +27,12 @@ export const PKEYS = {
   WT_JEV_TICKET_TRIAGE: jev('Ticket triage'),
   // WP-128: read by wt-shared/scripts/model-route.mjs (below env and the repo's .wt-pack/model-routing.json).
   WT_MODEL_ROUTING: { scope: 'project', label: 'Model routing', check: oneOf('off', 'shadow', 'live') },
+  // WP-143: read by handoff.sh (pool cap) and server.mjs's onDone (idle retirement); an env var of the same name
+  // wins over both, as WT_AGENTS_MCP does (test hook and ad-hoc use).
+  WT_WORKERS_IDLE_PER_TIER: { scope: 'project', label: 'Idle workers kept per model tier', default: '1',
+    check: (v) => (/^\d{1,3}$/.test(v) && Number(v) <= 100) || 'a non-negative integer (0–100)' },
+  WT_WORKERS_MAX: { scope: 'project', label: 'Max workers (unset = no cap)',
+    check: (v) => (/^\d{1,4}$/.test(v) && Number(v) >= 1 && Number(v) <= 1000) || 'a positive integer (1–1000)' },
 }
 
 export class ProjectSettings {

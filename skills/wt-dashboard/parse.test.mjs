@@ -1367,3 +1367,19 @@ test('WP-115 parsePicker: box borders stripped, soft wraps joined, paragraph bre
   assert.doesNotMatch(JSON.stringify(pk), /[│┃╭╰]/)
   assert.equal(unbox(['a | b', 'c']), 'a | b c') // a plain pipe is text, not a border
 })
+
+test('WP-143 retireIdle: keeps the N most-recently-handed-off idle/done agents per tier, never a busy or model-less one', async () => {
+  const { retireIdle } = await import('./server.mjs')
+  const idle = (pane, model, at, status = 'idle') => ({ pane_id: pane, agent_status: status, tokens: { role: 'worker', model, handoff_at: String(at) } })
+  const agents = [
+    idle('p1', 'sonnet', 100), idle('p2', 'sonnet', 300), idle('p3', 'sonnet', 200),
+    idle('p4', 'opus', 50),
+    { pane_id: 'p5', agent_status: 'working', tokens: { role: 'worker', model: 'sonnet', handoff_at: '400' } }, // busy: never a candidate
+    { pane_id: 'p6', agent_status: 'idle', tokens: { role: 'worker' } }, // no model token: never picked
+    { pane_id: 'p7', agent_status: 'idle', tokens: { role: 'worker', model: 'sonnet', task: 'WP-1 x', handoff_at: '500' } }, // still assigned
+  ]
+  assert.deepEqual(new Set(retireIdle(agents, 1)), new Set(['p1', 'p3'])) // keeps p2 (most recent sonnet) and p4 (only opus)
+  assert.deepEqual(new Set(retireIdle(agents, 0)), new Set(['p1', 'p2', 'p3', 'p4']))
+  assert.deepEqual(retireIdle(agents, 5), []) // every tier has <= 5
+  assert.deepEqual(retireIdle([idle('solo', 'opus', 1)], 1), []) // the only one of its tier is never removed
+})

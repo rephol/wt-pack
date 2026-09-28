@@ -22,6 +22,10 @@ export const ADDED_DEFAULTS = ['reviewer'] // defaults added after roles.json sh
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
 // alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.
+// WP-143: agents.sh's `model`/`effort` tokens are neither MIRRORED nor LIVE here — this file's mirror only ever
+// gets a value from inferTags()'s one-time backfill or adoptHandoff()'s ticket/handoff_at copy, so adding them
+// here would not actually persist them. A herdr restart wipes them like any other pane token, and an existing
+// agent then falls back to old behaviour (never reused by tier, never retired) until it is next spawned fresh.
 export const MIRRORED_KEYS = ['role', 'project', 'ticket', 'branch', 'spawned_by', 'created', 'handoff_at']
 export const LIVE_KEYS = ['task', 'task_state', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane']
 export const TAG_KEYS = [...MIRRORED_KEYS, ...LIVE_KEYS]

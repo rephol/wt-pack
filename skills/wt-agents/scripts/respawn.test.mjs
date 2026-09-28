@@ -76,6 +76,17 @@ test('respawn --stale: only the agent whose claude lacks the shim', () => {
   assert.ok(!r.calls.some((l) => /pgrep|pkill/.test(l)))
 })
 
+test('WP-143: respawn passes --model/--effort from the old tokens, and does not carry them as plain tokens too', () => {
+  setAgents([row(1, 'idle', 's-old', { model: 'opus', effort: 'high' })])
+  const r = run(['respawn', 'demo-worker-01'])
+  assert.equal(r.status, 0, r.stderr)
+  const start = r.calls[idx(r.calls, /^herdr agent start/)]
+  assert.match(start, /--model opus/)
+  assert.match(start, /--effort high/)
+  assert.ok(!r.calls.some((l) => /report-metadata w1:p9 .*--token model=/.test(l) && !l.includes('--token model=opus')))
+  assert.ok(!r.calls.some((l) => /report-metadata w1:p9 .*--token effort=/.test(l) && !l.includes('--token effort=high')))
+})
+
 test('respawn --stale: nothing stale; working agent is skipped and reported', () => {
   setAgents([row(2, 'idle', 's-ok')])
   assert.equal(run(['respawn', '--stale']).stdout.trim(), 'no stale agents')

@@ -433,6 +433,14 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   effort parameter, so this is session-only. `pick --json` and `floor --role R --json` include
   `effort`/`applyEffort`; logged next to the tier (with Jev's raw pick and confidence) in the judge log and shown
   as an Effort column in Settings › Observability › Model routing.
+- **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
+  pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
+  hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a
+  fresh one — so the pool no longer grows by one per hand-off. `WT_WORKERS_MAX` (project setting or env, worker
+  role only) caps the pool: at the cap, `wt-handoff` exits 3 (`pool full: <n>/<cap> workers in <repo>`, nothing
+  sent) and a dispatched card stays in Ready to retry later. On a card reaching Done, the dashboard retires idle
+  routed workers past `WT_WORKERS_IDLE_PER_TIER` (default 1) kept per model tier — an agent with no `model` token
+  (pre-existing or hand-made) is never touched.
 
 ## Mac app, PWA and Tailscale
 
