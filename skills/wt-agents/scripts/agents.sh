@@ -233,9 +233,10 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   set -- --name "$label"
   [ -z "$resume" ] || set -- "$@" --resume "$resume"
   if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
-  # WP-128/137: an explicit tier/effort wins; else the role floor and its effort, only in live routing (spawn has
-  # no task to route). WP-158: floor also returns the tier's explicit model id (its own loadConfig() already
-  # has the map in scope) — one call regardless of what's missing, not a second `model-id` process on top.
+  # WP-128/137: an explicit tier/effort wins; else the role floor and its effort (WP-160: in every routing
+  # mode, not just live — spawn has no task to route in the first place). WP-158: floor also returns the
+  # tier's explicit model id (its own loadConfig() already has the map in scope) — one call regardless of
+  # what's missing, not a second `model-id` process on top.
   # --model here (when the caller already gave one) is passed through so floor computes effort/id for the
   # tier actually being spawned, not the role's own floor tier when the two diverge.
   floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} --cwd "$main" --json 2>/dev/null || true)
