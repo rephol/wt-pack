@@ -30,7 +30,7 @@ git clone https://github.com/rephol/wt-pack.git ~/wt-pack
 ```sh
 cd skills/wt-dashboard
 npm test                                  # server + skill scripts (node --test), web unit tests, bundle check
-cd web && npx tsc --noEmit -p . && npm run build
+cd web && npx tsc --noEmit -p tsconfig.app.json && npm run build   # -p . checks nothing (the root tsconfig has no files)
 ```
 
 Run a single server test file with `node --test <file>.test.mjs`. A change that adds logic adds the test that
