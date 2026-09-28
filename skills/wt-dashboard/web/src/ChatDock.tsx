@@ -14,7 +14,7 @@ export type DockMeta = { name: string; dot: 'error' | 'success' | 'warning' | 'n
 
 export function Dock({ state, dispatch, meta, unread, need, body, onExpand }: {
   state: DockState; need: number; dispatch: (a: DockAction) => void; meta: (key: string) => DockMeta; unread: Record<string, 'dot' | '!'>
-  body: (key: string) => ReactNode; onExpand: (key: string) => void
+  body: (key: string) => ReactNode; onExpand: (key: string, mode: 'panel' | 'full') => void
 }) {
   useEffect(() => {
     document.documentElement.classList.add('hd-has-dock')
@@ -43,7 +43,8 @@ export function Dock({ state, dispatch, meta, unread, need, body, onExpand }: {
                   <Text size="sm" weight="semibold" maxLines={1}>{m.name}</Text>
                   <span style={{ flex: 1 }} />
                   <IconButton label="Minimise" tooltip="Minimise (Esc)" icon={<span aria-hidden style={{ fontWeight: 700 }}>–</span>} size="sm" variant="ghost" onClick={() => act('minimise', i.key)} />
-                  <IconButton label="Expand" tooltip={i.kind === 'agent' ? 'Open in the side panel' : 'Open the room page'} icon={<ExpandIcon />} size="sm" variant="ghost" onClick={() => { act('close', i.key); onExpand(i.key) }} />
+                  <IconButton label="Open in side panel" tooltip="Open in side panel" icon={<PanelIcon />} size="sm" variant="ghost" onClick={() => { act('close', i.key); onExpand(i.key, 'panel') }} />
+                  <IconButton label="Open full page" tooltip="Open full page" icon={<ExpandIcon />} size="sm" variant="ghost" onClick={() => { act('close', i.key); onExpand(i.key, 'full') }} />
                   <IconButton label="Close" tooltip="Close" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={() => act('close', i.key)} />
                 </header>
                 <div className="hd-dock-win-body">{body(i.key)}</div>
@@ -58,6 +59,12 @@ export function Dock({ state, dispatch, meta, unread, need, body, onExpand }: {
   )
 }
 
+const PanelIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M15 4v16" />
+  </svg>
+)
 const ExpandIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />

@@ -376,6 +376,7 @@ export default function App() {
   // Sidebar badges count AGENTS (same list and project field as the Agents page); tasks are not counted.
   const counts = useMemo(() => projectCounts(all?.agents ?? [], [...new Set(activeTasks(all?.tasks ?? []).map((t) => t.project).filter((p): p is string => Boolean(p)))]), [all])
   const openAgent = all?.agents.find((a) => a.key === openPane) ?? null
+  const openRoom = openPane?.startsWith('room:') ? roomsQ.data?.rooms.find((r) => r.slug === openPane.slice(5)) ?? null : null
   const narrow = useNarrow()
   const phone = useNarrow('(max-width: 639px)')
   const boardPhone = useNarrow('(max-width: 767px)')
@@ -395,7 +396,7 @@ export default function App() {
   // WP-112: on desktop an agent or room chat opens in the dock; terminals keep the side panel.
   const [dock, dockDispatch] = useReducer(dockReducer, undefined, loadDock)
   useEffect(() => { saveDock(dock) }, [dock])
-  const toPanel = (key: string) => { setOpenPane(key); setCollapsed(false); rememberRecent(key) }
+  const toPanel = (key: string) => { setOpenPane(key); setCollapsed(false); if (!key.startsWith('room:')) rememberRecent(key) }
   const open = (key: string) => {
     if (key.startsWith('room:')) key = `room:${key.slice(5).split(':')[0]}`
     if (dockKind(key)) {
@@ -429,7 +430,7 @@ export default function App() {
   }, [fullKey, fullAgent?.name])
   // The quick-switcher button stays off the agent panel (open, desktop) and a room's composer.
   const openTerm = openPane?.startsWith('term:') ? openPane.slice(5) : null
-  const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || !!termPage || (!!openTerm && !narrow && !collapsed) || (!!openAgent && !narrow && !collapsed)
+  const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || !!termPage || (!!openTerm && !narrow && !collapsed) || (!!openAgent && !narrow && !collapsed) || (!!openRoom && !narrow && !collapsed)
   const dockOpen = narrow ? [] : dock.items.filter((i) => !i.min).map((i) => i.key)
   useDesktop([...(collapsed || !openPane ? [] : [openPane]), ...dockOpen], open)
   const dockMarks = dockUnread(dock, { agents: all?.agents ?? [], rooms: roomsQ.data?.rooms ?? [] })
@@ -557,6 +558,15 @@ export default function App() {
                 onCollapse={() => setCollapsed(true)} onExpand={() => openFull(openAgent.key)} autoFocus />
             </LayoutPanel>
           </>
+        ) : openRoom && roomsQ.data && !narrow && !collapsed && !fullKey ? (
+          <>
+            <ResizeHandle direction="horizontal" isReversed hasDivider isAlwaysVisible={false} resizable={panel.props} label="Resize room panel" onDoubleClick={() => panel.resize(PANEL_DEFAULT)} />
+            <LayoutPanel resizable={panel.props} label={`Room #${openRoom.slug}`} isScrollable={false} padding={4}>
+              <div data-agent-panel="" style={{ height: '100%' }}>
+                <RoomView key={openRoom.slug} room={openRoom} agents={all?.agents ?? []} profile={roomsQ.data.settings.profile} onBack={() => setCollapsed(true)} onOpenAgent={open} onProject={setProject} />
+              </div>
+            </LayoutPanel>
+          </>
         ) : undefined}
       />
       <SettingsHost project={project} agents={all?.agents ?? []} />
@@ -579,7 +589,10 @@ export default function App() {
           return a ? <AgentPanelBody key={key} agent={a} task={all?.tasks.find((t) => t.id === a.task) ?? null} mode="dock" onCollapse={() => dockDispatch({ type: 'minimise', key, now: Date.now() })} autoFocus={false} />
             : <EmptyState isCompact title={all ? 'Agent not running' : 'Loading…'} />
         }}
-        onExpand={(key) => { if (key.startsWith('room:')) location.hash = `rooms/${encodeURIComponent(key.slice(5))}`; else toPanel(key) }} />}
+        onExpand={(key, mode) => {
+          if (mode === 'full') { if (key.startsWith('room:')) location.hash = `rooms/${encodeURIComponent(key.slice(5))}`; else openFull(key); return }
+          toPanel(key)
+        }} />}
       <PwaHost openInbox={() => openInbox()} />
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
