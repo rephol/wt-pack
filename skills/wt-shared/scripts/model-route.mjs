@@ -3,6 +3,8 @@
 //   model-route.mjs pick --skill S [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task
 //       live: prints the tier; off/shadow: prints nothing (--json: always the decision, plus "run#i"). Exit 0 always.
 //   model-route.mjs explain …same flags… < task   the whole decision as JSON
+//   model-route.mjs floor --role R [--cwd DIR]   live: the role's floor tier (planner → opus), else nothing (spawn
+//       has no task text to route, so this is all it applies without a --model)
 //   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
 // Order: kill switch / mode off → explicit model → skill pin → local obvious case → Jev choice → floors (only raise).
 // Config layers, first wins: env WT_MODEL_ROUTING (mode) › <repo>/.wt-pack/model-routing.json › dashboard project
@@ -176,6 +178,12 @@ async function main() {
   const [cmd, ...a] = process.argv.slice(2)
   const opt = (n) => { const i = a.indexOf(`--${n}`); return i >= 0 ? a[i + 1] ?? '' : '' }
   if (cmd === 'outcome') { outcome(a[0], a[1], a[2]); return }
+  if (cmd === 'floor') {
+    const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
+    const t = cfg.roleFloors?.[opt('role')]
+    if (cfg.mode === 'live' && isTier(t)) console.log(t)
+    return
+  }
   if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
