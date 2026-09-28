@@ -101,7 +101,9 @@ export function QuestionPopup({ target, onClose, onDone }: { target: PopupTarget
   const label = target.kind === 'ask' ? `${target.ask.agent} asks` : 'Question'
   const body = (
     <VStack gap={3}>
-      <HStack justify="end">
+      {/* BottomSheet's drag handle overlays the top ~24px of its content (not in normal flow, like
+          SelectorBottomSheet's own paddingBlockStart) — this row must clear it or its clicks are eaten. */}
+      <HStack justify="end" style={phone ? { paddingTop: 20 } : undefined}>
         <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
       </HStack>
       {target.kind === 'ask'
