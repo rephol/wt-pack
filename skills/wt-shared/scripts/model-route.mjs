@@ -6,6 +6,8 @@
 //   model-route.mjs floor --role R [--cwd DIR]   live: the role's floor tier (planner → opus), else nothing (spawn
 //       has no task text to route, so this is all it applies without a --model)
 //   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
+//   model-route.mjs usage [--days N]   tokens/notional cost by model, split session vs subagent (WP-130; dashboard-
+//       free equivalent of Settings › Usage; N defaults to 7)
 // Order: kill switch / mode off → explicit model → skill pin → local obvious case → Jev choice → floors (only raise).
 // Config layers, first wins: env WT_MODEL_ROUTING (mode) › <repo>/.wt-pack/model-routing.json › dashboard project
 // setting WT_MODEL_ROUTING (mode) › ~/.config/wt-pack/model-routing.json › defaults (mode shadow).
@@ -187,17 +189,30 @@ export function outcome(runi, what, why = '') {
   try { execFileSync(process.execPath, [fileURLToPath(new URL('./wt-judge.mjs', import.meta.url)), 'mark', runi, MARK[what]], { stdio: 'ignore', timeout: 5000 }) } catch {}
 }
 
+// Tokens/notional cost by model, split session vs subagent — the dashboard-free equivalent of Settings › Usage.
+// Dynamic import: wt-shared must keep working (pick/explain/floor/outcome) even where wt-dashboard isn't checked out.
+async function usageReport(days) {
+  const { UsageAgg } = await import('../../wt-dashboard/usage.mjs')
+  const agg = new UsageAgg({ keepMs: days * 86400_000 })
+  await agg.refresh(join(home(), '.claude', 'projects'))
+  const s = agg.summary(Date.now() - days * 86400_000, (r) => `${r.model} · ${r.kind}`)
+  console.log(`usage, last ${days}d: ${s.tokens} tokens${s.priced ? `, $${s.cost.toFixed(2)} notional` : ''}`)
+  console.log('model · kind\ttokens\tcost')
+  for (const g of s.groups) console.log([g.key, g.tokens, g.cost.toFixed(2)].join('\t'))
+}
+
 async function main() {
   const [cmd, ...a] = process.argv.slice(2)
   const opt = (n) => { const i = a.indexOf(`--${n}`); return i >= 0 ? a[i + 1] ?? '' : '' }
   if (cmd === 'outcome') { outcome(a[0], a[1], a[2]); return }
+  if (cmd === 'usage') { const days = Number(opt('days')); await usageReport(Number.isFinite(days) && days > 0 ? days : 7); return }
   if (cmd === 'floor') {
     const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
     const t = cfg.roleFloors?.[opt('role')]
     if (cfg.mode === 'live' && isTier(t)) console.log(t)
     return
   }
-  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"]'); process.exitCode = 2; return }
+  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
   const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log') })

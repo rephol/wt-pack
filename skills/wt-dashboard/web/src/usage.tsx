@@ -19,10 +19,11 @@ interface Limits {
 }
 interface Summary { tokens: number; cost: number; priced: boolean; groups: { key: string; tokens: number; cost: number }[] }
 type By = 'agent' | 'project' | 'model'
-interface Usage { limits: Limits | null; today: Record<By, Summary>; week: Record<By, Summary> }
+type Range = 'today' | 'week' | 'month'
+interface Usage { limits: Limits | null; today: Record<By, Summary>; week: Record<By, Summary>; month: Record<By, Summary> }
 
-const fmtTok = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n))
-const fmtUsd = (n: number) => `$${n >= 100 ? Math.round(n).toLocaleString() : n.toFixed(2)}`
+export const fmtTok = (n: number) => `${n < 0 ? '-' : ''}${Math.abs(n) >= 1e9 ? `${(Math.abs(n) / 1e9).toFixed(2)}B` : Math.abs(n) >= 1e6 ? `${(Math.abs(n) / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${Math.round(Math.abs(n) / 1e3)}k` : String(Math.abs(n))}`
+export const fmtUsd = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toLocaleString() : Math.abs(n).toFixed(2)}`
 const until = (iso: string | null) => {
   if (!iso) return null
   const m = Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60_000))
@@ -76,7 +77,7 @@ export function UsageBars() {
 // Settings › Usage: limits with reset times, plus the Agent/Project/Model token breakdown.
 export function UsageBreakdown() {
   const q = useUsage()
-  const [range, setRange] = useState<'today' | 'week'>('today')
+  const [range, setRange] = useState<Range>('today')
   const [by, setBy] = useState<By>('agent')
   if (!q.data) return q.isError ? <LoadError what="Claude usage" error={q.error} retry={() => q.refetch()} /> : <Loading h={120} />
   const l = q.data.limits
@@ -98,9 +99,10 @@ export function UsageBreakdown() {
       <Card padding={3}>
           <VStack gap={2}>
             <HStack justify="between" align="center" wrap="wrap" gap={2}>
-              <SegmentedControl label="Range" value={range} onChange={(v) => setRange(v as 'today' | 'week')} size="sm">
+              <SegmentedControl label="Range" value={range} onChange={(v) => setRange(v as Range)} size="sm">
                 <SegmentedControlItem value="today" label="Today" />
                 <SegmentedControlItem value="week" label="7 days" />
+                <SegmentedControlItem value="month" label="30 days" />
               </SegmentedControl>
               <SegmentedControl label="Group by" value={by} onChange={(v) => setBy(v as By)} size="sm">
                 <SegmentedControlItem value="agent" label="Agent" />

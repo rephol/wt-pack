@@ -145,6 +145,21 @@ test('WP-129: sharper local signals — read verbs, security keywords, docs-lens
   assert.equal(localDecide(s7), null)
 })
 
+test('CLI: usage prints tokens/cost by model, split session vs subagent, over --days', () => {
+  const proj = join(tmp, '.claude', 'projects', 'proj')
+  mkdirSync(join(proj, 's1', 'subagents'), { recursive: true })
+  const now = new Date().toISOString()
+  const line = (id, model, sessionId) => JSON.stringify({ type: 'assistant', sessionId, timestamp: now, message: { id, model, usage: { input_tokens: 100, output_tokens: 0 } } }) + '\n'
+  writeFileSync(join(proj, 's1.jsonl'), line('m1', 'claude-sonnet-5', 's1'))
+  writeFileSync(join(proj, 's1', 'subagents', 'agent-x.jsonl'), line('m2', 'claude-haiku-4-5', 's1'))
+  const out = execFileSync(process.execPath, [cli, 'usage', '--days', '7'], { encoding: 'utf8' })
+  assert.match(out, /^usage, last 7d: 200 tokens/)
+  assert.match(out, /claude-sonnet-5 · session\t100\t/)
+  assert.match(out, /claude-haiku-4-5 · subagent\t100\t/)
+  // invalid --days (0, negative, non-numeric) falls back to 7, not a zero/negative keep window
+  for (const bad of ['0', '-3', 'nope']) assert.match(execFileSync(process.execPath, [cli, 'usage', '--days', bad], { encoding: 'utf8' }), /^usage, last 7d: 200 tokens/)
+})
+
 test('global off beats a per-skill live mode (kill switch)', async () => {
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ skills: { 'wt-work': { mode: 'live' } } }))
   assert.equal((await route({ skill: 'wt-work', task: 'list files', env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).mode, 'off')

@@ -431,6 +431,57 @@ test('usage: dedupe by message id, incremental offsets, partial lines wait, buck
   assert.equal(agg.summary(Date.parse('2026-09-25T00:00:00Z'), (r) => r.session).tokens, 11110)
 })
 
+test('usage: subagent transcripts under <session>/subagents/*.jsonl are counted, split from the session, and fall back to the parent session id (not the subagent file name)', async () => {
+  const U = await import('./usage.mjs')
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
+  const root = await mkdtemp((await import('node:os')).tmpdir() + '/usage-sub-')
+  const sessDir = root + '/proj/s1'
+  await mkdir(sessDir + '/subagents', { recursive: true })
+  const now = Date.parse('2026-09-25T12:00:00Z')
+  const line = (id, model, u, sessionId) => JSON.stringify({ type: 'assistant', ...(sessionId ? { sessionId } : {}), timestamp: '2026-09-25T10:00:00Z', message: { id, model, usage: u } }) + '\n'
+  const u1 = { input_tokens: 100, output_tokens: 0 }
+  await writeFile(root + '/proj/s1.jsonl', line('m1', 'claude-sonnet-5', u1, 's1'))
+  // no sessionId on the subagent line: the fallback must be the parent session id, not the subagent file name
+  await writeFile(sessDir + '/subagents/agent-x.jsonl', line('m2', 'claude-haiku-4-5', u1))
+  const agg = new U.UsageAgg()
+  await agg.refresh(root, now)
+  const byKind = agg.summary(0, (r) => r.kind)
+  assert.deepEqual(byKind.groups.map((g) => [g.key, g.tokens]).sort(), [['session', 100], ['subagent', 100]])
+  const byModelKind = agg.summary(0, (r) => `${r.model} · ${r.kind}`)
+  assert.deepEqual(byModelKind.groups.map((g) => g.key).sort(), ['claude-haiku-4-5 · subagent', 'claude-sonnet-5 · session'])
+  assert.deepEqual([...new Set(agg.summary(0, (r) => r.session).groups.map((g) => g.key))], ['s1']) // both records attribute to s1
+})
+
+test('usage: a session directory untouched in the keep window is not rescanned for subagents', async () => {
+  const U = await import('./usage.mjs')
+  const { mkdtemp, mkdir, writeFile, utimes } = await import('node:fs/promises')
+  const root = await mkdtemp((await import('node:os')).tmpdir() + '/usage-old-')
+  const sessDir = root + '/proj/s1'
+  await mkdir(sessDir + '/subagents', { recursive: true })
+  const now = Date.parse('2026-09-25T12:00:00Z')
+  const line = (id, model, u) => JSON.stringify({ type: 'assistant', sessionId: 's1', timestamp: '2026-01-01T10:00:00Z', message: { id, model, usage: u } }) + '\n'
+  await writeFile(sessDir + '/subagents/agent-x.jsonl', line('m1', 'claude-haiku-4-5', { input_tokens: 100, output_tokens: 0 }))
+  const old = new Date(now - 400 * 86400_000)
+  await utimes(sessDir, old, old) // the session directory itself was last touched outside the keep window
+  const agg = new U.UsageAgg({ keepMs: 30 * 86400_000 })
+  await agg.refresh(root, now)
+  assert.equal(agg.summary(0, (r) => r.kind).tokens, 0)
+})
+
+test('usage: default keep window admits a message ~20 days old (past the old 8-day cutoff, inside the new 30-day one)', async () => {
+  const U = await import('./usage.mjs')
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
+  const root = await mkdtemp((await import('node:os')).tmpdir() + '/usage-30d-')
+  await mkdir(root + '/proj')
+  const now = Date.parse('2026-09-25T12:00:00Z')
+  const line = JSON.stringify({ type: 'assistant', sessionId: 's1', timestamp: '2026-09-05T10:00:00Z', message: { id: 'm1', model: 'claude-sonnet-5', usage: { input_tokens: 100, output_tokens: 0 } } }) + '\n'
+  await writeFile(root + '/proj/s1.jsonl', line)
+  assert.equal(new U.UsageAgg().keepMs, 30 * 86400_000)
+  const agg = new U.UsageAgg()
+  await agg.refresh(root, now) // 20 days before `now`: dropped by the old 8-day default, kept by the new 30-day one
+  assert.equal(agg.summary(0, (r) => r.model).tokens, 100)
+})
+
 test('usage: limits never expose tokenHash; missing fields are null; stale after 10 minutes', async () => {
   const U = await import('./usage.mjs')
   const { mkdtemp, writeFile, utimes } = await import('node:fs/promises')

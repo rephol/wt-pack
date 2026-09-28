@@ -49,12 +49,12 @@ export async function readLimits(file, now = Date.now()) {
 // One record per assistant message id: streaming writes the same message once per content block with identical
 // usage, so the last write wins. Files are read incrementally from a remembered byte offset.
 export class UsageAgg {
-  constructor({ keepMs = 8 * 86400_000 } = {}) {
+  constructor({ keepMs = 30 * 86400_000 } = {}) {
     this.files = new Map() // path -> byte offset of the first unread complete line
-    this.recs = new Map() // message id -> { ts, session, cwd, model, in, out, cw, cr }
+    this.recs = new Map() // message id -> { ts, session, cwd, model, kind, in, out, cw, cr }
     this.keepMs = keepMs
   }
-  ingest(text, session) {
+  ingest(text, session, kind) {
     for (const l of text.split('\n')) {
       if (!l.includes('"usage"') || !l.includes('"assistant"')) continue
       let e
@@ -63,13 +63,15 @@ export class UsageAgg {
       if (!u) continue
       const id = e.message.id ?? e.requestId ?? e.uuid
       this.recs.set(id, {
-        ts: Date.parse(e.timestamp) || 0, session: e.sessionId ?? session, cwd: e.cwd ?? null, model: e.message.model ?? 'unknown',
+        ts: Date.parse(e.timestamp) || 0, session: e.sessionId ?? session, cwd: e.cwd ?? null, model: e.message.model ?? 'unknown', kind,
         in: u.input_tokens ?? 0, out: u.output_tokens ?? 0, cw: u.cache_creation_input_tokens ?? 0, cr: u.cache_read_input_tokens ?? 0,
       })
     }
   }
   // Read what was appended to one file since last time (only complete lines; a partial tail waits).
-  async readFile(path, size) {
+  // `session` is the id to fall back to when a record carries none of its own (the owning session's uuid,
+  // for both a session's own transcript and any subagent transcript under it — not the subagent file's name).
+  async readFile(path, size, session, kind) {
     let off = this.files.get(path) ?? 0
     if (size < off) off = 0 // truncated or replaced: start over (records dedupe by id)
     if (size === off) return
@@ -79,25 +81,37 @@ export class UsageAgg {
       await fh.read(buf, 0, buf.length, off)
       const end = buf.lastIndexOf(0x0a)
       if (end < 0) return
-      this.ingest(buf.subarray(0, end).toString('utf8'), path.split('/').pop().replace(/\.jsonl$/, ''))
+      this.ingest(buf.subarray(0, end).toString('utf8'), session, kind)
       this.files.set(path, off + end + 1)
     } finally { await fh.close() }
   }
-  // Every project transcript touched within the keep window.
+  // Every project transcript touched within the keep window: a session's own <uuid>.jsonl, plus any subagent
+  // transcripts it spawned under <uuid>/subagents/*.jsonl (only for a session directory touched since — new
+  // subagent files bump their parent directory's mtime, so a directory untouched since stays unread).
   async refresh(root, now = Date.now()) {
     const since = now - this.keepMs
+    const fresh = async (p) => { const st = await stat(p).catch(() => null); return st && st.mtimeMs >= since ? st : null }
     for (const d of await readdir(root).catch(() => [])) {
       const dir = join(root, d)
       for (const f of await readdir(dir).catch(() => [])) {
-        if (!f.endsWith('.jsonl')) continue
         const p = join(dir, f)
-        const st = await stat(p).catch(() => null)
-        if (st && st.mtimeMs >= since) await this.readFile(p, st.size).catch(() => {})
+        if (f.endsWith('.jsonl')) {
+          const st = await fresh(p)
+          if (st) await this.readFile(p, st.size, f.replace(/\.jsonl$/, ''), 'session').catch(() => {})
+          continue
+        }
+        if (!(await fresh(p))) continue // session directory untouched in the keep window: skip its subagents too
+        for (const sf of await readdir(join(p, 'subagents')).catch(() => [])) {
+          if (!sf.endsWith('.jsonl')) continue
+          const sp = join(p, 'subagents', sf)
+          const st = await fresh(sp)
+          if (st) await this.readFile(sp, st.size, f, 'subagent').catch(() => {})
+        }
       }
     }
     for (const [id, r] of this.recs) if (r.ts < since) this.recs.delete(id)
   }
-  // Totals since `from` (ms), grouped by `keyOf(record)` → [{key, tokens, cost}], largest first.
+  // Totals since `from` (ms), grouped by `keyOf(record)` → [{key, tokens, cost, n}], largest first.
   summary(from, keyOf) {
     let tokens = 0, cost = 0, priced = true
     const groups = new Map()
@@ -109,8 +123,8 @@ export class UsageAgg {
       tokens += t
       if (c == null) priced = false; else cost += c
       const k = keyOf(r)
-      const g = groups.get(k) ?? { key: k, tokens: 0, cost: 0 }
-      g.tokens += t; g.cost += c ?? 0
+      const g = groups.get(k) ?? { key: k, tokens: 0, cost: 0, n: 0 }
+      g.tokens += t; g.cost += c ?? 0; g.n++
       groups.set(k, g)
     }
     return { tokens, cost, priced, groups: [...groups.values()].sort((a, b) => b.tokens - a.tokens) }

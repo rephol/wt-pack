@@ -313,10 +313,14 @@ Projects, Terminals, Usage, Observability, Server, About.
   - **Lean MCP for new agents** (`WT_AGENTS_MCP`, default **full**): lean gives new agents only their role's
     MCP servers plus Jev's picks at handoff.
   - The Jev switches, see [Jev](#jev-features).
-- **Usage**: plan limits (5-hour, weekly) and token spend from `~/.claude/projects`, by Today / 7 days, grouped
-  by agent, project or model. Dollar figures are notional list prices.
+- **Usage**: plan limits (5-hour, weekly) and token spend from `~/.claude/projects`, by Today / 7 days / 30 days,
+  grouped by agent, project or model (model rows split session vs subagent transcripts). Dollar figures are
+  notional list prices. CLI equivalent for installs without the dashboard: `model-route.mjs usage [--days N]`
+  (default 7) prints the same by-model/kind breakdown.
 - **Observability**: Jev calls by feature (24h / 7d), **Model routing** (7 days: picks, applied, send-backs,
-  returns, escalations and merges per skill × tier) and recent calls, the Jev log-snippets switch, sources,
+  returns, escalations and merges per skill × tier, plus an estimated tokens/cost saved vs running every applied
+  non-sonnet pick at sonnet instead — from each tier's actual average cost per message over the same window, so
+  it is an estimate, not exact per-decision spend) and recent calls, the Jev log-snippets switch, sources,
   server log (last 500 lines), Routines history, Board history, and **Housekeeping**:
   - Hourly (first 60s after start) plus **Run now** and a routine action. Defaults: delete unreferenced
     uploads after **30** days, drop resolved inbox items after **14** days, rotate logs at **5** MB keeping

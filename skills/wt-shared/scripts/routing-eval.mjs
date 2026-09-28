@@ -62,6 +62,22 @@ export function tune(ds, cfg) {
   return { thresholds: th, changes }
 }
 
+// Estimated tokens/cost saved vs running every decided pick at the default tier (sonnet), using each tier's
+// actual average cost-per-message from real usage in the same window (avgByTier: {tier: {tokens, cost}}, from
+// wt-dashboard/usage.mjs — WP-130; no per-decision usage is recorded, so this compares averages, not exact spend).
+export function estimateSavings(ds, avgByTier) {
+  const base = avgByTier.sonnet
+  if (!base) return { tokens: 0, cost: 0, priced: false, n: 0 }
+  let tokens = 0, cost = 0, priced = true, n = 0
+  for (const d of ds) {
+    if (d.mode !== 'live' || d.tier === 'sonnet') continue
+    const t = avgByTier[d.tier]
+    if (!t) { priced = false; continue }
+    tokens += base.tokens - t.tokens; cost += base.cost - t.cost; n++
+  }
+  return { tokens: Math.round(tokens), cost, priced, n }
+}
+
 const up = (t) => TIERS[Math.min(TIERS.length - 1, TIERS.indexOf(t) + 1)]
 const hash = (s) => createHash('sha1').update(JSON.stringify(s)).digest('hex').slice(0, 16)
 // Escalated or sent-back decisions become fixtures expecting one tier up; deduped by state hash.
