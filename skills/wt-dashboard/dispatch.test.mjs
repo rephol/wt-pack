@@ -10,7 +10,7 @@ import { Dispatch, mergeIds, dispatchPrompt, resolveReport } from './dispatch.mj
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
 
-async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn, report = null } = {}) {
+async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merges = '', pending = 0, triageOn, report = null, extra = {} } = {}) {
   const tickets = new Tickets({ dir: await mkdtemp(join(tmpdir(), 'dispatch-')) })
   await tickets.board('wt-pack')
   await tickets.setSettings('wt-pack', { dispatch: true })
@@ -25,6 +25,7 @@ async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merge
         calls.push({ args, prompt, cwd })
         return handoff ? handoff(args) : 'created wt-pack-worker-09 w9:p1\ntarget wt-pack-worker-09 w9:p1 — x\nreach: …\n'
       },
+      ...extra,
     },
   })
   return { tickets, d, calls }
@@ -312,3 +313,23 @@ test('WP-122: the report line names this pack\'s own handoff.sh, never a ~/.clau
   assert.doesNotMatch(l, /~\/\.claude\/skills/)
   assert.match(l, /\/wt-handoff\/scripts\/handoff\.sh --reply w1:p2/)
 })
+
+// WP-128: two strikes (returns or review send-backs) escalate a ticket to opus, live routing only.
+async function strikeSetup(mode) {
+  const outcomes = [], notes = []
+  const r = await setup({ max: 0, extra: { routeMode: async () => mode, routeOutcome: (...a) => outcomes.push(a), notify: async (i) => notes.push(i) } })
+  const t = await r.tickets.create('wt-pack', { title: 'x', column: 'building' }, user)
+  await r.tickets.comment(t.id, 'routing: sonnet (live, jev, ref abc12#0)', user)
+  return { ...r, t, outcomes, notes }
+}
+for (const [mode, n, want] of [['live', 2, true], ['live', 1, false], ['shadow', 2, false]]) {
+  test(`routing escalation: ${mode}, ${n} strike(s) → ${want ? 'escalated' : 'not'}`, async () => {
+    const { tickets, d, t, outcomes, notes } = await strikeSetup(mode)
+    for (let i = 0; i < n; i++) await tickets.comment(t.id, `routing: send-back abc12#0 — P1 ${i}`, user)
+    await d.tick(); await d.tick()
+    const esc = (await tickets.get(t.id)).history.filter((h) => /^routing: escalate opus/.test(h.text ?? ''))
+    assert.equal(esc.length, want ? 1 : 0) // once, not per tick
+    assert.equal(notes.length, want ? 1 : 0)
+    if (want) { assert.equal(notes[0].kind, 'routing-escalation'); assert.deepEqual(outcomes[0].slice(0, 2), ['abc12#0', 'escalated']) }
+  })
+}

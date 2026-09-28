@@ -127,6 +127,7 @@ test('resume: argv mirrors spawn plus --resume; blocked when running again, name
   const r = { name: 'wt-pack-worker-01', session: 's-1', ticket: 'WP-9' }
   assert.deepEqual(resumeArgv('w1:p1', r, ['--strict-mcp-config', '--mcp-config', '/c/mcp.json']),
     ['agent', 'start', 'wt-pack-worker-01', '--kind', 'claude', '--pane', 'w1:p1', '--', '--resume', 's-1', '--name', 'wt-pack-worker-01', '--strict-mcp-config', '--mcp-config', '/c/mcp.json'])
+  assert.ok(!resumeArgv('w1:p1', r, []).includes('--model')) // WP-128: a resumed session keeps its transcript's model
   assert.equal(resumeBlock('w1:p1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 'w1:p1' } }]), null)
   assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'x' }]), /running an agent again/)
   assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p9', name: r.name }]), /already running in pane w1:p9/)
