@@ -1010,21 +1010,10 @@ const AGENTS_SH = fileURLToPath(new URL('../wt-agents/scripts/agents.sh', import
 // or hand-made) is never touched; a busy or task-carrying one is never a candidate. When a tier has <= n agents
 // (including the pane that just went idle), nothing in it is removed.
 export function retireIdle(agents, n) {
-  const byTier = new Map()
-  for (const a of agents) {
-    if (a.tokens?.role !== 'worker' || !a.tokens?.model) continue
-    if (a.agent_status !== 'idle' && a.agent_status !== 'done') continue
-    if (a.tokens?.task) continue
-    const list = byTier.get(a.tokens.model) ?? []
-    list.push(a)
-    byTier.set(a.tokens.model, list)
-  }
-  const out = []
-  for (const list of byTier.values()) {
-    list.sort((a, b) => Number(b.tokens.handoff_at ?? 0) - Number(a.tokens.handoff_at ?? 0))
-    out.push(...list.slice(n).map((a) => a.pane_id))
-  }
-  return out
+  const eligible = agents.filter((a) => a.tokens?.role === 'worker' && a.tokens?.model && !a.tokens?.task
+    && (a.agent_status === 'idle' || a.agent_status === 'done'))
+  return [...Map.groupBy(eligible, (a) => a.tokens.model).values()].flatMap((list) =>
+    list.sort((a, b) => Number(b.tokens.handoff_at ?? 0) - Number(a.tokens.handoff_at ?? 0)).slice(n).map((a) => a.pane_id))
 }
 // Runs retireIdle() against the live pool and removes what it picks (agents.sh rm, no --force: refuses a
 // working agent, which nothing here should ever pick anyway).
