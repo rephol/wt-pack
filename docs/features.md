@@ -384,9 +384,10 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   › `~/.config/wt-pack/model-routing.json` › default. The JSON files also hold `thresholds`, `floors`,
   `roleFloors` and per-skill `{pin, mode}`.
 - **Order**: an explicit model always wins (`--model`, an Agent call's `model`) › a skill pin › local rules
-  (Explore and short read-only tasks → haiku) › Jev (haiku only at ≥ 0.8 confidence, opus at ≥ 0.6, else sonnet;
-  fail-open → sonnet). Floors only raise: correctness, security, data and migration work run on sonnet at least,
-  planners on opus.
+  (Explore, a docs/naming/formatting lens, or any read-only task with no security keyword → haiku, unless a
+  security keyword is present) › Jev (haiku only at ≥ 0.8 confidence, opus at ≥ 0.6, else sonnet; fail-open →
+  sonnet). Floors only raise: correctness, security (also triggered by auth/secret/token/session/cookie/
+  permission/csrf/migration/schema), data and migration work run on sonnet at least, planners on opus.
 - **Where it applies** (live): `wt-handoff` spawns a fresh agent with `--model` and comments
   `routing: <tier> (…, ref <run#i>)` on the ticket; `wt-agents spawn --model` (or the role floor); wt-review
   and wt-research pass the tier as each lens agent's or shard's `model`. A running session is never switched
