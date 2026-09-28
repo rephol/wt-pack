@@ -44,7 +44,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 | wt-ticket | local kanban board CLI (`WP-N`): new/list/show/move/comment/claim/assign/keys |
 | wt-room | rooms CLI: list/read/post/--attach/create |
 | wt-memory | store `~/.config/wt-memory`; Claude plugin via local marketplace `wt-pack` |
-| wt-shared | shared helpers |
+| wt-shared | shared helpers; `model-route.mjs` (WP-128 model routing: explain/pick/outcome) + `routing-eval.mjs` |
 | wt-setup | runs `./setup` at repo root |
 | wt-dashboard | see below |
 

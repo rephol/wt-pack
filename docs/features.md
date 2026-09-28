@@ -298,7 +298,8 @@ Projects, Terminals, Usage, Observability, Server, About.
   `WT_REVIEWER_LOGIN` / `~/.config/gh-reviewer-login` and matches, for machines without a dashboard, WP-126), **Base branch** (default `main`; wt-watch-prs diffs against it too; dispatch reconcile and the PR list's
   shipped check), **Agent MCP** (`WT_AGENTS_MCP`), **Max working agents** (dispatch cap; global = Routines'), **Max reviewers** (`maxReviewers`, default 2,
   0–20: wt-watch-prs dispatch spawns a reviewer only below it — WP-121),
-  **Ticket triage** (`WT_JEV_TICKET_TRIAGE`); plus the board's Auto and Dispatch switches. Stored in `wt.db`
+  **Ticket triage** (`WT_JEV_TICKET_TRIAGE`), **Model routing** (`WT_MODEL_ROUTING` off/shadow/live, see
+  [Model routing](#model-routing)); plus the board's Auto and Dispatch switches. Stored in `wt.db`
   (`project_settings`, not in the JSON rollback); shell scripts read it via
   `wt-shared/scripts/project-setting.mjs get <key> [--project P|--cwd DIR]`.
 - **Integrations**: precedence is process env › Keychain (secrets) › `~/.config/wt-dashboard/env` › default;
@@ -314,7 +315,8 @@ Projects, Terminals, Usage, Observability, Server, About.
   - The Jev switches, see [Jev](#jev-features).
 - **Usage**: plan limits (5-hour, weekly) and token spend from `~/.claude/projects`, by Today / 7 days, grouped
   by agent, project or model. Dollar figures are notional list prices.
-- **Observability**: Jev calls by feature (24h / 7d) and recent calls, the Jev log-snippets switch, sources,
+- **Observability**: Jev calls by feature (24h / 7d), **Model routing** (7 days: picks, applied, send-backs,
+  returns, escalations and merges per skill × tier) and recent calls, the Jev log-snippets switch, sources,
   server log (last 500 lines), Routines history, Board history, and **Housekeeping**:
   - Hourly (first 60s after start) plus **Run now** and a routine action. Defaults: delete unreferenced
     uploads after **30** days, drop resolved inbox items after **14** days, rotate logs at **5** MB keeping
@@ -373,6 +375,29 @@ threshold override `WT_JEV_<FEATURE>_MIN`.
 | `WT_JEV_LOG_SNIPPETS` | off | Keeps input snippets in the Jev log |
 
 Eval: `node skills/wt-shared/scripts/jev-eval.mjs <feature>`.
+
+### Model routing
+
+Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scripts/model-route.mjs`.
+- **Modes**: `shadow` (default) logs each pick and applies nothing; `live` applies it; `off` never routes.
+  Precedence, first wins: env `WT_MODEL_ROUTING` › the repo's `.wt-pack/model-routing.json` › the project setting
+  › `~/.config/wt-pack/model-routing.json` › default. The JSON files also hold `thresholds`, `floors`,
+  `roleFloors` and per-skill `{pin, mode}`.
+- **Order**: an explicit model always wins (`--model`, an Agent call's `model`) › a skill pin › local rules
+  (Explore and short read-only tasks → haiku) › Jev (haiku only at ≥ 0.8 confidence, opus at ≥ 0.6, else sonnet;
+  fail-open → sonnet). Floors only raise: correctness, security, data and migration work run on sonnet at least,
+  planners on opus.
+- **Where it applies** (live): `wt-handoff` spawns a fresh agent with `--model` and comments
+  `routing: <tier> (…, ref <run#i>)` on the ticket; `wt-agents spawn --model` (or the role floor); wt-review
+  and wt-research pass the tier as each lens agent's or shard's `model`. A running session is never switched
+  (`/model` asks interactively) and a watchdog resume keeps the session's model.
+- **Escalation**: a return or a review send-back (`routing: send-back …`) is a strike; at two, dispatch comments
+  `routing: escalate opus`, adds an Inbox item and the next handoff of that ticket runs on opus (live only).
+- **CLI**: `model-route.mjs explain` (the whole decision as JSON), `pick [--json]` (the tier, live only),
+  `outcome <run#i> ok|send-back|returned|escalated`.
+- **Tuning**: `jev-eval.mjs routing --report [--since 7d] [--apply]` reports per skill × tier from the judge log;
+  `--apply` moves each threshold by at most 0.05 (≥ 10 labelled Jev picks), skips pinned skills, never touches
+  floors, writes the user file, seeds `jev-fixtures/routing.json` and posts the change to #wt-pack.
 
 ## Mac app, PWA and Tailscale
 
