@@ -264,7 +264,9 @@ async function projectOf(cwd) {
 function tabBarSpan(lines, isStart, isEnd) {
   const start = lines.findLastIndex(isStart)
   if (start < 0) return null
-  for (let i = start; i < Math.min(start + 4, lines.length); i++) if (isEnd(lines[i])) return [start, i]
+  // 8 lines: each wrapped line still holds several tabs (Ink wraps whole tab items, not one per
+  // line), so this covers many more questions than the 4-question case that motivated it (WP-165).
+  for (let i = start; i < Math.min(start + 8, lines.length); i++) if (isEnd(lines[i])) return [start, i]
   return null
 }
 // The focused tab is only visible as a background colour (SGR 48) in the ANSI tab row.
