@@ -210,16 +210,7 @@ export class Dispatch {
         if (n < 2) continue // one miss may be a herdr blip
         this.gone.delete(g)
         const name = t.assignee.name
-        await this.tickets.mutate(t.id, (t, at) => {
-          if (t.assignee?.name !== name) return t
-          if (t.column === 'building' || t.column === 'planning') {
-            t.history.push({ at, author: 'dispatch', kind: 'move', from: t.column, to: 'ready', text: `returned: ${name} is gone` })
-            t.column = 'ready'; delete t.dispatch
-          }
-          t.history.push({ at, author: 'dispatch', kind: 'assign', from: name, to: null })
-          t.assignee = null
-          return t
-        })
+        await this.tickets.dropAssignee(t.id, name, 'dispatch', `returned: ${name} is gone`)
         this.event(project, 'returned', t.id, `${name} is gone`, now)
         const ref = routeRef(t)
         if (ref) try { this.deps.routeOutcome?.(ref, 'returned', `${name} is gone`) } catch {}
