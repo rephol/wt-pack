@@ -73,7 +73,9 @@ export function useHealth() {
         return (await r.json()) as Health
       } catch (e) { misses++; throw e }
     },
-    refetchInterval: 5000, refetchIntervalInBackground: true, retry: false,
+    // WP-146: the app window keeps polling forever while hidden if this stays true; a stale value while
+    // hidden is harmless (the badge catches up once shown), and the browser/PWA tab pause is unaffected.
+    refetchInterval: 5000, refetchIntervalInBackground: !tauri, retry: false,
   })
   const h = q.data
   const down = q.isError && misses >= 2

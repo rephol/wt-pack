@@ -1529,6 +1529,9 @@ const trayOfInbox = () => ({
   needs: inbox.open().map((it) => ({ key: it.target.agent ?? (it.target.room ? `room:${it.target.room}` : `memory:${it.target.memory}`), name: it.title, question: it.body })),
   working: lastSnap ? [...lastSnap.agents.values()].filter((a) => a.state === 'working').map((a) => ({ key: a.key, name: a.name })) : [],
 })
+// WP-146: the app rebuilds a whole native NSMenu per 'tray' event — broadcast only on change (~15/min otherwise).
+let lastTraySent = null
+export const traySame = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
 inbox.subs.add((it) => broadcastEvent('notification', it))
 // Scored once, async, after it is stored; the web reads `urgency` on its next list fetch (no re-broadcast: that
@@ -1623,7 +1626,8 @@ async function tick() {
     for (const h of holds) await inbox.add(h)
     const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket)), proposals, new Set(holds.map((h) => h.key))))
     if (resolved) broadcastEvent('inbox', { changed: true })
-    broadcastEvent('tray', trayOfInbox())
+    const tray = trayOfInbox()
+    if (!traySame(tray, lastTraySent)) { lastTraySent = tray; broadcastEvent('tray', tray) }
   } catch (e) { console.error('inbox:', e.message) }
 }
 // WP-55: the loaded build (index.html mtime) and what changed since `since` (ms) — wt-dashboard commit subjects.
