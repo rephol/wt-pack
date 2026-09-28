@@ -1,4 +1,4 @@
-// Run: node --test skills/wt-handoff/scripts/handoff.test.mjs — handoff.sh against a stub herdr (dry-run only).
+// Run: node --test skills/wt-handoff/scripts/handoff.test.mjs — handoff.sh against a stub herdr.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -14,6 +14,8 @@ writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
   "agent list") cat "${tmp}/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
   "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
+  "pane get") cat "${tmp}/pane-$(echo "$3" | tr : _).json" 2>/dev/null || echo '{"result":{"pane":{"tokens":{}}}}' ;;
+  "agent prompt") case " $* " in *" --wait "*) [ -f "${tmp}/goal-clear-fails" ] && exit 1 || exit 0 ;; esac ;;
   *) echo '{"result":{}}' ;;
 esac\n`)
 chmodSync(join(bin, 'herdr'), 0o755)
@@ -62,5 +64,32 @@ test('WP-129: routing sees --skill, or "wt-handoff" by default, never a word scr
   run(['--role', 'reviewer', '--skill', 'wt-watch-prs', '--no-goal', repo], 'review it')
   entries = readFileSync(judgeLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   assert.equal(entries.at(-1).item.skill, 'wt-watch-prs')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+// --cancel never reaches the network board (curl points at a closed port), so a ticket lookup fails
+// fast and the assignee-return is skipped — that path is exercised by --cancel's dry-run assertions
+// and by hand against a throwaway agent, not here.
+const runCancel = (args) => execFileSync(join(here, 'handoff.sh'), args, { encoding: 'utf8',
+  env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:1' } })
+
+test('WP-132: --cancel resolves a name to its pane and reports what it did', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
+  assert.match(runCancel(['--dry-run', '--cancel', 'demo-worker-01', 'duplicate dispatch']),
+    /dry-run: would cancel demo-worker-01 \(wW:p1\): duplicate dispatch/)
+
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), JSON.stringify({ result: { pane: { tokens: { task: 'WP-1 fix it', ticket: 'WP-1' } } } }))
+  const out = runCancel(['--cancel', 'demo-worker-01'])
+  assert.equal(out.trim(), 'cancelled demo-worker-01 (wW:p1): goal cleared, cleared task="WP-1 fix it"')
+  const calls = readFileSync(log, 'utf8')
+  assert.match(calls, /herdr agent send-keys wW:p1 esc/)
+  assert.match(calls, /herdr agent prompt wW:p1 \/goal clear --wait/)
+  assert.match(calls, /herdr pane report-metadata wW:p1 --source wt-dashboard --clear-token task --clear-token ticket/)
+
+  writeFileSync(join(tmp, 'goal-clear-fails'), '')
+  assert.match(runCancel(['--cancel', 'demo-worker-01']), /goal clear unverified, sent \/clear/)
+
+  assert.throws(() => runCancel(['--cancel', 'no-such-agent']), (e) => e.status === 1)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
