@@ -421,10 +421,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   to G; when the tier is a downgrade below the default tier (sonnet), E is also capped at the tier's own base
   effort (haiku low, sonnet medium, opus high; a read-only task drops one level) plus 2, never past `high`. A
   local-rule or pinned decision (no Jev call) has no pick to clamp, so it falls back to that same base(+2 if
-  downgraded) computation. G defaults to Claude Code's own effective effort setting — its live session env var,
-  else `settings.json`'s `effortLevel` (project over user) — so routing never exceeds what the session itself is
-  already running at; `WT_EFFORT` / the JSON files' `effort` key still override it explicitly when set (default
-  `high` if neither Claude Code nor wt-pack has an opinion). Applied at spawn with `claude --effort`
+  downgraded) computation. G defaults to Claude Code's own effective effort setting for the routed tier's own
+  model — its live session env var, else `settings.json`'s per-model `modelSettings[<model id>].effortLevel`
+  (matched by tier, e.g. an opus override) when set, else that file's top-level `effortLevel` (project over user)
+  — so routing never exceeds what the session itself is already running at for that model, and one tier's
+  override (e.g. opus set to low) no longer leaks into every other tier's ceiling; `WT_EFFORT` / the JSON files'
+  `effort` key still override it explicitly when set (default `high` if neither Claude Code nor wt-pack has an
+  opinion). Applied at spawn with `claude --effort`
   (`wt-agents spawn --effort`, wired from `wt-handoff` and the role floor); a subagent (the Agent tool) has no
   effort parameter, so this is session-only. `pick --json` and `floor --role R --json` include
   `effort`/`applyEffort`; logged next to the tier (with Jev's raw pick and confidence) in the judge log and shown
