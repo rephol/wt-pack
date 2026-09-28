@@ -33,7 +33,9 @@ const recommendedLabel = (o: { label: string }, recommended?: string) =>
 
 function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; onAnswered: () => void }) {
   const [step, setStep] = useState(0)
-  const [selected, setSelected] = useState<string[][]>(() => ask.questions.map((q) => (q.recommended ? [q.recommended] : [])))
+  // The recommended option is marked (sorted first, badged) but never pre-selected — same as the native
+  // picker (B), which only ever pre-checks an option the terminal itself already marked answered.
+  const [selected, setSelected] = useState<string[][]>(() => ask.questions.map(() => []))
   const [text, setText] = useState('')
   const answer = useMutation({
     mutationFn: async () => {
@@ -47,6 +49,8 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
   const set = (labels: string[]) => setSelected((s) => s.map((v, i) => (i === step ? labels : v)))
   const canNext = selected[step].length > 0
   const last = step === ask.questions.length - 1
+  // The Stepper allows jumping ahead (like PickerCard's own tabs); Answer still needs every question picked.
+  const canAnswer = last && selected.every((s) => s.length > 0)
   return (
     <VStack gap={3}>
       <HStack gap={2} align="center">
@@ -56,7 +60,7 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
       {ask.questions.length > 1 && (
         <Stepper activeStep={step} density="compact" label="Questions" onStepClick={setStep}
           horizontalOptions={{ minimumStepWidth: 64, collapsedVariant: 'withLabel' }}>
-          {ask.questions.map((qq, i) => <Step key={qq.header + i} step={i} label={qq.header} />)}
+          {ask.questions.map((qq, i) => <Step key={qq.header + i} step={i} label={qq.header} indicator={i !== step && selected[i].length > 0 ? '✓' : 'auto'} />)}
         </Stepper>
       )}
       {answer.isError && <Banner status="error" title="Could not send the answer" description={String(answer.error)} />}
@@ -80,7 +84,7 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
       <HStack gap={2} justify="end">
         {step > 0 && <Button label="Back" size="sm" variant="ghost" isDisabled={answer.isPending} onClick={() => setStep((s) => s - 1)} />}
         {last
-          ? <Button label="Answer" variant="primary" isLoading={answer.isPending} isDisabled={!canNext} onClick={() => answer.mutate()} />
+          ? <Button label="Answer" variant="primary" isLoading={answer.isPending} isDisabled={!canAnswer} onClick={() => answer.mutate()} />
           : <Button label="Next" variant="primary" isDisabled={!canNext} onClick={() => setStep((s) => s + 1)} />}
       </HStack>
     </VStack>
