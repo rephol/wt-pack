@@ -13,7 +13,7 @@ import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteR
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
-import { Dispatch, runHandoff, resolveReport } from './dispatch.mjs'
+import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
@@ -1958,12 +1958,25 @@ const readyNotes = readyBatcher(async (project, ts) => {
   await herdrOn(m, 'agent', 'prompt', a.id, readyNudge(project, ts))
 })
 setInterval(() => readyNotes.flush(), 60_000).unref()
+// WP-159: 'ok'/'returned' once per ref, however Done was reached or left (manual move, merge reconcile, any
+// caller of tickets.mjs's mutate()) — a plain-comment marker (not "routing: ", so routeRef/strikes/escalated's
+// regexes never pick it up as a decision) guards against recording the same ref's outcome twice.
+async function recordRoutingOutcome(t, what, why) {
+  const ref = routeRef(t)
+  if (!ref) return
+  const marker = `routing-outcome: ${what} (ref ${ref})`
+  if (t.history.some((h) => h.text === marker)) return
+  try { routeOutcome(ref, what, why) } catch {}
+  await tickets.comment(t.id, marker, { name: 'dispatch' }).catch((e) => console.error('tickets:', e.message))
+}
 // A card reaching Done (merge reconcile or a manual move) no longer holds its assignee's pane on this ticket
 // (WP-134): clear the stale task/ticket tokens so wt-handoff's free-worker pick sees it as free again.
 const tickets = new Tickets({
   dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM),
   onReady: (project, t) => readyNotes.add(project, t),
+  onReopen: (project, t) => recordRoutingOutcome(t, 'returned', 'reopened').catch((e) => console.error('routing outcome:', e.message)),
   onDone: async (project, t) => {
+    if (!strikes(t)) await recordRoutingOutcome(t, 'ok', 'reached done').catch((e) => console.error('routing outcome:', e.message))
     if (t.assignee?.pane) {
       const pane = t.assignee.pane
       try {

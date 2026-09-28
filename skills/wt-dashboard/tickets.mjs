@@ -80,8 +80,9 @@ export class Tickets {
   // reserved: keys owned by Linear (PROJECT_BY_TEAM), never given to a board.
   // onReady(project, ticket): a ticket entered Ready (created there or moved in, by anyone).
   // onDone(project, ticket): a ticket entered Done (merge reconcile or a manual move), by anyone.
-  constructor({ dir, reserved = [], log = console.error, onReady = () => {}, onDone = () => {} }) {
-    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log, onReady, onDone })
+  // onReopen(project, ticket): a Done ticket left Done (reopened), by anyone.
+  constructor({ dir, reserved = [], log = console.error, onReady = () => {}, onDone = () => {}, onReopen = () => {} }) {
+    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log, onReady, onDone, onReopen })
   }
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready. Off for a board that does not exist yet.
   async auto(project) { return (await this.settings(project)).auto }
@@ -160,7 +161,7 @@ export class Tickets {
   }
   // fn(ticket, at) → mutated copy; read, apply and write in one transaction.
   async mutate(id, fn) {
-    let entered = false, finished = false
+    let entered = false, finished = false, reopened = false
     const t = tx(this.db, () => {
       const old = this.row(id)
       const at = new Date().toISOString()
@@ -170,14 +171,17 @@ export class Tickets {
       this.db.prepare('UPDATE tickets SET json = ? WHERE id = ?').run(JSON.stringify(t), old.id)
       if (t.column === 'ready' && old.column !== 'ready') entered = true
       if (t.column === 'done' && old.column !== 'done') finished = true
+      if (t.column !== 'done' && old.column === 'done') reopened = true
       return t
     })
     if (entered) this.ready(await this.project(t.id), t)
     if (finished) this.done(await this.project(t.id), t)
+    if (reopened) this.reopen(await this.project(t.id), t)
     return t
   }
   ready(project, t) { try { this.onReady(project, t) } catch (e) { this.log('tickets onReady:', e.message) } }
   done(project, t) { try { this.onDone(project, t) } catch (e) { this.log('tickets onDone:', e.message) } }
+  reopen(project, t) { try { this.onReopen(project, t) } catch (e) { this.log('tickets onReopen:', e.message) } }
   // assignee: already resolved by the caller ({name,pane} | null) or undefined.
   async patch(id, body, author, assignee) {
     const f = clean(body)

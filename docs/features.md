@@ -454,6 +454,11 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   tokens, reuse-matching and escalation all still work in tiers, never ids.
 - **Escalation**: a return or a review send-back (`routing: send-back …`) is a strike; at two, dispatch comments
   `routing: escalate opus`, adds an Inbox item and the next handoff of that ticket runs on opus (live only).
+- **Outcomes recorded automatically** (WP-159): a ticket carrying a `routing: … ref <run#i>` reaches Done with
+  no send-back strikes → `ok`; a Done ticket is reopened (any other column) → `returned`. Fires from
+  `tickets.mjs`'s `onDone`/`onReopen` hooks, so every path that moves a card counts — the dashboard UI,
+  `wt-ticket move`, and dispatch's own merge-detection alike — not just the one dispatch already covered. Once
+  per ref (a `routing-outcome: … (ref …)` ticket comment guards against a repeat).
 - **CLI**: `model-route.mjs explain` (the whole decision as JSON), `pick [--json]` (the tier, live only),
   `outcome <run#i> ok|send-back|returned|escalated`, `model-id <tier>` (its explicit model id, configurable
   via `modelIds` in the same JSON files, default `opus` → `claude-opus-5-5`, `sonnet` → `claude-sonnet-5`,
