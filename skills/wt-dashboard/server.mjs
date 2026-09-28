@@ -2625,6 +2625,7 @@ async function removeAgent(pane, { force = false, confirmName } = {}) {
   const out = await run(AGENTS_SH, ['rm', pane, ...(force ? ['--force'] : [])], homedir(), 30_000)
   store.delete('agents:local'); store.delete('overview')
   await rooms.leave(a.name).catch((e) => console.error(`rooms: leave ${a.name}: ${e.message}`))
+  await tickets.leave(a.name).catch((e) => console.error(`tickets: leave ${a.name}: ${e.message}`))
   return { ok: true, message: out.trim() }
 }
 

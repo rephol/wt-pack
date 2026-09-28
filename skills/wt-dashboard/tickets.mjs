@@ -276,6 +276,30 @@ export class Tickets {
       return t
     })
   }
+  // Shared by leave() (agents.sh rm) and dispatch.mjs's reconcile (slower 'gone' debounce, WP-140): drops
+  // `name` as assignee of card `id` if it still holds it. Planning/Building return to Ready since nobody is
+  // working them and Dispatch skips assigned cards; Ready/Review/Blocked just lose the stale assignee.
+  async dropAssignee(id, name, author, text) {
+    return this.mutate(id, (t, at) => {
+      if (t.assignee?.name !== name) return t
+      if (t.column === 'building' || t.column === 'planning') {
+        t.history.push({ at, author, kind: 'move', from: t.column, to: 'ready', text })
+        t.column = 'ready'; delete t.dispatch
+      }
+      t.history.push({ at, author, kind: 'assign', from: name, to: null })
+      t.assignee = null
+      return t
+    })
+  }
+  // WP-140: an agent removed (agents.sh rm) unassigns from every open card it still held, across every
+  // project, mirroring rooms.leave.
+  async leave(name) {
+    for (const { id, json } of this.db.prepare('SELECT id, json FROM tickets').all()) {
+      const t = JSON.parse(json)
+      if (t.assignee?.name !== name || t.column === 'done') continue
+      await this.dropAssignee(id, name, 'wt-dashboard', `returned: ${name} was removed`)
+    }
+  }
 }
 
 // `WP-12 [ready] (bug,M,P2) title @assignee`; priority is Linear's scale, 0 = none (omitted), 1 urgent … 4 low.

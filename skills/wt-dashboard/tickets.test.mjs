@@ -257,6 +257,31 @@ test('moving back to Backlog clears the assignee (WP-49)', async () => {
   assert.equal((await t.patch(a.id, { column: 'ready' }, user)).assignee, null)
 })
 
+test('leave: unassigns every open card across projects; Planning/Building return to Ready; Done and other agents untouched (WP-140)', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const who = { name: 'wt-pack-worker-09', pane: 'w9:p1' }
+  const building = await t.create('wt-pack', { title: 'b', column: 'building' }, user)
+  await t.patch(building.id, {}, user, who)
+  const ready = await t.create('other-app', { title: 'r', column: 'ready' }, user)
+  await t.patch(ready.id, {}, user, who)
+  const blocked = await t.create('wt-pack', { title: 'x', column: 'blocked', note: 'stuck' }, user)
+  await t.patch(blocked.id, {}, user, who)
+  const done = await t.create('wt-pack', { title: 'd', column: 'building' }, user)
+  await t.patch(done.id, {}, user, who)
+  await t.patch(done.id, { column: 'done' }, user)
+  const others = await t.create('wt-pack', { title: 'o', column: 'building' }, user)
+  await t.patch(others.id, {}, user, { name: 'someone-else', pane: 'w1:p1' })
+
+  await t.leave(who.name)
+
+  const [B, R, X, D, O] = await Promise.all([t.get(building.id), t.get(ready.id), t.get(blocked.id), t.get(done.id), t.get(others.id)])
+  assert.deepEqual([B.column, B.assignee], ['ready', null])
+  assert.deepEqual([R.column, R.assignee], ['ready', null])
+  assert.deepEqual([X.column, X.assignee], ['blocked', null])
+  assert.deepEqual([D.column, D.assignee], ['done', who]) // done cards keep their assignee
+  assert.equal(O.assignee.name, 'someone-else') // another agent's card is untouched
+})
+
 test('onDone fires once when a card reaches Done, not on other moves or a no-op re-patch (WP-134)', async () => {
   const done = []
   const t = new Tickets({ dir: await tmp(), onDone: (p, x) => done.push([p, x.id]) })

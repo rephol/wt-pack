@@ -101,7 +101,9 @@ Runs every tick on **every** board, whether Dispatch is on or not:
 - A merge commit on `origin/main` naming the card (`Merge branch 'wp-N…'` or `WP-N`) moves a Building or
   Review card to Done (fetched at most every 5 min, 7-day lookback; merges older than the card's last move
   are ignored).
-- A dispatched card in Planning/Building whose agent is gone for two ticks returns to Ready, unassigned.
+- Any open card (Ready, Planning, Building, Review or Blocked) whose agent assignee is gone for two ticks
+  unassigns; Planning/Building also return to Ready (WP-140). Removing an agent (`agents.sh rm`) unassigns its
+  cards immediately, the same way it drops the agent from its rooms (WP-138).
 - A Building card whose agent has been idle longer than the stall minutes gets a **Stalled** badge.
 - History (30 days): Settings › Observability › Board history.
 
