@@ -404,7 +404,7 @@ test('rooms: commands are delivered RAW and alone; attachments ride as paths for
   await rooms.post('r', { author: user, text: '@rem look', attachments: img })
   await rooms.flush()
   const last = sent.at(-1)
-  assert.equal(last[0], 'rem'); assert.match(last[1], /from="me" kind=user>@rem look\n\(1 image not delivered — remote agent\)<\/room-message>/); assert.doesNotMatch(last[1], /\/u\/a\.png/)
+  assert.equal(last[0], 'rem'); assert.match(last[1], /from="me" kind=user>@rem look\n\(1 attachment not delivered — remote agent\)<\/room-message>/); assert.doesNotMatch(last[1], /\/u\/a\.png/)
   assert.deepEqual((await rooms.messages('r')).find((m) => m.text === '@rem look').undelivered, [{ to: 'rem', n: 1 }])
   // "finished" once the agent was seen working and is idle again.
   agents[0].status = 'working'; await rooms.flush(); agents[0].status = 'idle'; await rooms.flush()

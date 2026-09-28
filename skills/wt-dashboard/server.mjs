@@ -1870,9 +1870,10 @@ async function answerQuestion(a, req) {
   return [200, { ok: true }]
 }
 
-// ---- image uploads (Claude Code reads an image when the prompt holds its absolute path) ----
+// ---- uploads (Claude Code reads an attachment when the prompt holds its absolute path) ----
 const UPLOADS = join(DATA_ROOT, 'uploads')
 const MAX_UPLOAD = 10 << 20
+const MAX_UPLOAD_BIG = 25 << 20 // WP-170: a per-type bump for the larger document types (pdf, zip)
 const IMG = {
   'image/png': { ext: 'png', ok: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
   'image/jpeg': { ext: 'jpg', ok: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
@@ -1880,6 +1881,27 @@ const IMG = {
   'image/webp': { ext: 'webp', ok: (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
 }
 const EXT_MIME = Object.fromEntries(Object.entries(IMG).map(([m, v]) => [v.ext, m]))
+// WP-170: pdf/text/markdown/csv/json/log/code/zip — everything not in here is refused (deny by default), so
+// this list is also what keeps html/svg out: never served inline, so never a stored-XSS vector on this origin.
+// pdf/zip have a real signature to sniff; the rest are arbitrary text with none — extension + size cap only.
+const TEXT = (mime = 'text/plain') => ({ mime, max: MAX_UPLOAD })
+const DOC_EXT = {
+  pdf: { mime: 'application/pdf', max: MAX_UPLOAD_BIG, ok: (b) => b.subarray(0, 5).toString('latin1') === '%PDF-' },
+  zip: { mime: 'application/zip', max: MAX_UPLOAD_BIG, ok: (b) => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && [0x03, 0x05, 0x07].includes(b[2]) },
+  txt: TEXT(), md: TEXT(), markdown: TEXT(), log: TEXT(),
+  csv: TEXT('text/csv'), json: TEXT('application/json'),
+  js: TEXT(), mjs: TEXT(), cjs: TEXT(), ts: TEXT(), tsx: TEXT(), jsx: TEXT(),
+  py: TEXT(), rb: TEXT(), go: TEXT(), rs: TEXT(), java: TEXT(), c: TEXT(), h: TEXT(), cpp: TEXT(), cc: TEXT(),
+  sh: TEXT(), yml: TEXT(), yaml: TEXT(), toml: TEXT(), xml: TEXT(), sql: TEXT(), css: TEXT(),
+}
+// The client's own filename, basename-only, control chars stripped, capped — kept for display (the composer
+// chip, a room message's download chip) but never used as the on-disk name (that stays `<uuid>.<ext>`, so a
+// crafted name can't path-traverse or collide).
+export function sanitizeFilename(n) {
+  const base = String(n ?? '').split(/[/\\]/).pop() ?? ''
+  const cleaned = base.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200)
+  return cleaned || 'file'
+}
 const rawBody = (req, max) =>
   new Promise((resolve, reject) => {
     const chunks = []
@@ -1892,21 +1914,43 @@ const rawBody = (req, max) =>
     req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', reject)
   })
-async function saveUpload(req) {
-  const type = IMG[(req.headers['content-type'] ?? '').split(';')[0].trim()]
-  if (!type) return [415, { error: 'png, jpeg, webp or gif only' }]
-  const buf = await rawBody(req, MAX_UPLOAD)
-  if (!buf.length || !type.ok(buf)) return [400, { error: 'file content does not match its type' }]
+async function finishUpload(buf, ext, name, mime) {
   const day = new Date().toISOString().slice(0, 10)
   const dir = join(UPLOADS, day)
   await mkdir(dir, { recursive: true, mode: 0o700 })
-  const name = `${randomUUID()}.${type.ext}` // never the client filename
-  await writeFile(join(dir, name), buf, { mode: 0o600 })
-  return [200, { path: join(dir, name), url: `/api/uploads/${day}/${name}` }]
+  const stored = `${randomUUID()}.${ext}` // never the client filename on disk
+  await writeFile(join(dir, stored), buf, { mode: 0o600 })
+  return [200, { path: join(dir, stored), url: `/api/uploads/${day}/${stored}`, name, size: buf.length, mime }]
+}
+// WP-170: which family a file belongs to is decided by its own filename extension (`x-filename`, the client's
+// original name) rather than the declared content-type header — a browser's file picker often sends no
+// content-type, or the wrong one, for csv/log/code files. The declared type still gates which signature (if
+// any) the bytes must match.
+const EXT_ALIAS = { jpeg: 'jpg' } // a browser sends either extension for a JPEG; IMG's canonical ext is 'jpg'
+export async function saveUpload(req) {
+  let raw = ''
+  try { raw = decodeURIComponent(String(req.headers['x-filename'] ?? '')) } catch {}
+  const name = sanitizeFilename(raw)
+  const e0 = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+  const e = EXT_ALIAS[e0] ?? e0
+  const img = Object.entries(IMG).find(([, v]) => v.ext === e)
+  if (img) {
+    const [mime, type] = img
+    const buf = await rawBody(req, MAX_UPLOAD)
+    if (!buf.length || !type.ok(buf)) return [400, { error: 'file content does not match its type' }]
+    return finishUpload(buf, e, name, mime)
+  }
+  const doc = DOC_EXT[e]
+  if (doc) {
+    const buf = await rawBody(req, doc.max)
+    if (!buf.length || (doc.ok && !doc.ok(buf))) return [400, { error: 'file content does not match its type' }]
+    return finishUpload(buf, e, name, doc.mime)
+  }
+  return [415, { error: 'unsupported file type' }]
 }
 // Only <yyyy-mm-dd>/<uuid>.<ext> — nothing else under (or outside) the uploads dir is reachable.
 const UP_DAY = /^\d{4}-\d{2}-\d{2}$/
-const UP_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp|gif)$/
+const UP_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.([a-z0-9]{1,10})$/
 
 // ---- http ----
 const body = (req) =>
@@ -2249,22 +2293,34 @@ async function roomAuthor(req) {
 // Room attachments: the user attaches files already uploaded (paths inside UPLOADS); an agent attaches
 // images from its own cwd or /tmp, which are validated by content and COPIED into uploads.
 const MAX_ROOM_ATTS = 5
-async function roomAttachments(author, b) {
-  const list = author.kind === 'user' ? b.attachments : b.attach
-  if (list === undefined) return []
-  if (!Array.isArray(list) || list.length > MAX_ROOM_ATTS || !list.every((p) => typeof p === 'string'))
+export async function roomAttachments(author, b) {
+  const raw = author.kind === 'user' ? b.attachments : b.attach
+  if (raw === undefined) return []
+  if (!Array.isArray(raw) || raw.length > MAX_ROOM_ATTS)
+    throw Object.assign(new Error(`at most ${MAX_ROOM_ATTS} attachments`), { status: 400 })
+  // WP-170: the dashboard's own composer sends {path, name} (the original filename, kept for the message's
+  // download chip); an agent's `wt-room post --attach` still sends bare paths, unchanged.
+  const list = raw.map((x) => (typeof x === 'string' ? { path: x, name: null } : x))
+  if (!list.every((x) => x && typeof x.path === 'string' && (x.name == null || typeof x.name === 'string')))
     throw Object.assign(new Error(`at most ${MAX_ROOM_ATTS} attachments, as paths`), { status: 400 })
   const out = []
-  for (const p of list) {
+  for (const { path: p, name: origName } of list) {
     let real
     try { real = realpathSync(p) } catch { throw Object.assign(new Error(`no such file: ${p}`), { status: 400 }) }
-    if (!statSync(real).isFile() || statSync(real).size > MAX_UPLOAD) throw Object.assign(new Error(`${p}: not a file up to 10MB`), { status: 400 })
+    if (!statSync(real).isFile()) throw Object.assign(new Error(`${p}: not a file`), { status: 400 })
     const buf = await readFile(real)
-    const type = Object.entries(IMG).find(([, v]) => v.ok(buf))
-    if (!type || buf.length > MAX_UPLOAD) throw Object.assign(new Error(`${p}: png, jpeg, webp or gif up to 10MB only`), { status: 400 })
+    const img = Object.entries(IMG).find(([, v]) => v.ok(buf))
+    // WP-170: a non-image file has no reliable magic-byte signature to sniff, so it's recognised by its
+    // already-server-assigned extension instead — user attachments only. An agent's own room --attach stays
+    // images-only, unchanged: it points at arbitrary cwd/tmp paths, not a sanitized-filename upload.
+    const docExt = !img && author.kind === 'user' ? extname(real).slice(1).toLowerCase() : null
+    const doc = docExt ? DOC_EXT[docExt] : null
+    const type = img ? { mime: img[0], max: MAX_UPLOAD, ext: img[1].ext } : doc ? { mime: doc.mime, max: doc.max, ext: docExt } : null
+    if (!type || buf.length > type.max) throw Object.assign(new Error(`${p}: unsupported file type or too large`), { status: 400 })
+    if (doc?.ok && !doc.ok(buf)) throw Object.assign(new Error(`${p}: file content does not match its type`), { status: 400 })
     if (author.kind === 'user') {
       if (!real.startsWith(realpathSync(UPLOADS) + '/')) throw Object.assign(new Error('attach uploaded files only'), { status: 400 })
-      out.push({ path: real, type: type[0], size: buf.length })
+      out.push({ path: real, type: type.mime, size: buf.length, ...(origName ? { name: sanitizeFilename(origName) } : {}) })
       continue
     }
     const a = (await agents()).find((x) => x.key === author.key)
@@ -2272,9 +2328,9 @@ async function roomAttachments(author, b) {
     if (!roots.some((d) => real.startsWith(d + '/'))) throw Object.assign(new Error(`${p}: only images under your cwd or /tmp`), { status: 400 })
     const day = new Date().toISOString().slice(0, 10)
     await mkdir(join(UPLOADS, day), { recursive: true, mode: 0o700 })
-    const dest = join(UPLOADS, day, `${randomUUID()}.${type[1].ext}`)
+    const dest = join(UPLOADS, day, `${randomUUID()}.${type.ext}`)
     await writeFile(dest, buf, { mode: 0o600 })
-    out.push({ path: dest, type: type[0], size: buf.length })
+    out.push({ path: dest, type: type.mime, size: buf.length })
   }
   return out
 }
@@ -2646,9 +2702,16 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'uploads' && req.method === 'GET') {
         const [day, file] = [parts[2], parts[3]]
         if (parts.length !== 4 || !UP_DAY.test(day) || !UP_FILE.test(file)) return send(res, 404, { error: 'not found' })
+        const e = extname(file).slice(1).toLowerCase()
+        // WP-170: an image stays inline (unchanged); every other type is forced to download — html/svg are
+        // never in either map, so there is no way to get one served, let alone inline, from this route.
+        const mime = EXT_MIME[e] ?? DOC_EXT[e]?.mime
+        if (!mime) return send(res, 404, { error: 'not found' })
         const f = join(UPLOADS, day, file)
         if (!existsSync(f)) return send(res, 404, { error: 'not found' })
-        res.writeHead(200, { 'content-type': EXT_MIME[extname(f).slice(1)], 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' })
+        const headers = { 'content-type': mime, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' }
+        if (!(e in EXT_MIME)) headers['content-disposition'] = `attachment; filename="${file}"`
+        res.writeHead(200, headers)
         return res.end(await readFile(f))
       }
       if (url.pathname === '/api/usage' && req.method === 'GET') return send(res, 200, await usageApi())

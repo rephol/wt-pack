@@ -11,6 +11,8 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { Icon } from '@astryxdesign/core/Icon'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { Markdown } from '@astryxdesign/core/Markdown'
 import { Delayed, Rows } from './skeletons'
@@ -158,17 +160,33 @@ export function FileCards({ files, caption }: { files: SharedFile[]; caption?: s
 // ---- composer attachments (agent panel and rooms): upload on add, send the stored paths ----
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 export const MAX_IMAGE = 10 << 20
+// WP-170: any file, not just images — mirrors the server's own DOC_EXT allowlist (server.mjs). This is only
+// a doomed-upload-avoidance check; the server is the real gate (magic-byte sniff + extension allowlist).
+export const FILE_EXT = ['pdf', 'zip', 'txt', 'md', 'markdown', 'csv', 'json', 'log',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'rb', 'go', 'rs', 'java', 'c', 'h', 'cpp', 'cc',
+  'sh', 'yml', 'yaml', 'toml', 'xml', 'sql', 'css']
+export const MAX_FILE = 25 << 20
 export const MAX_IMAGES = 5
-export interface Attachment { id: string; preview: string; name: string; path?: string; error?: string }
-export async function uploadImage(f: File): Promise<string> {
-  const r = await fetch('/api/uploads', { method: 'POST', headers: { 'content-type': f.type }, body: f })
+// What the composer's hidden <input type=file> and the drag/paste plumbing both accept.
+export const ATTACH_ACCEPT = [...IMAGE_TYPES, ...FILE_EXT.map((e) => `.${e}`)].join(',')
+export interface Attachment { id: string; preview: string; name: string; size: number; kind: 'image' | 'file'; path?: string; error?: string }
+const extOf = (n: string) => n.split('.').pop()?.toLowerCase() ?? ''
+// A File's kind here, or null if it's neither an accepted image nor an accepted file type/size.
+export function classifyFile(f: File): 'image' | 'file' | null {
+  if (IMAGE_TYPES.includes(f.type)) return f.size <= MAX_IMAGE ? 'image' : null
+  if (FILE_EXT.includes(extOf(f.name))) return f.size <= MAX_FILE ? 'file' : null
+  return null
+}
+export async function uploadFile(f: File): Promise<{ path: string; name: string; size: number }> {
+  const r = await fetch('/api/uploads', { method: 'POST',
+    headers: { 'content-type': f.type || 'application/octet-stream', 'x-filename': encodeURIComponent(f.name) }, body: f })
   const j = await r.json()
   if (!r.ok) throw new Error(j.error ?? r.status)
-  return j.path
+  return { path: j.path, name: j.name, size: j.size }
 }
 // An uploads path → its served URL (null for anything else).
 export const uploadUrl = (p: string) => {
-  const m = p.match(/(\d{4}-\d{2}-\d{2})\/([0-9a-f-]{36}\.(?:png|jpg|webp|gif))$/)
+  const m = p.match(/(\d{4}-\d{2}-\d{2})\/([0-9a-f-]{36}\.[a-z0-9]{1,10})$/)
   return m ? `/api/uploads/${m[1]}/${m[2]}` : null
 }
 // `blocked`: why nothing can be attached here (e.g. a remote agent), or null.
@@ -181,15 +199,15 @@ export function useAttachments(blocked: string | null) {
     if (blocked) { setAttErr(blocked); return [] }
     const added: Attachment[] = []
     const room = MAX_IMAGES - atts.length
-    const ok = files.filter((f) => IMAGE_TYPES.includes(f.type) && f.size <= MAX_IMAGE)
-    if (ok.length < files.length) setAttErr('Only png/jpeg/webp/gif up to 10MB')
-    if (ok.length > room) setAttErr(`At most ${MAX_IMAGES} images per message`)
-    for (const f of ok.slice(0, Math.max(0, room))) {
-      const a: Attachment = { id: crypto.randomUUID(), preview: URL.createObjectURL(f), name: f.name }
+    const ok = files.map((f) => [f, classifyFile(f)] as const).filter((x): x is [File, 'image' | 'file'] => x[1] !== null)
+    if (ok.length < files.length) setAttErr('Some files were too large or an unsupported type')
+    if (ok.length > room) setAttErr(`At most ${MAX_IMAGES} attachments per message`)
+    for (const [f, kind] of ok.slice(0, Math.max(0, room))) {
+      const a: Attachment = { id: crypto.randomUUID(), preview: URL.createObjectURL(f), name: f.name, size: f.size, kind }
       added.push(a)
       setAtts((prev) => [...prev, a])
-      uploadImage(f).then(
-        (path) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, path } : x))),
+      uploadFile(f).then(
+        ({ path }) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, path } : x))),
         (e) => setAtts((prev) => prev.map((x) => (x.id === a.id ? { ...x, error: String(e.message ?? e) } : x))),
       )
     }
@@ -198,4 +216,46 @@ export function useAttachments(blocked: string | null) {
   const removeAtt = (id: string) => setAtts((prev) => prev.filter((x) => (x.id === id ? (URL.revokeObjectURL(x.preview), false) : true)))
   const clear = () => { atts.forEach((a) => URL.revokeObjectURL(a.preview)); setAtts([]); setAttErr(null) }
   return { atts, attErr, addFiles, removeAtt, clear, uploading: atts.some((a) => !a.path && !a.error) }
+}
+
+const fmtSizeShort = (b: number) => (b < 1024 ? `${b} B` : b < 1 << 20 ? `${(b / 1024).toFixed(0)} KB` : `${(b / (1 << 20)).toFixed(1)} MB`)
+const FileGlyph = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />
+  </svg>
+)
+// A composer-drawer chip for a non-image attachment (icon, name, size) — the file-typed sibling of Thumbnail.
+export function AttachmentChip({ a, onRemove }: { a: { name: string; size: number; error?: string }; onRemove: () => void }) {
+  return (
+    <Card padding={2}>
+      <HStack gap={2} align="center">
+        <FileGlyph />
+        <VStack gap={0}>
+          <Text weight="medium" maxLines={1} style={{ maxWidth: 160 }}>{a.name}</Text>
+          <Text type="supporting" size="sm">{a.error ?? fmtSizeShort(a.size)}</Text>
+        </VStack>
+        <IconButton label="Remove" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onRemove} />
+      </HStack>
+    </Card>
+  )
+}
+// A rendered room message's download chip for a non-image attachment.
+export function AttachmentDownload({ a }: { a: { path: string; name?: string; size?: number } }) {
+  const url = uploadUrl(a.path)
+  if (!url) return null
+  const name = a.name ?? a.path.split('/').pop() ?? 'file'
+  return (
+    <Card padding={2}>
+      <HStack gap={2} align="center" justify="between">
+        <HStack gap={2} align="center">
+          <FileGlyph />
+          <VStack gap={0}>
+            <Text weight="medium" maxLines={1} style={{ maxWidth: 220 }}>{name}</Text>
+            {a.size != null && <Text type="supporting" size="sm">{fmtSizeShort(a.size)}</Text>}
+          </VStack>
+        </HStack>
+        <Button label="Download" size="sm" variant="ghost" onClick={() => window.open(url, '_blank', 'noopener')} />
+      </HStack>
+    </Card>
+  )
 }

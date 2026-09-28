@@ -37,7 +37,7 @@ import { useToast } from '@astryxdesign/core/Toast'
 import { openInbox } from './inbox'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
-import { ImageRow, useAttachments, uploadUrl, IMAGE_TYPES, MAX_IMAGES } from './attachments'
+import { ImageRow, useAttachments, uploadUrl, AttachmentChip, AttachmentDownload, ATTACH_ACCEPT, IMAGE_TYPES, MAX_IMAGES } from './attachments'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { Link } from '@astryxdesign/core/Link'
 import { useChatDensity } from './density'
@@ -59,7 +59,7 @@ interface RoomMsg {
   author: { kind: 'user' | 'agent' | 'system'; name: string; machine?: string; avatar?: string | null }
   blocked?: { name: string; reason: string }[]
   queuedFor?: string[]; notified?: boolean
-  attachments?: { path: string; type: string; size: number }[]; undelivered?: { to: string; n: number }[]
+  attachments?: { path: string; type: string; size: number; name?: string }[]; undelivered?: { to: string; n: number }[]
   command?: { text: string; target: string }; agentKey?: string
   replyTo?: { id: string; name: string; text: string }
 }
@@ -270,7 +270,8 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
   }, [])
   const post = useMutation({
     mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST',
-      body: JSON.stringify({ ...b, text: numberMarkers(b.text, atts.filter((a) => a.path).map((a) => a.id)), attachments: atts.filter((a) => a.path).map((a) => a.path), replyTo: replyTo?.id }) }),
+      body: JSON.stringify({ ...b, text: numberMarkers(b.text, atts.filter((a) => a.path).map((a) => a.id)),
+        attachments: atts.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })), replyTo: replyTo?.id }) }),
     onSuccess: () => { setDraft(''); setConfirm(null); clearAtts(); setSendErr(null); setReplyTo(null); qc.invalidateQueries({ queryKey: ['rooms'] }) },
     onError: (e) => { const m = e instanceof Error ? e.message : String(e); if (/one agent/.test(m)) setSendErr(m); else toast({ body: `Could not post: ${m}`, type: 'error' }) },
   })
@@ -385,7 +386,11 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
               {m.replyTo && <Link onClick={() => jumpTo(m.replyTo!.id)}><Text type="supporting" size="sm" maxLines={1}>{`↪ ${m.replyTo.name}: ${m.replyTo.text}`}</Text></Link>}
               {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions} breaks={m.author.kind === 'user'}>{m.text}</ChatMarkdown></ChatMessageBubble>}
               {m.text && <LinkPreviews text={m.text} />}
-              {m.attachments?.length ? <ChatMessageBubble variant="ghost"><ImageRow srcs={m.attachments.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /></ChatMessageBubble> : null}
+              {m.attachments?.length ? <ChatMessageBubble variant="ghost"><VStack gap={2}>
+                {(() => { const imgs = m.attachments!.filter((a) => IMAGE_TYPES.includes(a.type))
+                  return imgs.length ? <ImageRow srcs={imgs.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /> : null })()}
+                {m.attachments!.filter((a) => !IMAGE_TYPES.includes(a.type)).map((a, i) => <AttachmentDownload key={i} a={a} />)}
+              </VStack></ChatMessageBubble> : null}
             </ChatMessage>
           ))(r.m)} />
         </ChatMessageList>
@@ -476,8 +481,8 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
               : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}
             headerActions={<>
               <IconButton label="Mention someone" icon={<AtIcon />} size="sm" variant="ghost" onClick={startMention} />
-              <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={atts.length >= MAX_IMAGES} onClick={() => fileRef.current?.click()} />
-              <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
+              <IconButton label="Attach a file" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={atts.length >= MAX_IMAGES} onClick={() => fileRef.current?.click()} />
+              <input ref={fileRef} type="file" accept={ATTACH_ACCEPT} multiple hidden onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
             </>}
             headerContext={!replyTo ? <div style={{ display: 'grid', width: '100%', minWidth: 0 }}><Text type="supporting" size="sm" maxLines={1}>{room.broadcast ? '→ every member hears this' : room.responderName ? `→ ${room.responderName} answers · @ to mention someone else` : '→ no responder: @mention someone'}</Text></div> : <HStack gap={1} align="center" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', width: '100%', minWidth: 0 }}>{/* grid: the header sizes to content, so a long quote would push the x off-screen */}
               <Text type="supporting" size="sm" maxLines={1}>{`↪ ${replyTo.author.kind === 'user' ? profile.name : replyTo.author.name}: ${replyTo.text.split('\n')[0]}`}</Text>
@@ -486,7 +491,9 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
             drawer={atts.length ? (
               <ChatComposerDrawer>
                 <HStack gap={2} wrap="wrap">
-                  {atts.map((a) => <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name} isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />)}
+                  {atts.map((a) => a.kind === 'image'
+                    ? <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name} isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />
+                    : <AttachmentChip key={a.id} a={a} onRemove={() => removeAtt(a.id)} />)}
                 </HStack>
               </ChatComposerDrawer>
             ) : undefined}
