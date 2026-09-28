@@ -1613,9 +1613,9 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             {dnd && <Tooltip content="Do Not Disturb"><span style={{ display: 'inline-flex', flexShrink: 0 }}><MoonIcon /></span></Tooltip>}
             <VStack gap={0.5} style={{ minWidth: 0 }}>
               <HStack gap={1} align="center" style={{ minWidth: 0 }}>
-                <Text weight="semibold" maxLines={1}>{agent.name}</Text>
-                {agent.background > 0 && <Badge label={`${agent.background} background`} />}
-                {agent.tags?.pair && <Badge variant="neutral" label={`paired · ${agent.tags.pair}`} />}
+                <Text weight="semibold" maxLines={1} style={{ minWidth: 0, flex: 1 }}>{agent.name}</Text>
+                {agent.background > 0 && <Badge label={`${agent.background} background`} style={{ flexShrink: 0 }} />}
+                {agent.tags?.pair && <Badge variant="neutral" label={`paired · ${agent.tags.pair}`} style={{ flexShrink: 0 }} />}
               </HStack>
               {agent.tags?.task && <Text size="sm" weight="medium" maxLines={1}>{taskLabel(agent.tags)}</Text>}
               <Text type="supporting" size="sm" maxLines={1}>{narrow
