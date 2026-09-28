@@ -402,7 +402,8 @@ fi
 
 # WP-143: a pool cap, worker role only. $WT_WORKERS_MAX wins over the project setting (as $WT_AGENTS_MCP does);
 # unset/non-numeric = no cap (today's behaviour). No queue: the caller (dispatch) keeps the card in Ready and
-# retries it on its next pass.
+# retries it on its next pass (dispatch.mjs's existing 3-strikes rule applies here too — a pool that stays full
+# for ~3 backoff cycles holds the card for a manual retry, same as any other repeated dispatch failure).
 if [ "$role" = worker ]; then
   cap=${WT_WORKERS_MAX:-$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get WT_WORKERS_MAX --cwd "${main_checkout:-$cwd}" 2>/dev/null)}
   case "$cap" in ''|*[!0-9]*) cap= ;; esac

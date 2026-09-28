@@ -1937,16 +1937,19 @@ const tickets = new Tickets({
   dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM),
   onReady: (project, t) => readyNotes.add(project, t),
   onDone: async (project, t) => {
-    if (!t.assignee?.pane) return
-    const pane = t.assignee.pane
-    try {
-      // Compare-and-clear: the pane may have moved on to a different ticket by the time this fires
-      // (a later merge-reconcile, after the worker was freed and reused) — only ours to clear if it's still ours.
-      const tok = JSON.parse(await herdr('pane', 'get', pane)).result?.pane?.tokens ?? {}
-      if (tok.ticket !== t.id) return
-      await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--clear-token', 'task', '--clear-token', 'ticket')
-      store.delete('paneMeta')
-    } catch (e) { console.error('tokens:', t.assignee.name, e.message) }
+    if (t.assignee?.pane) {
+      const pane = t.assignee.pane
+      try {
+        // Compare-and-clear: the pane may have moved on to a different ticket by the time this fires
+        // (a later merge-reconcile, after the worker was freed and reused) — only ours to clear if it's still ours.
+        // Independent of the retirement sweep below: a stale match here must not skip that too.
+        const tok = JSON.parse(await herdr('pane', 'get', pane)).result?.pane?.tokens ?? {}
+        if (tok.ticket === t.id) {
+          await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--clear-token', 'task', '--clear-token', 'ticket')
+          store.delete('paneMeta')
+        }
+      } catch (e) { console.error('tokens:', t.assignee.name, e.message) }
+    }
     // WP-143: retire idle routed workers past what this tier keeps, now that this one is free again.
     await retireIdleWorkers(project).catch((e) => console.error('retire idle:', e.message))
   },
