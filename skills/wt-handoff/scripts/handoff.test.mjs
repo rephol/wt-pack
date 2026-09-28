@@ -145,6 +145,28 @@ test('WP-147: a DND agent is not listed, and --pane to one warns but still sends
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
+test('WP-168: a --pane hand-off (dispatch to an already-running worker) logs its known tier as source=reuse, no Jev', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), JSON.stringify({ result: { pane: { tokens: { model: 'opus', effort: 'high' } } } }))
+  const out = run(['--pane', 'wW:p1', '--no-goal', repo], 'do the thing')
+  assert.match(out, /^reused wW:p1$/m)
+  // shadow (the default mode): logged with a ref, nothing applied — same shape as a Jev/local/pin decision,
+  // so `model-route.mjs outcome <ref> ...` has something to mark for this ticket.
+  assert.match(out, /routing: opus \(shadow, reuse, ref [a-z0-9]+#0\)/)
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), '{"result":{"pane":{"tokens":{}}}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-168: a --pane hand-off to a worker with no known model token logs nothing (nothing to log)', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  const out = run(['--pane', 'wW:p1', '--no-goal', repo], 'do the thing')
+  assert.match(out, /^reused wW:p1$/m)
+  assert.ok(!out.includes('routing:'))
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
 test('WP-147: a paired agent is not a free candidate, only reachable for its own ticket', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
