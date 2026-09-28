@@ -115,13 +115,13 @@ test('WP-122: spawn points WT_MEMORY_MCP at the sibling wt-memory server (plugin
   assert.match(spawn().tab, /--env WT_MEMORY_MCP=\S+\/wt-memory\/mcp\/server\.mjs/)
 })
 
-test('WP-128: --model is passed to claude; no flag without it; live routing gives a planner its opus floor', () => {
+test('WP-128/158: --model is passed to claude as its explicit id, not the bare tier; no flag without it; live routing gives a planner its opus floor', () => {
   const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
-  assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /-- --name \S+ .*--model haiku|--model haiku/)
+  assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /--model claude-haiku-4-5-20251001/)
   assert.doesNotMatch(start(spawn()), /--model/)
   assert.doesNotMatch(start(spawn(['spawn', 'planner'])), /--model/) // shadow (default): nothing applied
-  assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--model opus/)
-  assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model sonnet/) // explicit wins
+  assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--model claude-opus-5-5/)
+  assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model claude-sonnet-5/) // explicit wins
   assert.throws(() => spawn(['spawn', 'worker', '--model', 'gpt']), (e) => e.status === 2)
 })
 

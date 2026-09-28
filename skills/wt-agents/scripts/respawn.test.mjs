@@ -81,7 +81,7 @@ test('WP-143: respawn passes --model/--effort from the old tokens, and does not 
   const r = run(['respawn', 'demo-worker-01'])
   assert.equal(r.status, 0, r.stderr)
   const start = r.calls[idx(r.calls, /^herdr agent start/)]
-  assert.match(start, /--model opus/)
+  assert.match(start, /--model claude-opus-5-5/) // WP-158: the old tier's explicit id, not the bare alias
   assert.match(start, /--effort high/)
   assert.ok(!r.calls.some((l) => /report-metadata w1:p9 .*--token model=/.test(l) && !l.includes('--token model=opus')))
   assert.ok(!r.calls.some((l) => /report-metadata w1:p9 .*--token effort=/.test(l) && !l.includes('--token effort=high')))

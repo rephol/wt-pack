@@ -4,10 +4,12 @@
 #   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
 #   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
 #                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
-#                                            --model starts claude on that tier (WP-128); --effort sets its effort
-#                                            (WP-137); either missing falls back to the role's routing floor; the
-#                                            final tier/effort actually spawned are written as pane tokens
-#                                            model/effort (WP-143), for reuse-matching and idle retirement
+#                                            --model starts claude on that tier (WP-128), pinned to its explicit
+#                                            model id (WP-158) rather than the bare alias; --effort sets its
+#                                            effort (WP-137); either missing falls back to the role's routing
+#                                            floor; the final tier/effort actually spawned are written as pane
+#                                            tokens model/effort (WP-143, tier not id), for reuse-matching and
+#                                            idle retirement
 #   agents.sh dnd <name|pane> on|off       # set/clear the `dnd` pane token (WP-147): DND agents are skipped by
 #                                            every free-agent pick (wt-handoff candidates(), retireIdle, routines)
 #   agents.sh rm <name|pane> [--force]     # closes the tab
@@ -240,7 +242,9 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
     [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
     [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)
   fi
-  [ -z "$model" ] || set -- "$@" --model "$model"
+  # WP-158: claude --model <tier> lets Claude Code resolve the bare alias to whatever it currently treats as
+  # that tier; pin the explicit model id instead. $model itself stays the tier below (pane token, reuse match).
+  [ -z "$model" ] || set -- "$@" --model "$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" model-id "$model" --cwd "$main" 2>/dev/null || echo "$model")"
   [ -z "$effort" ] || set -- "$@" --effort "$effort"
   # WP-143: record what this pane actually runs (post-floor), so reuse and idle-retirement can match on it.
   herdr pane report-metadata "$pane" --source wt-dashboard ${model:+--token "model=$model"} ${effort:+--token "effort=$effort"} >/dev/null 2>&1 || true
