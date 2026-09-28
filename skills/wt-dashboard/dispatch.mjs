@@ -333,9 +333,9 @@ export class Dispatch {
       // A merge older than the card's latest move is an earlier round (a reopened card), not this one.
       const moved = t.history?.findLast((h) => h.kind === 'move')?.at
       if (moved && Number(ct) * 1000 < Date.parse(moved)) continue
+      // WP-159: tickets.mjs's onDone hook records the routing outcome for every Done transition now (every
+      // path there is, not just this merge-detection one), so there's no separate routeOutcome call to make here.
       await this.tickets.patch(id, { column: 'done', note: `merged in ${sha.slice(0, 7)}` }, { name: 'dispatch' })
-      const ref = routeRef(t)
-      if (ref && !strikes(t)) try { this.deps.routeOutcome?.(ref, 'ok', `merged in ${sha.slice(0, 7)}`) } catch {}
       t.column = 'done'
       this.event(project, 'done', id, `merged in ${sha.slice(0, 7)}`, now)
     }

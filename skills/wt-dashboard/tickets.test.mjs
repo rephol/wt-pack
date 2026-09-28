@@ -313,6 +313,23 @@ test('onDone fires once when a card reaches Done, not on other moves or a no-op 
   assert.deepEqual(done, [['wt-pack', a.id], ['wt-pack', a.id]])
 })
 
+// WP-159: onReopen mirrors onDone — a Done ticket leaving Done, however it left, once per transition.
+test('onReopen fires once when a Done card leaves Done, not on other moves or a no-op re-patch', async () => {
+  const reopened = []
+  const t = new Tickets({ dir: await tmp(), onReopen: (p, x) => reopened.push([p, x.id]) })
+  const a = await t.create('wt-pack', { title: 'x', column: 'building' }, agent)
+  await t.patch(a.id, { column: 'review' }, agent)
+  assert.deepEqual(reopened, []) // never was Done
+  await t.patch(a.id, { column: 'done' }, agent)
+  assert.deepEqual(reopened, [])
+  await t.patch(a.id, { column: 'ready' }, agent)
+  await t.patch(a.id, { column: 'ready' }, agent) // already ready: no-op, no second fire
+  assert.deepEqual(reopened, [['wt-pack', a.id]])
+  await t.patch(a.id, { column: 'done' }, agent)
+  await t.patch(a.id, { column: 'blocked', note: 'x' }, agent) // Done → blocked also counts as reopened
+  assert.deepEqual(reopened, [['wt-pack', a.id], ['wt-pack', a.id]])
+})
+
 test('dispatch settings: default off, stallMin validated', async () => {
   const t = new Tickets({ dir: await tmp() })
   await t.create('wt-pack', { title: 'x' }, user)
@@ -389,4 +406,71 @@ test('list: column and query combine (WP-90)', async () => {
   assert.deepEqual((await t.list('wt-pack', 'ready', 'foo')).tickets.map((x) => x.title), ['foo ready'])
   assert.deepEqual((await t.list('wt-pack', undefined, 'foo')).tickets.map((x) => x.title), ['foo ready', 'foo backlog'])
   assert.equal((await t.list('wt-pack')).tickets.length, 3)
+})
+
+// WP-159: model routing outcomes ('ok' on Done, 'returned' on reopen) recorded automatically, once per ref,
+// through server.mjs's onDone/onReopen — the generic tickets.mjs hook, not just dispatch's own merge-detection.
+test('server: routing outcome recorded once on Done, once on reopen, via model-route.mjs outcome', async () => {
+  const { spawn } = await import('node:child_process')
+  const { readFile: rf } = await import('node:fs/promises')
+  const root = await tmp()
+  await mkdir(join(root, 'data', 'tickets'), { recursive: true })
+  const file = join(root, 'data', 'tickets', 'wt-pack.json')
+  const board = JSON.stringify({ key: 'WP', next: 2, tickets: [{ id: 'WP-1', title: 'x', column: 'building', history: [
+    { at: new Date().toISOString(), author: 'wt-handoff', kind: 'comment', text: 'routing: sonnet (live, jev, ref abc12#0)' },
+  ] }] })
+  await writeFile(file, board)
+  const port = 20000 + Math.floor(Math.random() * 20000)
+  const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname],
+    { env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+  try {
+    await new Promise((res, rej) => {
+      let out = '', err = ''
+      srv.stdout.on('data', (d) => { out += d; if (out.includes('api →')) res() })
+      srv.stderr.on('data', (d) => { err += d })
+      srv.on('exit', (c) => rej(new Error(`server exited (${c}) before listening: ${err.slice(-400)}`)))
+      setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
+    })
+    const token = (await rf(join(root, 'session'), 'utf8')).trim()
+    const call = (method, path, body) => fetch(`http://127.0.0.1:${port}${path}`, { method, body, headers: { cookie: `hd_session=${token}`, 'content-type': 'application/json' } })
+    // A user-session PATCH needs rooms.settings.profile, loaded by the server's own periodic tick (first fires
+    // ~500ms after listening) — not yet true the instant the "listening" line prints. Retry past that window.
+    let res
+    for (let i = 0; i < 20; i++) {
+      // The note (dispatch's #merged uses "merged in <sha>") should end up as the outcome's `why`, not a
+      // generic reason — the move's own note is more useful than "reached done".
+      res = await call('PATCH', '/api/tickets/WP-1', '{"column":"done","note":"merged in abcdef1"}')
+      if (res.status !== 500) break
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    assert.equal(res.status, 200)
+    // onDone/onReopen run after mutate() already returned the response (same fire-and-forget shape as the
+    // existing WP-134 pane-token cleanup), so the marker lands a beat later — poll for it rather than assert
+    // on the immediate PATCH response.
+    const waitFor = async (text) => {
+      for (let i = 0; i < 20; i++) {
+        const t = await (await call('GET', '/api/tickets/WP-1')).json()
+        if (t.history.some((h) => h.text === text)) return t
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      throw new Error(`never saw "${text}"`)
+    }
+    await waitFor('routing-outcome: ok (ref abc12#0)')
+    // re-patching to the same column is a no-op (mutate() short-circuits): no duplicate marker
+    await call('PATCH', '/api/tickets/WP-1', '{"note":"still done"}')
+    await new Promise((r) => setTimeout(r, 500))
+    let t = await (await call('GET', '/api/tickets/WP-1')).json()
+    assert.equal(t.history.filter((h) => h.text === 'routing-outcome: ok (ref abc12#0)').length, 1)
+    await call('PATCH', '/api/tickets/WP-1', '{"column":"building"}') // reopened
+    await waitFor('routing-outcome: returned (ref abc12#0)')
+    // Done again with the SAME ref (no new routing decision) is a real transition — onDone fires again — but
+    // the ref already has an 'ok' outcome recorded, so the guard must not record (or comment) it a second time.
+    await call('PATCH', '/api/tickets/WP-1', '{"column":"done"}')
+    await new Promise((r) => setTimeout(r, 500))
+    const t2 = await (await call('GET', '/api/tickets/WP-1')).json()
+    assert.equal(t2.history.filter((h) => h.text === 'routing-outcome: ok (ref abc12#0)').length, 1)
+    const outcomes = (await rf(join(root, '.local', 'share', 'wt-pack', 'routing-outcomes.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    assert.deepEqual(outcomes.map((o) => [o.run, o.outcome]), [['abc12', 'ok'], ['abc12', 'returned']])
+    assert.equal(outcomes[0].why, 'merged in abcdef1') // the move's own note, not a generic "reached done"
+  } finally { srv.kill() }
 })
