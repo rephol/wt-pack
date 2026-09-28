@@ -3,9 +3,12 @@
 // WP-137: also pick its effort level (low < medium < high < xhigh < max), gated by the global ceiling G. Local rules
 // (tier, lens, read-only) set the base; a tier picked BELOW the default tier (sonnet) may raise effort up to 2
 // levels to compensate, capped at 'high'; an unchanged or upgraded tier never raises. Either way E is clamped to G.
-//   model-route.mjs pick --skill S [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task
+//   model-route.mjs pick --skill S [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--session] [--json] < task
 //       live: prints the tier; off/shadow: prints nothing (--json: always the decision incl. effort, plus "run#i").
-//       Exit 0 always.
+//       Exit 0 always. --session (WP-157): this pick decides a fresh SESSION's own tier (e.g. wt-handoff
+//       spawning an agent), not a subagent's — never lands below the session floor (see `floor` below),
+//       whatever picked it. wt-review/wt-research's lens/shard picks never pass this, so they may still land
+//       on haiku.
 //   model-route.mjs explain …same flags… < task   the whole decision as JSON
 //   model-route.mjs floor --role R [--model M] [--cwd DIR] [--json]   live: the role's floor tier (planner →
 //       opus, every other role → sonnet, WP-157: a session never spawns on haiku with no explicit tier) and
@@ -281,16 +284,21 @@ function logDecision(d) {
 }
 
 // The decision. `apply` is the tier to use (live only) or null.
-export async function route({ skill = '', role = '', lens = '', model = '', description = '', task = '', cwd = process.cwd(), env = process.env, fetchImpl, timeoutMs, log = true } = {}) {
+// `session`: WP-157 — this call decides a SESSION's own tier (a fresh agent spawn, e.g. wt-handoff), not a
+// subagent's. Never lands below cfg.sessionFloor regardless of what picked it — explicit, pinned, local or
+// Jev. Subagent routing (wt-review/wt-research's lens/shard picks) never passes this, so it stays unaffected.
+export async function route({ skill = '', role = '', lens = '', model = '', description = '', task = '', cwd = process.cwd(), env = process.env, fetchImpl, timeoutMs, log = true, session = false } = {}) {
   let cfg
   try { cfg = loadConfig({ cwd, env }) } catch { cfg = { ...DEFAULTS, from: 'default' } }
   // Global off is the kill switch: a per-skill mode never overrides it.
   const mode = cfg.mode !== 'off' && MODES.includes(cfg.skills?.[skill]?.mode) ? cfg.skills[skill].mode : cfg.mode
   if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from }
   const state = buildState({ skill, role, lens, description, task })
+  const sessionFloor = session && isTier(cfg.sessionFloor) ? cfg.sessionFloor : null
   if (model) {
-    const effort = computeEffort(model, state, effortCeiling(cfg, model).effort)
-    return { mode, apply: null, tier: model, effort, source: 'explicit', from: cfg.from, applyEffort: mode === 'live' ? effort : null }
+    const tier = sessionFloor ? max(sessionFloor, model) : model
+    const effort = computeEffort(tier, state, effortCeiling(cfg, tier).effort)
+    return { mode, apply: null, tier, effort, source: tier === model ? 'explicit' : 'explicit+session-floor', from: cfg.from, applyEffort: mode === 'live' ? effort : null }
   }
   let d
   const pin = cfg.skills?.[skill]?.pin
@@ -301,6 +309,7 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   }
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
+  if (sessionFloor && rank(sessionFloor) > rank(d.tier)) d = { ...d, tier: sessionFloor, source: `${d.source}+session-floor` }
   const ceiling = effortCeiling(cfg, d.tier)
   const effort = computeEffort(d.tier, state, ceiling.effort, d.jevEffort)
   const out = { ...d, effort, mode, from: cfg.from, effortFrom: ceiling.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
@@ -365,10 +374,10 @@ async function main() {
     else if (live) console.log(t)
     return
   }
-  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json] | model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
+  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--session] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json] | model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
-  const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log') })
+  const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log'), session: a.includes('--session') })
   if (cmd === 'explain') { const { state, ...rest } = d; console.log(JSON.stringify({ ...rest, state })); return }
   if (a.includes('--json')) console.log(JSON.stringify({ tier: d.tier ?? null, apply: d.apply, effort: d.effort ?? null, applyEffort: d.applyEffort ?? null, mode: d.mode, source: d.source, ref: d.run ? `${d.run}#0` : null }))
   else if (d.apply) console.log(d.apply)

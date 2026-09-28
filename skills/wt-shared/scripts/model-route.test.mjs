@@ -362,6 +362,31 @@ test('WP-157: subagent routing (pick/explain) is unaffected — it may still cho
   assert.equal(d.tier, 'haiku'); assert.equal(d.apply, 'haiku')
 })
 
+test('WP-157: session: true (wt-handoff spawning a fresh agent) floors a Jev haiku pick to sonnet', async () => {
+  // Without --session, a mechanical task genuinely picks haiku live (this is the bug wt-handoff hit: it used
+  // plain `pick`, which is shaped for subagent routing, to decide its OWN session's tier).
+  const plain = await route({ skill: 'wt-handoff', role: 'worker', task: 'rename a variable', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('haiku', 0.99, 'low') })
+  assert.equal(plain.tier, 'haiku'); assert.equal(plain.apply, 'haiku')
+  // With session: true, the same Jev haiku pick is raised to sonnet, source records both steps, and effort
+  // is Jev's own task-effort answer (unaffected by the tier bump, WP-139) clamped to sonnet's own ceiling.
+  const s = await route({ skill: 'wt-handoff', role: 'worker', task: 'rename a variable', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('haiku', 0.99, 'low'), session: true })
+  assert.equal(s.tier, 'sonnet'); assert.equal(s.apply, 'sonnet'); assert.equal(s.source, 'jev+session-floor')
+  // An explicit --model (e.g. a dispatch escalation) passed with session: true is floored too, never left at haiku.
+  const explicit = await route({ skill: 'wt-handoff', role: 'worker', model: 'haiku', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, session: true })
+  assert.equal(explicit.tier, 'sonnet'); assert.equal(explicit.source, 'explicit+session-floor')
+  // session: true never lowers an already-adequate pick (distinct state so it doesn't hit an earlier test's cache).
+  const already = await route({ skill: 'wt-handoff', role: 'worker', task: 'design a new auth flow', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99), session: true })
+  assert.equal(already.tier, 'opus')
+})
+
+test('CLI: pick --session floors a haiku pick to sonnet; plain pick (subagent shape) is unaffected', () => {
+  const run = (args, env) => execFileSync(process.execPath, [cli, ...args], { input: 'rename a variable', encoding: 'utf8', env: { ...process.env, ...env } })
+  const plain = JSON.parse(run(['pick', '--json', '--skill', 'wt-handoff', '--role', 'worker', '--cwd', repo], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(plain.tier, 'haiku')
+  const session = JSON.parse(run(['pick', '--json', '--skill', 'wt-handoff', '--role', 'worker', '--session', '--cwd', repo], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(session.tier, 'sonnet'); assert.equal(session.apply, 'sonnet')
+})
+
 test('global off beats a per-skill live mode (kill switch)', async () => {
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ skills: { 'wt-work': { mode: 'live' } } }))
   assert.equal((await route({ skill: 'wt-work', task: 'list files', env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).mode, 'off')
