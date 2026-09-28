@@ -215,8 +215,8 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
   const density = useChatDensity()
   const [confirm, setConfirm] = useState<string | null>(null)
   const { atts, attErr, addFiles: addAtts, removeAtt, clear: clearAtts, uploading } = useAttachments(null)
-  // Each added image leaves a [image:…] chip at the caret (as the @ menu inserts chips; insertToken emits no change,
-  // so an input event syncs the draft). Deleting a chip drops its image.
+  // Each added file leaves a [attachment:…] chip at the caret (as the @ menu inserts chips; insertToken emits no
+  // change, so an input event syncs the draft). Deleting a chip drops its attachment.
   const addFiles = (files: File[]) => {
     const h = inputRef.current, el = rootRef.current?.querySelector('[aria-label="Message input"]') as HTMLElement | null
     const added = addAtts(files)
