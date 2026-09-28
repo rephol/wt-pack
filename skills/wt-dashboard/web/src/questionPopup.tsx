@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { BottomSheet } from '@astryxdesign/core/BottomSheet'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -99,18 +100,33 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
 export function QuestionPopup({ target, onClose, onDone }: { target: PopupTarget; onClose: () => void; onDone: () => void }) {
   const phone = useNarrow()
   const label = target.kind === 'ask' ? `${target.ask.agent} asks` : 'Question'
-  const body = (
-    <VStack gap={3}>
-      {/* BottomSheet's drag handle overlays the top ~24px of its content (not in normal flow, like
-          SelectorBottomSheet's own paddingBlockStart) — this row must clear it or its clicks are eaten. */}
-      <HStack justify="end" style={phone ? { paddingTop: 20 } : undefined}>
-        <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
-      </HStack>
-      {target.kind === 'ask'
-        ? <AskCard ask={target.ask} onClose={onClose} onAnswered={onDone} />
-        : <PickerCard agent={target.agent} picker={target.picker} onSent={onDone} />}
-    </VStack>
+  const card = target.kind === 'ask'
+    ? <AskCard ask={target.ask} onClose={onClose} onAnswered={onDone} />
+    : <PickerCard agent={target.agent} picker={target.picker} onSent={onDone} />
+  if (phone) return (
+    <BottomSheet label={label} isOpen onOpenChange={(o) => !o && onClose()} height="hug">
+      {/* Sheet sizes to content (BottomSheet's 'hug', capped at 92vh by the library); the 16px side gutter
+          matches rooms.tsx's own BottomSheet content (rooms.tsx:400). */}
+      <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '85dvh', minWidth: 0 }}>
+        {/* The handle overlays the top ~24px of content (rooms.tsx has none, so it needs no clearance) —
+            this row must clear it or its clicks are eaten. */}
+        <HStack justify="end" style={{ paddingTop: 20, paddingInline: 16, flexShrink: 0 }}>
+          <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
+        </HStack>
+        <ScrollableArea label={label} style={{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
+          {card}
+        </ScrollableArea>
+      </div>
+    </BottomSheet>
   )
-  if (phone) return <BottomSheet label={label} isOpen onOpenChange={(o) => !o && onClose()} height="tall">{body}</BottomSheet>
-  return <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={480} padding={4}>{body}</Dialog>
+  return (
+    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={480} padding={4}>
+      <VStack gap={3}>
+        <HStack justify="end">
+          <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
+        </HStack>
+        {card}
+      </VStack>
+    </Dialog>
+  )
 }
