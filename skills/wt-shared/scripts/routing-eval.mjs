@@ -130,4 +130,4 @@ export async function main(argv) {
   } catch {}
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2))
+if (process.argv[1] === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).catch((err) => { console.error(err); process.exitCode = 1 })
