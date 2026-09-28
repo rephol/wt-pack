@@ -14,6 +14,7 @@ writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
   "agent list") cat "${tmp}/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
   "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
+  *) echo '{"result":{}}' ;;
 esac\n`)
 chmodSync(join(bin, 'herdr'), 0o755)
 execFileSync('git', ['-C', repo, 'init', '-q'])
@@ -48,5 +49,18 @@ test('WP-128: shadow logs a routing line and changes nothing; live spawns a fres
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8',
     env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' } })
   assert.match(out, /would spawn a reviewer in \S+ with --model haiku/) // a reused agent can't switch model without a picker
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-129: routing sees --skill, or "wt-handoff" by default, never a word scraped from the task', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-reviewer-01', pane_id: 'wR:p1', tab_id: 't2', agent_status: 'idle', workspace_id: 'wR', cwd: repo }] } }))
+  const judgeLog = join(tmp, '.claude', 'wt-judge-log.jsonl')
+  run(['--role', 'reviewer', '--no-goal', repo], 'wt-dashboard sent this: review it')
+  let entries = readFileSync(judgeLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.equal(entries.at(-1).item.skill, 'wt-handoff')
+  run(['--role', 'reviewer', '--skill', 'wt-watch-prs', '--no-goal', repo], 'review it')
+  entries = readFileSync(judgeLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.equal(entries.at(-1).item.skill, 'wt-watch-prs')
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
