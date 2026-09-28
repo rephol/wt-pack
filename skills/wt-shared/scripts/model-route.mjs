@@ -20,7 +20,6 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { judge, choice, runId } from './typesafe.mjs'
-import { UsageAgg } from '../../wt-dashboard/usage.mjs'
 
 export const TIERS = ['haiku', 'sonnet', 'opus']
 const rank = (t) => TIERS.indexOf(t)
@@ -191,7 +190,9 @@ export function outcome(runi, what, why = '') {
 }
 
 // Tokens/notional cost by model, split session vs subagent — the dashboard-free equivalent of Settings › Usage.
+// Dynamic import: wt-shared must keep working (pick/explain/floor/outcome) even where wt-dashboard isn't checked out.
 async function usageReport(days) {
+  const { UsageAgg } = await import('../../wt-dashboard/usage.mjs')
   const agg = new UsageAgg({ keepMs: days * 86400_000 })
   await agg.refresh(join(home(), '.claude', 'projects'))
   const s = agg.summary(Date.now() - days * 86400_000, (r) => `${r.model} · ${r.kind}`)
@@ -204,7 +205,7 @@ async function main() {
   const [cmd, ...a] = process.argv.slice(2)
   const opt = (n) => { const i = a.indexOf(`--${n}`); return i >= 0 ? a[i + 1] ?? '' : '' }
   if (cmd === 'outcome') { outcome(a[0], a[1], a[2]); return }
-  if (cmd === 'usage') { await usageReport(Number(opt('days')) || 7); return }
+  if (cmd === 'usage') { const days = Number(opt('days')); await usageReport(Number.isFinite(days) && days > 0 ? days : 7); return }
   if (cmd === 'floor') {
     const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
     const t = cfg.roleFloors?.[opt('role')]
