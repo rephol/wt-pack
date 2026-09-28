@@ -1,6 +1,6 @@
 // Pure gate for native notifications of inbox items: per-kind toggle, never for quiet (baseline) items,
 // suppressed while the user is looking at that agent (side panel or an open dock window), once per item key, ~1 per target per 30s.
-export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation'] as const
+export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth'] as const
 export type Kind = (typeof KINDS)[number]
 export interface InboxItem {
   id: string; ts: string; kind: Kind; key: string; title: string; body: string; read: boolean; resolvedAt: string | null; quiet?: boolean

@@ -1335,13 +1335,16 @@ export function jevState({ health, models, hasKey }) {
 }
 const jevGet = (path, key) => fetch(`https://api.typesafe.ai${path}`, { headers: key ? { authorization: `Bearer ${key}` } : {}, signal: AbortSignal.timeout(4000) })
   .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }), () => null)
+// The log can reach ~10 MB: shared by everything that reads it on a timer (the tick loop, the health
+// summary) rather than on demand (Observability's own request, which wants the current file).
+const cachedCalls = () => cached('jev-calls-raw', 15_000, () => readCalls())
 const jev = async () => ({
   ...(await cached('jev', 60_000, async () => {
     const key = cfg.get('TYPESAFE_API_KEY')
     const [h, m] = await Promise.all([jevGet('/health'), key ? jevGet('/v1/models', key) : null])
     return { ...jevState({ health: h, models: m, hasKey: Boolean(key) }), at: new Date().toISOString() }
   })),
-  calls: await cached('jev-calls', 60_000, async () => healthSummary(await readCalls())), // the log can reach ~10 MB
+  calls: await cached('jev-calls', 60_000, async () => healthSummary(await cachedCalls())),
 })
 
 // WP-81: a checkout's server rebuilds web/dist itself when web/src is newer (a merge never ran the build).
@@ -1559,7 +1562,7 @@ async function usageAlerts() {
 // WP-136: a 401/403 means the Jev key itself is rejected — not an ordinary fail-open — so it gets one Inbox
 // item per day per feature rather than silently degrading every routing/triage call in that window.
 async function jevAuthAlerts() {
-  const errs = authErrors(await readCalls())
+  const errs = authErrors(await cachedCalls())
   const day = new Date().toISOString().slice(0, 10)
   for (const feature of new Set(errs.map((e) => e.feature))) {
     const key = `jev-auth|${feature}|${day}`
