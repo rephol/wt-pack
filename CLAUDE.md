@@ -85,3 +85,21 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   the flag) and `skills/wt-handoff/scripts/handoff.test.mjs` (the shadow-log and reuse-vs-spawn tests now assert
   the floored sonnet/low tier for a read-only task). A completeness check for "who else calls the thing I just
   changed" must search for every shape that reaches the same router, not just its own name.
+- A mode gate (live/shadow/off) exists to hold back a *judgment* until it's trusted — it protects the caller
+  from a probabilistic or unproven decision taking uncontrolled effect. A fixed, non-probabilistic computation
+  living in the same file or CLI as that judgment does not inherit the same reason to be gated, and defaulting
+  it to the judgment's gate anyway is a bug, not a conservative default. WP-160: `model-route.mjs floor` — a
+  deterministic lookup of a role's minimum spawn tier from `cfg.sessionFloor`/`cfg.roleFloors`, no Jev call
+  involved — was gated on `cfg.mode === 'live'`, copying the exact gate that correctly protects `pick`/
+  `explain`'s Jev-routed, potentially-wrong tier choice from taking effect before it's trusted. `floor` has no
+  such trust concern (a spawn has no task text to route in the first place, so there's nothing "unproven" to
+  hold back), so the copied gate silently produced the opposite of its own stated invariant — a spawn with no
+  explicit `--model` got NO `--model` flag at all in shadow (the default mode) or off, so Claude Code's own
+  default applied, which can be haiku. This survived WP-157's own fix (which added the floor in the first
+  place) and its follow-up (WP-157's handoff.sh gap) because both rounds' reviews checked "does the floor
+  reach every caller," never "does the floor's own gating make sense for what it computes." Fixed by removing
+  the mode gate from `floor` specifically (`skills/wt-shared/scripts/model-route.mjs`'s `cmd === 'floor'`
+  branch) while leaving `pick`/`explain`/`route()` untouched — they still gate on `live`, correctly, because
+  they DO carry a Jev judgment. Enforced by `skills/wt-shared/scripts/model-route.test.mjs` ("floor never
+  spawns a role on haiku, in any mode") and `skills/wt-agents/scripts/spawn-env.test.mjs` (`--model`/`--effort`/
+  pane tokens all asserted present in shadow and off, not just live).
