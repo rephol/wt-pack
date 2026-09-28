@@ -143,11 +143,13 @@ say why, give each option its real cost. If research has already made an option 
 **A reachable user is not "no synchronous user."** A `<room-message room=<slug> …>` you are answering, or a
 `<wt-message kind=dispatch|handoff …>` whose own reply instructions name a room (`post a one-line result in
 #<slug>`) or an orchestrator pane, both have a human on the other end — the dashboard's chat page or the
-terminal that started them. **Post the user-owned questions there** (`room post <slug> "…"` — see the wt-room
-skill for the reply convention), one message per question, each with a recommendation and why; **end the turn**
-and resume when the answer arrives, the same as any other room delivery. Do not read "goal-driven" or
-"dispatched" alone as headless — a dispatch is still someone's request, relayed, not authored by nobody. Say so
-in the plan when you resume ("<user/room> chose X over Y, because Z").
+terminal that started them. **Post the user-owned questions there**, one message per question, each with a
+recommendation and why: `room post <slug> "…"` for the room case (see the wt-room skill for the reply
+convention), or `handoff.sh --reply <pane> "…"` for the pane case (see the wt-handoff skill) — use whichever
+channel the request actually named, never `room post` for a pane with no slug. **End the turn** and resume when
+the answer arrives, the same as any other delivery. Do not read "goal-driven" or "dispatched" alone as headless
+— a dispatch is still someone's request, relayed, not authored by nobody. Say so in the plan when you resume
+("<user/room/orchestrator> chose X over Y, because Z").
 
 **No synchronous user** applies only when neither is true: a routine, a scheduled trigger, or any run whose
 prompt carries no room and no reply channel to a person. There, do not block — state the assumption you are
