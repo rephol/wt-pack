@@ -318,11 +318,13 @@ fi
 # --model to get on it.
 # WP-137: route_effort rides the same live-only gate as route_tier (an escalated tier still gets its own computed
 # effort, not the escalation's — the escalation is a tier override only).
+# WP-157: --session — this pick decides a fresh SESSION's own tier (a handoff spawn), so it never lands below
+# the session floor (sonnet), unlike a subagent pick (wt-review/wt-research), which may still choose haiku.
 route_tier=; route_effort=; route_line=
 if [ "$mode" != pane ]; then
   esc=$( [ -n "$local_ticket" ] && [ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null \
     | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
-  r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
+  r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" --session \
     ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
   rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
   [ "$rmode" = live ] || esc= # an escalation applies only while routing is live
