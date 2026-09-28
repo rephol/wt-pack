@@ -19,7 +19,7 @@ import { fmtTok, fmtUsd } from './usage'
 type Stat = { feature: string; calls: number; cacheHits: number; failOpen: number; authError: number; picked: number; errorRate: number; timeoutRate: number; p50ms: number | null; p95ms: number | null }
 type Call = { ts: string; feature: string; outcome: 'picked' | 'not' | 'failopen' | 'auth_error'; p: number | null; ms: number; cache: boolean; err: string | null; in: string; snippet?: string }
 type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: string; message: string } | null }
-type Route = { skill: string; tier: string; picks: number; applied: number; sendBack: number; returned: number; escalated: number; ok: number }
+type Route = { skill: string; tier: string; effort: string | null; picks: number; applied: number; sendBack: number; returned: number; escalated: number; ok: number }
 type Savings = { tokens: number; cost: number; priced: boolean; n: number }
 interface Obs { stats: Record<'24h' | '7d', Stat[]>; recent: Call[]; features: string[]; sources: Record<string, Source>; routing?: Route[]; routingSavings?: Savings }
 
@@ -31,7 +31,7 @@ const time = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'sh
 const box = { overflowX: 'auto', maxWidth: '100%' } as const
 const STAT_COLS = ['Feature', 'Calls', 'Cache', 'Fail-open', 'Auth errors', 'Picked', 'Errors', 'Timeouts', 'p50', 'p95']
 const RECENT_COLS = ['Time', 'Feature', 'Outcome', 'p', 'ms', 'Error', 'Input']
-const ROUTE_COLS = ['Skill', 'Tier', 'Picks', 'Applied', 'Send-backs', 'Returns', 'Escalations', 'Merged']
+const ROUTE_COLS = ['Skill', 'Tier', 'Effort', 'Picks', 'Applied', 'Send-backs', 'Returns', 'Escalations', 'Merged']
 const cell = { padding: '4px 8px', textAlign: 'start', whiteSpace: 'nowrap', fontSize: 13 } as const
 
 export function ObservabilitySection() {
@@ -90,7 +90,7 @@ function Integrations() {
               <thead><tr>{ROUTE_COLS.map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
               <tbody>{q.data.routing.map((r) => (
                 <tr key={`${r.skill}|${r.tier}`}>
-                  <td style={cell}><code>{r.skill}</code></td><td style={cell}>{r.tier}</td><td style={cell}>{r.picks}</td><td style={cell}>{r.applied}</td>
+                  <td style={cell}><code>{r.skill}</code></td><td style={cell}>{r.tier}</td><td style={cell}>{r.effort ?? '-'}</td><td style={cell}>{r.picks}</td><td style={cell}>{r.applied}</td>
                   <td style={cell}>{r.sendBack}</td><td style={cell}>{r.returned}</td><td style={cell}>{r.escalated}</td><td style={cell}>{r.ok}</td>
                 </tr>
               ))}</tbody>

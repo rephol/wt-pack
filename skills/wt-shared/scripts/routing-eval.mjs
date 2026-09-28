@@ -27,13 +27,15 @@ export function load({ sinceDays = 7, now = Date.now() } = {}) {
     .map((e) => ({ ...e.item, p: e.p, run: e.run, state: e.state, outcomes: outs.get(e.run) ?? [] }))
 }
 
-// Per skill×tier: picks, applied (live), send-backs, returns, escalations, ok.
+// Per skill×tier: picks, applied (live), send-backs, returns, escalations, ok. `effort` (WP-137) is the most
+// recent E seen for that skill×tier — deterministic given tier and signals, so it rarely varies within a group.
 export function report(ds) {
   const rows = new Map()
   for (const d of ds) {
     const k = `${d.skill || d.role || '-'}|${d.tier}`
-    const r = rows.get(k) ?? { skill: d.skill || d.role || '-', tier: d.tier, picks: 0, applied: 0, sendBack: 0, returned: 0, escalated: 0, ok: 0 }
+    const r = rows.get(k) ?? { skill: d.skill || d.role || '-', tier: d.tier, effort: null, picks: 0, applied: 0, sendBack: 0, returned: 0, escalated: 0, ok: 0 }
     r.picks++; if (d.mode === 'live') r.applied++
+    if (d.effort) r.effort = d.effort
     for (const o of d.outcomes) if (o === 'send-back') r.sendBack++; else if (o === 'returned') r.returned++; else if (o === 'escalated') r.escalated++; else if (o === 'ok') r.ok++
     rows.set(k, r)
   }
@@ -110,8 +112,8 @@ export async function main(argv) {
   // line in the report — it means routing silently defaulted to sonnet for the whole window.
   const failOpen = ds.filter((d) => d.source === 'jev-failopen').length
   if (failOpen) console.log(`${failOpen} decision(s) fell back to sonnet (Jev unavailable) — excluded from tuning`)
-  console.log('skill\ttier\tpicks\tapplied\tsend-back\treturned\tescalated\tok')
-  for (const r of rows) console.log([r.skill, r.tier, r.picks, r.applied, r.sendBack, r.returned, r.escalated, r.ok].join('\t'))
+  console.log('skill\ttier\teffort\tpicks\tapplied\tsend-back\treturned\tescalated\tok')
+  for (const r of rows) console.log([r.skill, r.tier, r.effort ?? '-', r.picks, r.applied, r.sendBack, r.returned, r.escalated, r.ok].join('\t'))
   const cfg = loadConfig({ cwd: process.cwd() })
   const { thresholds, changes } = tune(ds, cfg)
   for (const c of changes) console.log(`threshold ${c.tier}: ${c.from} → ${c.to} (n=${c.n}, bad=${c.bad})`)

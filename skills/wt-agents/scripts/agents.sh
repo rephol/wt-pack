@@ -2,8 +2,10 @@
 # Manage the named agent pools this pack hands work to.
 #
 #   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
-#   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] # -> prints "<name> <pane>"; --mcp adds
-#                                            servers from mcp/catalog.json; --model starts claude on that tier (WP-128)
+#   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
+#                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
+#                                            --model starts claude on that tier (WP-128); --effort sets its effort
+#                                            (WP-137); either missing falls back to the role's routing floor
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #   agents.sh respawn <name|pane>|--stale [--force] # new tab (current PATH shims + plugin guard), same name, role,
 #                                            cwd, tokens and claude session; --stale: every pool agent lacking either
@@ -85,17 +87,19 @@ list)
 spawn|mcp-args|mcp-file)
   # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
   # --label/--resume are respawn's (WP-125): keep the old name, resume its claude session.
-  extra=; model=; fixed=; resume=; n=$#
+  extra=; model=; effort=; fixed=; resume=; n=$#
   while [ "$n" -gt 0 ]; do
     a=$1; shift; n=$((n - 1))
     if [ "$a" = --mcp ]; then extra=$1; shift; n=$((n - 1))
     elif [ "$a" = --model ]; then model=$1; shift; n=$((n - 1))
+    elif [ "$a" = --effort ]; then effort=$1; shift; n=$((n - 1))
     elif [ "$a" = --label ]; then fixed=$1; shift; n=$((n - 1))
     elif [ "$a" = --resume ]; then resume=$1; shift; n=$((n - 1))
     else set -- "$@" "$a"; fi
   done
   role=${1:?role required, e.g. worker|planner}
   case "$model" in ''|haiku|sonnet|opus) ;; *) echo "--model: haiku, sonnet or opus" >&2; exit 2 ;; esac
+  case "$effort" in ''|low|medium|high|xhigh|max) ;; *) echo "--effort: low, medium, high, xhigh or max" >&2; exit 2 ;; esac
   # Check --mcp names before anything is created.
   dir=$(cd "$(dirname "$0")/.." && pwd)/mcp
   if [ -n "$extra" ]; then
@@ -217,9 +221,17 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   set -- --name "$label"
   [ -z "$resume" ] || set -- "$@" --resume "$resume"
   if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
-  # WP-128: an explicit tier wins; else only the role floor, and only in live routing (spawn has no task to route).
-  [ -n "$model" ] || model=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" --cwd "$main" 2>/dev/null || true)
+  # WP-128/137: an explicit tier/effort wins; else the role floor and its effort, only in live routing (spawn has
+  # no task to route).
+  if [ -z "$model" ] || [ -z "$effort" ]; then
+    # --model here (when the caller already gave one) is passed through so floor computes effort for the
+    # tier actually being spawned, not the role's own floor tier when the two diverge.
+    floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} --cwd "$main" --json 2>/dev/null || true)
+    [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
+    [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)
+  fi
   [ -z "$model" ] || set -- "$@" --model "$model"
+  [ -z "$effort" ] || set -- "$@" --effort "$effort"
   while ! herdr agent start "$label" --kind claude --pane "$pane" -- "$@" >/dev/null 2>&1; do
     n=$((n + 1))
     [ "$n" -ge 3 ] && { echo "claude did not come up in $label (pane $pane)" >&2; exit 1; }

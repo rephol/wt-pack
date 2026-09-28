@@ -15,7 +15,7 @@ process.env.WT_DASHBOARD_DATA = join(tmp, 'dash')
 process.env.WT_DASHBOARD_ENV = join(tmp, 'none.env')
 process.env.WT_JEV_LOG = join(tmp, 'jev.jsonl')
 delete process.env.WT_MODEL_ROUTING
-const { buildState, localDecide, applyFloors, loadConfig, route, outcome, DEFAULTS, paths } = await import('./model-route.mjs')
+const { buildState, localDecide, applyFloors, computeEffort, loadConfig, route, outcome, DEFAULTS, paths } = await import('./model-route.mjs')
 const repo = join(tmp, 'repo'); mkdirSync(repo); execFileSync('git', ['-C', repo, 'init', '-q'])
 const cli = join(import.meta.dirname, 'model-route.mjs')
 
@@ -45,6 +45,11 @@ test('explicit model wins; pin beats Jev but not a floor; kill switch', async ()
   const env = { WT_MODEL_ROUTING: 'live' }
   assert.equal((await route({ model: 'opus', task: TASK, env, cwd: repo })).apply, null)
   assert.equal((await route({ model: 'opus', task: TASK, env, cwd: repo })).source, 'explicit')
+  // WP-137: an explicit model still gets its own computed effort (an escalation overrides the tier, not E).
+  const exp = await route({ model: 'haiku', task: TASK, env, cwd: repo })
+  assert.equal(exp.effort, 'high'); assert.equal(exp.applyEffort, 'high') // downgrade from sonnet, capped
+  const shadowExp = await route({ model: 'haiku', task: TASK, env: { WT_MODEL_ROUTING: 'shadow' }, cwd: repo })
+  assert.equal(shadowExp.effort, 'high'); assert.equal(shadowExp.applyEffort, null)
   mkdirSync(join(repo, '.wt-pack'), { recursive: true })
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ skills: { 'wt-work': { pin: 'haiku' } } }))
   calls = 0
@@ -69,6 +74,16 @@ test('Jev thresholds, durable cache (no second fetch), shadow applies nothing', 
   assert.equal(s.mode, 'shadow'); assert.equal(s.apply, null); assert.equal(s.tier, 'haiku')
   const log = readFileSync(paths().log, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   assert.ok(log.every((e) => e.cmd === 'routing')); assert.ok(log.some((e) => e.item.mode === 'shadow'))
+})
+
+// WP-137: effort is computed from the FLOORED tier, not Jev's pre-floor pick — a security floor raising
+// haiku to sonnet must not also carry haiku's downgrade-compensation raise.
+test('WP-137: effort follows the floor-raised tier, not the pre-floor pick', async () => {
+  const env = { WT_MODEL_ROUTING: 'live' }
+  const secTask = 'edit the session cookie auth token handling in the backend'
+  const d = await route({ skill: 'c', task: secTask, env, cwd: repo, fetchImpl: jev('haiku', 0.99) })
+  assert.equal(d.tier, 'sonnet'); assert.equal(d.source, 'jev+floor')
+  assert.equal(d.effort, 'medium') // sonnet's own base, no downgrade-raise from the pre-floor haiku pick
 })
 
 test('a timeout falls back to sonnet within 1.5 s', async () => {
@@ -169,6 +184,58 @@ test('CLI: usage prints tokens/cost by model, split session vs subagent, over --
   assert.match(out, /claude-haiku-4-5 · subagent\t100\t/)
   // invalid --days (0, negative, non-numeric) falls back to 7, not a zero/negative keep window
   for (const bad of ['0', '-3', 'nope']) assert.match(execFileSync(process.execPath, [cli, 'usage', '--days', bad], { encoding: 'utf8' }), /^usage, last 7d: 200 tokens/)
+})
+
+// WP-137: E = min(base [+2 if downgraded below sonnet, capped 'high'], G). Clamp table.
+test('WP-137: effort clamp table — downgrade raise, no raise on upgrade/unchanged, always ≤ G', () => {
+  const rw = buildState({ task: 'read the files' }) // reads, not edits: base drops one step
+  const edit = buildState({ task: TASK }) // edits
+  assert.equal(computeEffort('haiku', edit, 'max'), 'high') // downgrade from sonnet: low +2 = high
+  assert.equal(computeEffort('sonnet', edit, 'max'), 'medium') // unchanged: base, no raise
+  assert.equal(computeEffort('opus', edit, 'max'), 'high') // upgrade: base, no raise
+  assert.equal(computeEffort('haiku', edit, 'medium'), 'medium') // downgrade raise clamped to G
+  assert.equal(computeEffort('opus', edit, 'low'), 'low') // base itself clamped to G
+  assert.equal(computeEffort('haiku', rw, 'max'), 'high') // read-only lowers base (low → nothing lower), then +2
+  assert.equal(computeEffort('sonnet', rw, 'max'), 'low') // read-only lowers sonnet's base a step
+  assert.equal(computeEffort('sonnet', edit, undefined), 'medium') // no G override: falls back to the default ceiling
+})
+
+test('WT_EFFORT config precedence and route() carries effort/applyEffort', async () => {
+  assert.equal(loadConfig({ cwd: repo, env: {} }).effort, 'high') // default G
+  writeFileSync(paths().user, JSON.stringify({ mode: 'off', effort: 'low' }))
+  let c = loadConfig({ cwd: repo, env: {} }); assert.equal(c.effort, 'low'); assert.equal(c.effortFrom, 'user')
+  mkdirSync(join(tmp, 'dash', 'data'), { recursive: true })
+  const db2 = new DatabaseSync(join(tmp, 'dash', 'data', 'wt.db'))
+  try { db2.exec("INSERT INTO project_settings VALUES ('repo', 'WT_EFFORT', 'xhigh')") } catch { db2.exec("CREATE TABLE project_settings (project TEXT, key TEXT, value TEXT); INSERT INTO project_settings VALUES ('repo', 'WT_EFFORT', 'xhigh')") }
+  db2.close()
+  c = loadConfig({ cwd: repo, env: {} }); assert.equal(c.effort, 'xhigh'); assert.equal(c.effortFrom, 'project')
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ effort: 'medium' }))
+  c = loadConfig({ cwd: repo, env: {} }); assert.equal(c.effort, 'medium'); assert.equal(c.effortFrom, 'repo')
+  c = loadConfig({ cwd: repo, env: { WT_EFFORT: 'low' } }); assert.equal(c.effort, 'low'); assert.equal(c.effortFrom, 'env')
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
+  writeFileSync(paths().user, JSON.stringify({ mode: 'shadow' }))
+
+  const d = await route({ skill: 'a', task: TASK, env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99) })
+  assert.equal(d.effort, 'high'); assert.equal(d.applyEffort, 'high')
+  const shadow = await route({ skill: 'a', task: TASK, env: { WT_MODEL_ROUTING: 'shadow' }, cwd: repo, fetchImpl: jev('opus', 0.99) })
+  assert.equal(shadow.effort, 'high'); assert.equal(shadow.applyEffort, null) // computed but not applied outside live
+})
+
+test('CLI: pick --json and floor --json carry effort', () => {
+  const run = (args, env) => execFileSync(process.execPath, [cli, ...args], { input: 'list the files', encoding: 'utf8', env: { ...process.env, ...env } })
+  const j = JSON.parse(run(['pick', '--json', '--skill', 'x', '--cwd', repo], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(j.tier, 'haiku'); assert.equal(j.effort, 'high'); assert.equal(j.applyEffort, 'high') // downgrade from sonnet raises to the 'high' cap
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { planner: 'opus' } }))
+  const f = JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(f.tier, 'opus'); assert.equal(f.effort, 'high')
+  // plain-text (no --json): unchanged from pre-WP-137 — just the bare floor tier, live only
+  assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'live' }).trim(), 'opus')
+  assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'shadow' }).trim(), '')
+  // --model: effort for the caller's actual tier, not the role's own floor tier when they diverge; the
+  // printed/`tier` floor itself is unaffected
+  const div = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium') // sonnet's own base, not opus's
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
 })
 
 test('global off beats a per-skill live mode (kill switch)', async () => {

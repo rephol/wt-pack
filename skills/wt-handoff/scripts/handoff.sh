@@ -299,7 +299,9 @@ task=$(printf '%.80s' "$task")
 # WP-128 model routing (wt-shared/scripts/model-route.mjs; shadow by default = logged, nothing applied). A ticket
 # escalated by dispatch ("routing: escalate opus" in its history) is an explicit tier. A reused agent cannot change
 # model without an interactive picker, so an applied tier always spawns a fresh agent with --model.
-route_tier=; route_line=
+# WP-137: route_effort rides the same live-only gate as route_tier (an escalated tier still gets its own computed
+# effort, not the escalation's — the escalation is a tier override only).
+route_tier=; route_effort=; route_line=
 if [ "$mode" != pane ]; then
   esc=$( [ -n "$local_ticket" ] && [ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null \
     | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
@@ -308,6 +310,7 @@ if [ "$mode" != pane ]; then
   rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
   [ "$rmode" = live ] || esc= # an escalation applies only while routing is live
   route_tier=${esc:-$(printf '%s' "$r" | jq -r '.apply // empty' 2>/dev/null || true)}
+  [ "$rmode" = live ] && route_effort=$(printf '%s' "$r" | jq -r '.applyEffort // empty' 2>/dev/null || true)
   [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
   [ -z "$esc" ] || route_line="routing: $esc (escalated)"
 fi
@@ -391,10 +394,10 @@ if [ "$mode" = auto ] && [ -z "$route_tier" ]; then
   fi
 fi
 
-[ "$dry" -eq 1 ] && dry "would spawn a $role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}"
+[ "$dry" -eq 1 ] && dry "would spawn a $role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
-created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "$role" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"})
+created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "$role" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"})
 label=${created%% *}
 pane=${created##* }
 
