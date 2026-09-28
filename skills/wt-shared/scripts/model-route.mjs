@@ -145,10 +145,11 @@ function logDecision(d) {
 }
 
 // The decision. `apply` is the tier to use (live only) or null.
-export async function route({ skill = '', role = '', lens = '', model = '', description = '', task = '', cwd = process.cwd(), env = process.env, fetchImpl, timeoutMs } = {}) {
+export async function route({ skill = '', role = '', lens = '', model = '', description = '', task = '', cwd = process.cwd(), env = process.env, fetchImpl, timeoutMs, log = true } = {}) {
   let cfg
   try { cfg = loadConfig({ cwd, env }) } catch { cfg = { ...DEFAULTS, from: 'default' } }
-  const mode = MODES.includes(cfg.skills?.[skill]?.mode) ? cfg.skills[skill].mode : cfg.mode
+  // Global off is the kill switch: a per-skill mode never overrides it.
+  const mode = cfg.mode !== 'off' && MODES.includes(cfg.skills?.[skill]?.mode) ? cfg.skills[skill].mode : cfg.mode
   if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from }
   if (model) return { mode, apply: null, tier: model, source: 'explicit', from: cfg.from }
   const state = buildState({ skill, role, lens, description, task })
@@ -162,7 +163,7 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
   const out = { ...d, mode, from: cfg.from, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
-  logDecision(out)
+  if (log) logDecision(out)
   return { ...out, apply: mode === 'live' ? out.tier : null }
 }
 
@@ -190,7 +191,7 @@ async function main() {
   if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
-  const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd() })
+  const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log') })
   if (cmd === 'explain') { const { state, ...rest } = d; console.log(JSON.stringify({ ...rest, state })); return }
   if (a.includes('--json')) console.log(JSON.stringify({ tier: d.tier ?? null, apply: d.apply, mode: d.mode, source: d.source, ref: d.run ? `${d.run}#0` : null }))
   else if (d.apply) console.log(d.apply)

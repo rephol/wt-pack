@@ -110,3 +110,10 @@ test('CLI: pick prints a tier only in live; explain is JSON; outcome writes the 
   assert.throws(() => outcome('bad', 'ok'))
   assert.ok(existsSync(paths().cache))
 })
+
+test('global off beats a per-skill live mode (kill switch)', async () => {
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ skills: { 'wt-work': { mode: 'live' } } }))
+  assert.equal((await route({ skill: 'wt-work', task: 'list files', env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).mode, 'off')
+  assert.equal((await route({ skill: 'wt-work', task: 'list files', env: {}, cwd: repo })).mode, 'live')
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
+})
