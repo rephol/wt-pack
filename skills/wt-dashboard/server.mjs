@@ -12,6 +12,7 @@ import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
+import { Asks } from './asks.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
@@ -1955,6 +1956,7 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && method === 'DELETE' && /^\/api\/rooms\/tmp-[^/]+$/.test(path)) return false // agent `room delete` (agentMayDelete checks the owner)
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
+  if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   return true
 }
 
@@ -2024,6 +2026,19 @@ const tickets = new Tickets({
     // WP-143: retire idle routed workers past what this tier keeps, now that this one is free again.
     await retireIdleWorkers(project).catch((e) => console.error('retire idle:', e.message))
   },
+})
+// WP-164 wt-ask: deliver reuses handoff.sh --reply verbatim, so it inherits whatever that already does on a
+// busy pane — no separate handling needed here.
+const asks = new Asks({
+  dir: DATA,
+  notify: (draft) => inbox.add(draft),
+  resolveNotify: async (key) => {
+    await inbox.load()
+    const it = inbox.items.find((x) => x.key === key && !x.resolvedAt)
+    if (it) await inbox.resolve([it.id])
+  },
+  broadcast: broadcastEvent,
+  deliver: (pane, text) => runHandoff(execFile, HANDOFF_SH)(['--reply', pane, '--from', 'user'], text, process.cwd()),
 })
 // boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
 const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values(k) }, (e) => console.error('tickets:', e.message))
@@ -2139,6 +2154,31 @@ async function ticketsApi(req, res, url, parts) {
   if (req.method === 'POST' && parts[3] === 'jev-undo') return send(res, 200, await tickets.jevUndo(id, b.field, author))
   if (req.method === 'POST' && parts[3] === 'dispatch-retry') return send(res, 200, await tickets.dispatchRetry(id))
   if (req.method === 'POST' && parts[3] === 'claim') return send(res, 200, await tickets.claim(id, me(), b.force === true))
+  send(res, 404, { error: 'not found' })
+}
+// WP-164 wt-ask: POST /api/asks (agent), GET /api/asks?room=&open=1, POST /api/asks/:id/answer (user),
+// POST /api/asks/:id/resolve (the asking pane).
+async function asksApi(req, res, url, parts) {
+  const json = async () => JSON.parse((await body(req)) || '{}')
+  if (req.method === 'GET' && parts.length === 2) return send(res, 200, await asks.list(url.searchParams.get('room') || undefined, url.searchParams.get('open') === '1'))
+  if (req.method === 'POST' && parts.length === 2) {
+    const author = await roomAuthor(req)
+    if (author.kind !== 'agent') return send(res, 403, { error: 'wt-ask posts from an agent pane (x-herdr-pane)' })
+    const project = (await agents()).find((a) => a.key === author.key)?.project ?? null
+    return send(res, 200, await asks.create(await json(), { ...author, project }))
+  }
+  const id = parts[2]
+  if (req.method === 'GET' && parts.length === 3) return send(res, 200, await asks.get(id))
+  if (req.method === 'POST' && parts[3] === 'answer') {
+    const author = await roomAuthor(req)
+    if (author.kind !== 'user') return send(res, 403, { error: 'only the user answers an ask' })
+    return send(res, 200, await asks.answer(id, await json(), author))
+  }
+  if (req.method === 'POST' && parts[3] === 'resolve') {
+    const author = await roomAuthor(req)
+    if (author.kind !== 'agent') return send(res, 403, { error: 'resolve is called by the asking pane (x-herdr-pane)' })
+    return send(res, 200, await asks.resolve(id, author.pane))
+  }
   send(res, 404, { error: 'not found' })
 }
 
@@ -2586,6 +2626,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'asks') return await asksApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))

@@ -5,8 +5,8 @@ import { readdirSync, lstatSync, readFileSync } from 'node:fs'
 import { open, tx } from './store.mjs'
 import { randomUUID } from 'node:crypto'
 
-export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation']
-export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation'])
+export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'ask']
+export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask'])
 
 // A transition (from server.mjs transitions()) → an inbox item draft.
 export function itemFromTransition(e) {
@@ -24,11 +24,13 @@ export function itemFromTransition(e) {
 // Which unresolved actionable items no longer hold. `needs`: Set of target keys still needing the user
 // (agent keys and `room:<slug>` for room mentions); `suggested`: Set of ticket ids still suggested;
 // `proposals`: Set of wt-memory ids still pending, or null when unknown (then none resolve); `holds`: Set of
-// pr-held keys still held (reviewHolds), or null when unknown.
-export function toResolve(items, needs, suggested, proposals = null, holds = null) {
+// pr-held keys still held (reviewHolds), or null when unknown. `openAsks`: Set of still-open ask ids, or null
+// when unknown (then an `ask` item is left alone — asks.mjs resolves its own inbox item when the ask closes).
+export function toResolve(items, needs, suggested, proposals = null, holds = null, openAsks = null) {
   return items.filter((it) => !it.resolvedAt && ACTIONABLE.has(it.kind) && (
     it.kind === 'memory-proposal' ? proposals !== null && !proposals.has(it.target.memory)
     : it.kind === 'pr-held' ? holds !== null && !holds.has(it.key)
+    : it.kind === 'ask' ? openAsks !== null && !openAsks.has(it.target.ask)
     : it.kind === 'room-suggestion' ? !suggested.has(it.target.task)
       : it.kind === 'mention-user' ? !needs.has(`room:${it.target.room}`)
         : !needs.has(it.target.agent)

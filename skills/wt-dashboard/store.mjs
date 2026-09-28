@@ -179,6 +179,10 @@ export const MIGRATIONS = [
   // Not exported: the JSON rollback loses them.
   { sql: `CREATE TABLE project_settings (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project, key));`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-164 asks: wt-ask cards ('A' — a mirrored B picker is not stored here, the screen is its source of truth).
+  // Not exported: the JSON rollback loses them, like routines/board_events.
+  { sql: `CREATE TABLE asks (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, json TEXT NOT NULL);`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

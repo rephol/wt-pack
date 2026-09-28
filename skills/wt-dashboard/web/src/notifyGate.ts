@@ -1,11 +1,11 @@
 // Pure gate for native notifications of inbox items: per-kind toggle, never for quiet (baseline) items,
 // suppressed while the user is looking at that agent (side panel or an open dock window), once per item key, ~1 per target per 30s.
-export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth'] as const
+export const KINDS = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'ask'] as const
 export type Kind = (typeof KINDS)[number]
 export interface InboxItem {
   id: string; ts: string; kind: Kind; key: string; title: string; body: string; read: boolean; resolvedAt: string | null; quiet?: boolean
   urgency?: number // 0-3 from Jev (WT_JEV_INBOX_RANK); absent sorts as 1
-  target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null; memory?: string; watchdog?: string; check?: string }
+  target: { agent?: string; room?: string; task?: string; pr?: string; url?: string | null; memory?: string; watchdog?: string; check?: string; ask?: string }
 }
 export type KindPrefs = Record<Kind, boolean>
 export interface Prefs { inbox: KindPrefs; native: KindPrefs }
@@ -24,7 +24,7 @@ export function gate(e: InboxItem, s: { prefs: Prefs; focused: boolean; openKeys
   s.lastAt.set(rk, s.now)
   return true
 }
-export const ACTIONABLE_KINDS: Kind[] = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation']
+export const ACTIONABLE_KINDS: Kind[] = ['question', 'mention-user', 'needs-you', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask']
 // "Needs you" everywhere (badge, Inbox section, Overview tile): unresolved and actionable. Read/unread does not matter.
 export const needsYou = (it: InboxItem) => !it.resolvedAt && ACTIONABLE_KINDS.includes(it.kind)
 

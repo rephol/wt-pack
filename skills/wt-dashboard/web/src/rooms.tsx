@@ -22,6 +22,8 @@ import { Banner } from '@astryxdesign/core/Banner'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { ChatMarkdown } from './links'
 import { useTicketPlugins } from './ticketChip'
+import { useRoomChips, RoomChips } from './roomChips'
+import { QuestionPopup, type PopupTarget } from './questionPopup'
 import { VirtualRows } from './virtual'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Avatar } from '@astryxdesign/core/Avatar'
@@ -311,6 +313,8 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
   }
   const byName = new Map(agents.map((a) => [a.name, a]))
   const narrow = useNarrow()
+  const [popupTarget, setPopupTarget] = useState<PopupTarget | null>(null)
+  const chipItems = useRoomChips(room.slug, room.members, setPopupTarget)
   const [sheet, setSheet] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [removeMember, setRemoveMember] = useState<string | null>(null)
@@ -461,10 +465,12 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
       <AlertDialog isOpen={archiving} onOpenChange={setArchiving} title={`Archive #${room.slug}?`}
         description="It leaves the Rooms list and becomes read-only: agents' posts to it are refused. Messages are kept; restore it any time from Rooms › Archived." actionLabel="Archive" actionVariant="primary"
         onAction={() => { setArchiving(false); patch.mutate({ archived: true }) }} />
+      {popupTarget && <QuestionPopup target={popupTarget} onClose={() => setPopupTarget(null)} onDone={() => setPopupTarget(null)} />}
       <ChatLayout ref={layoutRef} style={{ flex: 1, minHeight: 0 }}
         emptyState={syncing ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
           <VStack gap={1}>
+          <RoomChips items={chipItems} phone={narrow} />
           <ChatComposer value={draft} onChange={(v) => { setDraft(v); if (sendErr) setSendErr(null); orphanedAtts(v, atts.map((a) => a.id)).forEach(removeAtt) }} onSubmit={submit} isDisabled={post.isPending || syncing} density="compact"
             status={sendErr ? { type: 'error', message: sendErr } : attErr ? { type: 'warning', message: attErr }
               : /^\s*(@\S+\s+)*\//.test(draft) && !cmdTarget ? { type: 'warning', message: 'A command goes to one agent: @mention it or set a responder' } : undefined}

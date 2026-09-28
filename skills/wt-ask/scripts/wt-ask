@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# wt-ask — post a question to the user as a room chip / Inbox card (WP-164's 'A'), from an agent pane.
+# bash + curl + node (for JSON), no other deps.
+#   wt-ask "<question>" --option A --option B [--recommend A] [--multi] [--header H] [--ticket WP-N] [--room slug]
+#   wt-ask --json <file> [--ticket WP-N] [--room slug]   (file: {"questions":[{question,header,options,multiSelect,recommended?},...]}, 1-4)
+#   wt-ask --resolve <id>
+# --room defaults to the ticket's room (its id, lowercased — e.g. WP-164 -> wp-164) when --ticket is given and
+# --room is not; otherwise the ask has no room and shows only in the Inbox.
+# Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
+set -u
+API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
+usage() { sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+call() {
+  local out code
+  out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+    ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API — wt-ask needs it running (see README › Install)" >&2; exit 1; }
+  code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
+  if [ "$code" -ge 400 ]; then echo "wt-ask: $code $out" >&2; exit 1; fi
+  [ -z "$out" ] || printf '%s\n' "$out"
+}
+
+[ $# -ge 1 ] || usage
+if [ "$1" = --resolve ]; then
+  [ $# -ge 2 ] || usage
+  out=$(call POST "/api/asks/$2/resolve" '{}')
+  echo "resolved $2"
+  exit 0
+fi
+
+if [ "$1" = --json ]; then
+  [ $# -ge 2 ] || usage
+  [ -f "$2" ] || { echo "wt-ask: no such file: $2" >&2; exit 2; }
+  body=$(cat "$2")
+  shift 2
+else
+  question=$1; shift
+  header=""; options=(); recommend=""; multi=0; ticket=""; room=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --option) [ $# -ge 2 ] || usage; options+=("$2"); shift 2 ;;
+      --recommend) [ $# -ge 2 ] || usage; recommend=$2; shift 2 ;;
+      --multi) multi=1; shift ;;
+      --header) [ $# -ge 2 ] || usage; header=$2; shift 2 ;;
+      --ticket) [ $# -ge 2 ] || usage; ticket=$2; shift 2 ;;
+      --room) [ $# -ge 2 ] || usage; room=$2; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  [ ${#options[@]} -ge 1 ] || { echo "wt-ask: needs at least one --option" >&2; exit 2; }
+  body=$(node -e '
+    const [question, header, multi, recommend, ...options] = process.argv.slice(1)
+    console.log(JSON.stringify({ questions: [{ question, header: header || question.slice(0, 60),
+      options: options.map((label) => ({ label })), multiSelect: multi === "1", ...(recommend ? { recommended: recommend } : {}) }] }))
+  ' "$question" "$header" "$multi" "$recommend" "${options[@]}")
+fi
+
+# --ticket/--room on top of --json or the built body (only if not already set by --json's own file).
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ticket) [ $# -ge 2 ] || usage; ticket=$2; shift 2 ;;
+    --room) [ $# -ge 2 ] || usage; room=$2; shift 2 ;;
+    *) usage ;;
+  esac
+done
+[ -n "${room:-}" ] || [ -z "${ticket:-}" ] || room=$(printf '%s' "$ticket" | tr '[:upper:]' '[:lower:]')
+body=$(node -e '
+  const [body, ticket, room] = process.argv.slice(1)
+  const b = JSON.parse(body)
+  if (ticket) b.ticket = ticket
+  if (room) b.room = room
+  console.log(JSON.stringify(b))
+' "$body" "${ticket:-}" "${room:-}")
+
+out=$(call POST /api/asks "$body")
+node -e 'console.log(JSON.parse(process.argv[1]).id)' "$out"

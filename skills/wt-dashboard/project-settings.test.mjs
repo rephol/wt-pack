@@ -63,7 +63,7 @@ test('stage 8 creates project_settings on an existing v7 DB, other rows kept', a
   db.exec("PRAGMA user_version = 7; INSERT INTO boards (project, key, next) VALUES ('wt-pack', 'WP', 9); INSERT INTO routine_settings (k, v) VALUES ('maxWorking', '3')")
   db.close()
   const up = open(f)
-  assert.equal(up.prepare('PRAGMA user_version').get().user_version, 8)
+  assert.equal(up.prepare('PRAGMA user_version').get().user_version, MIGRATIONS.length) // stage 7 (v7 DB) through the current last stage
   assert.equal(up.prepare('SELECT next FROM boards').get().next, 9)
   assert.equal(up.prepare('SELECT v FROM routine_settings').get().v, '3')
   assert.equal(up.prepare('SELECT count(*) n FROM project_settings').get().n, 0)
