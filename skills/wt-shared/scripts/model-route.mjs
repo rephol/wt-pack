@@ -87,9 +87,9 @@ export function buildState({ skill = '', role = '', lens = '', description = '',
 // A cheap, certain answer with no Jev call, or null.
 export function localDecide(state) {
   if (/^explore$/i.test(state.skill)) return 'haiku'
-  if (LOCAL_HAIKU_LENS.test(state.signals.lens)) return 'haiku'
   const secure = state.signals.keywords.some((k) => SECURITY.includes(k))
   if (secure) return null // a security-sensitive task always goes to Jev (and the floor), never a local shortcut
+  if (LOCAL_HAIKU_LENS.test(state.signals.lens)) return 'haiku'
   if (state.signals.len > 0 && state.signals.len < 80 && !state.signals.edits) return 'haiku'
   if (state.signals.reads && !state.signals.edits) return 'haiku'
   return null

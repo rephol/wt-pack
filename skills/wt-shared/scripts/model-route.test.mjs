@@ -139,6 +139,10 @@ test('WP-129: sharper local signals — read verbs, security keywords, docs-lens
   assert.equal(buildState({ task: 'verify the output' }).signals.reads, true)
   assert.equal(buildState({ task: 'compare the two configs' }).signals.reads, true)
   assert.deepEqual(buildState({ task: 'add csrf and permission checks' }).signals.keywords.sort(), ['csrf', 'permission'].sort())
+
+  // a security keyword blocks the docs/naming/formatting-lens shortcut too, not just the read-only one
+  const s7 = buildState({ lens: 'docs', task: 'check the docs against the session cookie handling' })
+  assert.equal(localDecide(s7), null)
 })
 
 test('global off beats a per-skill live mode (kill switch)', async () => {
