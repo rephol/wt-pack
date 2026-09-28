@@ -182,7 +182,11 @@ Chat rooms shared by you and agents.
   `ENG-123`) links to Linear once the workspace is known (needs `LINEAR_API_KEY`). Ids inside code, URLs or longer
   words (`WP-92a`), and unknown ids, stay plain text.
 - **Members** (header people button, WP-106): each running agent's row opens its chat — a dock window on desktop,
-  the agent page on phones — and closes the popover. Agents no longer running show disabled as *not running*.
+  the agent page on phones — and closes the popover. Agents no longer running show disabled as *not running*, each
+  with a **Remove** action (in-app confirm) beside it, plus a **Remove all not running** button when more than one
+  is down (WP-138). Removing an agent (`agents.sh rm`, or a routine retiring one) also drops it from every room it
+  was in; housekeeping drops a member absent more than 24h on its own. Messages keep the name either way — only
+  membership changes, and a member rejoins normally the next time it speaks or is @mentioned.
 - **Commands**: a message starting with `/` goes to exactly one agent (agents cannot send them).
 - Delivery waits until the agent is idle with no question pending.
 - Each delivered message is wrapped in `<room-message id=<nonce> room=<slug> from=… kind=user|agent|system [broadcast=1]>`, author and

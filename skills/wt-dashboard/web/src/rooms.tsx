@@ -313,23 +313,31 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
   const narrow = useNarrow()
   const [sheet, setSheet] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
+  const [removeMember, setRemoveMember] = useState<string | null>(null)
+  const [removeAllGone, setRemoveAllGone] = useState(false)
+  const notRunning = room.members.filter((n) => !byName.has(n))
   const act = (f: () => void) => () => { setSheet(false); f() }
   const members = (
     <VStack gap={2} padding={3} style={{ minWidth: 280 }}>
       <Text weight="semibold">Members</Text>
       {!room.members.length && <Text type="supporting" size="sm">Nobody yet — @mention an agent.</Text>}
       {/* WP-106: a live member's row opens its chat (side panel on desktop, agent page on phones); gone ones are disabled. */}
+      {/* WP-138: a not-running row also gets a Remove action (in-app confirm — window.confirm is banned, WKWebView). */}
       {room.members.map((n) => {
         const a = byName.get(n)
         return (
-          <button key={n} type="button" className="member-row" disabled={!a} title={a ? `Open ${n}'s chat` : `${n} is not running`}
-            onClick={() => { if (!a) return; setMembersOpen(false); onOpenAgent(a.key) }}>
-            <StatusDot variant={dotOf(a)} label={a?.status ?? 'offline'} /><Text size="sm">{n}</Text>
-            <Text size="sm" type="supporting">{a?.asks ? 'needs you' : a?.status ?? 'not running'}</Text>
-            <span aria-hidden style={{ marginLeft: 'auto' }}>{a ? '›' : ''}</span>
-          </button>
+          <HStack key={n} gap={1} align="center">
+            <button type="button" className="member-row" style={{ flex: 1, minWidth: 0 }} disabled={!a} title={a ? `Open ${n}'s chat` : `${n} is not running`}
+              onClick={() => { if (!a) return; setMembersOpen(false); onOpenAgent(a.key) }}>
+              <StatusDot variant={dotOf(a)} label={a?.status ?? 'offline'} /><Text size="sm">{n}</Text>
+              <Text size="sm" type="supporting">{a?.asks ? 'needs you' : a?.status ?? 'not running'}</Text>
+              <span aria-hidden style={{ marginLeft: 'auto' }}>{a ? '›' : ''}</span>
+            </button>
+            {!a && <IconButton label={`Remove ${n}`} icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={() => setRemoveMember(n)} />}
+          </HStack>
         )
       })}
+      {notRunning.length > 1 && <Button label="Remove all not running" size="sm" variant="secondary" onClick={() => setRemoveAllGone(true)} />}
     </VStack>
   )
   const layoutRef = useRef<HTMLDivElement>(null) // ChatLayout's root is the scroll container (VirtualRows scrolls it)
@@ -484,6 +492,12 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
       <AlertDialog isOpen={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)} title="Message everyone?"
         description={`@all delivers this to all ${room.members.length} members of #${room.slug}.`} actionLabel="Send to all" actionVariant="primary"
         isActionLoading={post.isPending} onAction={() => confirm && post.mutate({ text: confirm, confirmAll: true })} />
+      <AlertDialog isOpen={removeMember !== null} onOpenChange={(o) => !o && setRemoveMember(null)} title={`Remove ${removeMember}?`}
+        description={`${removeMember} is not running. It leaves #${room.slug}; its messages stay.`} actionLabel="Remove" actionVariant="destructive"
+        isActionLoading={patch.isPending} onAction={() => { if (removeMember) patch.mutate({ members: room.members.filter((n) => n !== removeMember) }); setRemoveMember(null) }} />
+      <AlertDialog isOpen={removeAllGone} onOpenChange={setRemoveAllGone} title="Remove all not-running members?"
+        description={`Drops every not-running member of #${room.slug} (${notRunning.length}). Their messages stay.`} actionLabel="Remove all" actionVariant="destructive"
+        isActionLoading={patch.isPending} onAction={() => { patch.mutate({ members: room.members.filter((n) => byName.has(n)) }); setRemoveAllGone(false) }} />
     </VStack>
     </div>
   )

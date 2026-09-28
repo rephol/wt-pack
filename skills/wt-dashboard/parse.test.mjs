@@ -1311,6 +1311,46 @@ test('WP-114 rooms: rename changes the title only (slug and posting by slug keep
   assert.equal(rooms.room('ops'), undefined)
 })
 
+test('WP-138 Rooms.leave: drops a name from every room, keeps messages, clears its absence timer', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp(pj(tmpdir(), 'rooms-leave-'))
+  const list = [{ name: 'w1', key: 'm/w:p1', local: true, status: 'idle' }]
+  const rooms = new Rooms({ dir, agents: async () => list, prompt: async () => {}, log: () => {} })
+  await rooms.create({ title: 'a', slug: 'a' })
+  await rooms.create({ title: 'b', slug: 'b' })
+  await rooms.post('a', { author: { kind: 'agent', name: 'w1', key: 'm/w:p1' }, text: 'hi' })
+  await rooms.update('b', { members: ['w1', 'other'] })
+  rooms.room('a').memberGoneSince = { w1: Date.now() - 1000 }
+  await rooms.leave('w1')
+  assert.deepEqual(rooms.room('a').members, [])
+  assert.deepEqual(rooms.room('b').members, ['other'])
+  assert.equal(rooms.room('a').memberGoneSince.w1, undefined)
+  assert.equal((await rooms.messages('a')).at(-1).author.name, 'w1') // history keeps the name
+})
+
+test('WP-138 Rooms.pruneMembers: a member absent 24h+ drops; reappearing clears its timer; unknown liveness is a no-op', async () => {
+  const { Rooms, MEMBER_GONE_MS } = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp(pj(tmpdir(), 'rooms-prune-'))
+  const rooms = new Rooms({ dir, agents: async () => [], prompt: async () => {}, log: () => {} })
+  await rooms.create({ title: 'a', slug: 'a' })
+  await rooms.update('a', { members: ['gone', 'here'] })
+  const t0 = Date.now()
+  await rooms.pruneMembers(null, t0) // no local agents known: never guess
+  assert.deepEqual(rooms.room('a').members, ['gone', 'here'])
+  await rooms.pruneMembers(new Set(['here']), t0) // first sight of 'gone' absent
+  assert.deepEqual(rooms.room('a').members, ['gone', 'here'])
+  assert.equal(rooms.room('a').memberGoneSince.gone, t0)
+  await rooms.pruneMembers(new Set(['here']), t0 + MEMBER_GONE_MS - 1) // not yet 24h
+  assert.deepEqual(rooms.room('a').members, ['gone', 'here'])
+  await rooms.pruneMembers(new Set(['gone', 'here']), t0 + MEMBER_GONE_MS + 1) // respawned before the deadline: cleared
+  assert.equal(rooms.room('a').memberGoneSince.gone, undefined)
+  await rooms.pruneMembers(new Set(['here']), t0 + MEMBER_GONE_MS + 2) // absent again, timer restarts
+  await rooms.pruneMembers(new Set(['here']), t0 + 2 * MEMBER_GONE_MS + 10) // now over 24h absent: dropped
+  assert.deepEqual(rooms.room('a').members, ['here'])
+})
+
 test('WP-115 parsePicker: box borders stripped, soft wraps joined, paragraph breaks kept (question and descriptions)', async () => {
   const { parsePicker, unbox } = await import('./server.mjs')
   const { readFileSync } = await import('node:fs')

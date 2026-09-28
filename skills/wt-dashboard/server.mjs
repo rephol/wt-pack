@@ -2624,6 +2624,7 @@ async function removeAgent(pane, { force = false, confirmName } = {}) {
   if (a.status === 'working' && !force) throw no(409, `${a.name} is working; a turn in flight dies with it`, 'force')
   const out = await run(AGENTS_SH, ['rm', pane, ...(force ? ['--force'] : [])], homedir(), 30_000)
   store.delete('agents:local'); store.delete('overview')
+  await rooms.leave(a.name).catch((e) => console.error(`rooms: leave ${a.name}: ${e.message}`))
   return { ok: true, message: out.trim() }
 }
 
@@ -2734,6 +2735,9 @@ async function runHousekeeping(dryRun = false) {
     live: local && { sessions: new Set(local.map((a) => a.session).filter(Boolean)), names: new Set(local.map((a) => a.name).filter(Boolean)) },
     settings: hk.settings, dryRun,
   })
+  // WP-138: drop room members not-running for over 24h (their messages stay). `local` is every locally known
+  // agent, running or not, so its names are the full liveness picture housekeeping has.
+  if (!dryRun) await rooms.pruneMembers(local && new Set(local.map((a) => a.name).filter(Boolean))).catch((e) => console.error(`rooms: pruneMembers: ${e.message}`))
   if (!dryRun) { hk.lastRun = { ...sum, actions: sum.actions.slice(0, 50) }; await writeFile(HK_FILE, JSON.stringify(hk, null, 2)) }
   if (sum.errors.length) console.error('housekeeping:', sum.errors.join('; '))
   return sum
