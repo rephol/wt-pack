@@ -155,8 +155,11 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **New agent** (Overview or palette): pick role and project, optional **first prompt** (sent once the agent
   is idle, up to 60s). It can reuse a free agent instead of spawning. Working directory is always the main
   checkout or one of the project's worktrees.
-- Names: `<repo>-<role>-NN`, numbered across all pools (herdr names are global; repo slug cut to 20 chars). Numbers
-  held by exited agents the watchdog still remembers are skipped, so their Resume stays possible (WP-120).
+- Names: `<repo>-<role>-NN`, numbered across all pools (herdr names are global; repo slug cut to 20 chars) —
+  the lowest number not currently in use (WP-148), so removing an agent frees its number for reuse. Numbers
+  held by exited agents the watchdog still remembers are skipped, so their Resume stays possible (WP-120); a
+  deliberate `rm` (or idle retirement, WP-143) drops its own name from that memory instead, since it isn't a
+  crash to resume.
 - Kill shim (WP-120): every spawned pane gets `pkill`/`pgrep`/`killall` shims from `wt-agents/bin` first on PATH
   (`--env PATH`, and `CLAUDE_ENV_FILE` so shell rc files cannot bury them). They refuse an option after the pattern
   and a `-f`/`-m` pattern under 6 characters or starting with `-` (BSD matches those against every agent and Chrome
