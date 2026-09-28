@@ -15,7 +15,7 @@ process.env.WT_DASHBOARD_DATA = join(tmp, 'dash')
 process.env.WT_DASHBOARD_ENV = join(tmp, 'none.env')
 process.env.WT_JEV_LOG = join(tmp, 'jev.jsonl')
 delete process.env.WT_MODEL_ROUTING
-const { buildState, localDecide, applyFloors, computeEffort, loadConfig, route, outcome, DEFAULTS, paths } = await import('./model-route.mjs')
+const { buildState, localDecide, applyFloors, computeEffort, loadConfig, route, outcome, DEFAULTS, paths, modelIdFor } = await import('./model-route.mjs')
 const repo = join(tmp, 'repo'); mkdirSync(repo); execFileSync('git', ['-C', repo, 'init', '-q'])
 const cli = join(import.meta.dirname, 'model-route.mjs')
 
@@ -364,4 +364,24 @@ test('global off beats a per-skill live mode (kill switch)', async () => {
   assert.equal((await route({ skill: 'wt-work', task: 'list files', env: { WT_MODEL_ROUTING: 'off' }, cwd: repo })).mode, 'off')
   assert.equal((await route({ skill: 'wt-work', task: 'list files', env: {}, cwd: repo })).mode, 'live')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
+})
+
+// WP-158: each tier spawns pinned to an explicit model id, not the bare alias Claude Code would otherwise
+// resolve on its own — configurable, same layers as everything else, falling back to the tier name if unmapped.
+test('modelIdFor: default map, a partial config override, and an unknown tier falls back to itself', () => {
+  assert.equal(modelIdFor('opus', DEFAULTS), 'claude-opus-5-5')
+  assert.equal(modelIdFor('sonnet', DEFAULTS), 'claude-sonnet-5')
+  assert.equal(modelIdFor('haiku', DEFAULTS), 'claude-haiku-4-5-20251001')
+  assert.equal(modelIdFor('opus', { modelIds: { opus: 'claude-opus-6' } }), 'claude-opus-6')
+  assert.equal(modelIdFor('sonnet', {}), 'sonnet') // no map at all: the pre-WP-158 alias behaviour
+  assert.equal(modelIdFor('nope', DEFAULTS), 'nope')
+})
+
+test('CLI: model-id prints the configured id, a repo override wins over the default, bad tier exits 2', () => {
+  const run = (args) => execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8' })
+  assert.equal(run(['model-id', 'opus', '--cwd', repo]).trim(), 'claude-opus-5-5')
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ modelIds: { opus: 'claude-opus-6' } }))
+  assert.equal(run(['model-id', 'opus', '--cwd', repo]).trim(), 'claude-opus-6')
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
+  assert.throws(() => execFileSync(process.execPath, [cli, 'model-id', 'nope'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
 })
