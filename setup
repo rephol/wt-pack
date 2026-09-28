@@ -150,7 +150,7 @@ doctor() {
     if [ -n "$ip" ] && [ -d "$ip" ]; then
       g=$(stat -f %B "$ip" 2>/dev/null || true)
       n=$(LC_ALL=C ps -axo lstart=,command= | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const g=+process.argv[1]*1000;console.log(s.split("\n").filter(l=>/^(\S*\/)?claude\s.*--name[ =]/.test(l.slice(25).trim())&&Date.parse(l.slice(4,24))<g).length)})' "${g:-0}")
-      [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — restart them"
+      [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — wt-agents respawn --stale (in each repo)"
     fi
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
   # WP-122: the root wt-pack plugin is the plugin-only path; with the ./setup plugin too, hooks run twice. Installed
@@ -168,7 +168,7 @@ doctor() {
     nm=$((nm + 1)); case "$e" in *WT_KILL_SHIM_DIR=*wt-agents/bin*) ;; *) ns=$((ns + 1)) ;; esac
   done
   if [ "$nm" -gt 0 ] && [ "$ns" -eq 0 ]; then ok "kill shim active in all $nm agent sessions"
-  elif [ "$ns" -gt 0 ]; then opt "$ns of $nm agent sessions run without the pkill/pgrep/killall shim (spawned before WP-120) — respawn them"; fi
+  elif [ "$ns" -gt 0 ]; then opt "$ns of $nm agent sessions run without the pkill/pgrep/killall shim (spawned before WP-120) — wt-agents respawn --stale (in each repo)"; fi
 
   # WP-98: commits here use a GitHub noreply identity (repo-local git config), so no personal/work email ships.
   if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then

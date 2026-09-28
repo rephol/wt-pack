@@ -5,6 +5,8 @@
 #   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] # -> prints "<name> <pane>"; --mcp adds
 #                                            servers from mcp/catalog.json; --model starts claude on that tier (WP-128)
 #   agents.sh rm <name|pane> [--force]     # closes the tab
+#   agents.sh respawn <name|pane>|--stale [--force] # new tab (current PATH shims + plugin guard), same name, role,
+#                                            cwd, tokens and claude session; --stale: every pool agent lacking either
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
@@ -82,11 +84,14 @@ list)
 
 spawn|mcp-args|mcp-file)
   # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
-  extra=; model=; n=$#
+  # --label/--resume are respawn's (WP-125): keep the old name, resume its claude session.
+  extra=; model=; fixed=; resume=; n=$#
   while [ "$n" -gt 0 ]; do
     a=$1; shift; n=$((n - 1))
     if [ "$a" = --mcp ]; then extra=$1; shift; n=$((n - 1))
     elif [ "$a" = --model ]; then model=$1; shift; n=$((n - 1))
+    elif [ "$a" = --label ]; then fixed=$1; shift; n=$((n - 1))
+    elif [ "$a" = --resume ]; then resume=$1; shift; n=$((n - 1))
     else set -- "$@" "$a"; fi
   done
   role=${1:?role required, e.g. worker|planner}
@@ -123,6 +128,7 @@ spawn|mcp-args|mcp-file)
     [ -r "$wd" ] && jq -r '.lastSeen // {} | .[] | select(.goneAt) | .name // empty' "$wd" 2>/dev/null; } \
     | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
   label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
+  [ -z "$fixed" ] || label=$fixed
   }
   [ "$cmd" = mcp-args ] && label=args-$$
   if [ "$cmd" = mcp-file ]; then
@@ -209,6 +215,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # `claude --name` sets the session's own display name. Setting only the first
   # leaves the session itself unnamed wherever claude lists its own sessions.
   set -- --name "$label"
+  [ -z "$resume" ] || set -- "$@" --resume "$resume"
   if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
   # WP-128: an explicit tier wins; else only the role floor, and only in live routing (spawn has no task to route).
   [ -n "$model" ] || model=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" --cwd "$main" 2>/dev/null || true)
@@ -241,5 +248,64 @@ rm)
   echo "removed $target ($pane, was $status)"
   ;;
 
-*) sed -n '2,8p' "$0" >&2; exit 2 ;;
+respawn)
+  # WP-125: the kill shims are pane ENV, set only at tab create, so a same-pane restart (the dashboard's Resume)
+  # would not pick them up — close the tab and spawn a new one under the same name (herdr names are global).
+  self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+  force=; stale=; target=
+  for a in "$@"; do case "$a" in --force) force=--force ;; --stale) stale=1 ;; *) target=$a ;; esac; done
+  respawn_one() {  # <name|pane> -> prints "<name> <new-pane>"
+    row=$(herdr agent list | jq -c --arg t "$1" '[.result.agents[] | select(.name == $t or .pane_id == $t)][0] // empty')
+    [ -n "$row" ] || { echo "no such agent: $1" >&2; return 1; }
+    name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
+    r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
+    sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')
+    [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role token and a cwd to respawn" >&2; return 1; }
+    [ -n "$sess" ] || { echo "$1: no claude session id to resume" >&2; return 1; }
+    [ -d "$dir" ] || { echo "$1: its cwd $dir is gone; not closing it" >&2; return 1; }
+    if [ "$(printf '%s' "$row" | jq -r .agent_status)" = working ] && [ -z "$force" ]; then
+      echo "$1 is working; re-run with --force to respawn it anyway" >&2; return 1
+    fi
+    # A session that never took a prompt has no transcript, and `claude --resume` on it dies: start fresh instead.
+    if [ -z "$(find "$HOME/.claude/projects" -name "$sess.jsonl" 2>/dev/null | head -1)" ]; then
+      echo "$name: no transcript for session $sess; starting fresh" >&2; sess=
+    fi
+    "$self" rm "$old" --force >/dev/null || return 1
+    out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"}) || return 1
+    new=${out#* }
+    # Spawn writes its own role/project/spawned_by/created; carry the rest (task, ticket, task_state …) over.
+    printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .project, .spawned_by, .created) | to_entries[] | "\(.key)=\(.value)"' \
+    | while IFS= read -r kv; do
+        herdr pane report-metadata "$new" --source wt-dashboard --token "$kv" >/dev/null 2>&1 || true
+      done
+    echo "$out"
+  }
+  if [ -z "$stale" ]; then respawn_one "${target:?name, pane or --stale required}"; exit; fi
+
+  # --stale: every agent in this repo's pools whose claude lacks the PATH shim or predates the installed plugin guard.
+  main=$(repo_root "$PWD"); repo=$(basename "$main")
+  me=; [ -z "${HERDR_PANE_ID:-}" ] || me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty')
+  ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null || true)
+  g=0; [ -n "$ip" ] && [ -d "$ip" ] && g=$(stat -f %B "$ip" 2>/dev/null || echo 0)
+  wss=$(herdr workspace list | jq -c --arg p "$repo-" '[.result.workspaces[] | select(.label | startswith($p) and endswith("s")) | .workspace_id]')
+  found=0
+  for name in $(herdr agent list | jq -r --argjson w "$wss" --arg me "$me" \
+      '.result.agents[] | select((.workspace_id as $x | $w | index($x)) and .pane_id != $me and (.name // "") != "") | .name'); do
+    # Never pgrep/pkill here (WP-109): read the process table and match claude's own --name.
+    pid=$(ps -axo pid=,command= | awk -v n="$name" '{ for (i = 2; i < NF; i++) if ($i == "--name" && $(i+1) == n && $2 ~ /(^|\/)claude$/) { print $1; exit } }')
+    [ -n "$pid" ] || continue
+    why=
+    case "$(ps eww -o command= -p "$pid" 2>/dev/null)" in *WT_KILL_SHIM_DIR=*) ;; *) why="no kill shim" ;; esac
+    if [ "$g" -gt 0 ]; then
+      st=$(LC_ALL=C date -j -f '%a %b %d %T %Y' "$(LC_ALL=C ps -o lstart= -p "$pid" | sed 's/  */ /g; s/^ //')" +%s 2>/dev/null || echo 0)
+      [ "$st" = 0 ] || [ "$st" -ge "$g" ] || why="${why:+$why, }predates the plugin guard"
+    fi
+    [ -n "$why" ] || continue
+    found=1
+    if out=$(respawn_one "$name" 2>&1); then echo "respawned $out ($why)"; else echo "skipped $name: $out"; fi
+  done
+  [ "$found" = 1 ] || echo "no stale agents"
+  ;;
+
+*) sed -n '2,10p' "$0" >&2; exit 2 ;;
 esac

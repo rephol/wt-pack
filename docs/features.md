@@ -161,7 +161,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   sessions without it (respawn them). Deliberate bypass: `/usr/bin/pkill` by full path.
 - **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
   closes; a worktree it used stays on disk.
-- CLI: `wt-agents spawn <role>`, `list --json`, `rm <name|pane> [--force]`.
+- CLI: `wt-agents spawn <role>`, `list --json`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
 - Skills: wt-agents, wt-handoff.
 
 ## Rooms

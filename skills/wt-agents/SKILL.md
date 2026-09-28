@@ -25,7 +25,13 @@ scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
 scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
 scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
 scripts/agents.sh rm <name|pane> [--force]
+scripts/agents.sh respawn <name|pane> [--force]  # same name/role/cwd/tokens, claude --resume, in a NEW tab
+scripts/agents.sh respawn --stale [--force]      # every pool agent lacking the kill shim or plugin guard
 ```
+
+`respawn` exists because the pkill/pgrep/killall shims are pane env, set only when the tab is created, and
+plugin hooks load only at session start (WP-120). A same-pane restart gets the guard but not the shims.
+`--stale` skips `working` agents (unless `--force`) and the caller's own pane.
 
 Run it from anywhere inside the repo; it resolves the main checkout itself, so a worktree works.
 
