@@ -1,13 +1,18 @@
 // The popup a room chip or an Inbox 'ask'/'question' item opens (WP-164 U3): a wt-ask card ('A', steps +
 // free text, the recommended option first and marked) or a mirrored native picker ('B', reusing PickerCard).
-// A dialog on desktop, fullscreen on a phone — the same pattern routines.tsx and spawn.tsx already use, not a
-// separate sheet component. No native dialogs here (window.confirm/alert): Astryx's Dialog only.
+// A dialog on desktop; on a phone a real BottomSheet (WP-164 follow-up), not a fullscreen Dialog — its default
+// purpose='info' gives Escape, scrim-tap and swipe dismissal for free, closable without answering either way
+// (the chip stays until the ask/picker itself closes). No native dialogs here (window.confirm/alert): Astryx's
+// Dialog/BottomSheet only.
 import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
+import { BottomSheet } from '@astryxdesign/core/BottomSheet'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { Icon } from '@astryxdesign/core/Icon'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
@@ -93,11 +98,17 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
 
 export function QuestionPopup({ target, onClose, onDone }: { target: PopupTarget; onClose: () => void; onDone: () => void }) {
   const phone = useNarrow()
-  return (
-    <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={phone ? undefined : 480} variant={phone ? 'fullscreen' : undefined} padding={phone ? 3 : 4}>
+  const label = target.kind === 'ask' ? `${target.ask.agent} asks` : 'Question'
+  const body = (
+    <VStack gap={3}>
+      <HStack justify="end">
+        <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
+      </HStack>
       {target.kind === 'ask'
         ? <AskCard ask={target.ask} onClose={onClose} onAnswered={onDone} />
         : <PickerCard agent={target.agent} picker={target.picker} onSent={onDone} />}
-    </Dialog>
+    </VStack>
   )
+  if (phone) return <BottomSheet label={label} isOpen onOpenChange={(o) => !o && onClose()} height="tall">{body}</BottomSheet>
+  return <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={480} padding={4}>{body}</Dialog>
 }
