@@ -19,6 +19,8 @@ import { collapseRepeats, needsYou, groupInbox, shortAgo, type InboxGroup, type 
 import { loadPrefs } from './desktop'
 import { api } from './rooms'
 import { Delayed, LoadError, Rows } from './skeletons'
+import type { PickerAgent } from './pickerCard'
+import { QuestionPopup, type PopupTarget, type Ask } from './questionPopup'
 
 export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
 const LABEL: Record<Kind, string> = {
@@ -50,13 +52,18 @@ export function InboxButton({ collapsed }: { collapsed: boolean }) {
 
 export function InboxHost({ onOpenAgent }: { onOpenAgent: (key: string) => void }) {
   const [filter, setFilter] = useState<'all' | Kind | null>(null)
+  const [popupTarget, setPopupTarget] = useState<PopupTarget | null>(null)
   useEffect(() => {
     const on = (e: Event) => setFilter((e as CustomEvent<'all' | Kind>).detail)
     addEventListener('open-inbox', on)
     return () => removeEventListener('open-inbox', on)
   }, [])
-  if (!filter) return null
-  return <InboxPanel filter={filter} setFilter={setFilter} onClose={() => setFilter(null)} onOpenAgent={onOpenAgent} />
+  return (
+    <>
+      {filter && <InboxPanel filter={filter} setFilter={setFilter} onClose={() => setFilter(null)} onOpenAgent={onOpenAgent} openQuestion={setPopupTarget} />}
+      {popupTarget && <QuestionPopup target={popupTarget} onClose={() => setPopupTarget(null)} onDone={() => setPopupTarget(null)} />}
+    </>
+  )
 }
 
 const HOVER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -84,10 +91,12 @@ const ICON: Record<Kind, React.ReactNode> = {
   'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus, memory: I.bulb, 'memory-proposal': I.bulb, watchdog: I.server, 'pr-held': I.clock, 'routing-escalation': I.bulb, 'jev-auth': I.x, ask: I.q,
 }
 
-function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void }) {
+function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void; openQuestion: (t: PopupTarget) => void }) {
   const qc = useQueryClient()
   const toast = useToast()
   const { items, loaded, error, retry } = useInbox()
+  // Shares the ['overview'] query App.tsx already polls at 4s, for the live picker behind a 'question' item.
+  const overviewQ = useQuery({ queryKey: ['overview'], queryFn: () => api<{ agents: (PickerAgent & { name: string })[] }>('/api/overview'), refetchInterval: 4000 })
   const [confirmAll, setConfirmAll] = useState(false)
   // WP-87: the drawer closes on Escape (a real Escape never reaches the Dialog's own handler) and on page navigation,
   // so it never covers the page you went to. The clear-all confirm keeps its own Escape. Subscribed once, reading refs:
@@ -138,6 +147,15 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent }: { filter: 'all'
   const go = (it: InboxRow) => {
     if (it.anyUnread) read.mutate({ ids: it.ids })
     if ((it.kind === 'room-suggestion' || it.kind === 'memory-proposal') && !it.resolvedAt) return
+    // 'ask'/'question' open the popup in place instead of navigating to the room or agent page (WP-164 U5).
+    if (it.kind === 'ask' && it.target.ask && !it.resolvedAt) {
+      api<Ask>(`/api/asks/${encodeURIComponent(it.target.ask)}`).then((ask) => openQuestion({ kind: 'ask', ask })).catch((e) => toast({ body: String(e), type: 'error' }))
+      return
+    }
+    if (it.kind === 'question' && it.target.agent && !it.resolvedAt) {
+      const a = overviewQ.data?.agents.find((x) => x.key === it.target.agent)
+      if (a?.picker) { openQuestion({ kind: 'picker', agent: a, picker: a.picker }); return }
+    }
     onClose()
     if (it.target.room) onOpenAgent(`room:${it.target.room}`) // desktop: a dock window; phones: the room page
     else if (it.target.agent) onOpenAgent(it.target.agent)

@@ -2168,6 +2168,7 @@ async function asksApi(req, res, url, parts) {
     return send(res, 200, await asks.create(await json(), { ...author, project }))
   }
   const id = parts[2]
+  if (req.method === 'GET' && parts.length === 3) return send(res, 200, await asks.get(id))
   if (req.method === 'POST' && parts[3] === 'answer') {
     const author = await roomAuthor(req)
     if (author.kind !== 'user') return send(res, 403, { error: 'only the user answers an ask' })
