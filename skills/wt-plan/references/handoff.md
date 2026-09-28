@@ -76,8 +76,12 @@ to spawn one.
 
 ```bash
 printf '%s\n' "$PROMPT" | ../wt-handoff/scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] --skill wt-plan <worktree>
+  [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] --skill wt-plan --buddy self <worktree>
 ```
+
+`--buddy self` pairs the worker with you (WP-147): a `pair` pane token on both, and the local ticket's own
+`pair` field, so a review round or a question addressed with `--task <TICKET>` reaches whichever of you it's
+for instead of a free agent. Only skip it if the ticket has no local board card (Linear-only).
 
 Pass `--task` with the ticket and a few-word title; it labels the worker in wt-dashboard. The script lives in
 the `wt-handoff` skill (read its SKILL.md for the tokens and the reply footer it adds).
