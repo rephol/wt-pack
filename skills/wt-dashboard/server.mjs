@@ -1961,11 +1961,14 @@ setInterval(() => readyNotes.flush(), 60_000).unref()
 // WP-159: 'ok'/'returned' once per ref, however Done was reached or left (manual move, merge reconcile, any
 // caller of tickets.mjs's mutate()) — a plain-comment marker (not "routing: ", so routeRef/strikes/escalated's
 // regexes never pick it up as a decision) guards against recording the same ref's outcome twice.
-async function recordRoutingOutcome(t, what, why) {
+async function recordRoutingOutcome(t, what, fallbackWhy) {
   const ref = routeRef(t)
   if (!ref) return
   const marker = `routing-outcome: ${what} (ref ${ref})`
   if (t.history.some((h) => h.text === marker)) return
+  // The move's own note (e.g. dispatch's #merged "merged in <sha>") is more useful than a generic reason —
+  // carry it through when the caller gave one, same as the outcome the removed explicit routeOutcome call used to.
+  const why = t.history.findLast((h) => h.kind === 'move')?.text || fallbackWhy
   try { routeOutcome(ref, what, why) } catch {}
   await tickets.comment(t.id, marker, { name: 'dispatch' }).catch((e) => console.error('tickets:', e.message))
 }

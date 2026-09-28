@@ -437,7 +437,9 @@ test('server: routing outcome recorded once on Done, once on reopen, via model-r
     // ~500ms after listening) — not yet true the instant the "listening" line prints. Retry past that window.
     let res
     for (let i = 0; i < 20; i++) {
-      res = await call('PATCH', '/api/tickets/WP-1', '{"column":"done"}')
+      // The note (dispatch's #merged uses "merged in <sha>") should end up as the outcome's `why`, not a
+      // generic reason — the move's own note is more useful than "reached done".
+      res = await call('PATCH', '/api/tickets/WP-1', '{"column":"done","note":"merged in abcdef1"}')
       if (res.status !== 500) break
       await new Promise((r) => setTimeout(r, 250))
     }
@@ -469,5 +471,6 @@ test('server: routing outcome recorded once on Done, once on reopen, via model-r
     assert.equal(t2.history.filter((h) => h.text === 'routing-outcome: ok (ref abc12#0)').length, 1)
     const outcomes = (await rf(join(root, '.local', 'share', 'wt-pack', 'routing-outcomes.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
     assert.deepEqual(outcomes.map((o) => [o.run, o.outcome]), [['abc12', 'ok'], ['abc12', 'returned']])
+    assert.equal(outcomes[0].why, 'merged in abcdef1') // the move's own note, not a generic "reached done"
   } finally { srv.kill() }
 })
