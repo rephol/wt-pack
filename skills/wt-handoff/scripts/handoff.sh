@@ -332,6 +332,21 @@ if [ "$mode" != pane ]; then
   [ "$rmode" = live ] && route_effort=$(printf '%s' "$r" | jq -r '.applyEffort // empty' 2>/dev/null || true)
   [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
   [ -z "$esc" ] || route_line="routing: $esc (escalated)"
+else
+  # WP-168: a `--pane`/paired hand-off (dispatch to an already-running worker) skipped routing entirely, so
+  # that ticket got no decision logged and no `outcome` ref — an eval sweep can't see it and can't mark it
+  # ok/send-back/returned. The worker's tier is already fixed (nothing will be applied), so this logs it as
+  # source=reuse with no Jev call, purely for the ref. Left empty when the target has no model token (e.g. a
+  # worker started without an explicit tier) — there is nothing known to log.
+  pmodel=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.model // empty')
+  case "$pmodel" in
+    haiku|sonnet|opus)
+      r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
+        --model "$pmodel" --reuse $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
+      rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
+      [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
+      ;;
+  esac
 fi
 
 # Wrap once, before the goal/no-goal split (so --no-goal is tagged too); a failed wrap never sends untagged.
