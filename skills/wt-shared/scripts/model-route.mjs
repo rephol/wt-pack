@@ -132,12 +132,15 @@ export async function jevDecide(state, cfg, { fetchImpl, timeoutMs = 1500 } = {}
   return { tier, source: 'jev', p: a.confidence, choice: a.choice, cached }
 }
 
+// jev-eval's evaluator pair (EVALUATORS.routing): the same question production asks.
+export const modelRoute = { questions: () => ({ tier: QUESTION }), decide: (a) => a?.tier?.choice ?? null }
+
 function logDecision(d) {
   try {
     const p = paths().log
     mkdirSync(dirname(p), { recursive: true })
     appendFileSync(p, JSON.stringify({ run: d.run, i: 0, ts: new Date().toISOString(), cmd: 'routing', p: d.p, t: d.t,
-      decided: d.tier !== 'sonnet', item: { skill: d.state.skill, role: d.state.role, tier: d.tier, mode: d.mode, source: d.source, choice: d.choice ?? null } }) + '\n')
+      decided: d.tier !== 'sonnet', item: { skill: d.state.skill, role: d.state.role, tier: d.tier, mode: d.mode, source: d.source, choice: d.choice ?? null }, state: d.state }) + '\n') // state (≤1.2 KB) lets routing-eval seed fixtures
   } catch {}
 }
 

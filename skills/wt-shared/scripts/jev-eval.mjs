@@ -23,9 +23,12 @@ export const EVALUATORS = {
   triage: 'wt-shared/scripts/jev-triage.mjs#triageClass',
   inbox_rank: 'wt-dashboard/inbox.mjs#inboxRank',
   ticket_triage: 'wt-dashboard/ticketJev.mjs#ticketType',
+  routing: 'wt-shared/scripts/model-route.mjs#modelRoute',
 }
 
 const feature = process.argv[2]
+// WP-128: the routing report/tuner reads local logs only, so it runs without a key.
+if (feature === 'routing' && process.argv.includes('--report')) { await (await import('./routing-eval.mjs')).main(process.argv.slice(3)); process.exit(0) }
 if (!feature || !EVALUATORS[feature]) {
   console.error(`usage: jev-eval.mjs <${Object.keys(EVALUATORS).join('|') || 'feature'}>`)
   process.exit(2)

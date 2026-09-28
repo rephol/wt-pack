@@ -1,0 +1,55 @@
+// Run: node --test skills/wt-shared/scripts/routing-eval.test.mjs — WP-128 U5 report/tuner on a temp HOME.
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+const tmp = mkdtempSync(join(tmpdir(), 'wt-reval-'))
+process.env.HOME = tmp
+const { tune, report, seedFixtures, load, writeUser, STEP } = await import('./routing-eval.mjs')
+const { DEFAULTS, paths } = await import('./model-route.mjs')
+
+const d = (over, outcomes) => ({ skill: 'wt-work', tier: 'haiku', choice: 'haiku', source: 'jev', mode: 'live', outcomes, state: { task: `t${Math.random()}` }, ...over })
+const many = (n, outcomes, over = {}) => Array.from({ length: n }, () => d(over, outcomes))
+
+test('haiku tightens at most one step on failures, loosens on a clean record', () => {
+  const bad = tune([...many(8, ['send-back']), ...many(4, ['ok'])], DEFAULTS)
+  assert.equal(bad.thresholds.haiku, +(DEFAULTS.thresholds.haiku + STEP).toFixed(2))
+  const clean = tune(many(12, ['ok']), DEFAULTS)
+  assert.equal(clean.thresholds.haiku, +(DEFAULTS.thresholds.haiku - STEP).toFixed(2))
+  assert.equal(tune(many(5, ['send-back']), DEFAULTS).changes.length, 0) // below MIN_N
+})
+
+test('pinned skills are ignored; floors never change', () => {
+  const cfg = { ...DEFAULTS, skills: { 'wt-work': { pin: 'haiku' } } }
+  assert.equal(tune(many(20, ['send-back']), cfg).changes.length, 0)
+  const r = tune(many(20, ['escalated'], { tier: 'sonnet', choice: 'sonnet' }), DEFAULTS)
+  assert.equal(r.thresholds.opus, +(DEFAULTS.thresholds.opus - STEP).toFixed(2))
+  assert.deepEqual(DEFAULTS.floors, { correctness: 'sonnet', security: 'sonnet', data: 'sonnet', migration: 'sonnet' })
+  writeUser(r.thresholds)
+  const u = JSON.parse(readFileSync(paths().user, 'utf8'))
+  assert.equal(u.thresholds.opus, r.thresholds.opus); assert.equal(u.floors, undefined)
+})
+
+test('fixtures: escalations and send-backs seed one tier up, never duplicated', () => {
+  const f = join(tmp, 'routing.json'); writeFileSync(f, '[]')
+  const ds = [d({ state: { task: 'a' } }, ['send-back']), d({ state: { task: 'a' } }, ['escalated']), d({ state: { task: 'b' } }, ['ok'])]
+  assert.equal(seedFixtures(ds, f), 1)
+  assert.equal(seedFixtures(ds, f), 0)
+  assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), [{ state: { task: 'a' }, expect: 'sonnet' }])
+})
+
+test('load joins outcomes by run; report groups skill×tier', () => {
+  mkdirSync(join(tmp, '.claude'), { recursive: true }); mkdirSync(join(tmp, '.local/share/wt-pack'), { recursive: true })
+  const now = new Date().toISOString()
+  writeFileSync(paths().log, [
+    { run: 'r1', cmd: 'routing', ts: now, item: { skill: 'wt-work', tier: 'haiku', mode: 'live', source: 'jev', choice: 'haiku' } },
+    { run: 'r2', cmd: 'routing', ts: now, item: { skill: 'wt-work', tier: 'haiku', mode: 'shadow', source: 'local' } },
+    { run: 'x', cmd: 'lenses', ts: now, item: {} },
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n')
+  writeFileSync(paths().outcomes, JSON.stringify({ run: 'r1', i: 0, outcome: 'send-back' }) + '\n')
+  const ds = load()
+  assert.equal(ds.length, 2)
+  assert.deepEqual(report(ds), [{ skill: 'wt-work', tier: 'haiku', picks: 2, applied: 1, sendBack: 1, returned: 0, escalated: 0, ok: 0 }])
+})
