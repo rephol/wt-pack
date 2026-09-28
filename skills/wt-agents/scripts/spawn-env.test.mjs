@@ -96,3 +96,14 @@ test('WP-137: --effort is passed to claude; falls back to the role floor\'s effo
   assert.match(start(spawn(['spawn', 'planner', '--effort', 'low'], { WT_MODEL_ROUTING: 'live' })), /--effort low/) // explicit wins
   assert.throws(() => spawn(['spawn', 'worker', '--effort', 'urgent']), (e) => e.status === 2)
 })
+
+test('WP-143: the final model/effort actually spawned are written as pane tokens', () => {
+  let s = spawn(['spawn', 'worker', '--model', 'haiku', '--effort', 'low'])
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=haiku/.test(l)))
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=low/.test(l)))
+  s = spawn() // shadow (default): floor computes nothing, no tokens written
+  assert.ok(!s.calls.some((l) => l.startsWith('herdr pane report-metadata') && /--token (model|effort)=/.test(l)))
+  s = spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' }) // live routing: floor's tier/effort recorded
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=opus/.test(l)))
+  assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=high/.test(l)))
+})

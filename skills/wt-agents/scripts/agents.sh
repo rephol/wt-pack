@@ -5,10 +5,14 @@
 #   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
 #                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
 #                                            --model starts claude on that tier (WP-128); --effort sets its effort
-#                                            (WP-137); either missing falls back to the role's routing floor
+#                                            (WP-137); either missing falls back to the role's routing floor; the
+#                                            final tier/effort actually spawned are written as pane tokens
+#                                            model/effort (WP-143), for reuse-matching and idle retirement
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #   agents.sh respawn <name|pane>|--stale [--force] # new tab (current PATH shims + plugin guard), same name, role,
-#                                            cwd, tokens and claude session; --stale: every pool agent lacking either
+#                                            cwd, tokens and claude session (model/effort tokens re-applied as
+#                                            --model/--effort so the respawn keeps its tier, not the role floor);
+#                                            --stale: every pool agent lacking either
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
@@ -232,6 +236,8 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   fi
   [ -z "$model" ] || set -- "$@" --model "$model"
   [ -z "$effort" ] || set -- "$@" --effort "$effort"
+  # WP-143: record what this pane actually runs (post-floor), so reuse and idle-retirement can match on it.
+  herdr pane report-metadata "$pane" --source wt-dashboard ${model:+--token "model=$model"} ${effort:+--token "effort=$effort"} >/dev/null 2>&1 || true
   while ! herdr agent start "$label" --kind claude --pane "$pane" -- "$@" >/dev/null 2>&1; do
     n=$((n + 1))
     [ "$n" -ge 3 ] && { echo "claude did not come up in $label (pane $pane)" >&2; exit 1; }
@@ -272,6 +278,7 @@ respawn)
     name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
     r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
     sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')
+    m=$(printf '%s' "$row" | jq -r '.tokens.model // empty'); e=$(printf '%s' "$row" | jq -r '.tokens.effort // empty')
     [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role token and a cwd to respawn" >&2; return 1; }
     [ -n "$sess" ] || { echo "$1: no claude session id to resume" >&2; return 1; }
     [ -d "$dir" ] || { echo "$1: its cwd $dir is gone; not closing it" >&2; return 1; }
@@ -283,10 +290,10 @@ respawn)
       echo "$name: no transcript for session $sess; starting fresh" >&2; sess=
     fi
     "$self" rm "$old" --force >/dev/null || return 1
-    out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"}) || return 1
+    out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
     new=${out#* }
-    # Spawn writes its own role/project/spawned_by/created; carry the rest (task, ticket, task_state …) over.
-    printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .project, .spawned_by, .created) | to_entries[] | "\(.key)=\(.value)"' \
+    # Spawn writes its own role/project/spawned_by/created/model/effort; carry the rest (task, ticket, task_state …) over.
+    printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .project, .spawned_by, .created, .model, .effort) | to_entries[] | "\(.key)=\(.value)"' \
     | while IFS= read -r kv; do
         herdr pane report-metadata "$new" --source wt-dashboard --token "$kv" >/dev/null 2>&1 || true
       done
