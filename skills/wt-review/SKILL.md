@@ -147,6 +147,12 @@ lens its own agent.
 <lens agent name> --role reviewer`; when it prints a tier (live routing), pass it as that Agent call's `model`. When it
 prints nothing (shadow or off, the default), leave `model` unset. A hook cannot set it, so this is the only place it gets set.
 
+**Send-back marker (WP-128).** In diff mode on a local board ticket, when a confirmed finding sends the work back to
+its author, record it so routing can learn: take the last `ref` from the ticket's `routing: … ref <run#i>` comment and
+run `../wt-ticket/scripts/wt-ticket comment <ID> "routing: send-back <ref> — <one-line why>"` and
+`node ../wt-shared/scripts/model-route.mjs outcome <ref> send-back "<why>"`. No routing comment → skip both. Two
+send-backs or returns escalate the ticket's next handoff to opus (live routing only).
+
 **Dispatch every agent in one message.** Queueing dominates a multi-agent step — on a measured run, waiting
 on reviewer scheduling cost more than the reviewing. A lens dispatched in its own turn adds its whole
 scheduling wait to the run, which is the real argument for bundling. It is not a token argument.
