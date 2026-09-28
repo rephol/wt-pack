@@ -334,7 +334,7 @@ async function main() {
     const sessionFloor = isTier(cfg.sessionFloor) ? cfg.sessionFloor : 'sonnet'
     const roleFloor = cfg.roleFloors?.[opt('role')]
     const t = isTier(roleFloor) ? max(sessionFloor, roleFloor) : sessionFloor
-    const source = isTier(roleFloor) && rank(roleFloor) > rank(sessionFloor) ? 'role-floor' : 'session-floor'
+    const source = isTier(roleFloor) && rank(roleFloor) >= rank(sessionFloor) ? 'role-floor' : 'session-floor'
     const live = cfg.mode === 'live' && isTier(t)
     // --model: the caller's actual tier (an explicit override away from the role's floor), effort only —
     // never changes the printed/`tier` floor itself. The session floor applies to the default (no --model)

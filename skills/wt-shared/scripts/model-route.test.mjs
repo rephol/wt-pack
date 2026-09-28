@@ -347,6 +347,10 @@ test('WP-157: floor never spawns a role on haiku — every role gets at least so
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { worker: 'haiku' } }))
   const misfloored = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(misfloored.tier, 'sonnet'); assert.equal(misfloored.source, 'session-floor')
+  // A role floor set EQUAL to the session floor attributes to the role's own config, not the session default.
+  writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { worker: 'sonnet' } }))
+  const tied = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.equal(tied.tier, 'sonnet'); assert.equal(tied.source, 'role-floor')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
 })
 
