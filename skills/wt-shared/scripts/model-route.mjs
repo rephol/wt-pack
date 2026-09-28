@@ -7,8 +7,10 @@
 //       live: prints the tier; off/shadow: prints nothing (--json: always the decision incl. effort, plus "run#i").
 //       Exit 0 always.
 //   model-route.mjs explain …same flags… < task   the whole decision as JSON
-//   model-route.mjs floor --role R [--cwd DIR] [--json]   live: the role's floor tier (planner → opus) and its
-//       effort, else nothing (spawn has no task text to route, so this is all it applies without a --model)
+//   model-route.mjs floor --role R [--model M] [--cwd DIR] [--json]   live: the role's floor tier (planner →
+//       opus) and its effort, else nothing (spawn has no task text to route, so this is all it applies without
+//       an explicit tier). --model computes the printed effort for that tier instead of the role's floor tier
+//       (e.g. the caller already picked one some other way) without changing the printed/`tier` floor itself.
 //   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
 //   model-route.mjs usage [--days N]   tokens/notional cost by model, split session vs subagent (WP-130; dashboard-
 //       free equivalent of Settings › Usage; N defaults to 7)
@@ -216,8 +218,11 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   // Global off is the kill switch: a per-skill mode never overrides it.
   const mode = cfg.mode !== 'off' && MODES.includes(cfg.skills?.[skill]?.mode) ? cfg.skills[skill].mode : cfg.mode
   if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from }
-  if (model) return { mode, apply: null, tier: model, source: 'explicit', from: cfg.from }
   const state = buildState({ skill, role, lens, description, task })
+  if (model) {
+    const effort = computeEffort(model, state, cfg.effort)
+    return { mode, apply: null, tier: model, effort, source: 'explicit', from: cfg.from, applyEffort: mode === 'live' ? effort : null }
+  }
   let d
   const pin = cfg.skills?.[skill]?.pin
   if (isTier(pin)) d = { tier: pin, source: 'pin' }
@@ -265,7 +270,11 @@ async function main() {
     const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
     const t = cfg.roleFloors?.[opt('role')]
     const live = cfg.mode === 'live' && isTier(t)
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, effort: live ? computeEffort(t, buildState({ role: opt('role') }), cfg.effort) : null }))
+    // --model: the caller's actual tier (an explicit override away from the role's floor), effort only —
+    // never changes the printed/`tier` floor itself.
+    const effortTier = isTier(opt('model')) ? opt('model') : t
+    const effortLive = cfg.mode === 'live' && isTier(effortTier)
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), cfg.effort) : null }))
     else if (live) console.log(t)
     return
   }
