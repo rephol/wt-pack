@@ -360,3 +360,89 @@ test('handoff output with a routing line: name from the target line, card claime
   assert.equal(got.assignee.name, 'wt-pack-worker-09'); assert.equal(got.assignee.pane, 'w9:p1')
   assert.equal(calls.length, 1)
 })
+
+// WP-147: pairing
+test('WP-147: dispatch picks a free reviewer as the buddy, passes --buddy, and pairs the ticket', async () => {
+  const reviewer = { name: 'wt-pack-reviewer-01', id: 'wR:p1', local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: {} }
+  const { tickets, d, calls } = await setup({ agents: [reviewer] })
+  const t = await ready(tickets, 'a')
+  await d.tick()
+  assert.ok(calls[0].args.includes('--buddy'))
+  assert.equal(calls[0].args[calls[0].args.indexOf('--buddy') + 1], 'wR:p1')
+  assert.deepEqual((await tickets.get(t.id)).pair, {
+    worker: { name: 'wt-pack-worker-09', pane: 'w9:p1' },
+    buddy: { name: 'wt-pack-reviewer-01', pane: 'wR:p1', role: 'reviewer' },
+  })
+})
+
+test('WP-147: no free reviewer → no --buddy, ticket stays unpaired', async () => {
+  const { tickets, d, calls } = await setup({ agents: [] })
+  const t = await ready(tickets, 'a')
+  await d.tick()
+  assert.ok(!calls[0].args.includes('--buddy'))
+  assert.equal((await tickets.get(t.id)).pair, undefined)
+})
+
+test('WP-147 reconcile: a gone paired worker is replaced in place, not returned to Ready, with a comment', async () => {
+  const repl = { name: 'wt-pack-worker-02', id: 'w2:p1', local: true, pool: 'worker', project: 'wt-pack', status: 'idle', paneTokens: {} }
+  const buddy = { name: 'wt-pack-reviewer-01', id: 'wR:p1', local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: {} }
+  const tagged = []
+  const { tickets, d } = await setup({ agents: [repl, buddy], extra: { tagPair: async (pane, ticket) => tagged.push([pane, ticket]) } })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t.id, { pair: { worker: { name: 'wt-pack-worker-07', pane: 'w7:p1' }, buddy: { name: 'wt-pack-reviewer-01', pane: 'wR:p1', role: 'reviewer' } } },
+    user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await d.tick(); await d.tick() // two misses
+  const T = await tickets.get(t.id)
+  assert.equal(T.column, 'building')
+  assert.equal(T.assignee.name, 'wt-pack-worker-02')
+  assert.equal(T.pair.worker.name, 'wt-pack-worker-02')
+  assert.equal(T.pair.buddy.name, 'wt-pack-reviewer-01') // unchanged
+  assert.ok(T.history.some((h) => h.text === 'pair: wt-pack-worker-07 → wt-pack-worker-02 (gone)'))
+  assert.deepEqual(tagged, [['w2:p1', T.id]])
+})
+
+test('WP-147 reconcile: two tickets losing their worker in the same tick never get the same replacement', async () => {
+  const repl = { name: 'wt-pack-worker-02', id: 'w2:p1', local: true, pool: 'worker', project: 'wt-pack', status: 'idle', paneTokens: {} }
+  const { tickets, d } = await setup({ agents: [repl] })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t1 = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t1.id, { pair: { worker: { name: 'wt-pack-worker-07', pane: 'w7:p1' } } }, user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  const t2 = await tickets.create('wt-pack', { title: 'b', column: 'building' }, user)
+  await tickets.patch(t2.id, { pair: { worker: { name: 'wt-pack-worker-08', pane: 'w8:p1' } } }, user, { name: 'wt-pack-worker-08', pane: 'w8:p1' })
+  await d.tick(); await d.tick() // two misses, both tickets, same tick
+  const [T1, T2] = await Promise.all([tickets.get(t1.id), tickets.get(t2.id)])
+  const winners = [T1.pair.worker?.name, T2.pair.worker?.name].filter(Boolean)
+  assert.equal(new Set(winners).size, winners.length) // never the same agent twice
+  assert.ok(winners.includes('wt-pack-worker-02')) // the one free worker went to exactly one of them
+  assert.ok([T1.pair.worker, T2.pair.worker].includes(null)) // the other has no replacement
+})
+
+test('WP-147 reconcile: a gone buddy is replaced too, worker untouched', async () => {
+  const worker = { name: 'wt-pack-worker-07', id: 'w7:p1', local: true, pool: 'worker', project: 'wt-pack', status: 'working', paneTokens: {} }
+  const replBuddy = { name: 'wt-pack-reviewer-02', id: 'wR:p2', local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: {} }
+  const { tickets, d } = await setup({ agents: [worker, replBuddy] })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t.id, { pair: { worker: { name: 'wt-pack-worker-07', pane: 'w7:p1' }, buddy: { name: 'wt-pack-reviewer-01', pane: 'wR:p1', role: 'reviewer' } } },
+    user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await d.tick(); await d.tick()
+  const T = await tickets.get(t.id)
+  assert.equal(T.assignee.name, 'wt-pack-worker-07')
+  assert.equal(T.pair.buddy.name, 'wt-pack-reviewer-02')
+})
+
+test('WP-147 reconcile: no free replacement → Inbox notify, card left where it is', async () => {
+  const notified = []
+  const other = { name: 'someone-else', local: true, pool: 'other', project: 'wt-pack', status: 'working' }
+  const { tickets, d } = await setup({ agents: [other], extra: { notify: async (item) => notified.push(item) } })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t.id, { pair: { worker: { name: 'wt-pack-worker-07', pane: 'w7:p1' }, buddy: { name: 'wt-pack-reviewer-01', pane: 'wR:p1', role: 'reviewer' } } },
+    user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await d.tick(); await d.tick()
+  const T = await tickets.get(t.id)
+  assert.equal(T.column, 'building')
+  assert.equal(T.pair.worker, null)
+  assert.ok(notified.some((n) => n.kind === 'pair-gone'))
+})

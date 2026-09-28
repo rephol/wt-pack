@@ -96,7 +96,9 @@ export class Dispatch {
   // Finish step 6 in one conditional write. handoff.sh's own wt-ticket move/assign fails from here (no pane: the
   // server rejects an empty x-herdr-pane), so the card is still unassigned; if that auth ever changes, this no-ops.
   // Only a card still claimed by us and unassigned moves.
-  async #sent(id, role, agent, now = Date.now()) {
+  // WP-147: `buddy` is the free reviewer dispatchOne picked (or null) — recorded on the ticket here (not by
+  // handoff.sh's own PATCH, which needs a real sender pane and silently no-ops from a server-side dispatch).
+  async #sent(id, role, agent, now = Date.now(), buddy = null) {
     let moved = false
     const t = await this.tickets.mutate(id, (t, at) => {
       if (t.dispatch?.state !== 'dispatching' || t.assignee) return t
@@ -105,6 +107,10 @@ export class Dispatch {
       t.history.push({ at, author: 'dispatch', kind: 'move', from: t.column, to, text: `dispatched to ${agent.name}` })
       t.history.push({ at, author: 'dispatch', kind: 'assign', from: null, to: agent.name })
       Object.assign(t, { column: to, assignee: agent, dispatch: { state: 'sent', at, agent: agent.name } })
+      if (buddy && !t.pair) {
+        t.pair = { worker: { name: agent.name, pane: agent.pane }, buddy: { name: buddy.name, pane: buddy.id, role: 'reviewer' } }
+        t.history.push({ at, author: 'dispatch', kind: 'pair', from: null, to: t.pair })
+      }
       return t
     })
     const project = await this.tickets.project(id)
@@ -162,11 +168,16 @@ export class Dispatch {
     const claimed = await this.tickets.dispatchClaim(next.id, now)
     if (!claimed) return
     const role = roleFor(next)
+    // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy (idle/done, like candidates()).
+    const buddy = role === 'worker' && !next.pair
+      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair)
+      : null
     try {
-      const out = await this.deps.handoff(['--role', role, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), repo], dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
+      const args = ['--role', role, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
+      const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
       const { name, pane } = parseHandoff(out)
       this.log(`dispatch ${next.id} → ${name} ${pane}`)
-      try { await this.#sent(next.id, role, { name, pane }, now) } catch (e) {
+      try { await this.#sent(next.id, role, { name, pane }, now, buddy) } catch (e) {
         // WP-131: the work was already sent; never re-dispatch it. Hold for a human.
         await this.tickets.mutate(next.id, (t, at) => {
           t.dispatch = { state: 'held', at, fails: 3, reason: `sent to ${name} but not recorded: ${String(e?.message ?? e).slice(0, 120)}` }
@@ -205,10 +216,9 @@ export class Dispatch {
       // gone unassigns; Planning/Building also return to Ready since nobody is working them and Dispatch
       // skips assigned cards (a Ready/Review/Blocked card just loses its stale assignee).
       if (!a && t.assignee.pane) {
-        const n = (this.gone.get(g) ?? 0) + 1
-        this.gone.set(g, n)
-        if (n < 2) continue // one miss may be a herdr blip
-        this.gone.delete(g)
+        if (!this.#debounceGone(g)) continue // one miss may be a herdr blip
+        // WP-147: a paired ticket is replaced in place (or flagged), never just returned to Ready.
+        if (t.pair) { await this.#pairReplace(project, t, 'worker', local, now).catch((e) => this.log(`pair replace ${t.id}: ${e.message}`)); continue }
         const name = t.assignee.name
         await this.tickets.dropAssignee(t.id, name, 'dispatch', `returned: ${name} is gone`)
         this.event(project, 'returned', t.id, `${name} is gone`, now)
@@ -232,6 +242,60 @@ export class Dispatch {
         await this.tickets.mutate(t.id, (t) => { delete t.dispatch.stalled; if (!Object.keys(t.dispatch).length) delete t.dispatch; return t })
       }
     }
+    // WP-147: the buddy is never the assignee, so a gone buddy needs its own check (the worker's is above).
+    for (const t of cards) {
+      if (!t.pair?.buddy?.pane || t.column === 'done') continue
+      const buddy = t.pair.buddy
+      const a = local.find((x) => x.name === buddy.name)
+      const g = `pair-buddy|${t.id}|${buddy.name}`
+      if (a) { this.gone.delete(g); continue }
+      if (!this.#debounceGone(g)) continue
+      await this.#pairReplace(project, t, 'buddy', local, now).catch((e) => this.log(`pair replace ${t.id}: ${e.message}`))
+    }
+  }
+
+  // Two consecutive ticks missing = gone (one miss may be a herdr blip); shared by the worker- and buddy-gone
+  // checks in reconcile(), which key it differently (`${id}|${name}` vs `pair-buddy|${id}|${name}`).
+  #debounceGone(key) {
+    const n = (this.gone.get(key) ?? 0) + 1
+    this.gone.set(key, n)
+    if (n < 2) return false
+    this.gone.delete(key)
+    return true
+  }
+
+  // WP-147 escalation: a gone pair member is replaced by a free agent of the same role, with a ticket comment
+  // ("pair: <old> → <new> (gone)"); no replacement → an Inbox item to the orchestrator, card left where it is.
+  // Re-reads the ticket: the worker and buddy checks share one `cards` snapshot per tick, and either can
+  // already have replaced the other's pair field earlier in the same pass. `local` is likewise shared and
+  // mutated in place on a pick, so two tickets losing a member in the same tick never get the same agent —
+  // `tagPair()` below only updates the live pane token, which this pass would not see again until the next tick.
+  async #pairReplace(project, t, role, local, now) {
+    const cur = await this.tickets.get(t.id)
+    const p = cur.pair?.[role]
+    if (!p) return
+    const wantPool = role === 'worker' ? 'worker' : (p.role || 'reviewer')
+    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair)
+    const repl = i < 0 ? null : local[i]
+    if (repl) local.splice(i, 1)
+    const pair = { ...cur.pair, [role]: repl ? { name: repl.name, pane: repl.id, ...(role === 'buddy' ? { role: wantPool } : {}) } : null }
+    await this.tickets.patch(t.id, { pair }, { name: 'dispatch' })
+    if (!repl) {
+      await this.deps.notify?.({ kind: 'pair-gone', key: `pair|${t.id}|${role}`, title: `${t.id}: ${role} ${p.name} is gone`,
+        body: `No free ${wantPool} to replace ${p.name} on ${t.id}.`, target: { ticket: t.id, project } })
+      this.event(project, 'pair-gone', t.id, `${role} ${p.name} gone, no replacement`, now)
+      return
+    }
+    await this.tickets.comment(t.id, `pair: ${p.name} → ${repl.name} (gone)`, { name: 'dispatch' })
+    await this.deps.tagPair?.(repl.id, t.id)
+    if (role === 'worker') {
+      await this.tickets.mutate(t.id, (tt, at) => {
+        tt.history.push({ at, author: 'dispatch', kind: 'assign', from: tt.assignee?.name ?? null, to: repl.name })
+        tt.assignee = { name: repl.name, pane: repl.id }
+        return tt
+      })
+    }
+    this.event(project, 'pair-replaced', t.id, `${role} ${p.name} → ${repl.name}`, now)
   }
 
   // Merge commits on origin/<baseBranch> since the last scan (7 days on the first); fetch at most every 5 min per repo.

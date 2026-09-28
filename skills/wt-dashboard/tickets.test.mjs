@@ -65,6 +65,23 @@ test('move appends history; blocked needs a note; validation', async () => {
   assert.equal(c.history.at(-1).kind, 'comment')
 })
 
+test('WP-147: pair round-trips, is validated, and is cleared on Done', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const { id } = await t.create('wt-pack', { title: 'x', column: 'building' }, user)
+  const pair = { worker: { name: 'wt-pack-worker-01', pane: 'w1:p2' }, buddy: { name: 'wt-pack-reviewer-01', pane: 'wR:p1', role: 'reviewer' } }
+  const p1 = await t.patch(id, { pair }, user)
+  assert.deepEqual(p1.pair, pair)
+  assert.deepEqual([p1.history.at(-1).kind, p1.history.at(-1).to], ['pair', pair])
+  // A pair member can go null independently (e.g. a gone buddy with no replacement), never rejected.
+  const p2 = await t.patch(id, { pair: { ...pair, buddy: null } }, user)
+  assert.equal(p2.pair.buddy, null)
+  await assert.rejects(t.patch(id, { pair: { worker: { name: 'x' } } }, user), { status: 400 }) // missing pane
+  await assert.rejects(t.patch(id, { pair: { worker: { name: 'x', pane: 'p' }, buddy: { name: 'y' } } }, user), { status: 400 }) // buddy missing role/pane
+  // Clearing on Done is server.mjs's onDone; here we prove the field itself clears cleanly to null.
+  const p3 = await t.patch(id, { pair: null, column: 'done' }, user)
+  assert.equal(p3.pair, null)
+})
+
 test('claim: 409 when held by another agent, force takes it', async () => {
   const t = new Tickets({ dir: await tmp() })
   const { id } = await t.create('wt-pack', { title: 'x' }, user)

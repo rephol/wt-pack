@@ -8,6 +8,8 @@
 #                                            (WP-137); either missing falls back to the role's routing floor; the
 #                                            final tier/effort actually spawned are written as pane tokens
 #                                            model/effort (WP-143), for reuse-matching and idle retirement
+#   agents.sh dnd <name|pane> on|off       # set/clear the `dnd` pane token (WP-147): DND agents are skipped by
+#                                            every free-agent pick (wt-handoff candidates(), retireIdle, routines)
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #   agents.sh respawn <name|pane>|--stale [--force] # new tab (current PATH shims + plugin guard), same name, role,
 #                                            cwd, tokens and claude session (model/effort tokens re-applied as
@@ -249,6 +251,20 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   done
   herdr agent rename "$pane" "$label" >/dev/null 2>&1 || true
   echo "$label $pane"
+  ;;
+
+dnd)
+  target=${1:?name or pane required}; state=${2:?on or off required}
+  case "$state" in on|off) ;; *) echo "dnd: on or off" >&2; exit 2 ;; esac
+  pane=$(herdr agent list | jq -r --arg t "$target" \
+    '.result.agents[] | select(.name == $t or .pane_id == $t) | .pane_id' | head -1)
+  [ -n "$pane" ] || { echo "no such agent: $target" >&2; exit 1; }
+  if [ "$state" = on ]; then
+    herdr pane report-metadata "$pane" --source wt-dashboard --token dnd=1 >/dev/null
+  else
+    herdr pane report-metadata "$pane" --source wt-dashboard --clear-token dnd >/dev/null
+  fi
+  echo "dnd $state: $target ($pane)"
   ;;
 
 rm)

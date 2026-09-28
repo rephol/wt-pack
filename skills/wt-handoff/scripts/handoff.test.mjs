@@ -124,6 +124,56 @@ test('WP-143: WT_WORKERS_MAX caps the worker pool; a full pool exits 3 and never
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
+test('WP-147: a DND agent is not listed, and --pane to one warns but still sends', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo },
+    { name: 'demo-worker-02', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p1', tokens: { dnd: '1' } }] } }))
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), JSON.stringify({ result: { pane: { tokens: { dnd: '1' } } } }))
+  const list = run(['--list', repo], '')
+  assert.ok(!list.includes('wW:p1'))
+  assert.ok(list.includes('wW:p2'))
+  let threw = null
+  let out
+  try { out = execFileSync(join(here, 'handoff.sh'), ['--pane', 'wW:p1', '--no-goal', repo], { input: 'x', encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp } }) } catch (e) { threw = e }
+  assert.equal(threw, null)
+  assert.match(out, /^reused wW:p1$/m)
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-147: a paired agent is not a free candidate, only reachable for its own ticket', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p1', tokens: { pair: 'WP-9' } }] } }))
+  const list = run(['--list', repo], '')
+  assert.ok(!list.includes('wW:p1'))
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-147: --task <TICKET> with no --pane routes to the pair — the worker, or the buddy for --role reviewer', () => {
+  // wt-ticket's own HTTP calls (curl) don't route through the herdr stub, so this one test gets a dedicated
+  // curl stub ahead of it on PATH: `-w '\n%{http_code}'` means the body is followed by a newline and a status.
+  const curlBin = join(tmp, 'curlbin')
+  mkdirSync(curlBin, { recursive: true })
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+for a in "$@"; do url=$a; done
+case "$url" in
+  *"/api/tickets/keys"*) printf 'WP\\n200' ;;
+  *"/api/tickets/WP-9"*) printf '%s\\n200' '{"id":"WP-9","pair":{"worker":{"name":"demo-worker-09","pane":"wW:p9"},"buddy":{"name":"demo-reviewer-09","pane":"wR:p9","role":"reviewer"}}}' ;;
+  *) printf '{}\\n404' ;;
+esac
+`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off' }
+  let out = execFileSync(join(here, 'handoff.sh'), ['--no-goal', '--dry-run', '--task', 'WP-9 fix it', repo], { input: 'x', encoding: 'utf8', env })
+  assert.match(out, /would hand to pane wW:p9$/m)
+  out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', '--task', 'WP-9 fix it', repo], { input: 'x', encoding: 'utf8', env })
+  assert.match(out, /would hand to pane wR:p9$/m)
+})
+
 test('WP-132: --cancel resolves a name to its pane and reports what it did', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))

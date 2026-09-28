@@ -109,6 +109,22 @@ Runs every tick on **every** board, whether Dispatch is on or not:
 
 Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards).
 
+### Pairing
+
+- A ticket can hold a **worker + buddy** pair (`pair: { worker, buddy }`), shown as a chip on the board card and
+  read-only under `paired · <TICKET>` on the paired agents' Summary tab; editable as a **Buddy** dropdown in the
+  ticket drawer (needs an assignee first). Both members get a `pair` pane token, which — like DND — makes them
+  invisible to every free-agent pick until the ticket is Done.
+- **Setting it**: `wt-handoff --buddy <pane|self>` (`self` = the sending pane) at the moment the worker is
+  chosen — wt-plan's handoff pairs the worker with the planner itself. Dispatch pairs a worker-role ticket with
+  no pair yet to a free reviewer automatically.
+- **Routing follow-ups**: `wt-handoff --task <TICKET>` with no `--pane` and a pair on record goes straight to the
+  worker (or the buddy, for `--role reviewer` — a review round); `wt-watch-prs dispatch` sends a paired ticket's
+  review to its buddy the same way, from the PR branch's ticket id.
+- **A gone pair member** (two missed ticks) is replaced by a free agent of the same role, with a
+  `pair: <old> → <new> (gone)` comment; no replacement → an Inbox item to the orchestrator, card left in place.
+- **Release**: reaching Done clears `pair` on both panes and the ticket.
+
 ## Install as a plugin
 
 - **Plugin-only install** (WP-122): `/plugin marketplace add rephol/wt-pack`, then `/plugin install wt-pack@wt-pack`.
@@ -167,6 +183,12 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   sessions without it (respawn them). Deliberate bypass: `/usr/bin/pkill` by full path.
 - **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
   closes; a worktree it used stays on disk.
+- **Do Not Disturb** (WP-147): a per-agent toggle (agent page header, and the Summary tab/panel — moon badge
+  next to the status dot when on) that makes the agent invisible to every free-agent pick — `wt-handoff`'s
+  `candidates()` (auto-pick and `--list`), idle-worker retirement (WP-143), and a routine's prompt target. A
+  direct `--pane` hand-off still reaches it, with a `warning: <name> is DND` on stderr. CLI: `wt-agents dnd
+  <name|pane> on|off`. **DND auto-off** (Settings › Projects, `dndAutoOffHours`, default 0 = never): turning DND
+  on writes an expiry instead of a flat `1`, cleared by the 4s server tick once it's past.
 - CLI: `wt-agents spawn <role>`, `list --json`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
 - Skills: wt-agents, wt-handoff.
 
