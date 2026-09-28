@@ -115,3 +115,13 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   a hand-constructed fixture (built from a confirmed real single-line capture plus an existing multi-line
   fixture's real wrap conventions, per `skills/wt-dashboard/test-fixtures/picker-4-tabs-wrapped*.txt`) rather
   than spending time on split/resize/restart attempts expecting a genuinely narrower live render.
+- A test that spawns a CLI synchronously (`execFileSync`/`spawnSync`) while also running an in-process HTTP
+  stub server for that CLI to call reaches a deadlock disguised as a connection failure: the synchronous
+  child-process call blocks the parent's event loop, so the stub's own request handler never gets to run, and
+  every call times out looking exactly like "server unreachable" (curl's own `--max-time`) rather than a hang.
+  WP-164's `wt-ask.test.mjs` first wrote its `run()` helper with `execFileSync`, and every test failed with
+  the CLI's own "wt-dashboard not reachable" message even though a real client (`curl` by hand, or the same
+  test with `execFile`/`promisify`) reached the identical stub instantly — confirmed by switching `run()` to
+  `promisify(execFile)` (`skills/wt-ask/scripts/wt-ask.test.mjs:13,27`), which fixed all six tests with no
+  other change. Any future skill test that spins up its own stub server and shells out to its CLI in the same
+  process needs the async form for this reason, not just because sync blocking is generally bad practice.
