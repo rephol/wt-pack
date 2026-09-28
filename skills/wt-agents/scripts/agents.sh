@@ -4,10 +4,12 @@
 #   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
 #   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
 #                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
-#                                            --model starts claude on that tier (WP-128); --effort sets its effort
-#                                            (WP-137); either missing falls back to the role's routing floor; the
-#                                            final tier/effort actually spawned are written as pane tokens
-#                                            model/effort (WP-143), for reuse-matching and idle retirement
+#                                            --model starts claude on that tier (WP-128), pinned to its explicit
+#                                            model id (WP-158) rather than the bare alias; --effort sets its
+#                                            effort (WP-137); either missing falls back to the role's routing
+#                                            floor; the final tier/effort actually spawned are written as pane
+#                                            tokens model/effort (WP-143, tier not id), for reuse-matching and
+#                                            idle retirement
 #   agents.sh dnd <name|pane> on|off       # set/clear the `dnd` pane token (WP-147): DND agents are skipped by
 #                                            every free-agent pick (wt-handoff candidates(), retireIdle, routines)
 #   agents.sh rm <name|pane> [--force]     # closes the tab
@@ -232,15 +234,17 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   [ -z "$resume" ] || set -- "$@" --resume "$resume"
   if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
   # WP-128/137: an explicit tier/effort wins; else the role floor and its effort, only in live routing (spawn has
-  # no task to route).
-  if [ -z "$model" ] || [ -z "$effort" ]; then
-    # --model here (when the caller already gave one) is passed through so floor computes effort for the
-    # tier actually being spawned, not the role's own floor tier when the two diverge.
-    floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} --cwd "$main" --json 2>/dev/null || true)
-    [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
-    [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)
-  fi
-  [ -z "$model" ] || set -- "$@" --model "$model"
+  # no task to route). WP-158: floor also returns the tier's explicit model id (its own loadConfig() already
+  # has the map in scope) — one call regardless of what's missing, not a second `model-id` process on top.
+  # --model here (when the caller already gave one) is passed through so floor computes effort/id for the
+  # tier actually being spawned, not the role's own floor tier when the two diverge.
+  floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} --cwd "$main" --json 2>/dev/null || true)
+  model_id=$(printf '%s' "$floor" | jq -r '.model // empty' 2>/dev/null || true)
+  [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
+  [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)
+  # claude --model <tier> lets Claude Code resolve the bare alias to whatever it currently treats as that
+  # tier; pin the explicit model id instead. $model itself stays the tier below (pane token, reuse match).
+  [ -z "$model" ] || set -- "$@" --model "${model_id:-$model}"
   [ -z "$effort" ] || set -- "$@" --effort "$effort"
   # WP-143: record what this pane actually runs (post-floor), so reuse and idle-retirement can match on it.
   herdr pane report-metadata "$pane" --source wt-dashboard ${model:+--token "model=$model"} ${effort:+--token "effort=$effort"} >/dev/null 2>&1 || true

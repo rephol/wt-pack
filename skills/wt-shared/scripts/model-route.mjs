@@ -16,6 +16,10 @@
 //   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
 //   model-route.mjs usage [--days N]   tokens/notional cost by model, split session vs subagent (WP-130; dashboard-
 //       free equivalent of Settings › Usage; N defaults to 7)
+//   model-route.mjs model-id <haiku|sonnet|opus> [--cwd DIR]   the explicit model id `claude --model` should get
+//       for that tier (WP-158; `claude --model opus` lets Claude Code resolve the alias to whatever it currently
+//       treats as opus — a session-level spawn wants the pinned id). Configurable: DEFAULTS.modelIds, same layers
+//       as everything else below.
 // Order: kill switch / mode off → explicit model → skill pin → local obvious case → Jev choice → floors (only raise).
 // Config layers, first wins: env WT_MODEL_ROUTING (mode) / WT_EFFORT (G) › <repo>/.wt-pack/model-routing.json ›
 // dashboard project setting WT_MODEL_ROUTING / WT_EFFORT › ~/.config/wt-pack/model-routing.json › defaults (mode
@@ -54,7 +58,12 @@ export const DEFAULTS = {
   sessionFloor: 'sonnet',
   thresholds: { haiku: 0.8, opus: 0.6 },
   effort: 'high', // the global ceiling G, same config layering as `mode`
+  // WP-158: the explicit model id `claude --model` gets for each tier, so a session-level spawn pins the
+  // actual model instead of handing Claude Code a bare alias to resolve on its own.
+  modelIds: { haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5', opus: 'claude-opus-5-5' },
 }
+// Falls back to the bare tier name (today's alias behaviour) when a tier has no configured id.
+export const modelIdFor = (tier, cfg) => (isTier(tier) && cfg?.modelIds?.[tier]) || tier
 const home = () => process.env.HOME || homedir()
 export const paths = () => ({
   user: join(home(), '.config', 'wt-pack', 'model-routing.json'),
@@ -327,6 +336,11 @@ async function main() {
   const opt = (n) => { const i = a.indexOf(`--${n}`); return i >= 0 ? a[i + 1] ?? '' : '' }
   if (cmd === 'outcome') { outcome(a[0], a[1], a[2]); return }
   if (cmd === 'usage') { const days = Number(opt('days')); await usageReport(Number.isFinite(days) && days > 0 ? days : 7); return }
+  if (cmd === 'model-id') {
+    if (!isTier(a[0])) { console.error('usage: model-route.mjs model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
+    console.log(modelIdFor(a[0], loadConfig({ cwd: opt('cwd') || process.cwd() })))
+    return
+  }
   if (cmd === 'floor') {
     const cfg = loadConfig({ cwd: opt('cwd') || process.cwd() })
     // WP-157: sessionFloor is the hard minimum for every role (a session never spawns on haiku); a role's own
@@ -342,11 +356,16 @@ async function main() {
     // before WP-157 — the floor guards what gets spawned with no explicit tier, not an explicit override.
     const effortTier = isTier(opt('model')) ? opt('model') : t
     const effortLive = cfg.mode === 'live' && isTier(effortTier)
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, source: live ? source : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null }))
+    // WP-158: the explicit model id for whichever tier ends up spawned (the caller's own --model, or else the
+    // role/session floor tier) — independent of `live`, since a caller-given tier gets its id regardless of
+    // routing mode. Folded into this same call (rather than a separate `model-id` one) so a spawn/respawn that
+    // already needs floor's tier/effort doesn't pay for loadConfig()'s git/project-setting shell-outs twice.
+    const model = isTier(effortTier) ? modelIdFor(effortTier, cfg) : null
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, source: live ? source : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null, model }))
     else if (live) console.log(t)
     return
   }
-  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json]'); process.exitCode = 2; return }
+  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json] | model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
   const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log') })
