@@ -325,7 +325,7 @@ function NotificationsSection() {
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); setSavedAt(Date.now()) } catch { /* private mode */ }
   }
   const GROUPS: [string, [Kind, string][]][] = [
-    ['Needs you', [['question', 'An agent asks a question'], ['mention-user', 'An agent @mentions you in a room'], ['memory-proposal', 'An agent proposes a global preference'], ['pr-held', 'A reviewer holds a PR for clarification']]],
+    ['Needs you', [['question', 'An agent asks a question'], ['mention-user', 'An agent @mentions you in a room'], ['memory-proposal', 'An agent proposes a global preference'], ['pr-held', 'A reviewer holds a PR for clarification'], ['routing-escalation', 'A ticket escalates to opus after two send-backs']]],
     ['Agents', [['agent-done', 'Agent done'], ['agent-stalled', 'Agent stalled'], ['ci-failed', 'PR CI failing'], ['room-suggestion', 'Room suggestions for tickets'], ['memory', 'An agent remembers a preference']]],
     ['System', [['server', 'Server events'], ['watchdog', 'Watchdog findings'], ['usage', 'Claude usage at 80% / 95%']]],
   ]

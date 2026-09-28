@@ -22,6 +22,8 @@ import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cl
 import { ProjectSettings, PKEYS } from './project-settings.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
+import { loadConfig as routeConfig, outcome as routeOutcome } from '../wt-shared/scripts/model-route.mjs'
+import { load as routeDecisions, report as routeReport } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
@@ -2188,6 +2190,7 @@ async function observabilityApi(req, res, url) {
     recent: recentCalls(calls, q),
     features: [...new Set(calls.map((c) => c.feature))].sort(),
     sources: SOURCES,
+    routing: routeReport(routeDecisions({ sinceDays: 7 })), // WP-128, from the judge log + routing outcomes
   })
 }
 
@@ -2630,6 +2633,10 @@ const dispatcher = new Dispatch({
     reportOf: async (project) => { await rooms.list(); return resolveReport(project, await tickets.settings(project), (s) => rooms.room(s), await agents().catch(() => [])) },
     git: (repo, ...args) => git(repo, ...args),
     ticketOf: tagTicket,
+    // WP-128 model routing: mode per project (its repo's layered config), outcomes, escalation Inbox items.
+    routeMode: async (project) => { const repo = (await projectRoots()).get(project); return repo ? routeConfig({ cwd: repo }).mode : 'off' },
+    routeOutcome,
+    notify: (item) => inbox.add(item),
     handoff: async (args, prompt, cwd) => {
       try { return await runHandoff(execFile, HANDOFF_SH)(args, prompt, cwd) } finally { store.delete('agents:local'); store.delete('overview') }
     },

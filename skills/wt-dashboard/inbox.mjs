@@ -5,8 +5,8 @@ import { readdirSync, lstatSync, readFileSync } from 'node:fs'
 import { open, tx } from './store.mjs'
 import { randomUUID } from 'node:crypto'
 
-export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held']
-export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held'])
+export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation']
+export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation'])
 
 // A transition (from server.mjs transitions()) → an inbox item draft.
 export function itemFromTransition(e) {

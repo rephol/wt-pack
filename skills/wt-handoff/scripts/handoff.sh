@@ -209,6 +209,7 @@ hand_to() {
   herdr agent prompt "$1" "$send" >/dev/null
 }
 
+task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
 from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
 from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
 [ -n "$from_pane" ] && prompt="$prompt
@@ -231,6 +232,23 @@ case "$(printf '%s' "$task" | tr '[:lower:]' '[:upper:]')" in
   *) task=$(printf '%s %s' "$ticket" "$task" | sed 's/^ *//; s/ *$//') ;;
 esac
 task=$(printf '%.80s' "$task")
+
+# WP-128 model routing (wt-shared/scripts/model-route.mjs; shadow by default = logged, nothing applied). A ticket
+# escalated by dispatch ("routing: escalate opus" in its history) is an explicit tier. A reused agent cannot change
+# model without an interactive picker, so an applied tier always spawns a fresh agent with --model.
+route_tier=; route_line=
+if [ "$mode" != pane ]; then
+  esc=$( [ -n "$local_ticket" ] && [ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null \
+    | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
+  skill=$(printf '%s' "$task_text" | grep -oE 'wt-[a-z]+(-[a-z]+)*' | head -1 || true)
+  r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-$role}" --role "$role" \
+    ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
+  rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
+  [ "$rmode" = live ] || esc= # an escalation applies only while routing is live
+  route_tier=${esc:-$(printf '%s' "$r" | jq -r '.apply // empty' 2>/dev/null || true)}
+  [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
+  [ -z "$esc" ] || route_line="routing: $esc (escalated)"
+fi
 
 # Wrap once, before the goal/no-goal split (so --no-goal is tagged too); a failed wrap never sends untagged.
 prompt=$(printf '%s' "$prompt" | node "$WTMSG" --kind "$kind" --from "${from_arg:-${from_name:-${from_pane:-wt-handoff}}}" ${ticket:+--ticket "$ticket"} ${pr:+--pr "$pr"} ${sha:+--sha "$sha"}) \
@@ -274,7 +292,10 @@ finish() {  # <first output line> <target pane>
     if [ -x "$T" ]; then "$T" move "$local_ticket" building >/dev/null || true; [ -n "$to_name" ] && { "$T" assign "$local_ticket" "$to_name" >/dev/null || true; }
     else echo "wt-ticket missing" >&2; fi
   fi
+  # The routing ref rides the ticket's history (dispatch records are cleared on a return), for outcome tuning.
+  if [ -n "$local_ticket" ] && [ -n "$route_line" ] && [ -x "$T" ]; then "$T" comment "$local_ticket" "$route_line" >/dev/null 2>&1 || true; fi
   echo "$line"
+  [ -z "$route_line" ] || echo "$route_line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
   echo "reach: $SELF --reply $to \"...\""
   [ -z "$routed" ] || echo "$routed"
@@ -287,6 +308,7 @@ dry() {  # <what would happen>
   [ -n "$local_ticket" ] && [ "$role" = worker ] && echo "board: would move $local_ticket building + assign the worker"
   echo "mcp: ${mcp:-none}${jev:+ (jev: $jev)}"
   [ -z "$routed" ] || echo "$routed"
+  [ -z "$route_line" ] || echo "$route_line"
   exit 0
 }
 
@@ -297,7 +319,7 @@ if [ "$mode" = pane ]; then
   exit 0
 fi
 
-if [ "$mode" = auto ]; then
+if [ "$mode" = auto ] && [ -z "$route_tier" ]; then
   reuse=$(candidates | while IFS= read -r c; do p=${c%%"$(printf '\t')"*}; has_picks "$(name_of "$p")" && { echo "$p"; break; }; done)
   if [ -n "$reuse" ]; then
     [ "$dry" -eq 1 ] && dry "would reuse $role $(name_of "$reuse") ($reuse)"
@@ -307,10 +329,10 @@ if [ "$mode" = auto ]; then
   fi
 fi
 
-[ "$dry" -eq 1 ] && dry "would spawn a $role in $spawn_cwd${mcp:+ with --mcp $mcp}"
+[ "$dry" -eq 1 ] && dry "would spawn a $role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
-created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "$role" "$spawn_cwd" ${mcp:+--mcp "$mcp"})
+created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "$role" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"})
 label=${created%% *}
 pane=${created##* }
 

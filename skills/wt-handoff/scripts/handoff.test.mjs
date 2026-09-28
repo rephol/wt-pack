@@ -38,3 +38,15 @@ test('WP-121: --role reviewer targets <repo>-reviewers, spawns in the main check
   execFileSync('git', ['-C', repo, 'worktree', 'add', '-q', join(tmp, 'wt'), '-b', 'wt'])
   assert.match(run(['--role', 'reviewer', '--no-goal', '--dry-run', join(tmp, 'wt')]), new RegExp(`would spawn a reviewer in ${repo}$`, 'm'))
 })
+
+test('WP-128: shadow logs a routing line and changes nothing; live spawns a fresh agent with --model', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-reviewer-01', pane_id: 'wR:p1', tab_id: 't2', agent_status: 'idle', workspace_id: 'wR', cwd: repo }] } }))
+  let out = run(['--role', 'reviewer', '--no-goal', '--dry-run', repo], 'list the open PRs')
+  assert.match(out, /would reuse reviewer demo-reviewer-01/)
+  assert.match(out, /routing: haiku \(shadow, local, ref [a-z0-9]+#0\)/)
+  out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' } })
+  assert.match(out, /would spawn a reviewer in \S+ with --model haiku/) // a reused agent can't switch model without a picker
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})

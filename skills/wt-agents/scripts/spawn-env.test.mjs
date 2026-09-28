@@ -24,10 +24,10 @@ const db = new DatabaseSync(join(tmp, 'data', 'wt.db'))
 db.exec('CREATE TABLE project_settings (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project, key))')
 const setAccount = (a) => { db.exec('DELETE FROM project_settings'); if (a) db.prepare("INSERT INTO project_settings VALUES ('demo', 'githubAccount', ?)").run(a) }
 
-const spawn = () => {
+const spawn = (args = ['spawn', 'worker'], extraEnv = {}) => {
   rmSync(log, { force: true })
-  const r = execFileSync(join(here, 'agents.sh'), ['spawn', 'worker'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
+  const r = execFileSync(join(here, 'agents.sh'), args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env'), ...extraEnv } })
   const calls = readFileSync(log, 'utf8').split('\n')
   return { out: r, tab: calls.find((l) => l.startsWith('herdr tab create')), calls, cred: (() => { try { return execFileSync('git', ['-C', repo, 'config', 'credential.https://github.com.username'], { encoding: 'utf8' }).trim() } catch { return '' } })() }
 }
@@ -72,4 +72,14 @@ test('WP-120: every spawn puts the kill shims first on PATH and sets CLAUDE_ENV_
 
 test('WP-122: spawn points WT_MEMORY_MCP at the sibling wt-memory server (plugin installs have no ~/.claude/skills)', () => {
   assert.match(spawn().tab, /--env WT_MEMORY_MCP=\S+\/wt-memory\/mcp\/server\.mjs/)
+})
+
+test('WP-128: --model is passed to claude; no flag without it; live routing gives a planner its opus floor', () => {
+  const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
+  assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /-- --name \S+ .*--model haiku|--model haiku/)
+  assert.doesNotMatch(start(spawn()), /--model/)
+  assert.doesNotMatch(start(spawn(['spawn', 'planner'])), /--model/) // shadow (default): nothing applied
+  assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--model opus/)
+  assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model sonnet/) // explicit wins
+  assert.throws(() => spawn(['spawn', 'worker', '--model', 'gpt']), (e) => e.status === 2)
 })

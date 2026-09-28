@@ -52,9 +52,17 @@ export function dispatchPrompt(t, role, report = null) {
     `Rebase on main and resolve conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`.\n` + line
 }
 
+// WP-128 model routing on a ticket's history: handoff.sh comments "routing: <tier> (<mode>, <source>, ref <run#i>)",
+// wt-review comments "routing: send-back …", dispatch writes "routing: escalate opus". Returns (dispatch's own
+// "returned: …" moves) and send-backs are strikes; two strikes escalate the ticket (live mode only).
+export const routeRef = (t) => (t.history ?? []).map((h) => String(h.text ?? '').match(/^routing: .*\bref ([a-z0-9]+#\d+)/)?.[1]).filter(Boolean).pop() ?? null
+export const strikes = (t) => (t.history ?? []).filter((h) => /^returned: /.test(h.text ?? '') || /^routing: send-back\b/.test(h.text ?? '')).length
+export const escalated = (t) => (t.history ?? []).some((h) => /^routing: escalate /.test(h.text ?? ''))
+
 export class Dispatch {
   // deps: { agents(), host(), handoff(args, prompt, cwd) → stdout, repoOf(project) → path|null, git(repo, ...args) → stdout,
-  //   reportOf(project) → { room: slug|null, orch: {name, pane}|null }, maxWorking(project) → n, baseBranch(project) → 'main' (WP-107), pending() → routine spawns in flight, ticketOf(agent) → ticket id|null }
+  //   reportOf(project) → { room: slug|null, orch: {name, pane}|null }, maxWorking(project) → n, baseBranch(project) → 'main' (WP-107), pending() → routine spawns in flight, ticketOf(agent) → ticket id|null,
+  //   WP-128 (all optional): routeMode(project) → 'off'|'shadow'|'live', routeOutcome(ref, what, why), notify(inboxItem) }
   constructor({ tickets, deps, log = console.error }) {
     Object.assign(this, { tickets, deps, log, ticking: false, state: new Map(), gone: new Map(), fetched: new Map() })
   }
@@ -170,6 +178,7 @@ export class Dispatch {
   async reconcile(project, key, ags, now = Date.now()) {
     const { tickets: cards, stallMin } = await this.tickets.list(project)
     await this.#merged(project, key, cards, now)
+    await this.#escalate(project, cards).catch((e) => this.log(`routing escalation ${project}: ${e.message}`))
     // herdr down (or no local agents at all) is not "every agent is gone".
     const local = ags?.filter((a) => a.local) ?? []
     if (!local.length) return
@@ -191,6 +200,8 @@ export class Dispatch {
           return t
         })
         this.event(project, 'returned', t.id, `${name} is gone`, now)
+        const ref = routeRef(t)
+        if (ref) try { this.deps.routeOutcome?.(ref, 'returned', `${name} is gone`) } catch {}
         continue
       }
       this.gone.delete(g)
@@ -212,6 +223,19 @@ export class Dispatch {
   }
 
   // Merge commits on origin/<baseBranch> since the last scan (7 days on the first); fetch at most every 5 min per repo.
+  // Two strikes (returns or review send-backs) → the next handoff of this ticket runs on opus. Live routing only.
+  async #escalate(project, cards) {
+    const due = cards.filter((t) => t.column !== 'done' && strikes(t) >= 2 && !escalated(t))
+    if (!due.length || (await this.deps.routeMode?.(project)) !== 'live') return
+    for (const t of due) {
+      await this.tickets.comment(t.id, 'routing: escalate opus (two returns or review send-backs)', { name: 'dispatch' })
+      const ref = routeRef(t)
+      if (ref) try { this.deps.routeOutcome?.(ref, 'escalated', `${strikes(t)} strikes`) } catch {}
+      await this.deps.notify?.({ kind: 'routing-escalation', key: `routing|${t.id}`, title: `${t.id} escalated to opus`,
+        body: 'Returned or sent back twice; its next handoff runs on opus (model routing, live).', target: { ticket: t.id, project } })
+    }
+  }
+
   async #merged(project, key, cards, now) {
     if (!cards.some((t) => t.column === 'building' || t.column === 'review')) return
     const repo = await this.deps.repoOf(project)
@@ -234,6 +258,8 @@ export class Dispatch {
       const moved = t.history?.findLast((h) => h.kind === 'move')?.at
       if (moved && Number(ct) * 1000 < Date.parse(moved)) continue
       await this.tickets.patch(id, { column: 'done', note: `merged in ${sha.slice(0, 7)}` }, { name: 'dispatch' })
+      const ref = routeRef(t)
+      if (ref && !strikes(t)) try { this.deps.routeOutcome?.(ref, 'ok', `merged in ${sha.slice(0, 7)}`) } catch {}
       t.column = 'done'
       this.event(project, 'done', id, `merged in ${sha.slice(0, 7)}`, now)
     }

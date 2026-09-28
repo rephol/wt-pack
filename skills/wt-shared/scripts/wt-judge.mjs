@@ -604,7 +604,8 @@ function mark() {
 function calibrate() {
   const only = positional[0];
   const apply = argv.includes('--apply');
-  const labelled = readLog().filter((e) => e.label !== undefined && (!only || e.cmd === only));
+  // WP-128: 'routing' is a 3-way pick, not a p ≥ t judgment; routing-eval.mjs tunes it, never calibrate.
+  const labelled = readLog().filter((e) => e.label !== undefined && e.cmd !== 'routing' && (!only || e.cmd === only));
   if (!labelled.length) {
     console.log('no labelled judgments yet — run some, then: wt-judge.mjs mark <run>#<i> yes|no');
     console.log(`log: ${LOG}`);
