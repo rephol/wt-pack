@@ -173,9 +173,9 @@ function baseEffort(tier, state) {
 export function computeEffort(tier, state, ceiling, jevEffort) {
   const base = baseEffort(tier, state)
   const downgrade = rank(tier) < rank(DEFAULT_TIER)
-  const pick = isEffort(jevEffort) ? jevEffort : downgrade ? EFFORTS[erank(base) + 2] : base
-  const e = downgrade ? emin(pick, emin(EFFORTS[erank(base) + 2], 'high')) : emin(pick, 'high')
-  return emin(e, isEffort(ceiling) ? ceiling : DEFAULTS.effort)
+  const cap = downgrade ? emin(EFFORTS[erank(base) + 2], 'high') : 'high'
+  const pick = isEffort(jevEffort) ? jevEffort : downgrade ? cap : base
+  return emin(emin(pick, cap), isEffort(ceiling) ? ceiling : DEFAULTS.effort)
 }
 
 const QUESTION = choice('Which Claude model tier does this agent task need? haiku: mechanical and bounded (look something up, run a known command, format, small obvious edit). sonnet: normal software work. opus: judgement-heavy or risky (design, planning, security, data migration, subtle bugs, reviewing others\' code).',
