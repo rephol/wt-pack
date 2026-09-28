@@ -91,6 +91,17 @@ this pack as pure waste, and a foreground `sleep` is blocked by the harness. One
 - **and every failure signature you would act on.** A filter that matches only the happy path is silent
   through a crashloop, and silence reads exactly like "still running".
 
+**A Monitor that fails to arm is silent, not absent** — the tool can come back with no task id and no error
+the reader would notice (the harness's own auto-mode classifier gave no verdict). Treat that exactly like an
+error: retry arming it up to twice more (an immediate re-issue, then again next turn) before giving up. Never
+report this step done, or move into §2, while the task id is still unconfirmed.
+
+**Both retries exhausted → this PR is unwatched.** With one Monitor and no room to post to, there is nothing
+left running to say so from — stop the session and report the failure exactly like any other stop condition
+(§3), so the reply that reaches whoever started you is the honest one: babysitting never started, not a false
+"watching" label left on the pane. Do not fall back to polling by hand; that is the waste this rule exists to
+avoid, not an escape hatch for a broken Monitor.
+
 Re-arm on expiry. Stop it with `TaskStop` the moment a stop condition is reached — a monitor left armed
 after the run ends keeps waking a session that has nothing left to do.
 
