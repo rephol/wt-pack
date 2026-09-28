@@ -1003,6 +1003,46 @@ export const ticketOf = (s, keys = [...TEAM_KEYS, ...boardKeys]) => {
 
 // ---- spawn / remove agents: always through the wt-agents skill's script (naming, pools, trust seed) ----
 const AGENTS_SH = fileURLToPath(new URL('../wt-agents/scripts/agents.sh', import.meta.url)) // sibling skill (WP-122)
+
+// WP-143: which idle/done routed workers to retire on Done, so the pool stops growing by one per hand-off.
+// Pure (no herdr) so it is unit-tested directly: group the free, task-less, model-tagged agents by tier, keep the
+// `n` most recently handed off in each, and return the rest's panes. An agent with no `model` token (pre-WP-143,
+// or hand-made) is never touched; a busy or task-carrying one is never a candidate. When a tier has <= n agents
+// (including the pane that just went idle), nothing in it is removed.
+export function retireIdle(agents, n) {
+  const byTier = new Map()
+  for (const a of agents) {
+    if (a.tokens?.role !== 'worker' || !a.tokens?.model) continue
+    if (a.agent_status !== 'idle' && a.agent_status !== 'done') continue
+    if (a.tokens?.task) continue
+    const list = byTier.get(a.tokens.model) ?? []
+    list.push(a)
+    byTier.set(a.tokens.model, list)
+  }
+  const out = []
+  for (const list of byTier.values()) {
+    list.sort((a, b) => Number(b.tokens.handoff_at ?? 0) - Number(a.tokens.handoff_at ?? 0))
+    out.push(...list.slice(n).map((a) => a.pane_id))
+  }
+  return out
+}
+// Runs retireIdle() against the live pool and removes what it picks (agents.sh rm, no --force: refuses a
+// working agent, which nothing here should ever pick anyway).
+async function retireIdleWorkers(project) {
+  const n = Number(process.env.WT_WORKERS_IDLE_PER_TIER ?? psettings.get(project, 'WT_WORKERS_IDLE_PER_TIER'))
+  if (!Number.isFinite(n) || n < 0) return
+  const label = `${project}-workers`
+  const [w, a, p] = await Promise.all([herdr('workspace', 'list'), herdr('agent', 'list'), herdr('pane', 'list')])
+  const ws = JSON.parse(w).result.workspaces.find((x) => x.label === label)?.workspace_id
+  if (!ws) return
+  const tokensOf = new Map(JSON.parse(p).result.panes.map((x) => [x.pane_id, x.tokens ?? {}]))
+  const agentsInPool = JSON.parse(a).result.agents.filter((x) => x.workspace_id === ws)
+    .map((x) => ({ pane_id: x.pane_id, agent_status: x.agent_status, tokens: tokensOf.get(x.pane_id) ?? {} }))
+  for (const pane of retireIdle(agentsInPool, n)) {
+    await run(AGENTS_SH, ['rm', pane], homedir(), 30_000).catch((e) => console.error(`retire ${pane}:`, e.message))
+  }
+  store.delete('agents:local')
+}
 // Project name → main checkout: the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
 // and every repo a local agent is working in.
 async function projectRoots() {
@@ -1918,6 +1958,8 @@ const tickets = new Tickets({
       await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--clear-token', 'task', '--clear-token', 'ticket')
       store.delete('paneMeta')
     } catch (e) { console.error('tokens:', t.assignee.name, e.message) }
+    // WP-143: retire idle routed workers past what this tier keeps, now that this one is free again.
+    await retireIdleWorkers(project).catch((e) => console.error('retire idle:', e.message))
   },
 })
 // boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
