@@ -107,6 +107,7 @@ command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 # `agent list` uses. Outside herdr there is no sender and no sender-side tokens.
 pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // empty'; }
 name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
+pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | select(.name == $n) | .pane_id' | head -1; }
 
 # --reply: a plain answer to whoever sent us a wt-message — no /goal, no tokens, no worker selection.
 if [ -n "$reply" ]; then
@@ -126,7 +127,6 @@ fi
 # condition regardless of what's typed at it (WP-131 incident: told to stop, kept going) — so this
 # escapes whatever it's mid-doing, then ends the goal itself, verifying that the agent actually went
 # idle; a goal that doesn't let go (or an agent already blocked past escape) falls back to /clear.
-pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | select(.name == $n) | .pane_id' | head -1; }
 if [ -n "$cancel" ]; then
   why=${1:-}
   case "$cancel" in
@@ -145,24 +145,29 @@ if [ -n "$cancel" ]; then
   herdr agent send-keys "$pane" esc >/dev/null 2>&1 || true
   if herdr agent prompt "$pane" "/goal clear" --wait --until idle --until done --timeout 8000 >/dev/null 2>&1; then
     cleared="goal cleared"
-  else
-    herdr agent prompt "$pane" "/clear" >/dev/null 2>&1 || true
+  elif herdr agent prompt "$pane" "/clear" >/dev/null 2>&1; then
     cleared="goal clear unverified, sent /clear"
+  else
+    cleared="goal clear unverified, /clear also rejected (agent still blocked?)"
   fi
 
   herdr pane report-metadata "$pane" --source wt-dashboard --clear-token task --clear-token ticket >/dev/null 2>&1 || true
 
   T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
   board=
-  if [ -n "$ticket" ] && [ -x "$T" ]; then
-    row=$("$T" show "$ticket" --json 2>/dev/null) && {
-      assignee_pane=$(printf '%s' "$row" | jq -r '.assignee.pane // empty' 2>/dev/null || true)
-      if [ "$assignee_pane" = "$pane" ]; then
-        "$T" assign "$ticket" none >/dev/null 2>&1 || true
-        "$T" move "$ticket" ready --note "cancelled${why:+: $why}" >/dev/null 2>&1 || true
-        board="returned $ticket to ready"
-      fi
-    }
+  if [ -n "$ticket" ]; then
+    if [ -x "$T" ]; then
+      row=$("$T" show "$ticket" --json 2>/dev/null) && {
+        assignee_pane=$(printf '%s' "$row" | jq -r '.assignee.pane // empty' 2>/dev/null || true)
+        if [ "$assignee_pane" = "$pane" ]; then
+          "$T" assign "$ticket" none >/dev/null 2>&1 || true
+          "$T" move "$ticket" ready --note "cancelled${why:+: $why}" >/dev/null 2>&1 || true
+          board="returned $ticket to ready"
+        fi
+      }
+    else
+      echo "wt-ticket missing" >&2
+    fi
   fi
 
   name=$(name_of "$pane")
