@@ -257,9 +257,21 @@ async function projectOf(cwd) {
 //     4. Type something.  ── 5. Chat about this
 //   Enter to select · Tab/Arrow keys to navigate · Esc to cancel
 // or the review step: "Review your answers" … "Ready to submit your answers?" ❯ 1. Submit answers  2. Cancel
+// WP-165: with enough questions (4+) the tab bar can be wider than the pane, and Ink wraps it onto more than
+// one line — ← only on the first, → only on the last, tabs split across whichever lines fall in between. Find
+// that span (a line starting the bar through the next line ending it, within a few lines) instead of requiring
+// one line with both, so parsing degrades gracefully with pane width rather than failing outright.
+function tabBarSpan(lines, isStart, isEnd) {
+  const start = lines.findLastIndex(isStart)
+  if (start < 0) return null
+  for (let i = start; i < Math.min(start + 4, lines.length); i++) if (isEnd(lines[i])) return [start, i]
+  return null
+}
 // The focused tab is only visible as a background colour (SGR 48) in the ANSI tab row.
 function focusedTab(raw, tabs) {
-  const row = raw.replace(/\r/g, '').split('\n').findLast((l) => l.includes('←') && l.includes('→') && /\x1b\[[0-9;]*48;/.test(l))
+  const rlines = raw.replace(/\r/g, '').split('\n')
+  const span = tabBarSpan(rlines, (l) => l.includes('←'), (l) => l.includes('→'))
+  const row = span && rlines.slice(span[0], span[1] + 1).find((l) => /\x1b\[[0-9;]*48;/.test(l))
   const seg = row?.match(/\x1b\[[0-9;]*48;[0-9;]*m([^\x1b]*)/)?.[1]?.replace(/[☐☒✔]/g, '').trim()
   if (!seg) return null
   if (seg === 'Submit') return tabs.length
@@ -290,14 +302,16 @@ function parsePickerText(text) {
   const lines = text.split('\n')
   const foot = lines.findLastIndex((l) => /Enter to select\s*·/.test(l)) // hint line; may be truncated
   const reviewAt = lines.findLastIndex((l) => /Ready to submit your answers\?/.test(l))
-  const tabLine = lines.findLastIndex((l) => /^\s*←\s+.*\s+→\s*$/.test(l))
-  const tabs = tabLine >= 0
-    ? [...lines[tabLine].matchAll(/([☐☒✔])\s+([^☐☒✔→]+?)(?=\s{2,}|\s*→)/g)].filter((m) => m[2].trim() !== 'Submit')
+  const tabSpan = tabBarSpan(lines, (l) => /^\s*←\s/.test(l), (l) => /\s→\s*$/.test(l))
+  const tabLine = tabSpan ? tabSpan[0] : -1
+  const tabLineEnd = tabSpan ? tabSpan[1] : -1
+  const tabs = tabSpan
+    ? [...lines.slice(tabSpan[0], tabSpan[1] + 1).join('  ').matchAll(/([☐☒✔])\s+([^☐☒✔→]+?)(?=\s{2,}|\s*→)/g)].filter((m) => m[2].trim() !== 'Submit')
         .map((m) => ({ header: m[2].trim(), done: m[1] === '☒' }))
     : []
   if (reviewAt >= 0 && reviewAt > foot && reviewAt > tabLine) {
     const answers = []
-    for (let i = tabLine + 1; i < reviewAt; i++) {
+    for (let i = tabLineEnd + 1; i < reviewAt; i++) {
       const q = lines[i].match(/^\s*●\s+(.*)$/)
       const a = lines[i + 1]?.match(/^\s*→\s+(.*)$/)
       if (q && a) answers.push({ question: q[1].trim(), answer: a[1].trim() })
@@ -312,7 +326,7 @@ function parsePickerText(text) {
     if (m && m[1] === '1') { first = i; break }
   }
   if (first < 0) return null
-  let qStart = tabLine >= 0 ? tabLine + 1 : lines.slice(0, first).findLastIndex((l) => /^\s*─{10,}/.test(l)) + 1
+  let qStart = tabLine >= 0 ? tabLineEnd + 1 : lines.slice(0, first).findLastIndex((l) => /^\s*─{10,}/.test(l)) + 1
   // A single question shows its header alone (" ☐ Color"), without the ← … → tab bar.
   const solo = tabLine < 0 && lines[qStart]?.match(/^\s*([☐☒])\s+(\S.*)$/)
   if (solo) { tabs.push({ header: solo[2].trim(), done: solo[1] === '☒' }); qStart++ }
