@@ -535,7 +535,7 @@ current repo; `--json` on any command. Exit 0 ok, 1 API error / server down, 2 u
 | wt-simplify · wt-review · wt-compound · wt-pr | The steps wt-ship runs in order |
 | wt-ship | Simplify → review → record learnings → PR (this repo merges to main instead) |
 | wt-babysit | Watch a PR until merge-ready |
-| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity. Modes (WP-121): standalone `/wt-watch-prs [repo]`; dispatch (orchestrator role: hands each new head to a `<repo>-reviewers` agent, never reads a diff, capped by Max reviewers); review `/wt-watch-prs review <pr> --sha <sha> --session <D>` (one head, records under the dispatcher, replies, stops) |
+| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity. Modes (WP-121): standalone `/wt-watch-prs [repo]`; dispatch (orchestrator role: hands each new head to a `<repo>-reviewers` agent, never reads a diff, capped by Max reviewers); review `/wt-watch-prs review <pr> --sha <sha> --session <D>` (one head, records under the dispatcher, replies, stops). If a monitor fails to arm (WP-152), it retries a couple times before giving up; on final failure it posts to the repo's room and stops rather than running with silent coverage loss |
 | wt-finish | Retire a merged worktree and its branch |
 | wt-handoff | Hand a prompt to an agent, or a freshly spawned one; `--cancel` actually stops a `/goal`-driven one |
 | wt-audit | PM+QA pass that files board cards; proposals only |
