@@ -15,11 +15,20 @@ export const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 export const MODEL = 'jev-latest';
 export const NO_KEY = 3;
 
-// The key normally lives in ~/.claude/.env rather than the shell. Minimal parse:
-// KEY=value lines, optional export, a matched quote pair stripped — anything
-// fancier belongs in a dotenv dependency this does not need.
+// WP-136: the dashboard's own precedence (config.mjs) is env var > Keychain (secrets) >
+// env file > default. This used to check the ~/.claude/.env file before the Keychain, so an
+// agent process (no TYPESAFE_API_KEY in its env) picked up a stale .env key even after the
+// Keychain one was rotated — 401s, silently fail-opened by judge(). Same order everywhere now.
+// The key normally lives in the Keychain or ~/.claude/.env rather than the shell. Minimal
+// parse for the .env file: KEY=value lines, optional export, a matched quote pair stripped —
+// anything fancier belongs in a dotenv dependency this does not need.
 export function apiKey() {
   if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY;
+  try {
+    const k = execFileSync('security', ['find-generic-password', '-s', 'wt-dashboard', '-a', 'TYPESAFE_API_KEY', '-w'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500 }).trim();
+    if (k) return k;
+  } catch {}
   try {
     for (const line of readFileSync(join(homedir(), '.claude', '.env'), 'utf8').split('\n')) {
       const m = line.match(/^\s*(?:export\s+)?TYPESAFE_API_KEY\s*=\s*(.*)$/);
@@ -140,14 +149,9 @@ export const enabled = (feature, dflt = false) => {
   return v == null ? dflt : v === 'on';
 };
 
-export function keyFor() {
-  const k = apiKey();
-  if (k) return k;
-  try {
-    return execFileSync('security', ['find-generic-password', '-s', 'wt-dashboard', '-a', 'TYPESAFE_API_KEY', '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500 }).trim() || null;
-  } catch { return null; }
-}
+// Same resolution as apiKey(); kept as a separate name for the fail-open call sites (judge()'s
+// default key, jev-eval.mjs) that historically asked "keyFor" rather than "apiKey".
+export const keyFor = apiKey;
 
 function logCall(rec) {
   try {
@@ -177,7 +181,9 @@ export async function judge(feature, state, questions, { timeoutMs = 2000, key, 
   const h = createHash('sha1').update(input).digest('hex');
   const ck = `${feature}:${h}`;
   const rec = (answers, err, cached) => {
-    let outcome = 'failopen';
+    // WP-136: a 401/403 means the key itself is rejected, not an ordinary fail-open (timeout, 5xx, bad key
+    // config) — record it distinctly so Observability and routing tuning don't read it as normal Jev noise.
+    let outcome = err === 'http_401' || err === 'http_403' ? 'auth_error' : 'failopen';
     if (answers != null) try { outcome = !pick || pick(answers) ? 'picked' : 'not'; } catch { outcome = 'not'; }
     logCall({ ts: new Date().toISOString(), feature, outcome, p: headline(answers), ms: Date.now() - t0, cache: cached, err,
       in: h.slice(0, 12), ...(isTestCall(feature) ? { test: true } : {}), ...(envSetting('WT_JEV_LOG_SNIPPETS') === 'on' ? { snippet: JSON.stringify(state).slice(0, 120) } : {}) });

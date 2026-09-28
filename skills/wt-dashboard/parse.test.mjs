@@ -821,7 +821,7 @@ test('jevlog: health summary counts the last 24h and its errors', () => {
   assert.deepEqual(healthSummary([...calls, ...noise], now), { today: 2, errors: 1 })
 })
 
-import { featureStats, recentCalls, tailLines } from './jevlog.mjs'
+import { featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { serverLogTail } from './server.mjs'
 test('jevlog: per-feature stats — p50/p95 over live calls, cache hits and fail-opens counted', () => {
   const now = Date.parse('2026-09-26T12:00:00Z')
@@ -834,13 +834,25 @@ test('jevlog: per-feature stats — p50/p95 over live calls, cache hits and fail
     { ts: '2026-09-20T11:00:00Z', feature: 'a', outcome: 'picked', ms: 5, cache: false, err: null },
   ]
   const [a, b] = featureStats(calls, 86_400_000, now)
-  assert.deepEqual({ ...a }, { feature: 'a', calls: 12, cacheHits: 1, failOpen: 1, picked: 11, errorRate: 0.09, timeoutRate: 0.09, p50ms: 600, p95ms: 2000 })
+  assert.deepEqual({ ...a }, { feature: 'a', calls: 12, cacheHits: 1, failOpen: 1, authError: 0, picked: 11, errorRate: 0.09, timeoutRate: 0.09, p50ms: 600, p95ms: 2000 })
   assert.equal(b.failOpen, 1)
   assert.equal(featureStats(calls, 7 * 86_400_000, now)[0].calls, 13)
   assert.equal(recentCalls(calls, { feature: 'a', err: 'timeout' }).length, 1)
   assert.equal(recentCalls(calls, { err: 'none' }, 3)[0].ts, '2026-09-20T11:00:00Z')
   assert.deepEqual(tailLines('1\n2\n3\n', 2), ['2', '3'])
   assert.equal(tailLines('x\n'.repeat(3000), 99999).length, 2000)
+})
+
+test('jevlog: authErrors — recent auth_error calls only, ordinary fail-opens excluded', () => {
+  const now = Date.parse('2026-09-28T03:00:00Z')
+  const calls = [
+    { ts: '2026-09-28T02:55:00Z', feature: 'model_route', outcome: 'auth_error', err: 'http_401' },
+    { ts: '2026-09-28T02:59:00Z', feature: 'ticket_triage', outcome: 'auth_error', err: 'http_403' },
+    { ts: '2026-09-28T02:30:00Z', feature: 'model_route', outcome: 'auth_error', err: 'http_401' }, // outside the 15m window
+    { ts: '2026-09-28T02:59:00Z', feature: 'model_route', outcome: 'failopen', err: 'timeout' }, // not an auth error
+  ]
+  const errs = authErrors(calls, 15 * 60_000, now)
+  assert.deepEqual(errs.map((e) => e.feature).sort(), ['model_route', 'ticket_triage'])
 })
 
 test('logs: /api/logs/server reads only the fixed server log, whatever the query says', async () => {

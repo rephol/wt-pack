@@ -36,11 +36,18 @@ export function featureStats(calls, windowMs, now = Date.now()) {
     return {
       feature, calls: cs.length, cacheHits: cs.length - live.length,
       failOpen: cs.filter((c) => c.outcome === 'failopen').length,
+      authError: cs.filter((c) => c.outcome === 'auth_error').length,
       picked: cs.filter((c) => c.outcome === 'picked').length,
       errorRate: rate(live.filter((c) => c.err).length), timeoutRate: rate(live.filter((c) => c.err === 'timeout').length),
       p50ms: pctl(ms, 0.5), p95ms: pctl(ms, 0.95),
     }
   }).sort((a, b) => b.calls - a.calls)
+}
+
+// WP-136: calls in the last `sinceMs` (default 15m, matching the inbox tick) where the Jev key was rejected
+// outright (401/403) — a rotated or misconfigured key, not an ordinary fail-open.
+export function authErrors(calls, sinceMs = 15 * 60_000, now = Date.now()) {
+  return calls.filter((c) => c.outcome === 'auth_error' && now - Date.parse(c.ts) < sinceMs)
 }
 
 // Newest first, filtered by exact feature / outcome / err ('none' = no error).

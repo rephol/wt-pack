@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync, mkdirSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,7 @@ const dir = mkdtempSync(join(tmpdir(), 'jev-'))
 process.env.WT_JEV_LOG = join(dir, 'calls.jsonl')
 process.env.WT_DASHBOARD_ENV = join(dir, 'env')
 delete process.env.TYPESAFE_API_KEY
-const { judge, enabled, minFor } = await import('./typesafe.mjs')
+const { judge, enabled, minFor, apiKey } = await import('./typesafe.mjs')
 const lines = () => readFileSync(process.env.WT_JEV_LOG, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
 const ok = (answers) => async () => ({ ok: true, json: async () => ({ answers }) })
 const Q = { q: { type: 'noul', instructions: 'x' } }
@@ -23,6 +23,18 @@ test('timeout → null, logged as timeout', async () => {
 test('HTTP 500 → null', async () => {
   assert.equal(await judge('t', { a: 2 }, Q, { key: 'k', fetchImpl: async () => ({ ok: false, status: 500 }) }), null)
   assert.deepEqual([lines().at(-1).err, lines().at(-1).outcome], ['http_500', 'failopen'])
+})
+
+// WP-136: a 401/403 is the key itself being rejected, not an ordinary fail-open — logged distinctly so it isn't
+// read as normal Jev noise (Observability, routing tuning).
+test('HTTP 401 → null, logged as auth_error not failopen', async () => {
+  assert.equal(await judge('t', { a: 2.1 }, Q, { key: 'k', fetchImpl: async () => ({ ok: false, status: 401 }) }), null)
+  assert.deepEqual([lines().at(-1).err, lines().at(-1).outcome], ['http_401', 'auth_error'])
+})
+
+test('HTTP 403 → auth_error', async () => {
+  assert.equal(await judge('t', { a: 2.2 }, Q, { key: 'k', fetchImpl: async () => ({ ok: false, status: 403 }) }), null)
+  assert.deepEqual([lines().at(-1).err, lines().at(-1).outcome], ['http_403', 'auth_error'])
 })
 
 test('no key → null without fetching', async () => {
@@ -51,6 +63,28 @@ test('rotates past 5 MB', async () => {
   await judge('r', { a: 5 }, Q, { key: 'k', fetchImpl: async () => ({ ok: false, status: 503 }) })
   assert.ok(existsSync(process.env.WT_JEV_LOG + '.1'))
   assert.ok(statSync(process.env.WT_JEV_LOG).size < 1000)
+})
+
+// WP-136: apiKey() must check the Keychain before ~/.claude/.env, matching the dashboard's own precedence
+// (config.mjs: env var > Keychain > env file) — otherwise a rotated Keychain key never wins over a stale
+// .env one in agent processes (no TYPESAFE_API_KEY in their env), which is exactly how the 401s happened.
+test('apiKey() prefers the Keychain over a stale ~/.claude/.env line', () => {
+  const home = mkdtempSync(join(tmpdir(), 'jev-home-'))
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  writeFileSync(join(home, '.claude', '.env'), 'TYPESAFE_API_KEY=stale-env-key\n')
+  const bin = join(home, 'bin')
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(join(bin, 'security'), '#!/bin/sh\necho fresh-keychain-key\n')
+  chmodSync(join(bin, 'security'), 0o755)
+  const prevHome = process.env.HOME, prevPath = process.env.PATH
+  process.env.HOME = home
+  process.env.PATH = `${bin}:${prevPath}`
+  try {
+    assert.equal(apiKey(), 'fresh-keychain-key')
+  } finally {
+    process.env.HOME = prevHome
+    process.env.PATH = prevPath
+  }
 })
 
 test('enabled/minFor read env then the dashboard env file', () => {

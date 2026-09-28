@@ -106,6 +106,10 @@ export async function main(argv) {
   const ds = load({ sinceDays })
   const rows = report(ds)
   console.log(`model routing, last ${sinceDays}d: ${ds.length} decisions (tokens-saved column skipped: no per-session usage source)`)
+  // WP-136: tune() already excludes these (only source === 'jev' feeds thresholds), but a spike is worth a
+  // line in the report — it means routing silently defaulted to sonnet for the whole window.
+  const failOpen = ds.filter((d) => d.source === 'jev-failopen').length
+  if (failOpen) console.log(`${failOpen} decision(s) fell back to sonnet (Jev unavailable) — excluded from tuning`)
   console.log('skill\ttier\tpicks\tapplied\tsend-back\treturned\tescalated\tok')
   for (const r of rows) console.log([r.skill, r.tier, r.picks, r.applied, r.sendBack, r.returned, r.escalated, r.ok].join('\t'))
   const cfg = loadConfig({ cwd: process.cwd() })

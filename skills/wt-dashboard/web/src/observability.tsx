@@ -16,8 +16,8 @@ import { useConfig, JevSwitch } from './integrations'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 import { fmtTok, fmtUsd } from './usage'
 
-type Stat = { feature: string; calls: number; cacheHits: number; failOpen: number; picked: number; errorRate: number; timeoutRate: number; p50ms: number | null; p95ms: number | null }
-type Call = { ts: string; feature: string; outcome: 'picked' | 'not' | 'failopen'; p: number | null; ms: number; cache: boolean; err: string | null; in: string; snippet?: string }
+type Stat = { feature: string; calls: number; cacheHits: number; failOpen: number; authError: number; picked: number; errorRate: number; timeoutRate: number; p50ms: number | null; p95ms: number | null }
+type Call = { ts: string; feature: string; outcome: 'picked' | 'not' | 'failopen' | 'auth_error'; p: number | null; ms: number; cache: boolean; err: string | null; in: string; snippet?: string }
 type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: string; message: string } | null }
 type Route = { skill: string; tier: string; picks: number; applied: number; sendBack: number; returned: number; escalated: number; ok: number }
 type Savings = { tokens: number; cost: number; priced: boolean; n: number }
@@ -29,7 +29,7 @@ const pct = (n: number) => `${Math.round(n * 100)}%`
 const time = (ts: string) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 // Native tables in a native scroller: they stay readable at 390px by scrolling sideways inside the box, not the page.
 const box = { overflowX: 'auto', maxWidth: '100%' } as const
-const STAT_COLS = ['Feature', 'Calls', 'Cache', 'Fail-open', 'Picked', 'Errors', 'Timeouts', 'p50', 'p95']
+const STAT_COLS = ['Feature', 'Calls', 'Cache', 'Fail-open', 'Auth errors', 'Picked', 'Errors', 'Timeouts', 'p50', 'p95']
 const RECENT_COLS = ['Time', 'Feature', 'Outcome', 'p', 'ms', 'Error', 'Input']
 const ROUTE_COLS = ['Skill', 'Tier', 'Picks', 'Applied', 'Send-backs', 'Returns', 'Escalations', 'Merged']
 const cell = { padding: '4px 8px', textAlign: 'start', whiteSpace: 'nowrap', fontSize: 13 } as const
@@ -67,7 +67,7 @@ function Integrations() {
             <tbody>{stats.map((s) => (
               <tr key={s.feature}>
                 <td style={cell}><code>{s.feature}</code></td><td style={cell}>{s.calls}</td><td style={cell}>{s.cacheHits}</td>
-                <td style={cell}>{s.failOpen}</td><td style={cell}>{s.picked}</td><td style={cell}>{pct(s.errorRate)}</td><td style={cell}>{pct(s.timeoutRate)}</td>
+                <td style={cell}>{s.failOpen}</td><td style={cell}>{s.authError}</td><td style={cell}>{s.picked}</td><td style={cell}>{pct(s.errorRate)}</td><td style={cell}>{pct(s.timeoutRate)}</td>
                 <td style={cell}>{s.p50ms == null ? '—' : `${s.p50ms} ms`}</td><td style={cell}>{s.p95ms == null ? '—' : `${s.p95ms} ms`}</td>
               </tr>
             ))}</tbody>
@@ -102,7 +102,7 @@ function Integrations() {
       <Heading level={4}>Recent calls</Heading>
       <HStack gap={2} wrap="wrap">
         <div style={{ flex: '1 1 150px' }}><Selector label="Feature" width="100%" value={f.feature} options={opts(q.data.features, 'All features')} onChange={(v: string) => setF({ ...f, feature: v })} /></div>
-        <div style={{ flex: '1 1 150px' }}><Selector label="Outcome" width="100%" value={f.outcome} options={opts(['picked', 'not', 'failopen'], 'All outcomes')} onChange={(v: string) => setF({ ...f, outcome: v })} /></div>
+        <div style={{ flex: '1 1 150px' }}><Selector label="Outcome" width="100%" value={f.outcome} options={opts(['picked', 'not', 'failopen', 'auth_error'], 'All outcomes')} onChange={(v: string) => setF({ ...f, outcome: v })} /></div>
         <div style={{ flex: '1 1 150px' }}><Selector label="Error" width="100%" value={f.err} options={opts(['none', 'timeout', 'nokey', 'parse', 'http_401', 'http_429', 'http_500', 'http_0'], 'Any')} onChange={(v: string) => setF({ ...f, err: v })} /></div>
       </HStack>
       {q.data.recent.length === 0 ? <Text type="supporting" size="sm">No calls match.</Text> : (
