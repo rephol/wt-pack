@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 const tmp = mkdtempSync(join(tmpdir(), 'wt-reval-'))
 process.env.HOME = tmp
-const { tune, report, seedFixtures, load, writeUser, STEP } = await import('./routing-eval.mjs')
+const { tune, report, seedFixtures, load, writeUser, STEP, estimateSavings } = await import('./routing-eval.mjs')
 const { DEFAULTS, paths } = await import('./model-route.mjs')
 
 const d = (over, outcomes) => ({ skill: 'wt-work', tier: 'haiku', choice: 'haiku', source: 'jev', mode: 'live', outcomes, state: { task: `t${Math.random()}` }, ...over })
@@ -52,4 +52,25 @@ test('load joins outcomes by run; report groups skill×tier', () => {
   const ds = load()
   assert.equal(ds.length, 2)
   assert.deepEqual(report(ds), [{ skill: 'wt-work', tier: 'haiku', picks: 2, applied: 1, sendBack: 1, returned: 0, escalated: 0, ok: 0 }])
+})
+
+test('estimateSavings: applied non-default picks compare to the sonnet average; shadow and sonnet picks do not count', () => {
+  const avg = { haiku: { tokens: 1000, cost: 0.01 }, sonnet: { tokens: 4000, cost: 0.08 }, opus: { tokens: 4000, cost: 0.4 } }
+  const ds = [
+    d({ tier: 'haiku', mode: 'live' }, []),
+    d({ tier: 'haiku', mode: 'shadow' }, []), // not applied: no saving counted
+    d({ tier: 'sonnet', mode: 'live' }, []), // default tier: no saving
+    d({ tier: 'opus', mode: 'live' }, []), // costs more than sonnet: negative saving
+  ]
+  const s = estimateSavings(ds, avg)
+  assert.equal(s.n, 2)
+  assert.equal(s.tokens, (4000 - 1000) + (4000 - 4000))
+  assert.equal(+s.cost.toFixed(4), +((0.08 - 0.01) + (0.08 - 0.4)).toFixed(4))
+  assert.equal(s.priced, true)
+})
+
+test('estimateSavings: no sonnet baseline or an unpriced applied tier yields no/partial numbers', () => {
+  assert.deepEqual(estimateSavings([d({ tier: 'haiku', mode: 'live' }, [])], {}), { tokens: 0, cost: 0, priced: false, n: 0 })
+  const partial = estimateSavings([d({ tier: 'haiku', mode: 'live' }, [])], { sonnet: { tokens: 100, cost: 1 } })
+  assert.equal(partial.priced, false); assert.equal(partial.n, 0)
 })
