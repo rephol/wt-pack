@@ -76,6 +76,7 @@ pr=
 sha=
 skill=
 dry=0
+buddy_arg=
 while :; do
   case "${1:-}" in
     -h|--help) sed -n "2,/^[^#]/{/^#/s/^# \{0,1\}//p;}" "$0"; exit 0 ;;
@@ -100,6 +101,8 @@ while :; do
     --mcp)   mcp=$2; shift 2 ;;
     --skill) skill=$2; shift 2 ;;   # WP-129: the caller's own skill name, for routing/tuning stats
     --dry-run) dry=1; shift ;;
+    --buddy) buddy_arg=$2; shift 2 ;;   # WP-147: pane id, or "self" for the sending pane
+
     *) break ;;
   esac
 done
@@ -213,6 +216,7 @@ candidates() {
     | jq -r --arg ws "$ws" --argjson panes "$panes" \
       '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws)
        | . as $a | ($panes[$a.pane_id] // {}) as $t
+       | select(($t.dnd // "") == "") | select(($t.pair // "") == "")
        | [$a.pane_id, $a.tab_id, $a.cwd, ($t.model // ""), ($t.effort // "")] | @tsv' \
     | while IFS="$tab" read -r id tid acwd amodel aeffort; do
         # Target by PANE ID, not name: an agent started by hand rather than by
@@ -297,6 +301,17 @@ case "$(printf '%s' "$task" | tr '[:lower:]' '[:upper:]')" in
 esac
 task=$(printf '%.80s' "$task")
 
+# WP-147: a follow-up addressed to a paired ticket (--task WP-N, no --pane) goes straight to its pair — the
+# worker, or the buddy for a review round (--role reviewer) — instead of picking a free agent.
+if [ "$mode" = auto ] && [ -n "$local_ticket" ]; then
+  pair_json=$([ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null | jq -c '.pair // empty' 2>/dev/null || true)
+  if [ -n "$pair_json" ] && [ "$pair_json" != "null" ]; then
+    if [ "$role" = reviewer ]; then pair_pane=$(printf '%s' "$pair_json" | jq -r '.buddy.pane // empty')
+    else pair_pane=$(printf '%s' "$pair_json" | jq -r '.worker.pane // empty'); fi
+    [ -n "$pair_pane" ] && { mode=pane; pane_arg=$pair_pane; }
+  fi
+fi
+
 # WP-128 model routing (wt-shared/scripts/model-route.mjs; shadow by default = logged, nothing applied). A ticket
 # escalated by dispatch ("routing: escalate opus" in its history) is an explicit tier. Reuse is fine when the free
 # worker already runs that tier (its `model`/`effort` pane tokens, WP-143); otherwise a fresh agent spawns with
@@ -361,6 +376,25 @@ finish() {  # <first output line> <target pane>
   fi
   # The routing ref rides the ticket's history (dispatch records are cleared on a return), for outcome tuning.
   if [ -n "$local_ticket" ] && [ -n "$route_line" ] && [ -x "$T" ]; then "$T" comment "$local_ticket" "$route_line" >/dev/null 2>&1 || true; fi
+  # WP-147: --buddy <pane|self> pairs the worker and the buddy on this ticket — a `pair` pane token on both
+  # (self = the sending pane), and a best-effort PATCH of the local ticket's own `pair` field (needs a real
+  # sender pane for auth, so it silently no-ops from a server-side dispatch — dispatch.mjs sets that directly).
+  if [ -n "$buddy_arg" ] && [ -n "$ticket" ]; then
+    bpane=$buddy_arg
+    [ "$bpane" != self ] || bpane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
+    if [ -n "$bpane" ]; then
+      tag "$to" --token "pair=$ticket"
+      tag "$bpane" --token "pair=$ticket"
+      if [ -n "$local_ticket" ]; then
+        brole=$(herdr pane get "$bpane" 2>/dev/null | jq -r '.result.pane.tokens.role // "reviewer"')
+        bname=$(name_of "$bpane")
+        payload=$(node -e 'const[w,wp,b,bp,br]=process.argv.slice(1);console.log(JSON.stringify({pair:{worker:{name:w,pane:wp},buddy:{name:b,pane:bp,role:br}}}))' \
+          "${to_name:-$to}" "$to" "${bname:-$bpane}" "$bpane" "$brole")
+        curl -sS --max-time 5 -X PATCH -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+          --data "$payload" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/tickets/$local_ticket" >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
   echo "$line"
   [ -z "$route_line" ] || echo "$route_line"
   echo "target ${to_name:-?} $to${task:+ — $task}"
@@ -380,6 +414,8 @@ dry() {  # <what would happen>
 }
 
 if [ "$mode" = pane ]; then
+  target_dnd=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.dnd // empty')
+  [ -z "$target_dnd" ] || echo "warning: $(name_of "$pane_arg") is DND" >&2
   [ "$dry" -eq 1 ] && dry "would hand to pane $pane_arg"
   hand_to "$pane_arg"
   finish "reused $pane_arg" "$pane_arg"

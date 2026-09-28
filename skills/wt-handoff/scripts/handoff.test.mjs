@@ -124,6 +124,35 @@ test('WP-143: WT_WORKERS_MAX caps the worker pool; a full pool exits 3 and never
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
+test('WP-147: a DND agent is not listed, and --pane to one warns but still sends', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo },
+    { name: 'demo-worker-02', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p1', tokens: { dnd: '1' } }] } }))
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), JSON.stringify({ result: { pane: { tokens: { dnd: '1' } } } }))
+  const list = run(['--list', repo], '')
+  assert.ok(!list.includes('wW:p1'))
+  assert.ok(list.includes('wW:p2'))
+  let threw = null
+  let out
+  try { out = execFileSync(join(here, 'handoff.sh'), ['--pane', 'wW:p1', '--no-goal', repo], { input: 'x', encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp } }) } catch (e) { threw = e }
+  assert.equal(threw, null)
+  assert.match(out, /^reused wW:p1$/m)
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-147: a paired agent is not a free candidate, only reachable for its own ticket', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p1', tokens: { pair: 'WP-9' } }] } }))
+  const list = run(['--list', repo], '')
+  assert.ok(!list.includes('wW:p1'))
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
 test('WP-132: --cancel resolves a name to its pane and reports what it did', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
