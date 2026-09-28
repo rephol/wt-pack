@@ -262,6 +262,7 @@ respawn)
     sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')
     [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role token and a cwd to respawn" >&2; return 1; }
     [ -n "$sess" ] || { echo "$1: no claude session id to resume" >&2; return 1; }
+    [ -d "$dir" ] || { echo "$1: its cwd $dir is gone; not closing it" >&2; return 1; }
     if [ "$(printf '%s' "$row" | jq -r .agent_status)" = working ] && [ -z "$force" ]; then
       echo "$1 is working; re-run with --force to respawn it anyway" >&2; return 1
     fi
