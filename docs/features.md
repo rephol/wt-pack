@@ -426,8 +426,8 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   override) when set, else that file's top-level `effortLevel` (project over user); never `CLAUDE_EFFORT`,
   which Claude Code exports as the CALLING session's own effort into every child process, not a setting for
   the routed target — an orchestrator running at `low` must not drag every task it dispatches down to `low`
-  too. One tier's override (e.g. opus set to low) no longer leaks into every other tier's ceiling; `WT_EFFORT` / the JSON files'
-  `effort` key still override it explicitly when set (default `high` if neither Claude Code nor wt-pack has an
+  too. One tier's override (e.g. opus set to low) no longer leaks into every other tier's ceiling; `WT_EFFORT` /
+  the JSON files' `effort` key still override it explicitly when set (default `high` if neither Claude Code nor wt-pack has an
   opinion). Applied at spawn with `claude --effort`
   (`wt-agents spawn --effort`, wired from `wt-handoff` and the role floor); a subagent (the Agent tool) has no
   effort parameter, so this is session-only. `pick --json` and `floor --role R --json` include

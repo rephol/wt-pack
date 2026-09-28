@@ -222,9 +222,9 @@ test('WP-139: Jev\'s effort pick is used and clamped (≤ G; downgrade capped at
   assert.equal(d4.effort, 'medium')
 })
 
-// WP-139: G defaults to Claude Code's own effective effort setting (its live env var, else settings.json
-// effortLevel, project over user) instead of the hardcoded 'high' — wt-pack's own overrides still win.
-test('WP-139: G reads Claude Code settings.json / env when wt-pack has no override', () => {
+// WP-139: G defaults to Claude Code's own effective effort setting (settings.json effortLevel, project over
+// user) instead of the hardcoded 'high' — wt-pack's own overrides (WT_EFFORT) still win.
+test('WP-139: G reads Claude Code settings.json when wt-pack has no override', () => {
   writeFileSync(paths().user, '{}')
   mkdirSync(join(tmp, '.claude'), { recursive: true })
   writeFileSync(join(tmp, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'medium' }))
@@ -257,16 +257,16 @@ test('WP-141: modelSettings effortLevel is per-model, top-level effortLevel is t
   const cfg = loadConfig({ cwd: repo, env: {} })
   assert.equal(cfg.effortFrom, 'claude') // loadConfig() has no tier yet: top-level effortLevel only
   assert.equal(cfg.effort, 'medium')
-  assert.equal(effortCeiling(cfg, 'opus', {}).effort, 'low') // opus has its own modelSettings entry
-  assert.equal(effortCeiling(cfg, 'opus', {}).effortFrom, 'claude')
-  assert.equal(effortCeiling(cfg, 'sonnet', {}).effort, 'medium') // no modelSettings entry: falls back to top-level
-  assert.equal(effortCeiling(cfg, 'haiku', {}).effort, 'medium')
+  assert.equal(effortCeiling(cfg, 'opus').effort, 'low') // opus has its own modelSettings entry
+  assert.equal(effortCeiling(cfg, 'opus').effortFrom, 'claude')
+  assert.equal(effortCeiling(cfg, 'sonnet').effort, 'medium') // no modelSettings entry: falls back to top-level
+  assert.equal(effortCeiling(cfg, 'haiku').effort, 'medium')
   // project settings.json's modelSettings wins over the user one, same as its top-level effortLevel already does
   mkdirSync(join(repo, '.claude'), { recursive: true })
   writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ modelSettings: { 'claude-opus-5-5': { effortLevel: 'low' } } }))
   const cfg2 = loadConfig({ cwd: repo, env: {} })
-  assert.equal(effortCeiling(cfg2, 'opus', {}).effort, 'low')
-  assert.equal(effortCeiling(cfg2, 'sonnet', {}).effort, 'medium') // project has no top-level effortLevel: user's still applies
+  assert.equal(effortCeiling(cfg2, 'opus').effort, 'low')
+  assert.equal(effortCeiling(cfg2, 'sonnet').effort, 'medium') // project has no top-level effortLevel: user's still applies
   // route() actually applies the per-tier ceiling to a routed decision, not just loadConfig() — Jev's own 'max'
   // pick for an opus (upgrade) tier is clamped all the way down to G='low' from the project's opus modelSettings
   const d = await route({ skill: 'a', task: `${TASK} (wp-141)`, env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99, 'max') })
@@ -288,6 +288,9 @@ test('WP-142: CLAUDE_EFFORT does not move the ceiling; the target\'s own setting
   assert.equal(effortCeiling(cfg, 'sonnet').effort, 'medium')
   const d = await route({ skill: 'a', task: `${TASK} (wp-142)`, env: { WT_MODEL_ROUTING: 'live', CLAUDE_EFFORT: 'low' }, cwd: repo, fetchImpl: jev('sonnet', 0.99, 'xhigh') })
   assert.equal(d.tier, 'sonnet'); assert.equal(d.effort, 'medium')
+  // the old code let CLAUDE_EFFORT beat a tier's own modelSettings entry too, not just the top-level fallback
+  writeFileSync(join(tmp, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'medium', modelSettings: { 'claude-opus-5-5': { effortLevel: 'high' } } }))
+  assert.equal(effortCeiling(loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'low' } }), 'opus').effort, 'high')
   writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
 })
 
