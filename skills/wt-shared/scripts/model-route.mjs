@@ -71,8 +71,12 @@ const projectSetting = (cwd, key) => {
   } catch { return '' }
 }
 // WP-139: G's real default is Claude Code's own effective effort setting, not the hardcoded 'high' — wt-pack's
-// own WT_EFFORT/model-routing.json layers below still win when a caller explicitly sets one. Same source order
-// Claude Code itself uses: its live session env var, else its settings.json `effortLevel` (project over user).
+// own WT_EFFORT/model-routing.json layers below still win when a caller explicitly sets one. Source: the
+// target's own settings.json `effortLevel` (project over user) — never a live session env var: WP-142 found
+// Claude Code exports CLAUDE_EFFORT into every child process as the CALLING session's own effort, not a
+// setting for the routed target, so reading it here silently imported the caller's effort as the target's
+// ceiling. An explicit override still goes through wt-pack's own WT_EFFORT (loadConfig()), tier-agnostic and
+// already final by the time claudeCodeEffort() runs.
 // WP-141: within each settings.json, a `modelSettings[<model id>].effortLevel` for the routed tier's own model
 // (matched by id prefix, e.g. "claude-opus-5-5" for tier 'opus') wins over that file's top-level `effortLevel` —
 // it's the more specific setting. `tier` is optional: omitted, this reads only the top-level effortLevel (used
@@ -83,8 +87,7 @@ function modelSettingsEffort(settings, tier) {
   for (const [id, v] of Object.entries(settings?.modelSettings ?? {})) if (re.test(id) && isEffort(v?.effortLevel)) return v.effortLevel
   return null
 }
-function claudeCodeEffort(root, env, tier) {
-  if (isEffort(env.CLAUDE_EFFORT)) return env.CLAUDE_EFFORT
+function claudeCodeEffort(root, tier) {
   const proj = root && readJson(join(root, '.claude', 'settings.json'))
   const pm = modelSettingsEffort(proj, tier)
   if (isEffort(pm)) return pm
@@ -98,9 +101,9 @@ function claudeCodeEffort(root, env, tier) {
 // Re-resolves G for the actual routed tier once one is known, when nothing more specific than Claude Code's own
 // settings (or nothing at all) claimed G yet — a wt-pack-level override (user/project/repo/env) is tier-agnostic
 // and already final by then.
-export function effortCeiling(cfg, tier, env = process.env) {
+export function effortCeiling(cfg, tier) {
   if (cfg.effortFrom !== 'claude' && cfg.effortFrom !== 'default') return cfg
-  const ce = claudeCodeEffort(cfg.root, env, tier)
+  const ce = claudeCodeEffort(cfg.root, tier)
   return isEffort(ce) ? { ...cfg, effort: ce, effortFrom: 'claude' } : cfg
 }
 
@@ -111,7 +114,7 @@ export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
   let effortFrom = readJson(paths().user)?.effort ? 'user' : 'default'
   const root = repoRoot(cwd) // one shell-out, shared with the repo config-file read below
   if (effortFrom === 'default') {
-    const ce = claudeCodeEffort(root, env)
+    const ce = claudeCodeEffort(root)
     if (isEffort(ce)) { cfg = { ...cfg, effort: ce }; effortFrom = 'claude' }
   }
   const pm = projectSetting(cwd, 'WT_MODEL_ROUTING')
@@ -271,7 +274,7 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from }
   const state = buildState({ skill, role, lens, description, task })
   if (model) {
-    const effort = computeEffort(model, state, effortCeiling(cfg, model, env).effort)
+    const effort = computeEffort(model, state, effortCeiling(cfg, model).effort)
     return { mode, apply: null, tier: model, effort, source: 'explicit', from: cfg.from, applyEffort: mode === 'live' ? effort : null }
   }
   let d
@@ -283,7 +286,7 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   }
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
-  const ceiling = effortCeiling(cfg, d.tier, env)
+  const ceiling = effortCeiling(cfg, d.tier)
   const effort = computeEffort(d.tier, state, ceiling.effort, d.jevEffort)
   const out = { ...d, effort, mode, from: cfg.from, effortFrom: ceiling.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
   if (log) logDecision(out)
