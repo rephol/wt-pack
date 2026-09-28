@@ -216,10 +216,7 @@ export class Dispatch {
       // gone unassigns; Planning/Building also return to Ready since nobody is working them and Dispatch
       // skips assigned cards (a Ready/Review/Blocked card just loses its stale assignee).
       if (!a && t.assignee.pane) {
-        const n = (this.gone.get(g) ?? 0) + 1
-        this.gone.set(g, n)
-        if (n < 2) continue // one miss may be a herdr blip
-        this.gone.delete(g)
+        if (!this.#debounceGone(g)) continue // one miss may be a herdr blip
         // WP-147: a paired ticket is replaced in place (or flagged), never just returned to Ready.
         if (t.pair) { await this.#pairReplace(project, t, 'worker', local, now).catch((e) => this.log(`pair replace ${t.id}: ${e.message}`)); continue }
         const name = t.assignee.name
@@ -252,12 +249,19 @@ export class Dispatch {
       const a = local.find((x) => x.name === buddy.name)
       const g = `pair-buddy|${t.id}|${buddy.name}`
       if (a) { this.gone.delete(g); continue }
-      const n = (this.gone.get(g) ?? 0) + 1
-      this.gone.set(g, n)
-      if (n < 2) continue
-      this.gone.delete(g)
+      if (!this.#debounceGone(g)) continue
       await this.#pairReplace(project, t, 'buddy', local, now).catch((e) => this.log(`pair replace ${t.id}: ${e.message}`))
     }
+  }
+
+  // Two consecutive ticks missing = gone (one miss may be a herdr blip); shared by the worker- and buddy-gone
+  // checks in reconcile(), which key it differently (`${id}|${name}` vs `pair-buddy|${id}|${name}`).
+  #debounceGone(key) {
+    const n = (this.gone.get(key) ?? 0) + 1
+    this.gone.set(key, n)
+    if (n < 2) return false
+    this.gone.delete(key)
+    return true
   }
 
   // WP-147 escalation: a gone pair member is replaced by a free agent of the same role, with a ticket comment
