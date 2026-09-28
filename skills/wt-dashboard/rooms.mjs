@@ -565,21 +565,31 @@ export class Rooms {
     await this.saveIndex()
     await this.system(r.slug, `responder: ${a.name}`)
   }
+  // A dropped member that was the room's pinned responder leaves it stuck: planDelivery blocks every
+  // unmentioned message on 'responder is not running', and followTicketAgent won't reassign a pinned one.
+  // Clearing the pin lets a ticket room pick a new responder and a plain room fall back to no responder.
+  unpinResponder(r, name) {
+    if (r.responderName !== name) return false
+    r.responder = null; r.responderName = null; r.responderPinned = false
+    return true
+  }
   // An agent removed (agents.sh rm, or a routine/reconcile retiring it) leaves every room it was a member of.
-  // Its messages keep its name; only membership changes.
+  // Its messages keep its name; only membership and any pinned-responder claim on it change.
   async leave(name) {
     await this.load()
     let changed = false
     for (const r of this.index) {
       if (r.members.includes(name)) { r.members = r.members.filter((m) => m !== name); changed = true }
       if (r.memberGoneSince?.[name]) { delete r.memberGoneSince[name]; changed = true }
+      if (this.unpinResponder(r, name)) changed = true
     }
     if (changed) await this.saveIndex()
   }
   // Housekeeping (hourly): a member absent from `liveNames` for more than MEMBER_GONE_MS is dropped from the
   // room (messages stay); a member that reappears (respawned under the same name) clears its absence and
   // rejoins normally the next time it speaks or is addressed. `liveNames`: null when liveness is unknown (no
-  // local agents list available) — leave every room untouched rather than guess.
+  // agents list available) — leave every room untouched rather than guess. Pass every known agent, local and
+  // remote, running or not — only an agent gone from the list entirely counts as absent.
   async pruneMembers(liveNames, now = Date.now()) {
     if (!liveNames) return
     await this.load()
@@ -593,7 +603,11 @@ export class Rooms {
       }
       for (const n of Object.keys(r.memberGoneSince)) if (!r.members.includes(n)) { delete r.memberGoneSince[n]; changed = true }
       const drop = r.members.filter((n) => r.memberGoneSince[n] && now - r.memberGoneSince[n] > MEMBER_GONE_MS)
-      if (drop.length) { r.members = r.members.filter((n) => !drop.includes(n)); for (const n of drop) delete r.memberGoneSince[n]; changed = true }
+      if (drop.length) {
+        r.members = r.members.filter((n) => !drop.includes(n))
+        for (const n of drop) { delete r.memberGoneSince[n]; this.unpinResponder(r, n) }
+        changed = true
+      }
     }
     if (changed) await this.saveIndex()
   }

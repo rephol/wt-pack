@@ -2717,7 +2717,8 @@ async function routinesApi(req, res, url, parts) {
 
 async function runHousekeeping(dryRun = false) {
   await hkLoaded
-  const local = await agents().then((l) => l.filter((a) => a.local), () => null)
+  const all = await agents().catch(() => null)
+  const local = all && all.filter((a) => a.local)
   const sum = await housekeep({
     roots: [DATA_ROOT, LOGS, join(CACHE, 'wt-memory'), join(CACHE, 'wt-agents')],
     uploads: UPLOADS,
@@ -2735,9 +2736,10 @@ async function runHousekeeping(dryRun = false) {
     live: local && { sessions: new Set(local.map((a) => a.session).filter(Boolean)), names: new Set(local.map((a) => a.name).filter(Boolean)) },
     settings: hk.settings, dryRun,
   })
-  // WP-138: drop room members not-running for over 24h (their messages stay). `local` is every locally known
-  // agent, running or not, so its names are the full liveness picture housekeeping has.
-  if (!dryRun) await rooms.pruneMembers(local && new Set(local.map((a) => a.name).filter(Boolean))).catch((e) => console.error(`rooms: pruneMembers: ${e.message}`))
+  // WP-138: drop room members not-running for over 24h (their messages stay). `all` is every known agent
+  // (local and remote, running or not) — the same set room membership itself is drawn from, so a remote or
+  // merely-idle member is never mistaken for gone.
+  if (!dryRun) await rooms.pruneMembers(all && new Set(all.map((a) => a.name).filter(Boolean))).catch((e) => console.error(`rooms: pruneMembers: ${e.message}`))
   if (!dryRun) { hk.lastRun = { ...sum, actions: sum.actions.slice(0, 50) }; await writeFile(HK_FILE, JSON.stringify(hk, null, 2)) }
   if (sum.errors.length) console.error('housekeeping:', sum.errors.join('; '))
   return sum

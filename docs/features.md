@@ -186,7 +186,9 @@ Chat rooms shared by you and agents.
   with a **Remove** action (in-app confirm) beside it, plus a **Remove all not running** button when more than one
   is down (WP-138). Removing an agent (`agents.sh rm`, or a routine retiring one) also drops it from every room it
   was in; housekeeping drops a member absent more than 24h on its own. Messages keep the name either way — only
-  membership changes, and a member rejoins normally the next time it speaks or is @mentioned.
+  membership changes, and a member rejoins normally the next time it speaks or is @mentioned. If the dropped
+  agent was the room's pinned responder, the pin goes with it instead of leaving the room stuck answering to
+  someone gone.
 - **Commands**: a message starting with `/` goes to exactly one agent (agents cannot send them).
 - Delivery waits until the agent is idle with no question pending.
 - Each delivered message is wrapped in `<room-message id=<nonce> room=<slug> from=… kind=user|agent|system [broadcast=1]>`, author and
