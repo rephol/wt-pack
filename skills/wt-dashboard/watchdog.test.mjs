@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { spawn } from 'node:child_process'
 import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
@@ -157,4 +161,39 @@ test('WP-120 stale-hooks: ps parse, agents started before the guard flagged, aft
   assert.match(f[0].body, /restart to load the pkill guard/i)
   assert.deepEqual(checks({ stale: { guardAt, agents: stale } }, { 'stale-hooks': { threshold: 600 } }), [])
   assert.deepEqual(checks({ stale: null }), [])
+})
+
+// WP-150: agents.sh `rm` edits watchdog.json's lastSeen directly on disk between ticks. A tick that merges
+// from its own stale in-memory lastSeen (instead of re-reading disk) clobbers that edit on its next write.
+test('watchdog tick: an external edit to watchdog.json between ticks survives the next tick (WP-150)', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'watchdog-'))
+  await mkdir(join(root, 'data'), { recursive: true })
+  const wdFile = join(root, 'data', 'watchdog.json')
+  const removedEntry = { 'w1:p1': { name: 'wt-pack-worker-05', session: 's1', cwd: '/x', role: 'worker', ticket: null, seenAt: min(10), goneAt: min(5) } }
+  await writeFile(wdFile, JSON.stringify({ settings: {}, open: {}, resolved: [], lastRun: null, lastSeen: removedEntry }))
+  // Shim herdr to always fail, so agents()/pane-list return null deterministically (this machine's real pool
+  // would otherwise leak in): rememberAgents(lastSeen, null, ...) then just passes its base lastSeen through,
+  // isolating the thing under test — whether that base came from disk or a stale in-memory copy.
+  const bin = join(root, 'bin')
+  await mkdir(bin, { recursive: true })
+  await writeFile(join(bin, 'herdr'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+  const port = 20000 + Math.floor(Math.random() * 20000)
+  const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname],
+    { env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root, PATH: `${bin}:/usr/bin:/bin` }, stdio: ['ignore', 'pipe', 'pipe'] })
+  try {
+    await new Promise((res, rej) => {
+      let out = '', err = ''
+      srv.stdout.on('data', (d) => { out += d; if (out.includes('api →')) res() })
+      srv.stderr.on('data', (d) => { err += d })
+      srv.on('exit', (c) => rej(new Error(`server exited (${c}) before listening: ${err.slice(-400)}`)))
+      setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
+    })
+    const token = (await readFile(join(root, 'session'), 'utf8')).trim()
+    const run = () => fetch(`http://127.0.0.1:${port}/api/watchdog/run`, { method: 'POST', headers: { cookie: `hd_session=${token}` } })
+    assert.equal((await run()).status, 200) // first tick: loads and rewrites the file with the same (unedited) lastSeen
+    // simulate agents.sh rm: drop the agent's name directly on disk, same as its jq+mv edit
+    await writeFile(wdFile, JSON.stringify({ ...JSON.parse(await readFile(wdFile, 'utf8')), lastSeen: {} }))
+    assert.equal((await run()).status, 200) // second tick must not resurrect it from a stale in-memory copy
+    assert.deepEqual(JSON.parse(await readFile(wdFile, 'utf8')).lastSeen, {})
+  } finally { srv.kill() }
 })

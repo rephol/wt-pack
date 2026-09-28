@@ -2828,7 +2828,11 @@ async function watchdogSnapshot() {
   const fs = await statfs(DATA).catch(() => null)
   // WP-109: remember live pool agents' sessions; a remembered pane still open without an agent has exited.
   const panes = await herdr('pane', 'list').then((t) => JSON.parse(t).result.panes.map((x) => x.pane_id), () => null)
-  wd.lastSeen = rememberAgents(wd.lastSeen, ag, panes, (c) => ticketOf(c ?? ''))
+  // WP-150: re-read lastSeen from disk instead of trusting this process's in-memory copy — agents.sh's `rm`
+  // edits watchdog.json directly (drops the removed agent's name) between ticks; merging from the stale
+  // in-memory value would clobber that edit and resurrect the name on this tick's write.
+  const diskLastSeen = await readFile(WD_FILE, 'utf8').then((t) => JSON.parse(t).lastSeen ?? wd.lastSeen, () => wd.lastSeen)
+  wd.lastSeen = rememberAgents(diskLastSeen, ag, panes, (c) => ticketOf(c ?? ''))
   return {
     exited: exitedAgents(wd.lastSeen, panes),
     stale: await staleHooks(ag).catch(() => null),
