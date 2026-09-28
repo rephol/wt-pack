@@ -233,7 +233,10 @@ test('WP-139: G reads Claude Code settings.json / env when wt-pack has no overri
   mkdirSync(join(repo, '.claude'), { recursive: true })
   writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'low' }))
   assert.equal(loadConfig({ cwd: repo, env: {} }).effort, 'low') // project over user
-  assert.equal(loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'xhigh' } }).effort, 'xhigh') // live session env wins
+  // WP-142: CLAUDE_EFFORT is the CALLING session's own effort, exported into every child process — not a
+  // setting for the routed target, so it must not move G at all.
+  assert.equal(loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'xhigh' } }).effort, 'low')
+  assert.equal(loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'xhigh' } }).effortFrom, 'claude')
   // wt-pack's own WT_EFFORT override still wins over a Claude Code effortLevel present at the same time
   assert.equal(loadConfig({ cwd: repo, env: { WT_EFFORT: 'max' } }).effort, 'max')
   assert.equal(loadConfig({ cwd: repo, env: { WT_EFFORT: 'max' } }).effortFrom, 'env')
@@ -269,6 +272,22 @@ test('WP-141: modelSettings effortLevel is per-model, top-level effortLevel is t
   const d = await route({ skill: 'a', task: `${TASK} (wp-141)`, env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99, 'max') })
   assert.equal(d.tier, 'opus'); assert.equal(d.effort, 'low'); assert.equal(d.effortFrom, 'claude')
   writeFileSync(join(repo, '.claude', 'settings.json'), '{}')
+  writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
+})
+
+// WP-142: CLAUDE_EFFORT is Claude Code's export of the CALLING session's own effort into every child process,
+// not a setting for the routed target — a low-effort orchestrator dispatching a task must not drag the
+// target's own G down to 'low' just because the orchestrator itself is running at 'low'.
+test('WP-142: CLAUDE_EFFORT does not move the ceiling; the target\'s own settings.json still does', async () => {
+  const { effortCeiling } = await import('./model-route.mjs')
+  writeFileSync(paths().user, '{}')
+  mkdirSync(join(tmp, '.claude'), { recursive: true })
+  writeFileSync(join(tmp, '.claude', 'settings.json'), JSON.stringify({ effortLevel: 'medium' }))
+  const cfg = loadConfig({ cwd: repo, env: { CLAUDE_EFFORT: 'low' } })
+  assert.equal(cfg.effort, 'medium')
+  assert.equal(effortCeiling(cfg, 'sonnet').effort, 'medium')
+  const d = await route({ skill: 'a', task: `${TASK} (wp-142)`, env: { WT_MODEL_ROUTING: 'live', CLAUDE_EFFORT: 'low' }, cwd: repo, fetchImpl: jev('sonnet', 0.99, 'xhigh') })
+  assert.equal(d.tier, 'sonnet'); assert.equal(d.effort, 'medium')
   writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
 })
 
