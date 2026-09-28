@@ -257,6 +257,20 @@ test('moving back to Backlog clears the assignee (WP-49)', async () => {
   assert.equal((await t.patch(a.id, { column: 'ready' }, user)).assignee, null)
 })
 
+test('onDone fires once when a card reaches Done, not on other moves or a no-op re-patch (WP-134)', async () => {
+  const done = []
+  const t = new Tickets({ dir: await tmp(), onDone: (p, x) => done.push([p, x.id]) })
+  const a = await t.create('wt-pack', { title: 'x', column: 'building' }, agent)
+  await t.patch(a.id, { column: 'review' }, agent)
+  assert.deepEqual(done, [])
+  await t.patch(a.id, { column: 'done' }, agent)
+  await t.patch(a.id, { column: 'done' }, agent) // already done: no-op, no second fire
+  assert.deepEqual(done, [['wt-pack', a.id]])
+  await t.patch(a.id, { column: 'building' }, agent) // reopened: Done → building → Done re-fires
+  await t.patch(a.id, { column: 'done' }, agent)
+  assert.deepEqual(done, [['wt-pack', a.id], ['wt-pack', a.id]])
+})
+
 test('dispatch settings: default off, stallMin validated', async () => {
   const t = new Tickets({ dir: await tmp() })
   await t.create('wt-pack', { title: 'x' }, user)

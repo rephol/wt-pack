@@ -1886,7 +1886,24 @@ const readyNotes = readyBatcher(async (project, ts) => {
   await herdrOn(m, 'agent', 'prompt', a.id, readyNudge(project, ts))
 })
 setInterval(() => readyNotes.flush(), 60_000).unref()
-const tickets = new Tickets({ dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM), onReady: (project, t) => readyNotes.add(project, t) })
+// A card reaching Done (merge reconcile or a manual move) no longer holds its assignee's pane on this ticket
+// (WP-134): clear the stale task/ticket tokens so wt-handoff's free-worker pick sees it as free again.
+const tickets = new Tickets({
+  dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM),
+  onReady: (project, t) => readyNotes.add(project, t),
+  onDone: async (project, t) => {
+    if (!t.assignee?.pane) return
+    const pane = t.assignee.pane
+    try {
+      // Compare-and-clear: the pane may have moved on to a different ticket by the time this fires
+      // (a later merge-reconcile, after the worker was freed and reused) — only ours to clear if it's still ours.
+      const tok = JSON.parse(await herdr('pane', 'get', pane)).result?.pane?.tokens ?? {}
+      if (tok.ticket !== t.id) return
+      await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--clear-token', 'task', '--clear-token', 'ticket')
+      store.delete('paneMeta')
+    } catch (e) { console.error('tokens:', t.assignee.name, e.message) }
+  },
+})
 // boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
 const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values(k) }, (e) => console.error('tickets:', e.message))
 const boardRuns = new Set() // projects with a 'Run now' in progress
