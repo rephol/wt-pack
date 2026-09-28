@@ -224,7 +224,9 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # WP-128/137: an explicit tier/effort wins; else the role floor and its effort, only in live routing (spawn has
   # no task to route).
   if [ -z "$model" ] || [ -z "$effort" ]; then
-    floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" --cwd "$main" --json 2>/dev/null || true)
+    # --model here (when the caller already gave one) is passed through so floor computes effort for the
+    # tier actually being spawned, not the role's own floor tier when the two diverge.
+    floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} --cwd "$main" --json 2>/dev/null || true)
     [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
     [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)
   fi

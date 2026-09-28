@@ -83,3 +83,16 @@ test('WP-128: --model is passed to claude; no flag without it; live routing give
   assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model sonnet/) // explicit wins
   assert.throws(() => spawn(['spawn', 'worker', '--model', 'gpt']), (e) => e.status === 2)
 })
+
+test('WP-137: --effort is passed to claude; falls back to the role floor\'s effort, for the tier actually spawned', () => {
+  const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
+  assert.match(start(spawn(['spawn', 'worker', '--effort', 'low'])), /--effort low/)
+  assert.doesNotMatch(start(spawn()), /--effort/)
+  assert.doesNotMatch(start(spawn(['spawn', 'planner'])), /--effort/) // shadow (default): nothing applied
+  assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--effort high/) // opus floor's own base
+  // an explicit --model diverging from the role's floor gets that MODEL's effort, not the floor role's
+  assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--effort medium/)
+  assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'], { WT_MODEL_ROUTING: 'live' })), /--effort high/) // downgrade from sonnet, capped
+  assert.match(start(spawn(['spawn', 'planner', '--effort', 'low'], { WT_MODEL_ROUTING: 'live' })), /--effort low/) // explicit wins
+  assert.throws(() => spawn(['spawn', 'worker', '--effort', 'urgent']), (e) => e.status === 2)
+})
