@@ -16,7 +16,7 @@ import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '@astryxdesign/core/Table'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { ServerStatus } from './status'
-import { ImageRow, FileCards, useAttachments, IMAGE_TYPES, MAX_IMAGES, type SharedFile } from './attachments'
+import { ImageRow, FileCards, useAttachments, AttachmentChip, ATTACH_ACCEPT, MAX_IMAGES, type SharedFile } from './attachments'
 import { useToast } from '@astryxdesign/core/Toast'
 import { useDesktop } from './desktop'
 import { Dock } from './ChatDock'
@@ -1346,19 +1346,19 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                   headerActions={<>
                       <IconButton label="Skills & commands" icon={<span aria-hidden style={{ fontWeight: 600 }}>/</span>} size="sm" variant="ghost" tooltip="Skills & commands (/)"
                         onClick={() => { inputRef.current?.focus(); inputRef.current?.insertText('/') }} />
-                      <IconButton label="Attach image" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={!agent.local || atts.length >= MAX_IMAGES}
-                        tooltip={agent.local ? 'Attach png/jpeg/webp/gif (or paste / drop)' : 'Images only for local agents'}
+                      <IconButton label="Attach a file" icon={<ClipIcon />} size="sm" variant="ghost" isDisabled={!agent.local || atts.length >= MAX_IMAGES}
+                        tooltip={agent.local ? 'Attach a file (or paste / drop)' : 'Attachments only for local agents'}
                         onClick={() => fileRef.current?.click()} />
-                      <input ref={fileRef} type="file" accept={IMAGE_TYPES.join(',')} multiple hidden
+                      <input ref={fileRef} type="file" accept={ATTACH_ACCEPT} multiple hidden
                         onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = '' }} />
                     </>}
                   drawer={atts.length ? (
                     <ChatComposerDrawer>
                       <HStack gap={2} wrap="wrap">
-                        {atts.map((a) => (
-                          <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name}
-                            isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />
-                        ))}
+                        {atts.map((a) => a.kind === 'image'
+                          ? <Thumbnail key={a.id} src={a.preview} label={a.error ? `${a.name}: ${a.error}` : a.name} alt={a.name}
+                              isLoading={!a.path && !a.error} onRemove={() => removeAtt(a.id)} showRemoveOn="always" />
+                          : <AttachmentChip key={a.id} a={a} onRemove={() => removeAtt(a.id)} />)}
                       </HStack>
                     </ChatComposerDrawer>
                   ) : undefined}

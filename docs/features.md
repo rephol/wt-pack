@@ -255,8 +255,12 @@ Chat rooms shared by you and agents.
   **Report to**, not to linked rooms.
 - **tmp rooms**: an agent may delete a `tmp-*` room where it is the responder; otherwise agents never archive
   or delete. tmp rooms do not expire on their own.
-- **Attachments**: png, jpeg, webp, gif; ≤ 10MB each, ≤ 5 per message. Remote agents receive a note instead
-  of the images.
+- **Attachments** (rooms and agent chat, file picker, paste or drag-drop): images (png, jpeg, webp, gif, ≤ 10MB)
+  render inline; any other file — pdf, zip, text/markdown/csv/json/log, or common code — shows as a file chip
+  (icon, name, size) while composing and a download chip once sent, ≤ 25MB for pdf/zip and ≤ 10MB otherwise,
+  ≤ 5 attachments per message. Served with `Content-Disposition: attachment` and `nosniff`; html and svg are
+  never accepted, so nothing here can render inline on the dashboard origin. The original filename is kept for
+  display; the file on disk is always renamed. Remote agents receive a note instead of the files.
 - **Image preview** (rooms and agent chat): tap an image to open it. Pinch, trackpad pinch or the wheel zooms the image
   (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x, keys `+` `-` `0` and arrows; it resets on the next image and on
   close. The page itself never zooms while the preview is open (WP-94). A zoomed image uses the whole screen at full resolution, and panning stops at the screen edges (WP-95).

@@ -127,11 +127,12 @@ export function parseCommand(msg, room, agents, handle) {
   const target = named.length ? agents.find((a) => a.name === named[0]) : agents.find((a) => a.key === room.responder)
   return target ? { text, target } : { error: ONE_TARGET }
 }
-// Image paths ride after the text, one per line — for a local agent only; a remote one cannot open them.
+// WP-170: attachment paths ride after the text, one per line, whatever type they are (not just images) —
+// for a local agent only; a remote one cannot open them.
 export function withAttachments(text, atts, local) {
   const n = atts?.length ?? 0
   if (!n) return text
-  return local ? [text, ...atts.map((a) => a.path)].join('\n') : `${text}\n(${n} image${n === 1 ? '' : 's'} not delivered — remote agent)`
+  return local ? [text, ...atts.map((a) => a.path)].join('\n') : `${text}\n(${n} attachment${n === 1 ? '' : 's'} not delivered — remote agent)`
 }
 
 // One prompt per agent per flush, whatever is queued for it across rooms. WP-68: the prompt is only the tags —
