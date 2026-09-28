@@ -11,10 +11,8 @@ import { Popover } from '@astryxdesign/core/Popover'
 import { Text } from '@astryxdesign/core/Text'
 import { api } from './rooms'
 import type { Ask } from './questionPopup'
-import type { Picker, PickerAgent } from './pickerCard'
+import { useOverviewAgents, type Picker, type PickerAgent } from './pickerCard'
 
-// Only the fields this row needs off the live agent list — the full Agent (App.tsx) satisfies this structurally.
-interface ChipAgent extends PickerAgent { name: string }
 interface ChipTarget { id: string; ts: number; label: string; agent: string; open: () => void }
 
 function seenKey(id: string) { return `wt-ask-seen:${id}` }
@@ -28,14 +26,8 @@ export function useRoomChips(roomSlug: string, members: string[], onOpen: (targe
     queryFn: () => api<Ask[]>(`/api/asks?room=${encodeURIComponent(roomSlug)}&open=1`),
     refetchInterval: 5000, refetchIntervalInBackground: true,
   })
-  // Shares the same query ['overview'] App.tsx already polls at 4s — this just adds an observer, not a new fetch cadence.
-  const overviewQ = useQuery({
-    queryKey: ['overview'],
-    queryFn: () => api<{ agents: ChipAgent[] }>('/api/overview'),
-    refetchInterval: 4000,
-  })
   const asks = asksQ.data ?? []
-  const pickers = (overviewQ.data?.agents ?? []).filter((a) => a.picker && members.includes(a.name))
+  const pickers = useOverviewAgents().filter((a) => a.picker && members.includes(a.name))
   const items: ChipTarget[] = [
     ...asks.map((a) => ({
       id: `ask:${a.id}`, ts: Date.parse(a.created ?? '') || 0, agent: a.agent,

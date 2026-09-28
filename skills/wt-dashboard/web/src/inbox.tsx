@@ -19,7 +19,7 @@ import { collapseRepeats, needsYou, groupInbox, shortAgo, type InboxGroup, type 
 import { loadPrefs } from './desktop'
 import { api } from './rooms'
 import { Delayed, LoadError, Rows } from './skeletons'
-import type { PickerAgent } from './pickerCard'
+import { useOverviewAgents } from './pickerCard'
 import { QuestionPopup, type PopupTarget, type Ask } from './questionPopup'
 
 export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
@@ -95,8 +95,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: {
   const qc = useQueryClient()
   const toast = useToast()
   const { items, loaded, error, retry } = useInbox()
-  // Shares the ['overview'] query App.tsx already polls at 4s, for the live picker behind a 'question' item.
-  const overviewQ = useQuery({ queryKey: ['overview'], queryFn: () => api<{ agents: (PickerAgent & { name: string })[] }>('/api/overview'), refetchInterval: 4000 })
+  const overviewAgents = useOverviewAgents() // for the live picker behind a 'question' item
   const [confirmAll, setConfirmAll] = useState(false)
   // WP-87: the drawer closes on Escape (a real Escape never reaches the Dialog's own handler) and on page navigation,
   // so it never covers the page you went to. The clear-all confirm keeps its own Escape. Subscribed once, reading refs:
@@ -153,7 +152,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: {
       return
     }
     if (it.kind === 'question' && it.target.agent && !it.resolvedAt) {
-      const a = overviewQ.data?.agents.find((x) => x.key === it.target.agent)
+      const a = overviewAgents.find((x) => x.key === it.target.agent)
       if (a?.picker) { openQuestion({ kind: 'picker', agent: a, picker: a.picker }); return }
     }
     onClose()

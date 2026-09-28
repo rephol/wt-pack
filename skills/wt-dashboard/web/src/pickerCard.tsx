@@ -43,6 +43,18 @@ export async function getJSON<T>(url: string): Promise<T> {
 }
 export const agentUrl = (a: PickerAgent) => `/api/agents/${encodeURIComponent(a.machine)}/${encodeURIComponent(a.id)}`
 
+// The live agent list with its picker, for anything that needs to find an agent's pending B picker outside
+// its own chat page (room chips, the Inbox). Shares App.tsx's own ['overview'] query and 4s poll — this adds
+// an observer, not a second fetch cadence.
+export function useOverviewAgents(): (PickerAgent & { name: string })[] {
+  const q = useQuery({
+    queryKey: ['overview'],
+    queryFn: () => getJSON<{ agents: (PickerAgent & { name: string })[] }>('/api/overview'),
+    refetchInterval: 4000,
+  })
+  return q.data?.agents ?? []
+}
+
 const RECOMMENDED = /\s*\(Recommended\)\s*$/
 function OptionLabel({ label }: { label: string }) {
   return (
