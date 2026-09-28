@@ -322,27 +322,31 @@ test('CLI: pick --json and floor --json carry effort', () => {
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { planner: 'opus' } }))
   const f = JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(f.tier, 'opus'); assert.equal(f.effort, 'high'); assert.equal(f.model, 'claude-opus-5-5') // WP-158
-  // plain-text (no --json): unchanged from pre-WP-137 — just the bare floor tier, live only
+  // plain-text (no --json): unchanged from pre-WP-137 — just the bare floor tier. WP-160: applies in every
+  // mode, not just live — a spawn has no task text to route, so shadow has no reason to withhold it.
   assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'live' }).trim(), 'opus')
-  assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'shadow' }).trim(), '')
+  assert.equal(run(['floor', '--role', 'planner', '--cwd', repo], { WT_MODEL_ROUTING: 'shadow' }).trim(), 'opus')
   // --model: effort/id for the caller's actual tier, not the role's own floor tier when they diverge; the
   // printed/`tier` floor itself is unaffected. The id is independent of live/shadow (an explicit tier resolves
   // to its id regardless of routing mode).
   const div = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium'); assert.equal(div.model, 'claude-sonnet-5') // sonnet's own base, not opus's
   const shadowDiv = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'shadow' }))
-  assert.equal(shadowDiv.tier, null); assert.equal(shadowDiv.effort, null); assert.equal(shadowDiv.model, 'claude-sonnet-5')
+  assert.equal(shadowDiv.tier, 'opus'); assert.equal(shadowDiv.effort, 'medium'); assert.equal(shadowDiv.model, 'claude-sonnet-5')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
 })
 
-test('WP-157: floor never spawns a role on haiku — every role gets at least sonnet, a role floor only raises further', () => {
+test('WP-157/160: floor never spawns a role on haiku, in any mode — every role gets at least sonnet, a role floor only raises further', () => {
   const run = (args, env) => execFileSync(process.execPath, [cli, ...args], { input: 'list the files', encoding: 'utf8', env: { ...process.env, ...env } })
   // A role with no roleFloors entry (everything but planner, today) used to print nothing live — now sonnet.
   const worker = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(worker.tier, 'sonnet'); assert.equal(worker.source, 'session-floor'); assert.equal(worker.effort, 'medium')
-  // shadow (default): still nothing, unaffected by the floor existing
+  // WP-160: shadow (default) and off both apply the same floor — a spawn has no task text to route, so this
+  // floor never touches Jev and has no shadow-mode reason to withhold (unlike a task-routed `pick`).
   const shadow = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'shadow' }))
-  assert.equal(shadow.tier, null); assert.equal(shadow.source, null)
+  assert.equal(shadow.tier, 'sonnet'); assert.equal(shadow.source, 'session-floor')
+  const off = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'off' }))
+  assert.equal(off.tier, 'sonnet'); assert.equal(off.source, 'session-floor')
   // A role floor above sonnet (planner -> opus) still wins and reports as role-floor, not session-floor.
   const planner = JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(planner.tier, 'opus'); assert.equal(planner.source, 'role-floor')
