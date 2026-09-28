@@ -48,12 +48,13 @@ test('WP-128: shadow logs a routing line and changes nothing; live spawns a fres
     { name: 'demo-reviewer-01', pane_id: 'wR:p1', tab_id: 't2', agent_status: 'idle', workspace_id: 'wR', cwd: repo }] } }))
   let out = run(['--role', 'reviewer', '--no-goal', '--dry-run', repo], 'list the open PRs')
   assert.match(out, /would reuse reviewer demo-reviewer-01/)
-  assert.match(out, /routing: haiku \(shadow, local, ref [a-z0-9]+#0\)/)
+  // WP-157: a local read-only rule would pick haiku, but handoff routes a SESSION's own tier (--session),
+  // which never lands below sonnet — this local task is a read-only rule, so effort drops one level too.
+  assert.match(out, /routing: sonnet \(shadow, local\+session-floor, ref [a-z0-9]+#0\)/)
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8',
     env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' } })
-  assert.match(out, /would spawn a reviewer in \S+ with --model haiku/) // a reused agent can't switch model without a picker
-  // WP-137: the same live spawn also carries its computed effort (haiku is a downgrade from sonnet, capped at 'high')
-  assert.match(out, /would spawn a reviewer in \S+ with --model haiku --effort high/)
+  assert.match(out, /would spawn a reviewer in \S+ with --model sonnet/) // a reused agent can't switch model without a picker
+  assert.match(out, /would spawn a reviewer in \S+ with --model sonnet --effort low/)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
@@ -78,12 +79,13 @@ const runCancel = (args) => execFileSync(join(here, 'handoff.sh'), args, { encod
 
 test('WP-143: live routing reuses a free worker already on the routed tier/effort; a different tier or effort spawns fresh', () => {
   const liveEnv = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' }
+  // WP-157: --session floors this local read-only pick to sonnet/low (never haiku for a session's own tier)
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
-    { pane_id: 'wW:p1', tokens: { model: 'haiku', effort: 'high' } }] } }))
+    { pane_id: 'wW:p1', tokens: { model: 'sonnet', effort: 'low' } }] } }))
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
   let out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
-  assert.match(out, /would reuse worker demo-worker-01 \(wW:p1\) \(model haiku\)/) // routed dry-run wording (plan Unit 2)
+  assert.match(out, /would reuse worker demo-worker-01 \(wW:p1\) \(model sonnet\)/) // routed dry-run wording (plan Unit 2)
   execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
   let calls = readFileSync(log, 'utf8')
   assert.match(calls, /^herdr agent prompt wW:p1 /m)
@@ -91,15 +93,15 @@ test('WP-143: live routing reuses a free worker already on the routed tier/effor
 
   // same model, different effort: still a spawn, not a reuse (the effort half of the match rule)
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
-    { pane_id: 'wW:p1', tokens: { model: 'haiku', effort: 'medium' } }] } }))
+    { pane_id: 'wW:p1', tokens: { model: 'sonnet', effort: 'medium' } }] } }))
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
-  assert.match(out, /would spawn a worker in \S+ with --model haiku --effort high/)
+  assert.match(out, /would spawn a worker in \S+ with --model sonnet --effort low/)
 
   // different model: spawn
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
-    { pane_id: 'wW:p1', tokens: { model: 'sonnet', effort: 'high' } }] } }))
+    { pane_id: 'wW:p1', tokens: { model: 'haiku', effort: 'low' } }] } }))
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
-  assert.match(out, /would spawn a worker in \S+ with --model haiku/)
+  assert.match(out, /would spawn a worker in \S+ with --model sonnet/)
 
   writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
