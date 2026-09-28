@@ -360,23 +360,22 @@ async function main() {
     const t = isTier(roleFloor) ? max(sessionFloor, roleFloor) : sessionFloor
     const source = isTier(roleFloor) && rank(roleFloor) >= rank(sessionFloor) ? 'role-floor' : 'session-floor'
     // WP-160: unlike `pick`'s Jev-routed choice, this floor never uses Jev — it's a fixed computation from
-    // cfg.sessionFloor/roleFloors, so it applies in every mode (including off), not just live. A spawn has no
-    // task text to route in the first place; gating it on `live` only ever meant a haiku-default spawn in
-    // shadow/off, the opposite of "a main agent never runs on haiku".
-    const apply = isTier(t)
+    // cfg.sessionFloor/roleFloors, so (t and effortTier below are always a tier) it applies in every mode
+    // (including off), not just live. A spawn has no task text to route in the first place; gating this on
+    // live only ever meant a haiku-default spawn in shadow/off, the opposite of "never runs on haiku".
     // --model: the caller's actual tier (an explicit override away from the role's floor), effort only —
     // never changes the printed/`tier` floor itself. The session floor applies to the default (no --model)
     // case via `t` above; an explicit --model is the caller's own choice and keeps its own effort, same as
     // before WP-157 — the floor guards what gets spawned with no explicit tier, not an explicit override.
     const effortTier = isTier(opt('model')) ? opt('model') : t
-    const effortApply = isTier(effortTier)
     // WP-158: the explicit model id for whichever tier ends up spawned (the caller's own --model, or else the
     // role/session floor tier) — independent of routing mode, since a caller-given tier gets its id regardless.
     // Folded into this same call (rather than a separate `model-id` one) so a spawn/respawn that
     // already needs floor's tier/effort doesn't pay for loadConfig()'s git/project-setting shell-outs twice.
-    const model = isTier(effortTier) ? modelIdFor(effortTier, cfg) : null
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: apply ? t : null, source: apply ? source : null, effort: effortApply ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null, model }))
-    else if (apply) console.log(t)
+    const model = modelIdFor(effortTier, cfg)
+    const effort = computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort)
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: t, source, effort, model }))
+    else console.log(t)
     return
   }
   if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--desc D] [--cwd DIR] [--session] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json] | model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
