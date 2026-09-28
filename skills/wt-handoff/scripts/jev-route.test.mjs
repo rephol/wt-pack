@@ -16,6 +16,10 @@ test('route: planner at or above 0.75, worker below or with no answer', () => {
   assert.equal(route.decide(null), 'worker')
 })
 
+// WP-162: this file's "wt-plan's own prompt" test runs handoff.sh with a deliberately fake TYPESAFE_API_KEY,
+// which still hits model-route.mjs's real network Jev call (shadow mode logs but doesn't apply); with no
+// WT_JEV_LOG override that 401 landed in the real ~/.local/share/wt-dashboard/jev-calls.jsonl production log.
+const jevLog = join(mkdtempSync(join(tmpdir(), 'jev-route-test-')), 'jev.jsonl')
 const bin = mkdtempSync(join(tmpdir(), 'fake-herdr-'))
 writeFileSync(join(bin, 'herdr'), `#!/bin/sh
 case "$1 $2" in
@@ -29,7 +33,7 @@ const repo = realpathSync(mkdtempSync(join(tmpdir(), 'route-repo-')))
 execFileSync('git', ['init', '-q', repo])
 const wt = join(repo, 'sub'); execFileSync('mkdir', ['-p', wt])
 const run = (args, prompt, env = {}) => execFileSync('sh', [join(here, 'handoff.sh'), '--dry-run', ...args, wt], {
-  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_PANE_ID: '', WT_AGENTS_MCP: 'full', ...env } })
+  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_PANE_ID: '', WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
 
 test('handoff --dry-run: switch off → a worker in cwd, no route line (unchanged behaviour)', () => {
   const out = run([], 'build the thing', { WT_JEV_ROUTE: 'off' })
