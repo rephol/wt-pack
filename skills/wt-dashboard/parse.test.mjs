@@ -431,6 +431,30 @@ test('usage: dedupe by message id, incremental offsets, partial lines wait, buck
   assert.equal(agg.summary(Date.parse('2026-09-25T00:00:00Z'), (r) => r.session).tokens, 11110)
 })
 
+test('usage: subagent transcripts under <session>/subagents/*.jsonl are counted and split from the session', async () => {
+  const U = await import('./usage.mjs')
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
+  const root = await mkdtemp((await import('node:os')).tmpdir() + '/usage-sub-')
+  const sessDir = root + '/proj/s1'
+  await mkdir(sessDir + '/subagents', { recursive: true })
+  const now = Date.parse('2026-09-25T12:00:00Z')
+  const line = (id, model, u) => JSON.stringify({ type: 'assistant', sessionId: 's1', timestamp: '2026-09-25T10:00:00Z', message: { id, model, usage: u } }) + '\n'
+  const u1 = { input_tokens: 100, output_tokens: 0 }
+  await writeFile(root + '/proj/s1.jsonl', line('m1', 'claude-sonnet-5', u1))
+  await writeFile(sessDir + '/subagents/agent-x.jsonl', line('m2', 'claude-haiku-4-5', u1))
+  const agg = new U.UsageAgg()
+  await agg.refresh(root, now)
+  const byKind = agg.summary(0, (r) => r.kind)
+  assert.deepEqual(byKind.groups.map((g) => [g.key, g.tokens]).sort(), [['session', 100], ['subagent', 100]])
+  const byModelKind = agg.summary(0, (r) => `${r.model} · ${r.kind}`)
+  assert.deepEqual(byModelKind.groups.map((g) => g.key).sort(), ['claude-haiku-4-5 · subagent', 'claude-sonnet-5 · session'])
+})
+
+test('usage: 30-day default keep window', async () => {
+  const U = await import('./usage.mjs')
+  assert.equal(new U.UsageAgg().keepMs, 30 * 86400_000)
+})
+
 test('usage: limits never expose tokenHash; missing fields are null; stale after 10 minutes', async () => {
   const U = await import('./usage.mjs')
   const { mkdtemp, writeFile, utimes } = await import('node:fs/promises')

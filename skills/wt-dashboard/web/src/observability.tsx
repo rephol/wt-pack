@@ -14,12 +14,14 @@ import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/Segme
 import { api } from './rooms'
 import { useConfig, JevSwitch } from './integrations'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
+import { fmtTok, fmtUsd } from './usage'
 
 type Stat = { feature: string; calls: number; cacheHits: number; failOpen: number; picked: number; errorRate: number; timeoutRate: number; p50ms: number | null; p95ms: number | null }
 type Call = { ts: string; feature: string; outcome: 'picked' | 'not' | 'failopen'; p: number | null; ms: number; cache: boolean; err: string | null; in: string; snippet?: string }
 type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: string; message: string } | null }
 type Route = { skill: string; tier: string; picks: number; applied: number; sendBack: number; returned: number; escalated: number; ok: number }
-interface Obs { stats: Record<'24h' | '7d', Stat[]>; recent: Call[]; features: string[]; sources: Record<string, Source>; routing?: Route[] }
+type Savings = { tokens: number; cost: number; priced: boolean; n: number }
+interface Obs { stats: Record<'24h' | '7d', Stat[]>; recent: Call[]; features: string[]; sources: Record<string, Source>; routing?: Route[]; routingSavings?: Savings }
 
 const ALL = ''
 const opts = (xs: string[], all: string) => [{ value: ALL, label: all }, ...xs.map((x) => ({ value: x, label: x }))]
@@ -75,17 +77,26 @@ function Integrations() {
 
       <Heading level={4}>Model routing (7 days)</Heading>
       {!q.data.routing?.length ? <Text type="supporting" size="sm">No routing decisions yet. Shadow mode logs them without applying.</Text> : (
-        <div className="hd-obs-box" style={{ ...box, maxHeight: 320, overflowY: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-            <thead><tr>{ROUTE_COLS.map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
-            <tbody>{q.data.routing.map((r) => (
-              <tr key={`${r.skill}|${r.tier}`}>
-                <td style={cell}><code>{r.skill}</code></td><td style={cell}>{r.tier}</td><td style={cell}>{r.picks}</td><td style={cell}>{r.applied}</td>
-                <td style={cell}>{r.sendBack}</td><td style={cell}>{r.returned}</td><td style={cell}>{r.escalated}</td><td style={cell}>{r.ok}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+        <VStack gap={2}>
+          {q.data.routingSavings && q.data.routingSavings.n > 0 && (
+            <Text type="supporting" size="sm">
+              {`Estimated savings vs sonnet: ${fmtTok(Math.max(0, q.data.routingSavings.tokens))} tokens`}
+              {q.data.routingSavings.priced ? `, ${fmtUsd(q.data.routingSavings.cost)} notional` : ''}
+              {` over ${q.data.routingSavings.n} applied decision${q.data.routingSavings.n === 1 ? '' : 's'}`}
+            </Text>
+          )}
+          <div className="hd-obs-box" style={{ ...box, maxHeight: 320, overflowY: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+              <thead><tr>{ROUTE_COLS.map((h) => <th key={h} style={cell}>{h}</th>)}</tr></thead>
+              <tbody>{q.data.routing.map((r) => (
+                <tr key={`${r.skill}|${r.tier}`}>
+                  <td style={cell}><code>{r.skill}</code></td><td style={cell}>{r.tier}</td><td style={cell}>{r.picks}</td><td style={cell}>{r.applied}</td>
+                  <td style={cell}>{r.sendBack}</td><td style={cell}>{r.returned}</td><td style={cell}>{r.escalated}</td><td style={cell}>{r.ok}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </VStack>
       )}
 
       <Heading level={4}>Recent calls</Heading>

@@ -22,8 +22,8 @@ import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cl
 import { ProjectSettings, PKEYS } from './project-settings.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
-import { loadConfig as routeConfig, outcome as routeOutcome } from '../wt-shared/scripts/model-route.mjs'
-import { load as routeDecisions, report as routeReport } from '../wt-shared/scripts/routing-eval.mjs'
+import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt-shared/scripts/model-route.mjs'
+import { load as routeDecisions, report as routeReport, estimateSavings as routeSavings } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
@@ -1512,7 +1512,7 @@ inbox.subs.add((it) => {
 const USAGE_FILE = join(homedir(), '.cache', 'ccstatusline', 'usage.json')
 const usageAgg = new UsageAgg()
 let usageScan = null, usageScannedAt = 0
-// Transcripts are re-read at most every 20s, appended bytes only; the first pass covers the last 8 days.
+// Transcripts are re-read at most every 20s, appended bytes only; the first pass covers the last 30 days.
 const scanUsage = () => {
   if (!usageScan && Date.now() - usageScannedAt > 20_000)
     usageScan = usageAgg.refresh(PROJECTS).catch((e) => console.error('usage:', e.message)).finally(() => { usageScan = null; usageScannedAt = Date.now() })
@@ -1528,7 +1528,7 @@ async function usageApi() {
   const by = {
     agent: (r) => agentOf.get(r.session) ?? `other (${proj.get(r.cwd) ?? '?'})`,
     project: (r) => proj.get(r.cwd) ?? 'unknown',
-    model: (r) => r.model,
+    model: (r) => `${r.model} · ${r.kind}`,
   }
   const midnight = new Date(); midnight.setHours(0, 0, 0, 0)
   const range = (from) => Object.fromEntries(Object.entries(by).map(([k, f]) => [k, usageAgg.summary(from, f)]))
@@ -1536,6 +1536,7 @@ async function usageApi() {
     limits: await readLimits(USAGE_FILE),
     today: range(midnight.getTime()),
     week: range(Date.now() - 7 * 86400_000),
+    month: range(Date.now() - 30 * 86400_000),
     priced: Object.keys(PRICES),
     scannedAt: usageScannedAt ? new Date(usageScannedAt).toISOString() : null,
   }
@@ -2185,12 +2186,20 @@ async function observabilityApi(req, res, url) {
   if (url.pathname === '/api/logs/server') return send(res, 200, await serverLogTail(url.searchParams))
   const calls = await readCalls()
   const q = Object.fromEntries(['feature', 'outcome', 'err'].map((k) => [k, url.searchParams.get(k) || undefined]))
+  const routingDs = routeDecisions({ sinceDays: 7 })
+  // Estimated savings vs the default tier (sonnet): each tier's actual average cost-per-message over the same
+  // window, from real usage — no per-decision usage is recorded, so this is an estimate, not exact spend (WP-130).
+  await (usageScannedAt ? null : scanUsage())
+  scanUsage()
+  const byTier = usageAgg.summary(Date.now() - 7 * 86400_000, (r) => TIERS.find((t) => r.model.includes(t)) ?? 'other').groups
+  const avgByTier = Object.fromEntries(byTier.filter((g) => g.key !== 'other' && g.n).map((g) => [g.key, { tokens: g.tokens / g.n, cost: g.cost / g.n }]))
   return send(res, 200, {
     stats: { '24h': featureStats(calls, 86_400_000), '7d': featureStats(calls, 7 * 86_400_000) },
     recent: recentCalls(calls, q),
     features: [...new Set(calls.map((c) => c.feature))].sort(),
     sources: SOURCES,
-    routing: routeReport(routeDecisions({ sinceDays: 7 })), // WP-128, from the judge log + routing outcomes
+    routing: routeReport(routingDs), // WP-128, from the judge log + routing outcomes
+    routingSavings: routeSavings(routingDs, avgByTier), // WP-130
   })
 }
 
