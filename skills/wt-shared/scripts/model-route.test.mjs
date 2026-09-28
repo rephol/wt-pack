@@ -241,6 +241,37 @@ test('WP-139: G reads Claude Code settings.json / env when wt-pack has no overri
   writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
 })
 
+// WP-141: a `modelSettings[<model id>].effortLevel` scopes to the model whose id it names — it must not leak
+// into every tier's G the way a flat read of "some nested effortLevel" would.
+test('WP-141: modelSettings effortLevel is per-model, top-level effortLevel is the fallback for the rest', async () => {
+  const { effortCeiling } = await import('./model-route.mjs')
+  writeFileSync(paths().user, '{}')
+  mkdirSync(join(tmp, '.claude'), { recursive: true })
+  writeFileSync(join(tmp, '.claude', 'settings.json'), JSON.stringify({
+    effortLevel: 'medium',
+    modelSettings: { 'claude-opus-5': { effortLevel: 'low' }, 'claude-opus-4-8': { effortLevel: 'low' }, 'claude-opus-5-5': { effortLevel: 'low' } },
+  }))
+  const cfg = loadConfig({ cwd: repo, env: {} })
+  assert.equal(cfg.effortFrom, 'claude') // loadConfig() has no tier yet: top-level effortLevel only
+  assert.equal(cfg.effort, 'medium')
+  assert.equal(effortCeiling(cfg, 'opus', {}).effort, 'low') // opus has its own modelSettings entry
+  assert.equal(effortCeiling(cfg, 'opus', {}).effortFrom, 'claude')
+  assert.equal(effortCeiling(cfg, 'sonnet', {}).effort, 'medium') // no modelSettings entry: falls back to top-level
+  assert.equal(effortCeiling(cfg, 'haiku', {}).effort, 'medium')
+  // project settings.json's modelSettings wins over the user one, same as its top-level effortLevel already does
+  mkdirSync(join(repo, '.claude'), { recursive: true })
+  writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ modelSettings: { 'claude-opus-5-5': { effortLevel: 'low' } } }))
+  const cfg2 = loadConfig({ cwd: repo, env: {} })
+  assert.equal(effortCeiling(cfg2, 'opus', {}).effort, 'low')
+  assert.equal(effortCeiling(cfg2, 'sonnet', {}).effort, 'medium') // project has no top-level effortLevel: user's still applies
+  // route() actually applies the per-tier ceiling to a routed decision, not just loadConfig() — Jev's own 'max'
+  // pick for an opus (upgrade) tier is clamped all the way down to G='low' from the project's opus modelSettings
+  const d = await route({ skill: 'a', task: `${TASK} (wp-141)`, env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99, 'max') })
+  assert.equal(d.tier, 'opus'); assert.equal(d.effort, 'low'); assert.equal(d.effortFrom, 'claude')
+  writeFileSync(join(repo, '.claude', 'settings.json'), '{}')
+  writeFileSync(join(tmp, '.claude', 'settings.json'), '{}')
+})
+
 test('WT_EFFORT config precedence and route() carries effort/applyEffort', async () => {
   assert.equal(loadConfig({ cwd: repo, env: {} }).effort, 'high') // default G
   writeFileSync(paths().user, JSON.stringify({ mode: 'off', effort: 'low' }))

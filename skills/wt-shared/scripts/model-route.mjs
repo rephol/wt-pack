@@ -73,13 +73,35 @@ const projectSetting = (cwd, key) => {
 // WP-139: G's real default is Claude Code's own effective effort setting, not the hardcoded 'high' — wt-pack's
 // own WT_EFFORT/model-routing.json layers below still win when a caller explicitly sets one. Same source order
 // Claude Code itself uses: its live session env var, else its settings.json `effortLevel` (project over user).
-function claudeCodeEffort(root, env) {
+// WP-141: within each settings.json, a `modelSettings[<model id>].effortLevel` for the routed tier's own model
+// (matched by id prefix, e.g. "claude-opus-5-5" for tier 'opus') wins over that file's top-level `effortLevel` —
+// it's the more specific setting. `tier` is optional: omitted, this reads only the top-level effortLevel (used
+// by loadConfig(), which resolves before a tier is chosen); effortCeiling() re-resolves per tier once one is.
+function modelSettingsEffort(settings, tier) {
+  if (!isTier(tier)) return null
+  const re = new RegExp(`^claude-${tier}(-|$)`)
+  for (const [id, v] of Object.entries(settings?.modelSettings ?? {})) if (re.test(id) && isEffort(v?.effortLevel)) return v.effortLevel
+  return null
+}
+function claudeCodeEffort(root, env, tier) {
   if (isEffort(env.CLAUDE_EFFORT)) return env.CLAUDE_EFFORT
   const proj = root && readJson(join(root, '.claude', 'settings.json'))
+  const pm = modelSettingsEffort(proj, tier)
+  if (isEffort(pm)) return pm
   if (isEffort(proj?.effortLevel)) return proj.effortLevel
   const user = readJson(join(home(), '.claude', 'settings.json'))
+  const um = modelSettingsEffort(user, tier)
+  if (isEffort(um)) return um
   if (isEffort(user?.effortLevel)) return user.effortLevel
   return null
+}
+// Re-resolves G for the actual routed tier once one is known, when nothing more specific than Claude Code's own
+// settings (or nothing at all) claimed G yet — a wt-pack-level override (user/project/repo/env) is tier-agnostic
+// and already final by then.
+export function effortCeiling(cfg, tier, env = process.env) {
+  if (cfg.effortFrom !== 'claude' && cfg.effortFrom !== 'default') return cfg
+  const ce = claudeCodeEffort(cfg.root, env, tier)
+  return isEffort(ce) ? { ...cfg, effort: ce, effortFrom: 'claude' } : cfg
 }
 
 // The merged config; `from`/`effortFrom` name where the mode/effort came from (for explain).
@@ -104,7 +126,7 @@ export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
   if (isEffort(ee)) { cfg = { ...cfg, effort: ee }; effortFrom = 'env' }
   if (!MODES.includes(cfg.mode)) cfg.mode = 'shadow'
   if (!isEffort(cfg.effort)) cfg.effort = DEFAULTS.effort
-  return { ...cfg, from, effortFrom }
+  return { ...cfg, from, effortFrom, root }
 }
 
 const EDIT = /\b(implement|fix|edit|write|add|change|refactor|rename|delete|remove|migrate|update|commit|merge|build)\b/i
@@ -249,7 +271,7 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from }
   const state = buildState({ skill, role, lens, description, task })
   if (model) {
-    const effort = computeEffort(model, state, cfg.effort)
+    const effort = computeEffort(model, state, effortCeiling(cfg, model, env).effort)
     return { mode, apply: null, tier: model, effort, source: 'explicit', from: cfg.from, applyEffort: mode === 'live' ? effort : null }
   }
   let d
@@ -261,8 +283,9 @@ export async function route({ skill = '', role = '', lens = '', model = '', desc
   }
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
-  const effort = computeEffort(d.tier, state, cfg.effort, d.jevEffort)
-  const out = { ...d, effort, mode, from: cfg.from, effortFrom: cfg.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
+  const ceiling = effortCeiling(cfg, d.tier, env)
+  const effort = computeEffort(d.tier, state, ceiling.effort, d.jevEffort)
+  const out = { ...d, effort, mode, from: cfg.from, effortFrom: ceiling.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
   if (log) logDecision(out)
   return { ...out, apply: mode === 'live' ? out.tier : null, applyEffort: mode === 'live' ? out.effort : null }
 }
@@ -303,7 +326,7 @@ async function main() {
     // never changes the printed/`tier` floor itself.
     const effortTier = isTier(opt('model')) ? opt('model') : t
     const effortLive = cfg.mode === 'live' && isTier(effortTier)
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), cfg.effort) : null }))
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: live ? t : null, effort: effortLive ? computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort) : null }))
     else if (live) console.log(t)
     return
   }
