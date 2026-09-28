@@ -102,8 +102,13 @@ left running to say so from — stop the session and report the failure exactly 
 "watching" label left on the pane. Do not fall back to polling by hand; that is the waste this rule exists to
 avoid, not an escape hatch for a broken Monitor.
 
-Re-arm on expiry. Stop it with `TaskStop` the moment a stop condition is reached — a monitor left armed
-after the run ends keeps waking a session that has nothing left to do.
+**Re-arm on expiry the same way** — a re-arm is just another arm call, and the silent-failure mode above is
+just as reachable mid-loop as at the start. Confirm the new task id before trusting the watch is still live;
+an unconfirmed re-arm gets the same retry-twice-then-stop treatment, not a shrug and a continue into the next
+tick believing nothing changed.
+
+Stop it with `TaskStop` the moment a stop condition is reached — a monitor left armed after the run ends
+keeps waking a session that has nothing left to do.
 
 ## 2. One tick, in this order
 
