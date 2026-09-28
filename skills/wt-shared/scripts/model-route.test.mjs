@@ -145,6 +145,17 @@ test('WP-129: sharper local signals — read verbs, security keywords, docs-lens
   assert.equal(localDecide(s7), null)
 })
 
+test('WP-133: Jev gets a plain-language notes sentence, not raw booleans, security first', async () => {
+  const s = buildState({ task: 'impact sweep of the session cookie format across the auth handlers' })
+  assert.equal(s.signals.notes, 'security-sensitive: auth, session, cookie; read-only; lens: none')
+
+  let sent
+  const capture = async (url, opts) => { sent = JSON.parse(opts.body); return { ok: true, status: 200, json: async () => ({ answers: { tier: { choice: 'opus', confidence: 0.9 } } }) } }
+  await route({ skill: 'b', task: 'impact sweep of the session cookie format across the auth handlers', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: capture })
+  assert.equal(sent.state.notes, 'security-sensitive: auth, session, cookie; read-only; lens: none')
+  assert.equal(sent.state.edits, undefined); assert.equal(sent.state.reads, undefined); assert.equal(sent.state.keywords, undefined)
+})
+
 test('CLI: usage prints tokens/cost by model, split session vs subagent, over --days', () => {
   const proj = join(tmp, '.claude', 'projects', 'proj')
   mkdirSync(join(proj, 's1', 'subagents'), { recursive: true })

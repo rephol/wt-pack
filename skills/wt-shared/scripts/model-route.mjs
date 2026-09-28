@@ -75,14 +75,27 @@ const KEYWORDS = ['security', 'auth', 'secret', 'token', 'session', 'cookie', 'p
 // A security-sensitive subset of KEYWORDS: floors the tier (applyFloors) and blocks the read-only local haiku rule.
 const SECURITY = ['security', 'auth', 'secret', 'token', 'session', 'cookie', 'permission', 'csrf', 'migration', 'schema']
 const LOCAL_HAIKU_LENS = /^(docs|naming|formatting)$/i
+// A plain-language summary of the signals, for Jev: raw booleans/keyword arrays read as "easy" to it (WP-133) —
+// a security risk stated first in words outweighs "reads:true" pulling it toward haiku.
+function buildNotes(s) {
+  const sec = s.keywords.filter((k) => SECURITY.includes(k))
+  const rest = s.keywords.filter((k) => !SECURITY.includes(k))
+  const parts = []
+  if (sec.length) parts.push(`security-sensitive: ${sec.join(', ')}`)
+  parts.push(s.edits ? 'edits code' : s.reads ? 'read-only' : 'unclear scope')
+  parts.push(`lens: ${s.lens || 'none'}`)
+  if (rest.length) parts.push(`keywords: ${rest.join(', ')}`)
+  return parts.join('; ')
+}
 // ≤ ~300 tokens: skill, description, the first 600 chars of the task, and cheap signals.
 export function buildState({ skill = '', role = '', lens = '', description = '', task = '' } = {}) {
   const t = String(task)
+  const edits = EDIT.test(t), reads = READ.test(t), l = String(lens).slice(0, 30)
+  const keywords = KEYWORDS.filter((k) => new RegExp(`\\b${k}`, 'i').test(t))
   return {
     skill: String(skill).slice(0, 60), role: String(role).slice(0, 30), agent_description: String(description).slice(0, 120),
     task: t.slice(0, 600),
-    signals: { edits: EDIT.test(t), reads: READ.test(t), lens: String(lens).slice(0, 30),
-      keywords: KEYWORDS.filter((k) => new RegExp(`\\b${k}`, 'i').test(t)), len: t.length },
+    signals: { edits, reads, lens: l, keywords, len: t.length, notes: buildNotes({ edits, reads, lens: l, keywords }) },
   }
 }
 
@@ -133,12 +146,17 @@ export async function jevDecide(state, cfg, { fetchImpl, timeoutMs = 1500 } = {}
   const h = hashOf(state)
   let a = cacheGet(h), cached = !!a
   if (!a) {
-    const ans = await judge('model_route', state, { tier: QUESTION }, { timeoutMs, fetchImpl })
+    // Jev sees the notes sentence, not the raw booleans/keyword array — those read as "easy" to it (WP-133).
+    const jevState = { skill: state.skill, role: state.role, agent_description: state.agent_description, task: state.task,
+      lens: state.signals.lens, notes: state.signals.notes }
+    const ans = await judge('model_route', jevState, { tier: QUESTION }, { timeoutMs, fetchImpl })
     const t = ans?.tier
     if (t && isTier(t.choice)) { a = { choice: t.choice, confidence: t.confidence ?? 0 }; cachePut(h, a) }
   }
   if (!a) return { tier: 'sonnet', source: 'jev-failopen', p: null, cached }
   const th = cfg.thresholds ?? DEFAULTS.thresholds
+  // `p` (here and in the log/tuning) is always this same confidence — the one number gated against thresholds,
+  // never a separate "probability" (WP-133): keep any future metric change to this one line.
   const tier = a.choice === 'haiku' && a.confidence >= th.haiku ? 'haiku' : a.choice === 'opus' && a.confidence >= th.opus ? 'opus' : 'sonnet'
   return { tier, source: 'jev', p: a.confidence, choice: a.choice, cached }
 }
