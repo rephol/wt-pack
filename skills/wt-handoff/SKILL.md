@@ -19,6 +19,7 @@ scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | scripts/handoff.sh \
   [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
 scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
+scripts/handoff.sh --cancel <pane|name> ["why"]   # stop a /goal-driven agent for real
 ```
 
 - **Every prompt is wrapped** (WP-104) as `<wt-message id=<nonce> kind=handoff|dispatch|routine|reply|system
@@ -28,6 +29,15 @@ scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on std
 - **`--reply <pane> "text"`** answers whoever sent you a wt-message: a plain `kind=reply` prompt, no `/goal`,
   no tokens, no worker selection. Raw `herdr agent prompt` still works but arrives untagged — describe it only
   as the fallback when `handoff.sh` is unavailable.
+- **`--cancel <pane|name> ["why"]`** actually stops a `/goal`-driven agent (WP-132): a goal keeps an agent
+  working toward its condition no matter what's typed at it — a plain "stop" is not enough (the WP-131
+  incident: two agents told to stop kept going). It sends Escape to interrupt whatever the agent is
+  mid-doing, then `/goal clear`, waiting for the agent to go idle/done as verification; if that doesn't
+  happen (still working/blocked after Escape, or the goal won't let go) it falls back to a plain `/clear`.
+  Either way it then clears the pane's `task`/`ticket` tokens, and — if the local board ticket in `tokens.ticket`
+  is still assigned to that pane — unassigns it and moves it back to `ready` with a note (`cancelled: <why>`).
+  Prints one line: `cancelled <name> (<pane>): <goal cleared|goal clear unverified, sent /clear>[, cleared
+  task="…"][, returned <ID> to ready]`. Dispatch and reconcile use it when they withdraw a hand-off.
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. `--no-goal` sends a plain prompt instead of `/goal`

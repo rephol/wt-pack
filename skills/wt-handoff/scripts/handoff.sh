@@ -4,6 +4,8 @@
 #   handoff.sh --list <cwd>                              # free workers, one per line
 #   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
+#   handoff.sh --cancel <pane|name> ["why"]               # stop a /goal-driven agent: escape, end its goal,
+#                                                          # clear task/ticket tokens, return its card if assigned
 #
 # WP-104: every prompt goes out wrapped as <wt-message id=… kind=handoff|dispatch|routine|reply|system from="…"
 # [ticket=…]>…</wt-message> (skills/wt-shared/scripts/wt-message.mjs), so the target knows it is wt-pack traffic,
@@ -57,6 +59,7 @@ clear=0
 kind=handoff
 from_arg=
 reply=
+cancel=
 PANE_RE='^[A-Za-z0-9:_][A-Za-z0-9:_-]*$'
 WTMSG="$(cd "$(dirname "$0")" && pwd)/../../wt-shared/scripts/wt-message-cli.mjs"
 # WP-122: the path the target runs to reply — this install's own handoff.sh (symlinks or the plugin cache).
@@ -78,6 +81,8 @@ while :; do
              printf '%s' "$pane_arg" | grep -qE "$PANE_RE" || { echo "--pane: bad pane id" >&2; exit 2; } ;;
     --reply) reply=$2; shift 2
              printf '%s' "$reply" | grep -qE "$PANE_RE" || { echo "--reply: bad pane id" >&2; exit 2; } ;;
+    --cancel) cancel=$2; shift 2
+             printf '%s' "$cancel" | grep -qE "$PANE_RE" || { echo "--cancel: bad pane id or name" >&2; exit 2; } ;;
     --kind)  kind=$2; shift 2
              case "$kind" in handoff|dispatch|routine|reply|system) ;; *) echo "--kind: handoff, dispatch, routine, reply or system" >&2; exit 2 ;; esac ;;
     --from)  from_arg=$2; shift 2 ;;
@@ -102,6 +107,7 @@ command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 # `agent list` uses. Outside herdr there is no sender and no sender-side tokens.
 pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // empty'; }
 name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
+pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | select(.name == $n) | .pane_id' | head -1; }
 
 # --reply: a plain answer to whoever sent us a wt-message — no /goal, no tokens, no worker selection.
 if [ -n "$reply" ]; then
@@ -114,6 +120,58 @@ if [ -n "$reply" ]; then
   [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
   herdr agent prompt "$reply" "$msg" >/dev/null
   echo "replied $reply"
+  exit 0
+fi
+
+# --cancel: stop a /goal-driven agent for real. A herdr /goal keeps the agent working toward its
+# condition regardless of what's typed at it (WP-131 incident: told to stop, kept going) — so this
+# escapes whatever it's mid-doing, then ends the goal itself, verifying that the agent actually went
+# idle; a goal that doesn't let go (or an agent already blocked past escape) falls back to /clear.
+if [ -n "$cancel" ]; then
+  why=${1:-}
+  case "$cancel" in
+    *:*) pane=$(pane_of "$cancel" || true) ;;
+    *)   pane= ;;
+  esac
+  [ -n "$pane" ] || pane=$(pane_of_name "$cancel")
+  [ -n "$pane" ] || { echo "--cancel: no such pane or agent: $cancel" >&2; exit 1; }
+
+  [ "$dry" -eq 1 ] && { echo "dry-run: would cancel $cancel ($pane)${why:+: $why}"; exit 0; }
+
+  info=$(herdr pane get "$pane" 2>/dev/null || true)
+  task=$(printf '%s' "$info" | jq -r '.result.pane.tokens.task // empty' 2>/dev/null || true)
+  ticket=$(printf '%s' "$info" | jq -r '.result.pane.tokens.ticket // empty' 2>/dev/null || true)
+
+  herdr agent send-keys "$pane" esc >/dev/null 2>&1 || true
+  if herdr agent prompt "$pane" "/goal clear" --wait --until idle --until done --timeout 8000 >/dev/null 2>&1; then
+    cleared="goal cleared"
+  elif herdr agent prompt "$pane" "/clear" >/dev/null 2>&1; then
+    cleared="goal clear unverified, sent /clear"
+  else
+    cleared="goal clear unverified, /clear also rejected (agent still blocked?)"
+  fi
+
+  herdr pane report-metadata "$pane" --source wt-dashboard --clear-token task --clear-token ticket >/dev/null 2>&1 || true
+
+  T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+  board=
+  if [ -n "$ticket" ]; then
+    if [ -x "$T" ]; then
+      row=$("$T" show "$ticket" --json 2>/dev/null) && {
+        assignee_pane=$(printf '%s' "$row" | jq -r '.assignee.pane // empty' 2>/dev/null || true)
+        if [ "$assignee_pane" = "$pane" ]; then
+          "$T" assign "$ticket" none >/dev/null 2>&1 || true
+          "$T" move "$ticket" ready --note "cancelled${why:+: $why}" >/dev/null 2>&1 || true
+          board="returned $ticket to ready"
+        fi
+      }
+    else
+      echo "wt-ticket missing" >&2
+    fi
+  fi
+
+  name=$(name_of "$pane")
+  echo "cancelled ${name:-$pane} ($pane): $cleared${task:+, cleared task=\"$task\"}${board:+, $board}"
   exit 0
 fi
 
