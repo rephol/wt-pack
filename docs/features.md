@@ -408,6 +408,15 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - **Tuning**: `jev-eval.mjs routing --report [--since 7d] [--apply]` reports per skill × tier from the judge log;
   `--apply` moves each threshold by at most 0.05 (≥ 10 labelled Jev picks), skips pinned skills, never touches
   floors, writes the user file, seeds `jev-fixtures/routing.json` and posts the change to #wt-pack.
+- **Effort level** (`low < medium < high < xhigh < max`, gated by the global ceiling G): local rules (tier, lens,
+  read-only) set a base effort per tier (haiku low, sonnet medium, opus high; a read-only task drops one level);
+  a tier picked *below* the default tier (sonnet — a downgrade) may raise effort up to 2 levels to compensate,
+  capped at `high`; an unchanged or upgraded tier never raises. Either way E is clamped to G. G uses the same
+  config layering as the mode, under `WT_EFFORT` / the JSON files' `effort` key (default `high`). Applied at
+  spawn with `claude --effort` (`wt-agents spawn --effort`, wired from `wt-handoff` and the role floor); a
+  subagent (the Agent tool) has no effort parameter, so this is session-only. `pick --json` and
+  `floor --role R --json` include `effort`/`applyEffort`; logged next to the tier in the judge log and shown as
+  an Effort column in Settings › Observability › Model routing.
 
 ## Mac app, PWA and Tailscale
 
