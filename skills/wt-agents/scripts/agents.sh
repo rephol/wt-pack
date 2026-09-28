@@ -130,12 +130,16 @@ spawn|mcp-args|mcp-file)
   # agent_name_taken and the agent never starts.
   slug=$(repo_slug "$main")
   # WP-120: plus the names of exited agents the watchdog remembers — herdr drops them from its list, and
-  # reusing one blocks that agent's Resume ("already running in pane …").
+  # reusing one blocks that agent's Resume ("already running in pane …"). A deliberate `rm` (or the WP-143
+  # idle retirement, which also runs `rm`) drops its own name from watchdog.json below, so only a crash-gone
+  # agent still occupies a number here.
+  # WP-148: pick the LOWEST unoccupied number rather than max+1, so numbers freed by removal get reused.
   wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
-  next=$({ herdr agent list | jq -r '.result.agents[].name // empty'
+  used=$({ herdr agent list | jq -r '.result.agents[].name // empty'
     [ -r "$wd" ] && jq -r '.lastSeen // {} | .[] | select(.goneAt) | .name // empty' "$wd" 2>/dev/null; } \
-    | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
-  label=$(printf '%s-%s-%02d' "$slug" "$role" "$(( ${next:-0} + 1 ))")
+    | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -nu)
+  num=$(printf '%s\n' "$used" | awk 'BEGIN{n=1} NF{if ($1==n) n++} END{print n}')
+  label=$(printf '%s-%s-%02d' "$slug" "$role" "$num")
   [ -z "$fixed" ] || label=$fixed
   }
   [ "$cmd" = mcp-args ] && label=args-$$
@@ -263,6 +267,14 @@ rm)
   name=$(herdr agent get "$pane" | jq -r '.result.agent.name // empty')
   herdr tab close "$tab" >/dev/null
   [ -n "$name" ] && rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$name.json"
+  # WP-148: a deliberate rm is not a crash to resume, so drop its name from the watchdog's memory too —
+  # otherwise WP-120's Resume-collision guard keeps the number reserved forever and numbering only climbs.
+  wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
+  if [ -n "$name" ] && [ -f "$wd" ]; then
+    tmp_wd="$wd.tmp.$$"
+    jq --arg n "$name" '.lastSeen |= with_entries(select(.value.name != $n))' "$wd" > "$tmp_wd" \
+      && mv "$tmp_wd" "$wd" || rm -f "$tmp_wd"
+  fi
   echo "removed $target ($pane, was $status)"
   ;;
 
