@@ -37,6 +37,15 @@ test('HTTP 403 → auth_error', async () => {
   assert.deepEqual([lines().at(-1).err, lines().at(-1).outcome], ['http_403', 'auth_error'])
 })
 
+// WP-136 (reopened): 401s persisted after fixing the source order, from a caller with no explicit
+// key — the key itself is never logged, so name which source (env/keychain/file) resolved it instead.
+test('auth_error logs which key source resolved it; other outcomes do not', async () => {
+  await judge('t', { a: 2.3 }, Q, { key: 'k', fetchImpl: async () => ({ ok: false, status: 401 }) })
+  assert.equal(lines().at(-1).keySource, 'explicit')
+  await judge('t', { a: 2.4 }, Q, { key: 'k', fetchImpl: async () => ({ ok: false, status: 500 }) })
+  assert.equal('keySource' in lines().at(-1), false)
+})
+
 test('no key → null without fetching', async () => {
   let called = false
   const r = await judge('t', { a: 3 }, Q, { key: '', fetchImpl: async () => { called = true } })
