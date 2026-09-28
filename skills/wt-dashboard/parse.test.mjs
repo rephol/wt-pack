@@ -1311,6 +1311,53 @@ test('WP-114 rooms: rename changes the title only (slug and posting by slug keep
   assert.equal(rooms.room('ops'), undefined)
 })
 
+test('WP-138 Rooms.leave: drops a name from every room, keeps messages, clears its absence timer', async () => {
+  const { Rooms } = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp(pj(tmpdir(), 'rooms-leave-'))
+  const list = [{ name: 'w1', key: 'm/w:p1', local: true, status: 'idle' }]
+  const rooms = new Rooms({ dir, agents: async () => list, prompt: async () => {}, log: () => {} })
+  await rooms.create({ title: 'a', slug: 'a' })
+  await rooms.create({ title: 'b', slug: 'b' })
+  await rooms.post('a', { author: { kind: 'agent', name: 'w1', key: 'm/w:p1' }, text: 'hi' })
+  await rooms.update('b', { members: ['w1', 'other'] })
+  await rooms.update('a', { responder: 'm/w:p1' }) // pinned: w1 answers unmentioned messages in #a
+  rooms.room('a').memberGoneSince = { w1: Date.now() - 1000 }
+  await rooms.leave('w1')
+  assert.deepEqual(rooms.room('a').members, [])
+  assert.deepEqual(rooms.room('b').members, ['other'])
+  assert.equal(rooms.room('a').memberGoneSince.w1, undefined)
+  assert.equal((await rooms.messages('a')).at(-1).author.name, 'w1') // history keeps the name
+  // gone agent's responder pin does not linger and silently block every unmentioned message (WP-138 review)
+  assert.deepEqual([rooms.room('a').responder, rooms.room('a').responderName, rooms.room('a').responderPinned], [null, null, false])
+})
+
+test('WP-138 Rooms.pruneMembers: a member absent 24h+ drops; reappearing clears its timer; unknown liveness is a no-op', async () => {
+  const { Rooms, MEMBER_GONE_MS } = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp(pj(tmpdir(), 'rooms-prune-'))
+  const rooms = new Rooms({ dir, agents: async () => [], prompt: async () => {}, log: () => {} })
+  await rooms.create({ title: 'a', slug: 'a' })
+  await rooms.update('a', { members: ['gone', 'here'] })
+  Object.assign(rooms.room('a'), { responder: 'm/gone:p1', responderName: 'gone', responderPinned: true })
+  const t0 = Date.now()
+  await rooms.pruneMembers(null, t0) // no local agents known: never guess
+  assert.deepEqual(rooms.room('a').members, ['gone', 'here'])
+  await rooms.pruneMembers(new Set(['here']), t0) // first sight of 'gone' absent
+  assert.deepEqual(rooms.room('a').members, ['gone', 'here'])
+  assert.equal(rooms.room('a').memberGoneSince.gone, t0)
+  await rooms.pruneMembers(new Set(['here']), t0 + MEMBER_GONE_MS - 1) // not yet 24h
+  assert.deepEqual(rooms.room('a').members, ['gone', 'here'])
+  await rooms.pruneMembers(new Set(['gone', 'here']), t0 + MEMBER_GONE_MS + 1) // respawned before the deadline: cleared
+  assert.equal(rooms.room('a').memberGoneSince.gone, undefined)
+  assert.equal(rooms.room('a').responderPinned, true) // still not yet dropped: pin stands
+  await rooms.pruneMembers(new Set(['here']), t0 + MEMBER_GONE_MS + 2) // absent again, timer restarts
+  await rooms.pruneMembers(new Set(['here']), t0 + 2 * MEMBER_GONE_MS + 10) // now over 24h absent: dropped
+  // its pinned-responder claim goes with it, so the room can pick someone else instead of staying stuck (WP-138 review)
+  assert.deepEqual([rooms.room('a').responder, rooms.room('a').responderName, rooms.room('a').responderPinned], [null, null, false])
+  assert.deepEqual(rooms.room('a').members, ['here'])
+})
+
 test('WP-115 parsePicker: box borders stripped, soft wraps joined, paragraph breaks kept (question and descriptions)', async () => {
   const { parsePicker, unbox } = await import('./server.mjs')
   const { readFileSync } = await import('node:fs')

@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS = {
 export const AGENT_ROOMS_PER_HOUR = 3
 // Queued mentions older than this are not re-sent after a server restart (they are marked undelivered).
 export const RESTORE_MS = 3_600_000
+// A member absent from the live agents list this long is dropped from room membership (WP-138).
+export const MEMBER_GONE_MS = 86_400_000
 // An agent may delete only a throwaway room it created itself: slug `tmp-…`, it is the responder (WP-42).
 export const agentMayDelete = (room, author) => Boolean(room?.slug?.startsWith('tmp-') && [author.key, author.name].includes(room.responder))
 export const agentRoomAllowed = (times, now = Date.now()) => times.filter((t) => now - t < 3_600_000).length < AGENT_ROOMS_PER_HOUR
@@ -562,6 +564,52 @@ export class Rooms {
     if (!r.members.includes(a.name)) r.members = [...r.members, a.name]
     await this.saveIndex()
     await this.system(r.slug, `responder: ${a.name}`)
+  }
+  // A dropped member that was the room's pinned responder leaves it stuck: planDelivery blocks every
+  // unmentioned message on 'responder is not running', and followTicketAgent won't reassign a pinned one.
+  // Clearing the pin lets a ticket room pick a new responder and a plain room fall back to no responder.
+  unpinResponder(r, name) {
+    if (r.responderName !== name) return false
+    r.responder = null; r.responderName = null; r.responderPinned = false
+    return true
+  }
+  // An agent removed (agents.sh rm, or a routine/reconcile retiring it) leaves every room it was a member of.
+  // Its messages keep its name; only membership and any pinned-responder claim on it change.
+  async leave(name) {
+    await this.load()
+    let changed = false
+    for (const r of this.index) {
+      if (r.members.includes(name)) { r.members = r.members.filter((m) => m !== name); changed = true }
+      if (r.memberGoneSince?.[name]) { delete r.memberGoneSince[name]; changed = true }
+      if (this.unpinResponder(r, name)) changed = true
+    }
+    if (changed) await this.saveIndex()
+  }
+  // Housekeeping (hourly): a member absent from `liveNames` for more than MEMBER_GONE_MS is dropped from the
+  // room (messages stay); a member that reappears (respawned under the same name) clears its absence and
+  // rejoins normally the next time it speaks or is addressed. `liveNames`: null when liveness is unknown (no
+  // agents list available) — leave every room untouched rather than guess. Pass every known agent, local and
+  // remote, running or not — only an agent gone from the list entirely counts as absent.
+  async pruneMembers(liveNames, now = Date.now()) {
+    if (!liveNames) return
+    await this.load()
+    let changed = false
+    for (const r of this.index) {
+      if (r.archived) continue
+      r.memberGoneSince ??= {}
+      for (const n of r.members) {
+        if (liveNames.has(n)) { if (r.memberGoneSince[n]) { delete r.memberGoneSince[n]; changed = true }; continue }
+        if (!r.memberGoneSince[n]) { r.memberGoneSince[n] = now; changed = true }
+      }
+      for (const n of Object.keys(r.memberGoneSince)) if (!r.members.includes(n)) { delete r.memberGoneSince[n]; changed = true }
+      const drop = r.members.filter((n) => r.memberGoneSince[n] && now - r.memberGoneSince[n] > MEMBER_GONE_MS)
+      if (drop.length) {
+        r.members = r.members.filter((n) => !drop.includes(n))
+        for (const n of drop) { delete r.memberGoneSince[n]; this.unpinResponder(r, n) }
+        changed = true
+      }
+    }
+    if (changed) await this.saveIndex()
   }
   // Delete: index entry, its messages, its live streams and anything still queued for it.
   async remove(slug) {
