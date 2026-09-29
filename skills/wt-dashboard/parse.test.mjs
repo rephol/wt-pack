@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -444,6 +444,36 @@ test('WP-179: planUsageSnapshot returns the freshest noted reading, null once st
   assert.equal(planUsageSnapshot(now + 11 * 60_000), null) // stale
   notePlanUsage(null, now + 20 * 60_000) // a null reading (no statusline this poll) never overwrites the last one
   assert.deepEqual(planUsageSnapshot(now + 5 * 60_000), { session: { pct: 5, reset: '2h56m' }, weekly: { pct: 46, reset: '3d' }, at: now })
+})
+
+// WP-179 second follow-up: panes disagree with each other (stale redraws, or even a different Claude account —
+// ccstatusline's own cache is per-account, keyed by tokenHash). The cache file it refreshes itself is one
+// account-wide number, so it must win outright whenever fresh — never averaged or alternated with pane reads.
+test('planUsageFromFile: reads ccstatusline\'s own cache, never exposes tokenHash', async () => {
+  const { mkdtemp, writeFile, utimes } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const dir = await mkdtemp((await import('node:os')).tmpdir() + '/ccstatusline-')
+  const file = join(dir, 'usage.json')
+  const now = Date.now()
+  const iso = (ms) => new Date(now + ms).toISOString()
+  await writeFile(file, JSON.stringify({
+    sessionUsage: 24.3, sessionResetAt: iso(4 * 3600_000 + 57 * 60_000),
+    weeklyUsage: 49.6, weeklyResetAt: iso(3 * 86400_000 + 15 * 3600_000 + 7 * 60_000),
+    weeklySonnetUsage: 40, weeklyOpusUsage: 9, extraUsageEnabled: false,
+    tokenHash: 'super-secret-account-hash',
+  }))
+
+  const u = await planUsageFromFile(file, now)
+  assert.deepEqual(u, { session: { pct: 24.3, reset: '4h57m' }, weekly: { pct: 49.6, reset: '3d 15hr 7m' }, at: now })
+  assert.equal(JSON.stringify(u).includes('tokenHash'), false)
+  assert.equal(JSON.stringify(u).includes('super-secret'), false)
+
+  // Present but stale (>15 min old): hide, do not fall back to a caller-supplied pane reading.
+  await utimes(file, new Date(now - 20 * 60_000), new Date(now - 20 * 60_000))
+  assert.equal(await planUsageFromFile(file, now), null)
+
+  // Missing entirely: undefined signals the caller to use its pane-parsed fallback instead.
+  assert.equal(await planUsageFromFile(join(dir, 'nope.json'), now), undefined)
 })
 
 test('usage: dedupe by message id, incremental offsets, partial lines wait, bucketing and notional cost', async () => {

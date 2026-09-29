@@ -405,9 +405,32 @@ const readPane = (m, pane, lines) =>
 const since = new Map() // machine|pane → { status, at }
 const parsed = new Map() // machine|pane → { p, seq, at }: last parse, reused until the pane changes
 
+// WP-179 follow-up: panes disagree (a status line is only as fresh as its own last redraw, and a pane can even
+// belong to a different Claude account — ccstatusline's cache carries a tokenHash per account). The cache file
+// it refreshes itself is one number per account, so it is the source of truth whenever it's fresh; pane parsing
+// is a fallback for when the file itself is missing, never blended with it.
+const USAGE_FILE = join(homedir(), '.cache', 'ccstatusline', 'usage.json')
+const fmtCountdown = (ms) => {
+  if (!Number.isFinite(ms) || ms <= 0) return null
+  const mins = Math.round(ms / 60_000)
+  const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60
+  return d > 0 ? `${d}d ${h}hr ${m}m` : `${h}h${m}m`
+}
+// undefined = file missing/unreadable → caller falls back to pane parsing. null = file present but stale
+// (>15min old) or incomplete → hide, never fall back (that would mix a stale/foreign-account pane in).
+export async function planUsageFromFile(file = USAGE_FILE, now = Date.now()) {
+  const l = await readLimits(file, now)
+  if (!l) return undefined
+  if (l.ageSec > 15 * 60 || l.session == null || l.weekly == null) return null
+  const session = l.sessionResetAt && fmtCountdown(Date.parse(l.sessionResetAt) - now)
+  const weekly = l.weeklyResetAt && fmtCountdown(Date.parse(l.weeklyResetAt) - now)
+  if (!session || !weekly) return null
+  return { session: { pct: l.session, reset: session }, weekly: { pct: l.weekly, reset: weekly }, at: now }
+}
+
 // WP-179: the freshest ccstatusline plan-usage reading seen on ANY pane (session/weekly % are account-wide,
 // not per-pane) — no Claude API call, just whatever a pane's own statusline already shows. Pure and
-// separately testable from the herdr-dependent read loop that feeds it.
+// separately testable from the herdr-dependent read loop that feeds it. Fallback only — see planUsageFromFile.
 let latestPlanUsage = null // { session: {pct, reset}, weekly: {pct, reset}, at }
 export function notePlanUsage(u, now = Date.now()) { if (u) latestPlanUsage = { ...u, at: now } }
 export function planUsageSnapshot(now = Date.now(), maxAgeMs = 10 * 60_000) {
@@ -1441,6 +1464,9 @@ const freshenWeb = freshener({
 
 async function health() {
   const dist = await stat(join(DIST, 'index.html')).catch(() => null)
+  // WP-179 follow-up: the cache file wins whenever it's fresh (one account-wide number); pane parsing only
+  // fills in when the file itself is missing, never averaged or alternated with it.
+  const fileUsage = await planUsageFromFile()
   return {
     ok: true, app: 'wt-dashboard', runtime: RUNTIME, pid: process.pid, startedAt: STARTED_AT,
     managedBy: MANAGED_BY,
@@ -1448,7 +1474,7 @@ async function health() {
     webStale: selfBuild() ? await webStale(WEB) : null, // null: not this server's job (bundled app / custom dist)
     sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
     jev: await jev(), // outside `sources`: Jev being down doesn't degrade this server
-    planUsage: planUsageSnapshot(), // WP-179: null when no pane has reported one recently
+    planUsage: fileUsage === undefined ? planUsageSnapshot() : fileUsage,
   }
 }
 
@@ -1604,7 +1630,6 @@ inbox.subs.add((it) => {
     .catch((e) => console.error('inbox rank:', e.message))
 })
 // ---- Claude usage (Overview) ----
-const USAGE_FILE = join(homedir(), '.cache', 'ccstatusline', 'usage.json')
 const usageAgg = new UsageAgg()
 let usageScan = null, usageScannedAt = 0
 // Transcripts are re-read at most every 20s, appended bytes only; the first pass covers the last 30 days.
