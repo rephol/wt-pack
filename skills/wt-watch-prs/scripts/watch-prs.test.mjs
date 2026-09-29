@@ -300,6 +300,8 @@ test('WP-176 record --coverage stores full/partial, rejects garbage, works with 
   assert.equal(e.coverage, 'full'); assert.equal(e.reviewer, 'demo-reviewer-01')
   assert.equal(run(['record', '15', sha('d'), 'approved', 'x', 'sess-d']).status, 0) // no options still works
   assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).reviewed[15].coverage, undefined)
+  r = run(['record', '16', sha('e'), 'approved', 'x', 'sess-d', '--coverage']) // dangling flag: must not hang
+  assert.equal(r.status, 1); assert.match(r.stderr, /usage: record/)
 })
 
 test.after(() => { assert.ok(!existsSync(join(tmp, 'home', '.claude'))); rmSync(tmp, { recursive: true, force: true }) })

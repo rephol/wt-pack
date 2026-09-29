@@ -108,8 +108,8 @@ record)
   n=$1; shaval=$2; st=$3; note=$4; s=$5; shift 5
   by=""; cov=""
   while [ $# -gt 0 ]; do case "$1" in
-    --by) by=${2:-}; shift 2;;
-    --coverage) cov=${2:-}; shift 2;;
+    --by|--coverage) [ $# -ge 2 ] || die "usage: record N <sha40> <state> <outcome|-> S [--by NAME] [--coverage full|partial]"
+      [ "$1" = --by ] && by=$2 || cov=$2; shift 2;;
     *) die "usage: record N <sha40> <state> <outcome|-> S [--by NAME] [--coverage full|partial]";;
   esac; done
   num "$n"; sess "$s"; setup
