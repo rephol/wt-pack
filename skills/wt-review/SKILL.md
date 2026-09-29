@@ -400,6 +400,20 @@ it twice inflates the apparent yield of a bigger panel.
 State plainly which mode ran, which lenses ran, and which triggers fired. A caller cannot tell a clean
 target from a narrow review otherwise.
 
+## Verdict word
+
+The verdict's **first line** is exactly one of **Approve**, **Approve with fixes**, or **Send back** — nothing
+else on that line. Compute it from the merged, verified findings and the coverage state:
+
+- **Send back** — any confirmed `high`-severity finding, an intent mismatch, or partial coverage (below).
+- **Approve with fixes** — no `high`/intent-mismatch/coverage reason to send back, but at least one confirmed
+  `medium` or `low` finding.
+- **Approve** — no confirmed findings at any severity, and coverage is complete.
+
+A `refuted` or `unverifiable` finding never on its own forces Send back or Approve with fixes — only a
+`confirmed` one does. The coverage line (below) always follows the verdict word as the last line; it never
+replaces it.
+
 ## Coverage line in the verdict
 
 The verdict's last line is always: `Coverage: N/M files read in full · lenses: <fired lenses> · tests:
