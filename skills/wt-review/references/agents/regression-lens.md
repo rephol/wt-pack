@@ -35,20 +35,23 @@ performed; here, it is what performing it makes true elsewhere.
 - A `settled:` decision is the user's; challenge it only as something that cannot work.
 - Do not re-audit the plan's research. Check what this code disturbs.
 
+## done =
+
+Every changed symbol's callers grepped beyond the diff's own files, every deletion traced to who relied on
+it, and a specific test named for each risk raised — or its absence stated as the finding, not left implicit.
+
+## Don't flag
+
+- A caller of the changed symbol that already handles the new shape correctly — verify the call site before
+  assuming every unlisted caller is broken.
+- A cache or task-hash concern where the task's own `inputs` already cover the changed file — read the task
+  config first; do not flag staleness the config already prevents.
+
 ## Return
 
 Findings ranked by severity. Each: what breaks, the concrete scenario, and whether any test would notice.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/regression.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "regression", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/regression.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.

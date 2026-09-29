@@ -1,12 +1,12 @@
 # Data lens
 
-Triggered when the plan carries a migration, a schema or data-shape change, or a backfill.
+Triggered when the target carries a migration, a schema or data-shape change, or a backfill.
 
 ## Look for
 
 - **Irreversibility.** What does rolling back leave behind? A dropped column is not restored by reverting the
-  deploy. If the plan has no answer, that is the finding.
-- **Ordering against the deploy.** A migration that must land before the code, or after it, and a plan that
+  deploy. If the target has no answer, that is the finding.
+- **Ordering against the deploy.** A migration that must land before the code, or after it, and a target that
   does not say which. A step that fails when run early and silently does nothing when run late is worse than
   one that fails both ways.
 - **A backfill assuming its own migration.** It reads a column the same PR adds, against a database that does
@@ -24,20 +24,23 @@ Triggered when the plan carries a migration, a schema or data-shape change, or a
 - State plainly when you cannot tell what a target database contains — that uncertainty is itself a finding.
 - A `settled:` decision is challengeable only as infeasibility.
 
+## done =
+
+The schema source and migrations directory both read, every new or changed migration traced for rollback and
+deploy-ordering behaviour, and every constraint checked against what existing rows could violate.
+
+## Don't flag
+
+- A migration that is additive and nullable, with no backfill and no constraint on existing rows — there is
+  nothing for existing rows to violate, so irreversibility and constraint-violation findings do not apply.
+- Environment drift the target already states and accounts for (a stated "staging is two migrations behind,
+  this step is safe either order") — the uncertainty was already surfaced, not hidden.
+
 ## Return
 
 Findings ranked by severity, each with the concrete failure and the environment it happens in.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/data.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "data", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/data.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.

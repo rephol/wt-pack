@@ -41,21 +41,25 @@ left to judgement.
   on.
 - A `settled:` decision is the user's; challenge it only as something that cannot work.
 
+## done =
+
+Every applicable section of the root instructions file and any guideline directory the target touches read
+in full, every finding matched against a specific quoted rule, and at least one recent neighbour checked for
+practised (not just documented) convention.
+
+## Don't flag
+
+- A convention difference between the instructions file and a recent neighbour where the neighbour is
+  clearly the older, unmigrated file — report it as drift to fix, not as the target's own violation.
+- A style choice the repo has never written down anywhere, however much it reads as best practice —
+  undocumented is not a finding here.
+
 ## Return
 
 Findings ranked by severity. Each: the rule (quoted, with path), where the target breaks it, and the concrete
 consequence — especially whether anything would catch it.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/standards.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "standards", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/standards.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.
