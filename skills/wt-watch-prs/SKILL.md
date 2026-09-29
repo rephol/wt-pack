@@ -73,8 +73,9 @@ $W identity           # "<login> <source>" — the account reviews post as
   that opened the PR means nothing). Say so in every affected review.
 - **Post only through `$W gh …`** (`$W gh pr review 12 --approve --body-file f`). It injects the reviewer token
   per call; never print, echo or store the token, and never pass it in argv.
-- **Arm two Monitors, both `persistent: true`**, after checking `TaskList` that this session has neither yet
-  (another session's pair is fine — claims resolve overlap):
+- **Arm two Monitors, both `timeout_ms: 1800000`** (30 minutes — the maximum; `Monitor` has no `persistent`
+  option, every monitor expires and must be re-armed, see below), after checking `TaskList` that this session
+  has neither yet (another session's pair is fine — claims resolve overlap):
   - `$W poll-shas` — description `new commits on open <repo> PRs [session S]`. Emits
     `PR #n — new commits <sha> — …` for each unreviewed head, and `PR #n — NO LONGER OPEN — MERGED|CLOSED …`.
   - `$W poll-replies --session S` — description `replies on held <repo> PRs [session S]`. Emits human replies
@@ -85,16 +86,27 @@ $W identity           # "<login> <source>" — the account reviews post as
   error, per Monitor: retry arming *that one* up to twice more (an immediate re-issue, then again next turn)
   before giving up on it specifically. Never report §1 done, or start draining the backlog, while either
   Monitor's task id is still unconfirmed.
+- **Re-arm on expiry the same way** — a monitor's own expiry notice is not a stop condition, it is another arm
+  call with the same `timeout_ms: 1800000` and the same silent-failure exposure as the first arm: confirm the
+  new task id before trusting the watch is still live, and an unconfirmed re-arm gets the same
+  retry-twice-then-give-up-on-that-one treatment, not a shrug and a continue believing nothing changed.
+  `poll-shas` and `poll-replies` keep their own progress in `state.json` under
+  `~/.local/share/wt-watch-prs/<owner>-<repo>/` (durable across process restarts — `seen()` reads
+  `.reviewed[n].sha` from it), so a re-armed process picks up where the expired one left off; nothing already
+  reviewed re-fires, and the short in-process de-dup windows each script keeps (the last-15-minutes reply
+  cursor, the vanished-PR comparison set) only reset to a slightly wider, overlapping window on restart —
+  at most a redundant notice right at the boundary, never a missed one.
 - **One Monitor exhausted, the other armed → keep going, degraded.** Report the failed one as DEGRADED
   (alongside the identity DEGRADED lines) rather than tearing down a Monitor that is working — losing
   `poll-replies` still leaves new-head detection running, which is most of the loop's value. Keep retrying the
   failed one occasionally between events instead of dropping it for good.
-- **Both Monitors exhausted → this repo is unwatched.** Say so where it will be noticed, not just in your own
-  reply: `room post <main checkout's basename> "wt-watch-prs: could not arm monitoring for <repo> after 3
-  attempts each — this repo is unwatched until re-started"`, and reply through whatever channel started you
-  (a wt-message dispatch/handoff footer), if any — nothing else will tell that sender the loop never started.
-  Then stop the session — continuing with zero Monitors armed is silent coverage loss dressed up as a running
-  loop, the exact failure this exists to prevent.
+- **Both Monitors exhausted → this repo is unwatched.** Whether from the initial arm or a failed re-arm on
+  expiry, say so where it will be noticed, not just in your own reply: `room post <main checkout's basename>
+  "wt-watch-prs: could not arm monitoring for <repo> after 3 attempts each — this repo is unwatched until
+  re-started"`, and reply through whatever channel started you (a wt-message dispatch/handoff footer), if any —
+  nothing else will tell that sender the loop never started (or stopped watching). Then stop the session —
+  continuing with zero Monitors armed is silent coverage loss dressed up as a running loop, the exact failure
+  this exists to prevent.
 - Report: both task ids, the repo, the identity and its source, S, and every DEGRADED line.
 
 The first poll fires every open unreviewed PR — a backlog. **That is a work queue, not a report.** Drain it
