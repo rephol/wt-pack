@@ -69,9 +69,13 @@ Invoke each skill in turn. What this skill adds is what happens *between* them:
   of Done. It swaps its mandatory pair to correctness and regression for a diff and computes the rest from
   its own trigger table. **Do not restate its sizing rules**; a second copy of that table is a lockstep with
   nothing to fail when it drifts.
-- **After `wt-review`** — apply the findings, verifying the load-bearing ones yourself first. A finding not
-  applied is a finding wasted; record any you decline and why. **A finding that invalidates the work is a
-  stop**, not an input to step 3.
+- **After `wt-review`** — apply each confirmed finding using its `suggested_fix` as the starting point,
+  verifying the load-bearing ones yourself first. A finding not applied is a finding wasted; record any you
+  decline and why. **A finding that invalidates the work is a stop**, not an input to step 3. File any
+  `residual_risks` that survive dedupe: on a local board ticket (`../wt-ticket/scripts/wt-ticket keys` matches
+  this repo), one `wt-ticket new "<risk title>" --label residual --body "<risk detail>"` per distinct risk;
+  otherwise list them in the PR body for `wt-pr` to carry. You are the caller filing these — the reviewers
+  that found them never file tickets themselves.
 - **Into `wt-compound`** — the applied review findings and the plan's `disproved` records are its input. Most
   runs record nothing, which is the normal outcome.
 - **Into `wt-pr`** — the two paragraphs only this run can write, what research corrected and what review
