@@ -59,6 +59,10 @@ quote it, and show the line where behaviour diverges. Report this even when the 
 on its own merits — a correct implementation that contradicts its own stated intent still needs the mismatch
 resolved (fix the code, or fix the claim), and whoever applies findings cannot tell which without being told.
 
+Mark it in the JSON, not just in prose: set `"type": "intent-mismatch"` on the finding object (SKILL.md's
+schema). The verdict word reads that field mechanically to decide Send back — a mismatch described only in
+`detail` cannot trigger it.
+
 ## Tool budget
 
 Roughly 40 tool calls. Spend them opening your assigned/cited files, tracing a caller or two per suspect

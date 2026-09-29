@@ -171,10 +171,15 @@ assigning agents:
 - **> 200 changed lines** — **one agent per fired lens**, capped at **5**. Each of those agents reads **every**
   changed file in full — the lens is its filter, not a slice of the file list — so give each agent the
   complete `git diff --name-only` list, not a disjoint subset. This replaces file-slicing: past 200 lines, the
-  split is by lens, not by file.
-  - When more than 5 lenses fire, bundle the extras using the existing 3-row bundle table's groupings above,
-    merging the smallest bundles first (the pair that combines into the fewest total lenses), until exactly 5
-    agents remain.
+  split is by lens, not by file. **The mandatory pair (correctness + regression, or coherence + feasibility in
+  plan mode) always shares one agent, exactly as it does at ≤200 lines** — it never counts as two toward the
+  5-agent cap and is never split by this rule.
+  - When more than 5 lenses fire (counting the mandatory pair as one), merge whole rows of the 3-row bundle
+    table, starting with row 3 (security · data · scope · adversarial · reliability · performance — merge its
+    fired members into one agent first, since it is the largest row and yields the biggest single reduction),
+    then row 2 (testing + learnings) if still over 5, then absorb standards and agent-native into the
+    mandatory-pair agent (row 1) last. Stop merging as soon as the agent count is ≤5 — do not merge further
+    than the cap requires.
   - `[unsourced]`: whether a per-lens agent can read a diff past ~800 lines in full within its ~40-call tool
     budget. The effort floor and per-file coverage rows below surface it when an agent runs thin — report a
     thin pass as partial coverage rather than assuming the read happened.
@@ -269,6 +274,11 @@ finding:
    "evidence": "line 78: `await handshake()` has no timeout or AbortController wrapping it",
    "suggested_fix": "wrap the call in Promise.race with a timeout, or pass an AbortSignal it can honour" }]
 ```
+
+**An intent-mismatch finding (`references/reviewer-contract.md`'s own finding type) sets `"type":
+"intent-mismatch"`** alongside the usual fields — omit `type` for every ordinary defect finding. This is the
+field the verdict word (below) reads mechanically to apply its intent-mismatch Send-back trigger; a reviewer
+that writes the prose but not the field leaves that finding unable to force a Send back.
 
 `file` and `line` are **the location the finding is about** — in plan mode that is usually the plan itself
 (`docs/plans/….md`, and the line in it), in diff mode a source file. `related` names the paths where a
@@ -405,7 +415,8 @@ target from a narrow review otherwise.
 The verdict's **first line** is exactly one of **Approve**, **Approve with fixes**, or **Send back** — nothing
 else on that line. Compute it from the merged, verified findings and the coverage state:
 
-- **Send back** — any confirmed `high`-severity finding, an intent mismatch, or partial coverage (below).
+- **Send back** — any confirmed `high`-severity finding, a confirmed finding with `"type": "intent-mismatch"`
+  (§ "Every reviewer writes JSON, not prose"), or partial coverage (below).
 - **Approve with fixes** — no `high`/intent-mismatch/coverage reason to send back, but at least one confirmed
   `medium` or `low` finding.
 - **Approve** — no confirmed findings at any severity, and coverage is complete.

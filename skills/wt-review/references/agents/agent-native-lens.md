@@ -12,9 +12,10 @@ plausible interpretation and keeps going.
 - **An instruction an agent will plausibly misread.** Two valid readings of the same sentence, a step that
   assumes context the agent was never given, an example whose specifics do not match the rule it illustrates.
 - **A script path that is not sibling-relative.** CLAUDE.md is explicit: never write the setup-install home
-  path (the tilde-expanded `.claude/skills` link) into scripts, sent strings or SKILL prose — a skill
-  installed via the plugin path has no such directory. Grep the changed prose for that literal string, per
-  `skills/wt-shared/scripts/paths.test.mjs`'s own pattern.
+  path into scripts, sent strings or SKILL prose — a skill installed via the plugin path has no such
+  directory. `skills/wt-shared/scripts/paths.test.mjs` defines the forbidden forms as a regex (its `RE`
+  constant, near the top of the file) — read that regex and check the changed prose against it directly,
+  rather than guessing which spellings count.
 - **Ambiguity between a user message and wt-message traffic.** Prose telling an agent how to tell the two
   apart that is itself ambiguous, or a new message kind introduced without saying which channel answers it.
 - **A lockstep copy this change should have updated and did not.** The same trigger table, schema or list
@@ -34,9 +35,10 @@ plausible interpretation and keeps going.
 
 ## done =
 
-Every changed instruction, prompt or tool description read as a first-time agent reader would, a grep run for
-the setup-install home path and for any lockstep copy elsewhere in the pack, and every message-kind or
-channel reference checked against how the pack actually routes it.
+Every changed instruction, prompt or tool description read as a first-time agent reader would, the changed
+prose checked against `paths.test.mjs`'s own `RE` pattern for the setup-install home path, a grep run for any
+lockstep copy elsewhere in the pack, and every message-kind or channel reference checked against how the pack
+actually routes it.
 
 ## Don't flag
 
