@@ -133,6 +133,42 @@ test('poll-shas: NO LONGER OPEN only for a verified merge; an empty poll is not 
   assert.equal(out.trim(), 'PR #8 — NO LONGER OPEN — MERGED — dev: pr 8')
 })
 
+test('WP-188: poll-shas persists fired/prev across separate --once processes (a Monitor re-arm)', () => {
+  reset(); fixture('list.1.json', [pr(21, sha('1'))])
+  assert.match(run(['poll-shas', '--once']).stdout, /PR #21 — new commits/)
+  // A fresh process (simulating a re-armed Monitor) does not re-announce the same head within the TTL.
+  fixture('list.2.json', [pr(21, sha('1'))])
+  assert.equal(run(['poll-shas', '--once']).stdout, '')
+  assert.ok(existsSync(join(sd, 'poll', 'shas.fired')), 'fired baseline persisted')
+  assert.ok(existsSync(join(sd, 'poll', 'shas.prev')), 'prev baseline persisted')
+})
+
+test('WP-188: poll-shas detects a vanished PR in a fresh process — the regression this fixes', () => {
+  reset(); fixture('list.1.json', [pr(22, sha('2'))])
+  run(['poll-shas', '--once']) // run 1: PR 22 open, seeds poll/shas.prev with [22]
+  // run 2 is a brand-new process (its own empty in-memory $T) — only the persisted prev makes this
+  // detectable; before WP-188, prev was always empty on a fresh process and this vanished silently. A
+  // non-empty list (some unrelated PR #99) keeps the "empty poll is not a mass close" guard from skipping
+  // vanished-PR detection entirely — the pre-existing behaviour that motivated that guard is left untouched.
+  fixture('list.2.json', [pr(99, sha('9'))])
+  fixture('view-22.json', { state: 'MERGED', title: 'pr 22', author: { login: 'dev' } })
+  const out = run(['poll-shas', '--once']).stdout
+  assert.match(out, /PR #22 — NO LONGER OPEN — MERGED — dev: pr 22/)
+})
+
+test('WP-188: poll-replies persists seen ids and the since cursor across separate --once processes', () => {
+  reset({ reviewed: { 23: { sha: sha('a'), state: 'changes-requested', reviewer_session: 'sess-a' } } })
+  fixture('comments.json', [{ id: 9, user: { login: 'dev', type: 'User' }, body: 'first reply' }])
+  fixture('reviews.json', [])
+  let out = run(['poll-replies', '--session', 'sess-a', '--once']).stdout
+  assert.match(out, /PR #23 — REPLY on a held PR — dev: first reply/)
+  assert.ok(existsSync(join(sd, 'poll', 'replies-sess-a.seen')))
+  assert.ok(existsSync(join(sd, 'poll', 'replies-sess-a.since')))
+  // A fresh process for the same session does not re-announce the id it already saw.
+  out = run(['poll-replies', '--session', 'sess-a', '--once']).stdout
+  assert.doesNotMatch(out, /first reply/)
+})
+
 test('claim: second claim loses; release frees it', () => {
   reset()
   assert.equal(run(['claim', '11', 'sess-a']).stdout.trim(), 'claimed')

@@ -16,9 +16,10 @@
 #   gate N                           green | red | pending | none   (GitHub Actions check runs only)
 #   describes N                      ok | no-body | branch-title
 #   diff N S [--sha SHA]             pinned-ref diff: delta vs the recorded head when it is an ancestor, else full
-# State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/<owner>-<repo>/{state.json,claims/,state.lock}
-# The dashboard reads state.json for held PRs (Inbox pr-held). Test knobs: WATCH_PRS_POLLS, WATCH_PRS_SLEEP,
-# WATCH_PRS_TTL, WATCH_PRS_HANDOFF.
+# State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/<owner>-<repo>/{state.json,claims/,state.lock,poll/}
+# poll/ (WP-188) persists poll-shas' and poll-replies' dedupe baselines across process restarts: shas.prev,
+# shas.fired, replies-<S>.seen, replies-<S>.since. The dashboard reads state.json for held PRs (Inbox pr-held).
+# Test knobs: WATCH_PRS_POLLS, WATCH_PRS_SLEEP, WATCH_PRS_TTL, WATCH_PRS_HANDOFF.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "watch-prs: $*" >&2; exit 1; }
@@ -217,13 +218,27 @@ dispatch)
 poll-shas)
   [ "${1:-}" = --once ] && WATCH_PRS_POLLS=1
   setup; polls=${WATCH_PRS_POLLS:-0}; TTL=${WATCH_PRS_TTL:-900}
-  T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; : > "$T/fired"; : > "$T/prev"
+  PD="$SD/poll"; mkdir -p "$PD"; PF="$PD/shas.fired"; PP="$PD/shas.prev"
+  T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+  # WP-188: seed from the persisted files so a fresh process (a Monitor re-arm, or the serve loop's own
+  # restart) resumes the TTL dedupe and the vanished-PR baseline instead of starting blank.
+  [ -f "$PF" ] && cp "$PF" "$T/fired" || : > "$T/fired"
+  [ -f "$PP" ] && cp "$PP" "$T/prev" || : > "$T/prev"
+  # Best-effort under the shared state lock: a stuck lock must never block the polling loop itself, only
+  # delay how current the persisted baseline is (the in-memory $T files stay authoritative meanwhile).
+  persist() {
+    local L="$SD/state.lock" i2
+    for i2 in 1 2 3 4 5; do mkdir "$L" 2>/dev/null && break; sleep 0.2; done
+    [ -d "$L" ] || return 0
+    cp "$T/fired" "$PF" 2>/dev/null; cp "$T/prev" "$PP" 2>/dev/null
+    rmdir "$L" 2>/dev/null
+  }
   seen() { # exact, or a stored short SHA that prefixes the head (else a short record re-fires forever)
     local s; s=$(jq -r --arg n "$1" '.reviewed[$n].sha // ""' "$STATE" 2>/dev/null)
     [ -n "$s" ] || return 1; [ "$2" = "$s" ] && return 0
     [ ${#s} -lt 40 ] && case "$2" in "$s"*) return 0;; esac; return 1
   }
-  fired() { # announced by this process inside the TTL; expired lines drop out
+  fired() { # announced within the TTL — by this process, or an earlier one via the persisted seed; expired lines drop out
     local now hit=1; now=$(date +%s); : > "$T/f2"
     while read -r fn fs ft; do
       [ $((now - ft)) -ge "$TTL" ] && continue
@@ -249,6 +264,7 @@ poll-shas)
       done
       sort -u "$T/nums" "$T/keep" > "$T/prev"
     fi
+    persist
     i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
     sleep "${WATCH_PRS_SLEEP:-60}"
   done
@@ -258,8 +274,21 @@ poll-replies)
   while [ $# -gt 0 ]; do case "$1" in --session) S=${2:-}; shift 2;; --once) polls=1; shift;; *) die "unknown arg $1";; esac; done
   sess "$S"; setup
   SELF=$(login); [ -n "$SELF" ] || die "SELF is unresolved — refusing to watch replies (it would wake on its own holds)"
-  SINCE=$(date -u -v-15M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
-  T=$(mktemp); trap 'rm -f "$T"' EXIT; i=0
+  PD="$SD/poll"; mkdir -p "$PD"; SEENF="$PD/replies-$S.seen"; SINCEF="$PD/replies-$S.since"
+  T=$(mktemp); trap 'rm -f "$T"' EXIT
+  # WP-188: seed the seen-id set and the reply cursor from disk, so a re-armed/restarted process does not
+  # re-widen its window back to 15 minutes and does not re-announce ids it already reported.
+  [ -f "$SEENF" ] && cp "$SEENF" "$T" || : > "$T"
+  if [ -s "$SINCEF" ]; then SINCE=$(cat "$SINCEF")
+  else SINCE=$(date -u -v-15M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ); fi
+  persist() { # best-effort, same rationale as poll-shas' persist
+    local L="$SD/state.lock" i2
+    for i2 in 1 2 3 4 5; do mkdir "$L" 2>/dev/null && break; sleep 0.2; done
+    [ -d "$L" ] || return 0
+    cp "$T" "$SEENF" 2>/dev/null; printf '%s' "$SINCE" > "$SINCEF" 2>/dev/null
+    rmdir "$L" 2>/dev/null
+  }
+  i=0
   while :; do
     # The next poll asks only for what is newer than this one's start (a minute of overlap; ids dedupe), so a busy
     # held PR never pins the 50-comment page to its oldest replies.
@@ -274,7 +303,8 @@ poll-replies)
         echo "PR #$n — $kind on a held PR — $who: $body"
       done
     done
-    SINCE=$next; i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
+    SINCE=$next; persist
+    i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
     sleep "${WATCH_PRS_SLEEP:-90}"
   done
   ;;
