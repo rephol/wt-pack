@@ -390,6 +390,8 @@ export default function App() {
     if (narrow) { openFull(key); return }
     toPanel(key)
   }
+  // WP-174: the Agents list opens straight into the side panel (like terminals), not the dock.
+  const openInPanel = (key: string) => { if (narrow) { openFull(key); return } toPanel(key) }
   const openFull = (key: string) => {
     rememberRecent(key)
     setCollapsed(true) // the panel is never open alongside the full page
@@ -512,7 +514,7 @@ export default function App() {
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setProject} />}
         {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={all?.agents ?? []} />}
-        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={open} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
+        {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={openInPanel} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
           : <Banner status="info" title="Terminals are off" description="Turn them on in Settings › Terminals, from http://127.0.0.1 on this machine." />)}
