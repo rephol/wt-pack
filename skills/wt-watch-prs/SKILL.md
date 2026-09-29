@@ -54,7 +54,7 @@ The judgement is §2 (from Describes on), §3 and §4, unchanged.
 
 **Standalone** is §1–§5 below.
 
-## 1. Preflight, then arm
+## 1. Preflight, then watch
 
 ```bash
 $W preflight          # exit 1 on any HARD fail → report and stop; DEGRADED lines go in the arming report
@@ -73,9 +73,20 @@ $W identity           # "<login> <source>" — the account reviews post as
   that opened the PR means nothing). Say so in every affected review.
 - **Post only through `$W gh …`** (`$W gh pr review 12 --approve --body-file f`). It injects the reviewer token
   per call; never print, echo or store the token, and never pass it in argv.
-- **Arm two Monitors, both `timeout_ms: 1800000`** (30 minutes — the maximum; `Monitor` has no `persistent`
-  option, every monitor expires and must be re-armed, see below), after checking `TaskList` that this session
-  has neither yet (another session's pair is fine — claims resolve overlap):
+- **`$W poller-status` first.** The background poller (WP-187, `watch-prs.sh serve` under launchd) polls
+  independently of any session and delivers events as `<wt-message kind=system>` prompts — it needs no
+  tool call to keep running, so it has none of the next bullet's failure mode. `poller-status` exits 0 when
+  the launchd agent is loaded and its heartbeat (`$WT_WATCH_PRS_HOME/poller.beat`) is under 3 minutes old.
+  - **Exit 0 → `$W register --session S`** and stop here; the poller drains the backlog and delivers events
+    to this pane from now on. No Monitor, no polling loop in this session — `register` records this pane
+    (resolved via `herdr pane get`, the `HERDR_PANE_ID`-may-be-the-stable-id trap) and this repo's checkout
+    path once, and returns immediately.
+  - **Exit non-zero → fall back to arming Monitors yourself**, below. The poller not running (not installed,
+    `--no-service`, or its own launchd agent down) is the ordinary degraded path, not a failure to report —
+    say so in one line and continue with the fallback.
+- **Fallback: arm two Monitors, both `timeout_ms: 1800000`** (30 minutes — the maximum; `Monitor` has no
+  `persistent` option, every monitor expires and must be re-armed, see below), after checking `TaskList` that
+  this session has neither yet (another session's pair is fine — claims resolve overlap):
   - `$W poll-shas` — description `new commits on open <repo> PRs [session S]`. Emits
     `PR #n — new commits <sha> — …` for each unreviewed head, and `PR #n — NO LONGER OPEN — MERGED|CLOSED …`.
   - `$W poll-replies --session S` — description `replies on held <repo> PRs [session S]`. Emits human replies
@@ -90,17 +101,15 @@ $W identity           # "<login> <source>" — the account reviews post as
   call with the same `timeout_ms: 1800000` and the same silent-failure exposure as the first arm: confirm the
   new task id before trusting the watch is still live, and an unconfirmed re-arm gets the same
   retry-twice-then-give-up-on-that-one treatment, not a shrug and a continue believing nothing changed.
-  `poll-shas` and `poll-replies` keep their own progress in `state.json` under
+  `poll-shas` and `poll-replies` keep their own progress in `state.json` **and** in `poll/` under
   `~/.local/share/wt-watch-prs/<owner>-<repo>/` (durable across process restarts — `seen()` reads
-  `.reviewed[n].sha` from it), so a re-armed process picks up where the expired one left off; nothing already
-  reviewed re-fires, and `poll-replies`' in-process reply cursor only resets to a slightly wider, overlapping
-  window on restart — at most a redundant notice, never a missed one. **`poll-shas`' vanished-PR comparison is
-  the one gap this doesn't cover**: its baseline is a fresh, empty in-process file on every restart, so a PR
-  that merges or closes in the gap between the old process dying and the new one's first poll can be silently
-  dropped from the `NO LONGER OPEN` notice — including the §5 partial-coverage re-review it would otherwise
-  trigger. This is a pre-existing property of `watch-prs.sh`, not introduced here, but a 30-minute re-arm cycle
-  makes the gap a routine, expected event instead of a rare crash-restart — track it as its own fix (WP-187's
-  scope, or a dedicated ticket), not something to work around by hand in this loop.
+  `.reviewed[n].sha` from `state.json`; `poll/shas.prev`, `poll/shas.fired` and `poll/replies-S.{seen,since}`
+  hold the TTL and vanished-PR dedupe baselines, WP-188), so a re-armed process resumes exactly where the
+  expired one left off — nothing already reviewed re-fires, and no vanished PR is dropped at the restart
+  boundary either. (This used to be a real gap: before WP-188, `poll-shas`' vanished-PR baseline was a fresh,
+  empty in-process file on every restart, so a PR that closed in the restart gap silently skipped its `NO
+  LONGER OPEN` notice. WP-187/188 persist that baseline to disk, closing it for both this Monitor path and the
+  poller.)
 - **One Monitor exhausted, the other armed → keep going, degraded.** Report the failed one as DEGRADED
   (alongside the identity DEGRADED lines) rather than tearing down a Monitor that is working — losing
   `poll-replies` still leaves new-head detection running, which is most of the loop's value. Keep retrying the
@@ -112,9 +121,12 @@ $W identity           # "<login> <source>" — the account reviews post as
   nothing else will tell that sender the loop never started (or stopped watching). Then stop the session —
   continuing with zero Monitors armed is silent coverage loss dressed up as a running loop, the exact failure
   this exists to prevent.
-- Report: both task ids, the repo, the identity and its source, S, and every DEGRADED line.
+- Report: whether the poller took over (`register`, no Monitors) or the Monitor fallback armed (both task
+  ids), the repo, the identity and its source, S, and every DEGRADED line.
 
-The first poll fires every open unreviewed PR — a backlog. **That is a work queue, not a report.** Drain it
+The first poll fires every open unreviewed PR — a backlog, whether it arrives as one Monitor notification with
+several lines (the fallback) or as several separate poller-delivered wt-messages arriving close together
+(`register`). **Either way it is a work queue, not a report.** Drain it
 oldest-first (a stack base-first) without ending the turn between PRs; never end a turn on "starting #n next"
 without the tool call that starts it. A PR whose gate is pending goes to the back of the queue.
 
@@ -218,6 +230,10 @@ $W release 12 "$S"
 
 ## Limits
 
-Session-scoped: the Monitors die with this session (the state survives). Inline diff-line comments
-(`pulls/N/comments`) are not watched — post holds as review bodies so answers land in the conversation.
-State: `~/.local/share/wt-watch-prs/<owner>-<repo>/` (`state.json`, `claims/`, `state.lock`).
+**Fallback path is session-scoped**: the Monitors die with this session (the state survives). **`register`ed
+watching is not** — the poller keeps delivering to this pane after the session that registered it ends, until
+it is explicitly `unregister`ed or the poller itself decides the pane stopped consuming (§1's decision-5
+criteria: pane gone, handoff failed 3 times, or an event unclaimed and unreviewed 30+ minutes on). Inline
+diff-line comments (`pulls/N/comments`) are not watched — post holds as review bodies so answers land in the
+conversation. State: `~/.local/share/wt-watch-prs/<owner>-<repo>/` (`state.json`, `claims/`, `state.lock`,
+`poll/`) and, top-level, `watchers.json`, `poller.beat`, `unwatched.json` (WP-187).
