@@ -66,7 +66,7 @@ export const DEFAULTS = {
   effort: 'high', // the global ceiling G, same config layering as `mode`
   // WP-158: the explicit model id `claude --model` gets for each tier, so a session-level spawn pins the
   // actual model instead of handing Claude Code a bare alias to resolve on its own.
-  modelIds: { haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5', opus: 'claude-opus-5-5' },
+  modelIds: { haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5' }, // WP-178
 }
 // Falls back to the bare tier name (today's alias behaviour) when a tier has no configured id.
 export const modelIdFor = (tier, cfg) => (isTier(tier) && cfg?.modelIds?.[tier]) || tier

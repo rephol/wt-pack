@@ -492,7 +492,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   per ref (a `routing-outcome: … (ref …)` ticket comment guards against a repeat).
 - **CLI**: `model-route.mjs explain` (the whole decision as JSON), `pick [--json]` (the tier, live only),
   `outcome <run#i> ok|send-back|returned|escalated`, `model-id <tier>` (its explicit model id, configurable
-  via `modelIds` in the same JSON files, default `opus` → `claude-opus-5-5`, `sonnet` → `claude-sonnet-5`,
+  via `modelIds` in the same JSON files, default `opus` → `claude-opus-5-5`, `sonnet` → `claude-sonnet-5-5`,
   `haiku` → `claude-haiku-4-5-20251001`).
 - **Tuning**: `jev-eval.mjs routing --report [--since 7d] [--apply]` reports per skill × tier from the judge log;
   `--apply` moves each threshold by at most 0.05 (≥ 10 labelled Jev picks), skips pinned skills, never touches
