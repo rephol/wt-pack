@@ -191,10 +191,15 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Do Not Disturb** (WP-147): a per-agent toggle (agent page header, and the Summary tab/panel — moon badge
   next to the status dot when on) that makes the agent invisible to every free-agent pick — `wt-handoff`'s
   `candidates()` (auto-pick and `--list`), idle-worker retirement (WP-143), and a routine's prompt target. A
-  direct `--pane` hand-off still reaches it, with a `warning: <name> is DND` on stderr. CLI: `wt-agents dnd
-  <name|pane> on|off`. **DND auto-off** (Settings › Projects, `dndAutoOffHours`, default 0 = never): turning DND
-  on writes an expiry instead of a flat `1`, cleared by the 4s server tick once it's past.
-- CLI: `wt-agents spawn <role>`, `list --json`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
+  direct `--pane` hand-off still reaches it, with a `warning: <name> is DND` on stderr. CLI (WP-173): `wt-agents
+  dnd <name|pane>` alone prints the current state (on/off, and until-when if it expires); `dnd <name|pane> on
+  [--for 2h]` sets it — `--for` writes the same expiry format the dashboard's toggle uses, omitted never
+  auto-clears; `dnd <name|pane> off` clears it. **DND auto-off** (Settings › Projects, `dndAutoOffHours`,
+  default 0 = never): turning DND on (from either the CLI's `--for` or the dashboard toggle) writes an expiry
+  instead of a flat `1`, cleared by the 4s server tick once it's past.
+- `wt-agents list` (plain and `--json`) shows DND (with its expiry, when set) and `pair` per agent — `--json`
+  adds structured `dnd:{on,until}` and `pair` fields alongside the existing raw pane `tokens` map.
+- CLI: `wt-agents spawn <role>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
 - Skills: wt-agents, wt-handoff.
 
 ## Rooms

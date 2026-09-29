@@ -1,7 +1,8 @@
 #!/bin/sh
 # Manage the named agent pools this pack hands work to.
 #
-#   agents.sh list [role] [--json]         # name, pane, status, cwd (--json adds tokens)
+#   agents.sh list [role] [--json]         # name, pane, status, cwd, dnd (+until), pair (--json adds tokens,
+#                                            plus structured dnd:{on,until} and pair)
 #   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
 #                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
 #                                            --model starts claude on that tier (WP-128), pinned to its explicit
@@ -10,8 +11,13 @@
 #                                            floor; the final tier/effort actually spawned are written as pane
 #                                            tokens model/effort (WP-143, tier not id), for reuse-matching and
 #                                            idle retirement
-#   agents.sh dnd <name|pane> on|off       # set/clear the `dnd` pane token (WP-147): DND agents are skipped by
-#                                            every free-agent pick (wt-handoff candidates(), retireIdle, routines)
+#   agents.sh dnd <name|pane> [on [--for 2h]|off]  # set/clear/query the `dnd` pane token (WP-147, WP-173):
+#                                            DND agents are skipped by every free-agent pick (wt-handoff
+#                                            candidates(), retireIdle, routines) — target one explicitly with
+#                                            --pane to bypass the skip. `on` with no --for never auto-clears
+#                                            (dnd=1); `on --for <Nh|Nm|Nd|Ns>` writes an expiry (dashboard's own
+#                                            format, ISO time), auto-cleared by the dashboard's tick. No on/off
+#                                            argument prints the current state instead of changing it.
 #   agents.sh rm <name|pane> [--force]     # closes the tab
 #   agents.sh respawn <name|pane>|--stale [--force] # new tab (current PATH shims + plugin guard), same name, role,
 #                                            cwd, tokens and claude session (model/effort tokens re-applied as
@@ -81,13 +87,21 @@ list)
   for r in ${role:-worker planner}; do
     ws=$(pool_ws "$(role_label "$r" "$repo")" "$main")
     sync_names "$ws"
+    # dnd token -> {on, until}: absent = off; "1" = on, no expiry; anything else = on until that ISO time
+    # (WP-147's dashboard format, matched by `dnd on --for`).
     if [ -n "$json" ]; then
       # Tokens live on panes, not on the agent list.
       herdr agent list | jq -c --arg ws "$ws" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
-        '.result.agents[] | select(.workspace_id == $ws) | {name, pane: .pane_id, status: .agent_status, cwd, tokens: ($panes[.pane_id] // {})}'
+        '.result.agents[] | select(.workspace_id == $ws) | ($panes[.pane_id] // {}) as $t |
+         {name, pane: .pane_id, status: .agent_status, cwd, tokens: $t,
+          dnd: (if ($t.dnd // "") == "" then {on:false,until:null} elif $t.dnd == "1" then {on:true,until:null} else {on:true,until:$t.dnd} end),
+          pair: ($t.pair // null)}'
     else
-      herdr agent list | jq -r --arg ws "$ws" \
-        '.result.agents[] | select(.workspace_id == $ws) | [.name, .pane_id, .agent_status, .cwd] | @tsv'
+      herdr agent list | jq -r --arg ws "$ws" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
+        '.result.agents[] | select(.workspace_id == $ws) | ($panes[.pane_id] // {}) as $t |
+         [.name, .pane_id, .agent_status, .cwd,
+          (if ($t.dnd // "") == "" then "-" elif $t.dnd == "1" then "dnd" else "dnd until " + $t.dnd end),
+          ($t.pair // "-")] | @tsv'
     fi
   done
   ;;
@@ -259,13 +273,35 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   ;;
 
 dnd)
-  target=${1:?name or pane required}; state=${2:?on or off required}
-  case "$state" in on|off) ;; *) echo "dnd: on or off" >&2; exit 2 ;; esac
+  target=${1:?name or pane required}; shift
+  state=${1:-}
+  case "$state" in on|off) shift ;; '') ;; *) echo "dnd: on, off, or omit to query" >&2; exit 2 ;; esac
+  for_dur=
+  while [ $# -gt 0 ]; do case "$1" in --for) for_dur=${2:?--for needs a duration}; shift 2 ;;
+    *) echo "dnd: unknown argument: $1" >&2; exit 2 ;; esac; done
+  [ -z "$for_dur" ] || [ "$state" = on ] || { echo "dnd: --for only valid with on" >&2; exit 2; }
   pane=$(herdr agent list | jq -r --arg t "$target" \
     '.result.agents[] | select(.name == $t or .pane_id == $t) | .pane_id' | head -1)
   [ -n "$pane" ] || { echo "no such agent: $target" >&2; exit 1; }
+  if [ -z "$state" ]; then
+    v=$(herdr pane get "$pane" | jq -r '.result.pane.tokens.dnd // empty')
+    if [ -z "$v" ]; then echo "dnd off: $target ($pane)"
+    elif [ "$v" = 1 ]; then echo "dnd on: $target ($pane), no expiry"
+    else echo "dnd on: $target ($pane) until $v"; fi
+    exit 0
+  fi
   if [ "$state" = on ]; then
-    herdr pane report-metadata "$pane" --source wt-dashboard --token dnd=1 >/dev/null
+    value=1
+    if [ -n "$for_dur" ]; then
+      # Same expiry format the dashboard writes (WP-147): an ISO time, auto-cleared by its tick once past.
+      value=$(node -e '
+        const m = process.argv[1].match(/^([0-9]+)([smhd])?$/)
+        if (!m) { console.error("dnd: bad --for duration, e.g. 2h, 30m, 1d"); process.exit(1) }
+        const ms = { s: 1e3, m: 60e3, h: 3_600_000, d: 86_400_000 }[m[2] || "h"]
+        console.log(new Date(Date.now() + Number(m[1]) * ms).toISOString())
+      ' "$for_dur") || exit 1
+    fi
+    herdr pane report-metadata "$pane" --source wt-dashboard --token "dnd=$value" >/dev/null
   else
     herdr pane report-metadata "$pane" --source wt-dashboard --clear-token dnd >/dev/null
   fi
