@@ -25,8 +25,9 @@
 #                                    poll-replies --once and deliver each line via handoff.sh --kind system;
 #                                    run by launchd (id.local.wtpack.watchprs), never by an interactive session
 # State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/{watchers.json,poller.beat,unwatched.json,
-#   <owner>-<repo>/{state.json,claims/,state.lock,poll/}}. poll/ (WP-188) persists poll-shas' and poll-replies'
-# dedupe baselines across process restarts: shas.prev, shas.fired, replies-<S>.seen, replies-<S>.since. The
+#   <owner>-<repo>/{state.json,claims/,state.lock,poll/}}. poll/ (WP-187) persists poll-shas' and poll-replies'
+# dedupe baselines across process restarts: shas.fired, replies-<S>.seen, replies-<S>.since (poll-shas' own
+# vanished-PR baseline is reseeded from state.json each start instead, WP-188). The
 # dashboard reads state.json for held PRs (Inbox pr-held) and unwatched.json for poller notices (Inbox server).
 # Test knobs: WATCH_PRS_POLLS, WATCH_PRS_SLEEP, WATCH_PRS_TTL, WATCH_PRS_HANDOFF.
 set -u
@@ -381,8 +382,11 @@ serve)
       wrepo=$(printf '%s' "$w" | jq -r .repo); wpane=$(printf '%s' "$w" | jq -r .pane)
       wsess=$(printf '%s' "$w" | jq -r .session); wcwd=$(printf '%s' "$w" | jq -r .cwd)
       [ -n "$wcwd" ] && [ -d "$wcwd" ] || continue
+      # a watcher with no resolved pane (herdr missing/failed at register time) can never deliver anything —
+      # without this it polls forever as a silent black hole, never firing an unwatched notice.
+      [ -n "$wpane" ] || { mark_unwatched "$wrepo" "no resolved pane at registration -- never delivered"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
       # decision 5 (1/3): the pane itself is gone.
-      if [ -n "$wpane" ] && command -v herdr >/dev/null 2>&1; then
+      if command -v herdr >/dev/null 2>&1; then
         herdr pane get "$wpane" >/dev/null 2>&1 || { mark_unwatched "$wrepo" "reviewer pane $wpane is gone"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
       fi
       out=$(cd "$wcwd" && "$0" poll-shas --once 2>/dev/null)
@@ -394,7 +398,6 @@ serve)
       [ -n "$out" ] || continue
       printf '%s\n' "$out" | while IFS= read -r line; do
         [ -z "$line" ] && continue
-        [ -n "$wpane" ] || continue
         if printf '%s' "$line" | "$HANDOFF" --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1; then
           rm -f "$FC/$wpane"
         else
@@ -407,6 +410,10 @@ serve)
           fi
         fi
       done
+      # the handoff-failure branch above unregisters from inside a pipe subshell, so its effect on $wsess
+      # doesn't reach this scope directly — re-read from disk to skip a redundant unwatched-notice below.
+      still_watched=$(jq --arg s "$wsess" --arg repo "$wrepo" 'any(.[]; .session == $s and .repo == $repo)' "$WF" 2>/dev/null)
+      [ "$still_watched" = "true" ] || continue
       # decision 5 (3/3): a delivered "new commits" event that is still neither claimed nor recorded 30 min
       # later, while poll-shas' own fired file says a delivery happened — the pane stopped acting on it.
       wsd="$WH/${wrepo/\//-}"

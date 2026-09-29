@@ -233,6 +233,19 @@ test('WP-187: serve delivers a new-commits event via handoff --kind system --pan
   assert.ok(existsSync(join(wh, 'poller.beat')), 'heartbeat touched')
 })
 
+test('WP-187: serve unregisters and records an unwatched notice for a watcher with no resolved pane', () => {
+  // registered with no herdr / no HERDR_PANE_ID (empty pane) -- would otherwise poll forever with no
+  // delivery and no unwatched notice, a silent black hole distinct from the three cases decision 5 covers.
+  reset(); run(['register', '--session', 'sess-r'], { HERDR_PANE_ID: '' })
+  fixture('list.1.json', [pr(50, sha('5'))])
+  const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')), [])
+  const uw = JSON.parse(readFileSync(join(wh, 'unwatched.json'), 'utf8'))
+  assert.equal(uw.length, 1); assert.match(uw[0].reason, /no resolved pane/)
+  assert.ok(!existsSync(join(fx, 'handoff')), 'never attempted a handoff with no pane to deliver to')
+})
+
 test('WP-187: serve unregisters and records an unwatched notice when the pane is gone', () => {
   reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
   run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
