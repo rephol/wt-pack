@@ -59,25 +59,25 @@ what was actually built, the same instinct the plan-mode section aims at a propo
 - Do not manufacture objections to justify the lens. Finding nothing is a legitimate result; say what you
   pressed on.
 
+## done =
+
+Plan mode: every load-bearing claim in the plan's own case for the work pressed on — evidence, falsifiability,
+mechanism — and at least one cheaper alternative named concretely. Diff mode: every guard, retry, external
+call and shared-state access in the diff checked for the specific failure shapes above, not just skimmed.
+
+## Don't flag
+
+- A `settled:` premise you would have designed differently — this lens attacks whether a thing can fail or
+  cannot work, never whether a better shape existed.
+- An external call or retry that is already wrapped in the codebase's own established idempotency or
+  circuit-breaker pattern — verify the wrapper is actually applied before flagging the call as unguarded.
+
 ## Return
 
 Findings ranked by severity. Plan mode: the premise being challenged, why it does not hold, and what follows.
 Diff mode: the concrete failure, the input or sequence that produces it, and where.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/adversarial.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs. Every finding follows
-`references/reviewer-contract.md` (confidence, evidence, suggested_fix — required on every finding, every
-lens, both modes).
-
-```json
-[{ "lens": "adversarial", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low", "confidence": 0,
-   "evidence": "<the literal line/snippet that shows it — see the contract>",
-   "suggested_fix": "<one concrete sentence>" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/adversarial.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.

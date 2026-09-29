@@ -45,21 +45,24 @@ several assertions at once and the credit goes to the wrong one.
 - **More tests is not a recommendation.** If the suite is thin in one place and padded in another, say both.
 - A `settled:` decision is the user's; challenge it only as something that cannot work.
 
+## done =
+
+Every new or changed test read alongside the code it covers, an injection named for each guard the target
+claims to add, and every deleted or loosened assertion traced to what it used to catch.
+
+## Don't flag
+
+- A test that duplicates another test's injection point on purpose, when the target's own commit message or
+  comment says so — redundancy the author chose is not a finding.
+- A thin area the target did not touch and does not claim to guard — this lens covers what the target adds
+  or changes, not a general coverage audit of the whole file.
+
 ## Return
 
 Findings ranked by severity. Each: the test, what it fails to catch, and the injection that would prove it —
 or, where the defect is an absent test, the specific case and why it is the one that matters.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/testing.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "testing", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/testing.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.

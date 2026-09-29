@@ -98,6 +98,9 @@ const LENS_TRIGGERS = {
   data: 'Does this target change a database schema, run a migration, alter a persisted data shape, or backfill existing rows?',
   scope: 'Is this target large, or does it defer work to a later section or leave parts explicitly unfinished?',
   adversarial: 'Is this target worth challenging at the premise — does it depend on something unvalidated, unproven on real hardware, or outside this repository, such that the whole approach could be wrong rather than merely buggy?',
+  'agent-native': 'Does this target change SKILL.md prose, a prompt, handoff/wt-message text, or MCP tool descriptions — anything an agent reads rather than a human?',
+  reliability: 'Does this target touch timeouts, retries, launchd plists, child processes, kill paths, or a Monitor driving a long-running loop?',
+  performance: 'Does this target touch a polling interval, a render loop, work done per tick, or an unbounded read?',
 };
 
 async function lenses() {
@@ -404,6 +407,9 @@ const LENS_FOCUS = {
   data: 'migrations, schema and data-shape changes, backfills, anything that can leave stored data wrong',
   scope: 'work beyond what the ticket asked for, and work the ticket asked for that is missing',
   adversarial: "the premise itself: whether the change solves a problem that exists, and what its docblocks and comments assert without proof",
+  'agent-native': 'an instruction an agent will plausibly misread, a script path that is not sibling-relative, or a lockstep copy of a prompt/schema this change should have updated and did not',
+  reliability: 'a Monitor armed without confirming it, a kill path that can hit more than its target, a retry with no backoff or cap, a timeout that does not actually bound the call',
+  performance: 'work repeated every tick that only needs to run on change, an unjustified polling interval, an unbounded read, N+1 inside a loop',
 };
 
 // A hunk is the unit a reviewer actually reads. Anything bigger hides the thing

@@ -33,20 +33,24 @@ code has to agree with what it says it does.
 - A `settled:` decision is the user's; challenge it only as something that cannot work.
 - The plan's findings were measured — do not re-derive them. Check this code against them.
 
+## done =
+
+Every assigned file opened in full (not the hunk alone), each new precondition traced to where it is enforced
+or left unenforced, and every commit-message or Definition-of-Done claim checked against an actual branch in
+the code.
+
+## Don't flag
+
+- `??`/`||` used where the left side can never plausibly be `false`, `0` or `''` at runtime (a UUID, a
+  non-empty literal) — only flag the coalescing where a falsy real value is actually reachable.
+- A `catch` that turns a failure into a default value, when that default is the documented or evidently
+  intended behaviour for exactly this failure — not every swallowed error is a missed one.
+
 ## Return
 
 Findings ranked by severity. Each: the defect, the concrete input that produces the wrong output, and where.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/correctness.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "correctness", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/correctness.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.

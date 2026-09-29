@@ -1,6 +1,6 @@
 # Security lens
 
-Triggered when the plan touches auth, credentials, safety, secrets or user data.
+Triggered when the target touches auth, credentials, safety, secrets or user data.
 
 ## Look for
 
@@ -21,24 +21,28 @@ Triggered when the plan touches auth, credentials, safety, secrets or user data.
 ## Rules
 
 - Verify against the code before reporting; name the file.
-- Do not re-derive the codebase — verify the `[unsourced]` claims and the plan's reasoning.
+- Do not re-derive the codebase — verify the `[unsourced]` claims and the target's own reasoning.
 - A `settled:` decision is challengeable only as infeasibility. A security defect is not a preference, so if
   one is real, say so at full strength regardless of any label.
+
+## done =
+
+Every file the target touches that handles auth, credentials, secrets or user data opened, each guard traced
+to its actual fail-open/fail-closed behaviour, and every `[unsourced]` security claim verified against the
+code rather than taken as stated.
+
+## Don't flag
+
+- An allowlist or scope that is narrower than the general pattern elsewhere in the codebase — narrower is
+  the safe direction; flag only where it is wider than intended.
+- A credential or secret that never leaves the process boundary (stays in memory, a local env var, a
+  same-process call) — the finding is about a surface it reaches, not about the value existing at all.
 
 ## Return
 
 Findings ranked by severity, each with the concrete exploit or exposure it produces. No threat-model essays.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/security.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "security", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/security.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.

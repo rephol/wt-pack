@@ -135,13 +135,23 @@ $W diff 12 "$S" --sha <reported sha> > "$TMPDIR/pr12.diff"
 
 ## 3. The verdict
 
+`wt-review`'s own verdict word (its first line: **Approve**, **Approve with fixes**, or **Send back**) maps
+onto what gets posted: Approve → `--approve`, Approve with fixes → `gh pr comment`, a **defect** Send back
+(a confirmed high finding or intent mismatch) → `--request-changes` as a **hold**. A **coverage-only** Send
+back (nothing confirmed, but the coverage line shows `N < M`) is its own row below, posted as `gh pr comment`
+— an unread file is neither a defect nor a question, so it is not a hold either. The situations below are
+that mapping worked out against this skill's own gate/coverage/identity rules, which can still override it —
+a defect Send back from `wt-review` with a failing required check is still `--request-changes`, not softened
+by anything else.
+
 | Situation | Post |
 |---|---|
-| Failing required check, P0/P1, must-fix P2 | `--request-changes` |
+| `wt-review` verdict: Send back on a confirmed defect — failing required check, P0/P1, must-fix P2, intent mismatch | `--request-changes` |
 | A question only the author can answer that changes what should merge | `--request-changes` as a **hold** — say it is for clarification, not a defect, and that you will approve on the answer |
 | No body / branch-name title | `--request-changes`, the only blocker; say what you verified anyway |
-| Partial coverage (coverage line's `N < M`) | `gh pr comment` — never an approval (below) |
-| Nothing outstanding, gate green, full coverage, distinct identity | `--approve` (observations ride along; they need no reply) |
+| `wt-review` verdict: Send back on coverage alone (coverage line's `N < M`, no confirmed defect) — cannot issue Approve here | `gh pr comment` naming exactly what's uncovered — never an approval, never a hold (below) |
+| `wt-review` verdict: Approve with fixes | `gh pr comment` naming the confirmed medium/low findings and what applying them would take |
+| `wt-review` verdict: Approve, gate green, full coverage, distinct identity | `--approve` (observations ride along; they need no reply) |
 | Same identity as the author, degraded, or gate not green | `gh pr comment` saying what the verdict would be and what it waits on |
 
 **Never approve with a question.** An approval means nothing outstanding; asking belongs in a hold, telling

@@ -127,6 +127,13 @@ Read the target and compute the risk vector. Each trigger adds a lens; nothing e
 | migration, schema or data-shape change; a backfill | data | `references/agents/data-lens.md` |
 | large, or it has a deferred section / unfinished work | scope | `references/agents/scope-lens.md` |
 | plan: greenfield, or no validated upstream requirements. diff: ≥50 changed code lines; touches persistence, retries, concurrency or an external call; or the change itself is a guard, a test, or a CI gate | adversarial | `references/agents/adversarial-lens.md` |
+| the target changes SKILL.md prose, a prompt, handoff/wt-message text, or MCP tool descriptions | agent-native | `references/agents/agent-native-lens.md` |
+| touches timeouts, retries, launchd plists, child processes, kill paths, or a `Monitor` driving a long-running loop | reliability | `references/agents/reliability-lens.md` |
+| touches a polling interval, a render loop, work done per tick, or an unbounded read | performance | `references/agents/performance-lens.md` |
+
+Reliability and adversarial overlap on "retries an external call" by design — reliability looks for a defect
+in the retry itself, adversarial attacks whether the call can be broken at all. Both firing on the same
+target is expected, not a sizing bug.
 
 The two mandatory pairs are counterparts, not different jobs: coherence asks whether the plan agrees with
 itself and correctness whether the code does what it says; feasibility asks whether a step can be performed
@@ -138,36 +145,47 @@ guard that cannot fail just as easily as code can — earlier, and more cheaply.
 **Learnings is the read side of `wt-compound`.** A store nothing consults on the way in does not compound, it
 accumulates. Where a repo has one, this lens is what makes every earlier entry pay.
 
-**Floor 1 agent. Ceiling 3.** No trigger fires → one agent carrying the mandatory pair. Everything fires →
-three agents with lenses bundled, never nine.
+**Floor 1 agent. Ceiling 3 at ≤200 changed lines, 5 for a per-lens diff review past that (see next section).**
+No trigger fires → one agent carrying the mandatory pair. Everything fires, ≤200 lines → three agents with
+lenses bundled, never nine.
 
 Bundle by reading surface:
 
 | Agent | Lenses | What it reads |
 |---|---|---|
-| 1 | mandatory pair + standards | the target against the code and the repo's own rules |
+| 1 | mandatory pair + standards + agent-native | the target against the code and the repo's own rules |
 | 2 | testing + learnings | the guards, and what the repo already knows |
-| 3 | security · data · scope · adversarial | the risk surface and the target's own premise |
+| 3 | security · data · scope · adversarial · reliability · performance | the risk surface and the target's own premise |
 
 Collapse upward when few triggers fire — two lenses do not need two agents. Never split a bundle to give a
 lens its own agent.
 
 ## Size by diff, not just by lens (diff mode)
 
-The lens table decides *what* each agent looks for; diff size decides *how much of the diff* it can
-actually cover, and this floor is never lowered by a quiet lens set — a 23-file diff that only trips one
-lens still gets split for coverage. Read the changed-line count (`git diff <base>...HEAD --shortstat`, or
-`--numstat` summed) and the changed-file list (`git diff <base>...HEAD --name-only`) before assigning agents:
+The lens table decides *what* each agent looks for; diff size decides *how the fired lenses are split across
+agents*. Read the changed-line count (`git diff <base>...HEAD --shortstat`, or `--numstat` summed) before
+assigning agents:
 
-- **≤ 200 changed lines** — the lens-bundle agent count above stands; each agent reads the whole diff.
-- **200–800** — at least 2 agents (3 if the lens table already asked for 3), each given an explicit, disjoint
-  slice of `git diff --name-only` to read in full — not "skim the diff." Bundle lenses onto those agents
-  exactly as the table above groups them.
-- **> 800** — 3 agents, every path in `git diff --name-only` assigned to exactly one of them. No file goes
-  unassigned, and no agent gets "the rest" without an explicit list.
+- **≤ 200 changed lines** — the lens-bundle agent count and table above stand: bundle by reading surface,
+  floor 1, ceiling 3, each agent reads the whole diff.
+- **> 200 changed lines** — **one agent per fired lens**, capped at **5**. Each of those agents reads **every**
+  changed file in full — the lens is its filter, not a slice of the file list — so give each agent the
+  complete `git diff --name-only` list, not a disjoint subset. This replaces file-slicing: past 200 lines, the
+  split is by lens, not by file. **The mandatory pair (correctness + regression, or coherence + feasibility in
+  plan mode) always shares one agent, exactly as it does at ≤200 lines** — it never counts as two toward the
+  5-agent cap and is never split by this rule.
+  - When more than 5 lenses fire (counting the mandatory pair as one), merge whole rows of the 3-row bundle
+    table, starting with row 3 (security · data · scope · adversarial · reliability · performance — merge its
+    fired members into one agent first, since it is the largest row and yields the biggest single reduction),
+    then row 2 (testing + learnings) if still over 5, then absorb standards and agent-native into the
+    mandatory-pair agent (row 1) last. Stop merging as soon as the agent count is ≤5 — do not merge further
+    than the cap requires.
+  - `[unsourced]`: whether a per-lens agent can read a diff past ~800 lines in full within its ~40-call tool
+    budget. The effort floor and per-file coverage rows below surface it when an agent runs thin — report a
+    thin pass as partial coverage rather than assuming the read happened.
 
-Diff size can raise the agent count past what lenses alone would spawn; it never lowers it. The **ceiling
-stays 3** either way — a bigger diff means fewer files per agent, never a fourth agent.
+Diff size never lowers the lens-bundle count from the ≤200 table; past 200 lines it can only raise the agent
+count, up to the 5-agent ceiling.
 
 ## Per-file coverage, checked against the diff
 
@@ -256,6 +274,11 @@ finding:
    "evidence": "line 78: `await handshake()` has no timeout or AbortController wrapping it",
    "suggested_fix": "wrap the call in Promise.race with a timeout, or pass an AbortSignal it can honour" }]
 ```
+
+**An intent-mismatch finding (`references/reviewer-contract.md`'s own finding type) sets `"type":
+"intent-mismatch"`** alongside the usual fields — omit `type` for every ordinary defect finding. This is the
+field the verdict word (below) reads mechanically to apply its intent-mismatch Send-back trigger; a reviewer
+that writes the prose but not the field leaves that finding unable to force a Send back.
 
 `file` and `line` are **the location the finding is about** — in plan mode that is usually the plan itself
 (`docs/plans/….md`, and the line in it), in diff mode a source file. `related` names the paths where a
@@ -386,6 +409,26 @@ it twice inflates the apparent yield of a bigger panel.
 
 State plainly which mode ran, which lenses ran, and which triggers fired. A caller cannot tell a clean
 target from a narrow review otherwise.
+
+## Verdict word
+
+The verdict's **first line** is exactly one of **Approve**, **Approve with fixes**, or **Send back** — nothing
+else on that line. Compute it from the merged, verified findings and the coverage state:
+
+- **Send back** — any confirmed `high`-severity finding, a confirmed finding with `"type": "intent-mismatch"`
+  (§ "Every reviewer writes JSON, not prose"), or partial coverage (below).
+- **Approve with fixes** — no `high`/intent-mismatch/coverage reason to send back, but at least one confirmed
+  `medium` or `low` finding.
+- **Approve** — no confirmed findings at any severity, and coverage is complete.
+
+A `refuted` or `unverifiable` finding never on its own forces Send back or Approve with fixes — only a
+`confirmed` one does. The coverage line (below) always follows the verdict word as the last line; it never
+replaces it.
+
+**A Send back driven only by coverage, with no confirmed finding, is not the same as a Send back for a
+defect** — say which one it is in the reply. A caller maps them differently: `wt-watch-prs` posts a defect
+Send back as a hold (`--request-changes`) but a coverage-only Send back as a plain comment naming the gap,
+because an unread file is neither a question nor a defect (see its §3).
 
 ## Coverage line in the verdict
 

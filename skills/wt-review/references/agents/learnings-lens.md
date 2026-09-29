@@ -40,6 +40,19 @@ body says what makes it invisible.
   same directory.
 - A `settled:` decision is the user's; challenge it only as something that cannot work.
 
+## done =
+
+The store located and searched by symptom and mechanism against every area the target touches, every match
+read in full (not just its title), and each learning's relationship to the target stated explicitly — even
+when that relationship is "no match found."
+
+## Don't flag
+
+- An entry whose topic overlaps the target's area but whose actual guidance the target already follows —
+  cite it only when the target contradicts or repeats it, not for merely being nearby.
+- A store that genuinely has nothing bearing on this change — say so in one line; it is not a finding to
+  manufacture relevance where none exists.
+
 ## Return
 
 Findings ranked by severity. Each: the entry (quoted, with path), how the target relates to it — repeats,
@@ -48,16 +61,7 @@ contradicts, invalidates, or leaves unaddressed — and the concrete consequence
 If the store had nothing bearing on this change, say that in one line. It is a real answer, and it tells the
 caller the check ran.
 
-**Write them as JSON, not prose.** Append your findings to `<scratchpad>/findings/learnings.json` as one array,
-and reply with only a one-line count and the worst one. The caller groups duplicates and checks every finding
-against the file it cites, and both read this file — a prose reply means neither runs.
-
-```json
-[{ "lens": "learnings", "title": "one line", "detail": "the defect and the concrete failure it produces",
-   "file": "<path the finding is about: the plan in plan mode, a source file in diff mode>",
-   "line": 0, "related": ["<path where a refutation would live: the test, the caller, the doc>"],
-   "severity": "high|medium|low" }]
-```
-
-`related` is what keeps a true finding from coming back unverifiable: name the file that would prove you
-wrong, not the one you already read.
+Write findings per `references/reviewer-contract.md` and SKILL.md's schema — JSON to
+`<scratchpad>/findings/learnings.json`, a one-line count and the worst one in your reply. The caller groups
+duplicates and checks every finding against the file it cites, and both read this file — a prose reply means
+neither runs.
