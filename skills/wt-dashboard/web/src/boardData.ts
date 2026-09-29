@@ -25,12 +25,15 @@ export interface Ticket {
   jev?: TicketJev | null
   dispatch?: TicketDispatch | null
 }
-// Board Dispatch (WP-52, dispatch.mjs): claim state, failures, and reconcile's stall flag.
-export interface TicketDispatch { state?: 'dispatching' | 'sent' | 'failed' | 'held'; at?: string; agent?: string; fails?: number; reason?: string; stalled?: string }
+// Board Dispatch (WP-52, dispatch.mjs): claim state, failures, and reconcile's stall flag. `undelivered`
+// (WP-177) is distinct from `stalled`: a handoff that never reached the agent at all (resend already tried),
+// not a long-idle one that did.
+export interface TicketDispatch { state?: 'dispatching' | 'sent' | 'failed' | 'held'; at?: string; agent?: string; fails?: number; reason?: string; stalled?: string; undelivered?: string }
 export interface DispatchStatus { last: { at: number; text: string } | null; waiting: string | null; inflight: number }
 // The card's dispatch badge, if any: [label, variant, tooltip].
 export function dispatchBadge(d?: TicketDispatch | null): [string, 'info' | 'warning' | 'error', string] | null {
   if (!d) return null
+  if (d.undelivered) return ['Stalled', 'error', d.undelivered]
   if (d.stalled) return ['Stalled', 'warning', d.stalled]
   if (d.state === 'dispatching') return ['Dispatching…', 'info', 'Handing off to a free agent']
   if (d.state === 'held') return ['Dispatch held', 'error', `Failed ${d.fails ?? 3} times: ${d.reason ?? ''}`]
