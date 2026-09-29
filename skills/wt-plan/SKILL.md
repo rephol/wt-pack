@@ -249,6 +249,11 @@ what was wrong. That record is the point.
 
 Tie-break: **a review finding wins on facts about the code; the plan wins on settled decisions.**
 
+Any `residual_risks` that survive dedupe are yours to file, not the reviewers': on a local board ticket
+(`../wt-ticket/scripts/wt-ticket keys` matches this repo), one `wt-ticket new "<risk title>" --label residual
+--body "<risk detail>"` per distinct risk; otherwise note them in the plan for whoever ships it to carry
+forward.
+
 ## 8. Commit
 
 Commit **the plan alone**, on the worktree branch. The findings stay in the scratchpad: their content is
