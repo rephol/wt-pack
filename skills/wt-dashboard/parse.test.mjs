@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -417,6 +417,23 @@ test('parsePane: background work from the last turn-status line (shells, tasks),
   assert.equal(parsePane(pane('✻ Cooked for 5s · done 7:08 PM · 1 shell still running')).background, 1)
   assert.equal(parsePane(pane('✻ Cooked for 5s · 2 shells still running · 1 background task')).background, 3)
   assert.equal(parsePane(pane('✻ Cooked for 5s · done 7:08 PM')).background, 0)
+})
+
+test('parsePane: WP-179 plan usage — ccstatusline\'s own Session/Weekly line, null when absent', () => {
+  const box = '─'.repeat(40)
+  const withLine = (line) => `⏺ ok\n\n${box}\n❯ \n${box}\n   Context: ▓▓░░ 383k/1M (38%)  Model: X\n   ${line}\n  cwd: /x\n`
+  const p = parsePane(withLine('Session: 5.0%  Reset: 2h56m  Weekly: 46.0%  Weekly Reset: 3d 18hr 6m'))
+  assert.deepEqual(p.planUsage, { session: { pct: 5, reset: '2h56m' }, weekly: { pct: 46, reset: '3d 18hr 6m' } })
+  assert.equal(parsePane(withLine('cwd: /x')).planUsage, null)
+})
+
+test('WP-179: planUsageSnapshot returns the freshest noted reading, null once stale (>10 min)', () => {
+  const now = Date.now()
+  notePlanUsage({ session: { pct: 5, reset: '2h56m' }, weekly: { pct: 46, reset: '3d' } }, now)
+  assert.deepEqual(planUsageSnapshot(now + 5 * 60_000), { session: { pct: 5, reset: '2h56m' }, weekly: { pct: 46, reset: '3d' }, at: now })
+  assert.equal(planUsageSnapshot(now + 11 * 60_000), null) // stale
+  notePlanUsage(null, now + 20 * 60_000) // a null reading (no statusline this poll) never overwrites the last one
+  assert.deepEqual(planUsageSnapshot(now + 5 * 60_000), { session: { pct: 5, reset: '2h56m' }, weekly: { pct: 46, reset: '3d' }, at: now })
 })
 
 test('usage: dedupe by message id, incremental offsets, partial lines wait, bucketing and notional cost', async () => {
