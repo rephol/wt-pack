@@ -125,10 +125,14 @@ export function parsePane(text, raw = '') {
   // A cwd the status line cut short ('…/my-app...') is dropped, so herdr's own cwd is used instead.
   const cwd = footer.match(/^\s*cwd:\s*(\S.*?)\s*$/m)?.[1]?.replace(/^.*(\.\.\.|…)$/, '') || undefined
 
-  // WP-179: ccstatusline's own line, e.g. "Session: 5.0%  Reset: 2h56m  Weekly: 46.0%  Weekly Reset: 3d 18hr 6m".
-  // No API call — just whatever Claude Code's own statusline already renders on screen.
-  const sess = footer.match(/Session:\s*(\d+(?:\.\d+)?)%\s+Reset:\s*(\S(?:.*?\S)?)(?:\s{2,}|\n|$)/)
-  const week = footer.match(/Weekly:\s*(\d+(?:\.\d+)?)%\s+Weekly Reset:\s*(\S(?:.*?\S)?)(?:\s{2,}|\n|$)/)
+  // WP-179/follow-up: ccstatusline's own line, e.g. "Session: 0.0%  Reset: 4h57m  Weekly: 47.0%  Weekly Reset:
+  // 3d 15hr 7m" — no API call, just whatever Claude Code's own statusline already renders. Real panes separate
+  // fields with U+00A0 (non-breaking space) around a single powerline-style glyph (·, not ASCII), never a run
+  // of plain spaces, so a "stop at 2+ whitespace" lookahead never fires and swallows the rest of the line. Stop
+  // the reset-time capture at the first non-word character instead (a duration is only digits/letters/spaces).
+  const stripNbsp = footer.replace(/ /g, ' ')
+  const sess = stripNbsp.match(/Session:\s*(\d+(?:\.\d+)?)%.*?Reset:\s*(\w+(?: \w+)*)/)
+  const week = stripNbsp.match(/Weekly:\s*(\d+(?:\.\d+)?)%.*?Weekly Reset:\s*(\w+(?: \w+)*)/)
   const planUsage = sess && week
     ? { session: { pct: Number(sess[1]), reset: sess[2] }, weekly: { pct: Number(week[1]), reset: week[2] } }
     : null

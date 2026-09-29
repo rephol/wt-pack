@@ -427,6 +427,16 @@ test('parsePane: WP-179 plan usage — ccstatusline\'s own Session/Weekly line, 
   assert.equal(parsePane(withLine('cwd: /x')).planUsage, null)
 })
 
+// Follow-up: real ccstatusline output separates fields with U+00A0 (non-breaking space) around a single
+// powerline-style glyph (here U+E0B0), never a run of plain spaces — a real capture from wt-pack-worker-04
+// (w1Q:p1A, `herdr pane read`) came back null against the ASCII-space fixture above.
+test('parsePane: WP-179 follow-up — a real ccstatusline capture (NBSP + glyph separators, not plain spaces)', () => {
+  const box = '─'.repeat(40)
+  const real = '   Session: 0.0%  Reset: 4h57m  Weekly: 47.0%  Weekly Reset: 3d 15hr 7m'
+  const pane = `⏺ ok\n\n${box}\n❯ \n${box}\n   Context: ▓▓░░ 156k/1M (16%)  Model: Sonnet 5\n${real}\n  cwd: /x\n`
+  assert.deepEqual(parsePane(pane).planUsage, { session: { pct: 0, reset: '4h57m' }, weekly: { pct: 47, reset: '3d 15hr 7m' } })
+})
+
 test('WP-179: planUsageSnapshot returns the freshest noted reading, null once stale (>10 min)', () => {
   const now = Date.now()
   notePlanUsage({ session: { pct: 5, reset: '2h56m' }, weekly: { pct: 46, reset: '3d' } }, now)
