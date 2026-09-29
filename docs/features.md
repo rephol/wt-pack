@@ -560,8 +560,12 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - `./setup doctor`: one line per check (node ≥ 22.13 with `node:sqlite`, git/curl/jq, gh auth, claude, herdr,
   links, plugin (installed version = checkout's), build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
   cargo); per project with a GitHub account: gh has its token, the token logs in as it, and it reaches the
-  repo; exit 1 while a required check fails.
-- `./setup secrets`: TypeSafe key into `~/.claude/.env` (Linear goes through Settings › Integrations).
+  repo; exit 1 while a required check fails. If `~/.claude/.env` and the Keychain hold different TypeSafe
+  keys, it removes the stale env-file copy (the Keychain entry is what every reader already prefers) rather
+  than just warning about the drift.
+- `./setup secrets`: TypeSafe key, preferring the Keychain (the file only when the Keychain isn't available);
+  skips the prompt if a key is already in either place, so it never leaves a second, driftable copy behind
+  (Linear goes through Settings › Integrations).
 - `./setup uninstall [--purge]`: removes service, plugin and links; keeps data unless `--purge`.
 - Skill: wt-setup ("set up wt-pack").
 
