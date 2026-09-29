@@ -125,6 +125,14 @@ export function parsePane(text, raw = '') {
   // A cwd the status line cut short ('…/my-app...') is dropped, so herdr's own cwd is used instead.
   const cwd = footer.match(/^\s*cwd:\s*(\S.*?)\s*$/m)?.[1]?.replace(/^.*(\.\.\.|…)$/, '') || undefined
 
+  // WP-179: ccstatusline's own line, e.g. "Session: 5.0%  Reset: 2h56m  Weekly: 46.0%  Weekly Reset: 3d 18hr 6m".
+  // No API call — just whatever Claude Code's own statusline already renders on screen.
+  const sess = footer.match(/Session:\s*(\d+(?:\.\d+)?)%\s+Reset:\s*(\S(?:.*?\S)?)(?:\s{2,}|\n|$)/)
+  const week = footer.match(/Weekly:\s*(\d+(?:\.\d+)?)%\s+Weekly Reset:\s*(\S(?:.*?\S)?)(?:\s{2,}|\n|$)/)
+  const planUsage = sess && week
+    ? { session: { pct: Number(sess[1]), reset: sess[2] }, weekly: { pct: Number(week[1]), reset: week[2] } }
+    : null
+
   // Turns: ❯ = user, ⏺ = assistant; continuation lines belong to the current turn.
   const turns = []
   let cur = null
@@ -168,6 +176,7 @@ export function parsePane(text, raw = '') {
     background,
     recap,
     context: ctx ? { used: ctx[1], total: ctx[2], pct: Number(ctx[3]) } : null,
+    planUsage,
     cwd,
     asks: Boolean(question),
     question,
@@ -391,6 +400,15 @@ const readPane = (m, pane, lines) =>
 // ---- agents ----
 const since = new Map() // machine|pane → { status, at }
 const parsed = new Map() // machine|pane → { p, seq, at }: last parse, reused until the pane changes
+
+// WP-179: the freshest ccstatusline plan-usage reading seen on ANY pane (session/weekly % are account-wide,
+// not per-pane) — no Claude API call, just whatever a pane's own statusline already shows. Pure and
+// separately testable from the herdr-dependent read loop that feeds it.
+let latestPlanUsage = null // { session: {pct, reset}, weekly: {pct, reset}, at }
+export function notePlanUsage(u, now = Date.now()) { if (u) latestPlanUsage = { ...u, at: now } }
+export function planUsageSnapshot(now = Date.now(), maxAgeMs = 10 * 60_000) {
+  return latestPlanUsage && now - latestPlanUsage.at <= maxAgeMs ? latestPlanUsage : null
+}
 // Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
 const roleStore = new RoleStore(DATA)
 // Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
@@ -467,8 +485,9 @@ async function listAgents(m) {
     if (stale) {
       try {
         const raw = await readPane(m, a.pane_id, '120')
-            const p = parsePane(stripAnsi(raw), raw)
+        const p = parsePane(stripAnsi(raw), raw)
         parsed.set(k, { p, seq: a.state_change_seq, at: Date.now() })
+        notePlanUsage(p.planUsage)
       } catch {}
     }
     const p = parsed.get(k)?.p ?? {}
@@ -1425,6 +1444,7 @@ async function health() {
     webStale: selfBuild() ? await webStale(WEB) : null, // null: not this server's job (bundled app / custom dist)
     sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
     jev: await jev(), // outside `sources`: Jev being down doesn't degrade this server
+    planUsage: planUsageSnapshot(), // WP-179: null when no pane has reported one recently
   }
 }
 

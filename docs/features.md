@@ -384,6 +384,13 @@ Projects, Terminals, Usage, Observability, Server, About.
   grouped by agent, project or model (model rows split session vs subagent transcripts). Dollar figures are
   notional list prices. CLI equivalent for installs without the dashboard: `model-route.mjs usage [--days N]`
   (default 7) prints the same by-model/kind breakdown.
+- **Sidebar plan usage bar** (WP-179, under Server status): two thin bars, session and weekly %, sourced with
+  no Claude API call — whatever an agent pane's own ccstatusline footer already shows (`Session: 5.0%  Reset:
+  2h56m  Weekly: 46.0%  Weekly Reset: 3d 18hr 6m`), parsed server-side and kept as the freshest reading across
+  every pane. Hover or tap for the reset times; colour by threshold (>80% warn, >95% danger); collapsed
+  sidebar shows a small ring instead. Hidden entirely once no pane has reported one in the last 10 minutes.
+  Distinct from the Usage page's own limits, which read ccstatusline's local cache file instead — this reads
+  panes directly, so it also works for a remote machine's agents.
 - **Observability**: Jev calls by feature (24h / 7d, fail-opens and **auth errors** — a rejected 401/403
   key, kept separate from an ordinary timeout/5xx fail-open — counted apart), **Model routing** (7 days: picks,
   applied, send-backs, returns, escalations and merges per skill × tier, plus an estimated tokens/cost saved vs

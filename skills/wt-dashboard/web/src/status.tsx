@@ -12,6 +12,9 @@ import { Card } from '@astryxdesign/core/Card'
 import { Heading } from '@astryxdesign/core/Heading'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { useToast } from '@astryxdesign/core/Toast'
+import { ProgressBar } from '@astryxdesign/core/ProgressBar'
+import { Tooltip } from '@astryxdesign/core/Tooltip'
+import { planVariant, type PlanUsage } from './planUsage'
 
 type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: string; message: string } | null; enabled?: boolean; online?: number; total?: number }
 interface Health {
@@ -19,6 +22,7 @@ interface Health {
   runtime?: { kind: string; path: string }
   sources: Record<'herdr' | 'git' | 'gh' | 'linear' | 'machines', Source>
   jev?: { state: 'up' | 'down' | 'unreachable'; key: 'none' | 'ok' | 'invalid' | 'unknown'; models: string[]; at: string }
+  planUsage?: PlanUsage
 }
 // Jev (TypeSafe): health + key only; the API exposes no credits or usage.
 const JEV_KEY = { none: 'no key set', ok: 'key ok', invalid: 'key rejected', unknown: 'key not checked' } as const
@@ -39,6 +43,13 @@ const ago = (iso: string | null) => {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${(s / 3600).toFixed(1)}h` : `${Math.round(s / 86400)}d`
 }
 const dot = (s: Source) => (s.enabled === false ? 'neutral' : s.ok === null ? 'neutral' : s.ok ? 'success' : 'error') as 'neutral' | 'success' | 'error'
+// WP-179: >95% danger, >80% warn, otherwise the plan's own accent colour.
+const planTip = (u: NonNullable<PlanUsage>) => (
+  <VStack gap={0.5}>
+    <Text size="sm">{`Session ${u.session.pct}% · resets in ${u.session.reset}`}</Text>
+    <Text size="sm">{`Weekly ${u.weekly.pct}% · resets in ${u.weekly.reset}`}</Text>
+  </VStack>
+)
 
 export function useServerControl() {
   const toast = useToast()
@@ -85,15 +96,49 @@ export function useHealth() {
   return { h, down, state, variant }
 }
 
+// Under the Server status row: two thin bars (session, weekly), reset time on hover/tap, coloured by
+// threshold. Collapsed sidebar (icon rail): a small ring instead, same tooltip. Nothing when the server has
+// no recent reading (WP-179's 10-minute staleness lives server-side — planUsage is just absent then).
+function PlanUsageRow({ u, collapsed }: { u: PlanUsage; collapsed: boolean }) {
+  if (!u) return null
+  const meters = [['Session', u.session], ['Weekly', u.weekly]] as const
+  if (collapsed) {
+    const worst = Math.max(u.session.pct, u.weekly.pct)
+    return (
+      <Tooltip content={planTip(u)}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
+          <StatusDot variant={planVariant(worst)} label="Claude plan usage" />
+        </div>
+      </Tooltip>
+    )
+  }
+  return (
+    <Tooltip content={planTip(u)}>
+      <VStack gap={1} style={{ padding: '0 12px' }}>
+        {meters.map(([label, m]) => (
+          <VStack key={label} gap={0.5}>
+            <HStack justify="between" gap={2}>
+              <Text size="sm" type="supporting">{label}</Text>
+              <Text size="sm" type="supporting">{`${m.pct}%`}</Text>
+            </HStack>
+            <ProgressBar label={`${label} plan usage`} isLabelHidden value={m.pct} max={100} variant={planVariant(m.pct)} />
+          </VStack>
+        ))}
+      </VStack>
+    </Tooltip>
+  )
+}
+
 // Sidebar item: status dot (+ "Server"); opens Settings on the Server section. Also owns the down screen.
 export function ServerStatus({ collapsed = false, onOpen }: { collapsed?: boolean; onOpen: () => void }) {
-  const { down, state, variant } = useHealth()
+  const { h, down, state, variant } = useHealth()
   const ctl = useServerControl()
   return (
     <>
       {down && <DownState ctl={ctl} />}
       <SideNavItem label="Server" onClick={onOpen} icon={<span style={{ width: 16, display: "inline-flex", justifyContent: "center" }}><StatusDot variant={variant} label={`Server ${state}`} /></span>}
         endContent={collapsed ? undefined : <Text size="sm" type="supporting">{state}</Text>} />
+      <PlanUsageRow u={h?.planUsage ?? null} collapsed={collapsed} />
     </>
   )
 }
