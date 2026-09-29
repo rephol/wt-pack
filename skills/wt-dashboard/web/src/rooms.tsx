@@ -5,6 +5,7 @@ import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
+import { useFixTriggerMenuPosition } from './triggerMenuFix'
 import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Popover } from '@astryxdesign/core/Popover'
@@ -204,6 +205,7 @@ function mentionPlugin(agents: RoomAgent[], profile: Profile, colorOf: (a: RoomA
 
 // compact (WP-112 dock window): no header (back, project chip, members, settings), and the last DOCK_LIMIT rows.
 export function RoomView({ room, agents, profile, projects = [], onBack, onOpenAgent, onProject, compact = false }: { room: Room; agents: RoomAgent[]; profile: Profile; projects?: string[]; onBack: () => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void; compact?: boolean }) {
+  useFixTriggerMenuPosition() // WP-181: the '/' and '@' menu, wherever this composer renders
   const rootRef = useRef<HTMLDivElement>(null) // the composer and message ids of THIS view (a dock window and the page can both be open)
   const [archiving, setArchiving] = useState(false)
   const qc = useQueryClient()

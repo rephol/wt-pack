@@ -65,6 +65,7 @@ import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, ChatSendButton, ChatToolCalls, type ChatToolCallItem, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
+import { useFixTriggerMenuPosition } from './triggerMenuFix'
 import { TypeaheadItem } from '@astryxdesign/core/Typeahead'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -75,6 +76,10 @@ import { RoutinesPage } from './routines'
 
 // ---------- types (mirror server.mjs) ----------
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown'
+// WP-181: an agent waiting on something (a picker, a question) is 'blocked', not 'working' — but it is just as
+// unable to take a message right now. A message sent while blocked was labelled 'sending' (only 'working' counted
+// as busy) and then never confirmed, since nothing delivers a queued message until the agent goes idle.
+const isBusy = (s: AgentStatus) => s === 'working' || s === 'blocked'
 interface Agent {
   background: number // shells/tasks still running after the turn (Stop does not end them)
   key: string
@@ -760,7 +765,7 @@ function MachinesStrip({ machines }: { machines: Machine[] }) {
 const needsYou = (a: Agent) => a.asks && a.status !== 'working'
 const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
   all: () => true,
-  busy: (a) => a.status === 'working' || a.status === 'blocked',
+  busy: (a) => isBusy(a.status),
   free: (a) => (a.status === 'idle' || a.status === 'done') && !needsYou(a),
   needs: needsYou,
 }
@@ -1111,6 +1116,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   agent: Agent; task: Task | null; onCollapse: () => void; onExpand?: () => void; onAsPanel?: () => void; mode?: 'panel' | 'page' | 'dock'; autoFocus: boolean
 }) {
   const [tab, setTab] = useState('conversation')
+  useFixTriggerMenuPosition() // WP-181: the '/' skills menu, wherever this composer renders (dock/panel/page)
   const ticketChips = useTicketPlugins()
   const narrow = useNarrow()
   useSyncExternalStore(subDetails, () => showAllDetails) // the ⋯ menu's details label
@@ -1159,8 +1165,9 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     const paths = atts.filter((a) => a.path).map((a) => a.path!)
     if (!v.trim() && !paths.length) return
     const text = [v.trim(), paths.join('\n')].filter(Boolean).join('\n\n')
-    // "working" can lag the 4s poll right after a send, so a send within 30s of the last one counts as mid-turn too.
-    const busy = agent.status === 'working' || Date.now() - lastSend.current < 30_000
+    // A status poll can lag right after a send, so a send within 30s of the last one counts as mid-turn too.
+    // 'blocked' (waiting on a picker/question) is just as unable to take a message right now as 'working'.
+    const busy = isBusy(agent.status) || Date.now() - lastSend.current < 30_000
     lastSend.current = Date.now()
     // Optimistic: shown at once, until the transcript has it. Only a failed send leaves it marked.
     const id = crypto.randomUUID()
@@ -1206,7 +1213,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     if (left.length !== queued.length) setQueued(left)
   }, [msgs]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (agent.status === 'working' || !queued.length) return
+    if (isBusy(agent.status) || !queued.length) return
     // Idle and still not in the transcript: flag it rather than silently dropping it.
     const t = setTimeout(() => setQueued((q) => q.map((x) => (x.state === 'failed' ? x : { ...x, state: 'unconfirmed' }))), 15_000)
     return () => clearTimeout(t)
