@@ -227,19 +227,23 @@ dispatch)
 poll-shas)
   [ "${1:-}" = --once ] && WATCH_PRS_POLLS=1
   setup; polls=${WATCH_PRS_POLLS:-0}; TTL=${WATCH_PRS_TTL:-900}
-  PD="$SD/poll"; mkdir -p "$PD"; PF="$PD/shas.fired"; PP="$PD/shas.prev"
+  PD="$SD/poll"; mkdir -p "$PD"; PF="$PD/shas.fired"
   T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-  # WP-188: seed from the persisted files so a fresh process (a Monitor re-arm, or the serve loop's own
-  # restart) resumes the TTL dedupe and the vanished-PR baseline instead of starting blank.
+  # WP-188: seed the vanished-PR baseline from $STATE instead of a persisted file, so a PR that merges/closes in
+  # the gap between a dying process and its restart (routine since WP-186's 30-min re-arm, and for WP-187's
+  # serve loop) is still caught on the very first poll — every PR this repo has ever reviewed and not yet
+  # recorded merged/closed is "was open". $T/prev is then kept current in-process same as before.
+  jq -r '.reviewed | to_entries[] | select(.value.state != "merged" and .value.state != "closed") | .key' "$STATE" 2>/dev/null | sort -u > "$T/prev"
+  # WP-187: fired (the TTL announce-dedupe) still needs its own persisted file — state.json has no per-SHA
+  # "already announced" record, so a restart within the TTL would re-announce every SHA it just reported.
   [ -f "$PF" ] && cp "$PF" "$T/fired" || : > "$T/fired"
-  [ -f "$PP" ] && cp "$PP" "$T/prev" || : > "$T/prev"
   # Best-effort under the shared state lock: a stuck lock must never block the polling loop itself, only
-  # delay how current the persisted baseline is (the in-memory $T files stay authoritative meanwhile).
+  # delay how current the persisted fired-set is (the in-memory $T/fired stays authoritative meanwhile).
   persist() {
     local L="$SD/state.lock" i2
     for i2 in 1 2 3 4 5; do mkdir "$L" 2>/dev/null && break; sleep 0.2; done
     [ -d "$L" ] || return 0
-    cp "$T/fired" "$PF" 2>/dev/null; cp "$T/prev" "$PP" 2>/dev/null
+    cp "$T/fired" "$PF" 2>/dev/null
     rmdir "$L" 2>/dev/null
   }
   seen() { # exact, or a stored short SHA that prefixes the head (else a short record re-fires forever)

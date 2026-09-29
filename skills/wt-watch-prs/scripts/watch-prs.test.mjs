@@ -148,30 +148,27 @@ test('poll-shas: NO LONGER OPEN only for a verified merge; an empty poll is not 
   assert.equal(out.trim(), 'PR #8 — NO LONGER OPEN — MERGED — dev: pr 8')
 })
 
-test('WP-188: poll-shas persists fired/prev across separate --once processes (a Monitor re-arm)', () => {
+test('WP-187: poll-shas persists fired across separate --once processes (a Monitor re-arm)', () => {
   reset(); fixture('list.1.json', [pr(21, sha('1'))])
   assert.match(run(['poll-shas', '--once']).stdout, /PR #21 — new commits/)
   // A fresh process (simulating a re-armed Monitor) does not re-announce the same head within the TTL.
   fixture('list.2.json', [pr(21, sha('1'))])
   assert.equal(run(['poll-shas', '--once']).stdout, '')
   assert.ok(existsSync(join(sd, 'poll', 'shas.fired')), 'fired baseline persisted')
-  assert.ok(existsSync(join(sd, 'poll', 'shas.prev')), 'prev baseline persisted')
 })
 
-test('WP-188: poll-shas detects a vanished PR in a fresh process — the regression this fixes', () => {
-  reset(); fixture('list.1.json', [pr(22, sha('2'))])
-  run(['poll-shas', '--once']) // run 1: PR 22 open, seeds poll/shas.prev with [22]
-  // run 2 is a brand-new process (its own empty in-memory $T) — only the persisted prev makes this
-  // detectable; before WP-188, prev was always empty on a fresh process and this vanished silently. A
-  // non-empty list (some unrelated PR #99) keeps the "empty poll is not a mass close" guard from skipping
-  // vanished-PR detection entirely — the pre-existing behaviour that motivated that guard is left untouched.
-  fixture('list.2.json', [pr(99, sha('9'))])
-  fixture('view-22.json', { state: 'MERGED', title: 'pr 22', author: { login: 'dev' } })
+test('WP-188: restart seeds the vanished-PR baseline from state.json instead of starting empty', () => {
+  // #20 was reviewed and never recorded merged/closed (still "open" as far as state.json knows) but is gone
+  // from the very first poll after a restart — the old empty-baseline would silently miss it forever.
+  reset({ reviewed: { 20: { sha: sha('2') }, 21: { sha: sha('1') }, 22: { sha: sha('3'), state: 'merged' } } })
+  fixture('list.json', [pr(21, sha('1'))]) // #20 gone; #22 already recorded terminal, rightly not re-checked
+  fixture('view-20.json', { state: 'MERGED', title: 'pr 20', author: { login: 'dev' } })
   const out = run(['poll-shas', '--once']).stdout
-  assert.match(out, /PR #22 — NO LONGER OPEN — MERGED — dev: pr 22/)
+  assert.equal(out.trim(), 'PR #20 — NO LONGER OPEN — MERGED — dev: pr 20')
+  assert.doesNotMatch(readFileSync(join(fx, 'calls'), 'utf8'), /view-22|view 22/) // never even asked about #22
 })
 
-test('WP-188: poll-replies persists seen ids and the since cursor across separate --once processes', () => {
+test('WP-187: poll-replies persists seen ids and the since cursor across separate --once processes', () => {
   reset({ reviewed: { 23: { sha: sha('a'), state: 'changes-requested', reviewer_session: 'sess-a' } } })
   fixture('comments.json', [{ id: 9, user: { login: 'dev', type: 'User' }, body: 'first reply' }])
   fixture('reviews.json', [])

@@ -103,13 +103,15 @@ $W identity           # "<login> <source>" — the account reviews post as
   retry-twice-then-give-up-on-that-one treatment, not a shrug and a continue believing nothing changed.
   `poll-shas` and `poll-replies` keep their own progress in `state.json` **and** in `poll/` under
   `~/.local/share/wt-watch-prs/<owner>-<repo>/` (durable across process restarts — `seen()` reads
-  `.reviewed[n].sha` from `state.json`; `poll/shas.prev`, `poll/shas.fired` and `poll/replies-S.{seen,since}`
-  hold the TTL and vanished-PR dedupe baselines, WP-188), so a re-armed process resumes exactly where the
-  expired one left off — nothing already reviewed re-fires, and no vanished PR is dropped at the restart
-  boundary either. (This used to be a real gap: before WP-188, `poll-shas`' vanished-PR baseline was a fresh,
-  empty in-process file on every restart, so a PR that closed in the restart gap silently skipped its `NO
-  LONGER OPEN` notice. WP-187/188 persist that baseline to disk, closing it for both this Monitor path and the
-  poller.)
+  `.reviewed[n].sha` from `state.json`; `poll/shas.fired` and `poll/replies-S.{seen,since}` hold the TTL dedupe
+  baselines, WP-187), so a re-armed process resumes exactly where the expired one left off — nothing already
+  reviewed re-fires, and `poll-replies`' in-process reply cursor only resets to a slightly wider, overlapping
+  window on restart — at most a redundant notice, never a missed one. `poll-shas`' vanished-PR comparison seeds
+  its baseline from `state.json` too (WP-188): every PR this repo has reviewed and not yet recorded
+  merged/closed counts as "was open" from the first poll of a fresh process, so a PR that merges or closes in
+  the gap between the old process dying and the new one's first poll is still caught, not silently dropped —
+  routine now that a 30-minute re-arm cycle makes that gap a normal event rather than a rare crash-restart, and
+  the same fix covers the WP-187 poller's own restarts.
 - **One Monitor exhausted, the other armed → keep going, degraded.** Report the failed one as DEGRADED
   (alongside the identity DEGRADED lines) rather than tearing down a Monitor that is working — losing
   `poll-replies` still leaves new-head detection running, which is most of the loop's value. Keep retrying the
