@@ -344,6 +344,26 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
     assert.deepEqual(I.toResolve(hbox.items, new Set(), new Set(), null, new Set(holds.map((h) => h.key))), [hbox.items[0].id])
     assert.deepEqual(I.reviewHolds(root + '/missing'), [])
   }
+  // WP-187: unwatched repos from the background poller — one-shot server items, keyed so re-scanning
+  // the same row every poll never duplicates it, robust to a missing/malformed/oversized file.
+  {
+    const { mkdtemp, writeFile } = await import('node:fs/promises')
+    const root = await mkdtemp((await import('node:os')).tmpdir() + '/unwatched-')
+    const uwrite = (v) => writeFile(root + '/unwatched.json', typeof v === 'string' ? v : JSON.stringify(v))
+    await uwrite([{ repo: 'acme/demo', reason: 'handoff failed 3 times', at: '2026-01-01T00:00:00Z' }, { repo: 'x' }])
+    const rows = I.watchPrsUnwatched(root)
+    assert.deepEqual(rows.map((r) => [r.key, r.kind, r.title, r.body]),
+      [['watch-prs-unwatched|acme/demo|2026-01-01T00:00:00Z', 'server', 'wt-watch-prs: acme/demo is unwatched', 'handoff failed 3 times']])
+    const ubox = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
+    for (const r of rows) await ubox.add(r)
+    for (const r of I.watchPrsUnwatched(root)) assert.equal(await ubox.add(r), null) // re-scanning the same row is a no-op
+    assert.equal(ubox.items.length, 1)
+    assert.deepEqual(I.watchPrsUnwatched(root + '/missing'), [])
+    await uwrite('not an array')
+    assert.deepEqual(I.watchPrsUnwatched(root), [])
+    await uwrite('x'.repeat(1_000_001))
+    assert.deepEqual(I.watchPrsUnwatched(root), []) // oversized file: refused, same as reviewHolds
+  }
   const { mkdtemp } = await import('node:fs/promises')
   const box = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
   assert.ok(await box.add({ kind: 'question', key: 'k', title: 't', body: '', target: { agent: 'a' } }))

@@ -17,7 +17,9 @@ REPO=$(cd "$(dirname "$0")" && pwd -P)
 SKILLS="$HOME/.claude/skills"
 SK="$REPO/skills"
 DASH="$SK/wt-dashboard"
+WP="$SK/wt-watch-prs"
 PLIST="$HOME/Library/LaunchAgents/id.local.wtdashboard.server.plist"
+WPPLIST="$HOME/Library/LaunchAgents/id.local.wtpack.watchprs.plist"
 PORT=${PORT:-7777}
 OS=$(uname -s)
 
@@ -76,6 +78,7 @@ skill_dir() { if [ -d "$1/skills/$2" ]; then echo "$1/skills/$2"; else echo "$1/
 skills() { for d in "$SK"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
 node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)'; }
 service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
+wpservice_root() { [ -f "$WPPLIST" ] && plutil -extract ProgramArguments.1 raw "$WPPLIST" 2>/dev/null | sed 's#/scripts/watch-prs\.sh$##'; }
 # JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
 market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).find(x=>x.name==="wt-pack");if(m)console.log(m.path||m.installLocation||"")}catch{}})'; }
 # plugin_ok [enabled]: wt-memory@wt-pack is installed (and enabled).
@@ -212,6 +215,20 @@ doctor() {
     fi
   else
     opt "no launchd on $OS: run the dashboard with  npm --prefix $DASH start  (a systemd user unit is not provided)"
+  fi
+
+  # WP-187: optional — SKILL.md's §1 arms Monitors instead when this isn't running, so a failure here is a
+  # note, not a required check (never `bad`).
+  if [ "$service" -eq 0 ]; then opt "watchprs poller not checked (--no-service)"
+  elif [ "$OS" = Darwin ]; then
+    wpst=$("$WP/scripts/watch-prs.sh" poller-status 2>&1)
+    case "$wpst" in
+      *"(stale)"*) opt "watchprs $wpst — node $WP/scripts/poller-service.mjs restart" ;;
+      *"loaded, beat"*) opt "watchprs $wpst" ;;
+      *) opt "watchprs $wpst — node $WP/scripts/poller-service.mjs install (optional: SKILL.md falls back to Monitors without it)" ;;
+    esac
+  else
+    opt "no launchd on $OS: run the poller with  bash $WP/scripts/watch-prs.sh serve  (a systemd user unit is not provided)"
   fi
   code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null)
   case "$code" in 2*|3*|401|403) ok "dashboard answers on http://127.0.0.1:$PORT ($code)" ;;
@@ -379,6 +396,18 @@ svc() {
   else node "$DASH/scripts/service.mjs" install >/dev/null && ok "installed and started ($PLIST)" || bad "service install failed — node $DASH/scripts/service.mjs install"; fi
 }
 
+# WP-187: the wt-watch-prs background poller — optional (SKILL.md's §1 falls back to arming Monitors when it
+# isn't running), installed the same way the dashboard's watchdog probe is: on by default, --no-service skips it.
+wp_svc() {
+  step "wt-watch-prs poller (launchd)"
+  if [ "$service" -eq 0 ]; then opt "skipped (--no-service)"; return 0; fi
+  if [ "$OS" != Darwin ]; then opt "no launchd on $OS — run: bash $WP/scripts/watch-prs.sh serve"; return 0; fi
+  wproot=$(wpservice_root)
+  if [ "$wproot" = "$WP" ] && node "$WP/scripts/poller-service.mjs" status 2>/dev/null | grep -q running; then ok "already: running from $WP"
+  elif [ -n "$wproot" ] && [ "$wproot" != "$WP" ] && is_pack "$(root_of "$wproot")"; then opt "kept: the poller runs $wproot (another wt-pack checkout)"
+  else node "$WP/scripts/poller-service.mjs" install >/dev/null && ok "installed and started ($WPPLIST)" || bad "poller install failed — node $WP/scripts/poller-service.mjs install"; fi
+}
+
 secrets_step() {
   step "optional keys"
   env="$HOME/.claude/.env"
@@ -404,7 +433,7 @@ secrets_step() {
 
 install() {
   step "wt-pack install ($REPO)"
-  deps; link_skills; dirs; plugin; web; svc
+  deps; link_skills; dirs; plugin; web; svc; wp_svc
   if [ "$secrets" -eq 1 ] && [ -t 0 ]; then secrets_step; else step "optional keys"; opt "skipped (--no-secrets or not a terminal): ./setup secrets"; fi
   echo; doctor
 }
@@ -414,6 +443,8 @@ uninstall() {
   step "wt-pack uninstall ($REPO)"
   if [ "$OS" = Darwin ] && { [ "$(service_root)" = "$DASH" ] || [ "$(service_root)" = "$REPO/wt-dashboard" ]; }; then node "$DASH/scripts/service.mjs" uninstall >/dev/null && ok "service removed"
   else opt "service: not installed from this checkout, left alone"; fi
+  if [ "$OS" = Darwin ] && [ "$(wpservice_root)" = "$WP" ]; then node "$WP/scripts/poller-service.mjs" uninstall >/dev/null && ok "watchprs poller removed"
+  else opt "watchprs poller: not installed from this checkout, left alone"; fi
   if has claude && [ "$(market_path)" = "$REPO" ]; then
     claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
     ok "plugin wt-memory@wt-pack and marketplace wt-pack removed"

@@ -57,6 +57,27 @@ export function reviewHolds(root) {
   })
 }
 
+// WP-187: repos the background poller (watch-prs.sh serve) stopped watching, from <root>/unwatched.json — a
+// JSON array of {repo, reason, at} the poller appends to. No herdr pane exists to room-post from a launchd
+// process, so this reuses the same read-only-scan idiom as reviewHolds instead: agent-written, so untrusted
+// (≤1 MB, no symlinks, fields length-capped), and a one-shot `server` item keyed on repo+at so re-scanning the
+// same row every dashboard poll tick never duplicates it (Inbox.add is idempotent by key).
+export function watchPrsUnwatched(root) {
+  const f = join(root, 'unwatched.json')
+  try {
+    const st = lstatSync(f)
+    if (!st.isFile() || st.size > 1_000_000) return []
+    const rows = JSON.parse(readFileSync(f, 'utf8'))
+    if (!Array.isArray(rows)) return []
+    return rows.filter((r) => typeof r?.repo === 'string' && typeof r?.at === 'string').map((r) => ({
+      kind: 'server', key: `watch-prs-unwatched|${r.repo}|${r.at}`,
+      title: `wt-watch-prs: ${r.repo} is unwatched`,
+      body: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
+      target: {},
+    }))
+  } catch { return [] }
+}
+
 // WT_JEV_INBOX_RANK: one score per new item, stored as `urgency` 0-3 (noise, FYI, needs attention soon, blocking).
 export const inboxRank = {
   questions: () => ({ urgency: { type: 'score', instructions: 'How urgent is this dashboard notification for the developer who runs these coding agents?',

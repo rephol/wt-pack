@@ -16,7 +16,7 @@ import { Asks } from './asks.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
-import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds } from './inbox.mjs'
+import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds, watchPrsUnwatched } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
@@ -1724,6 +1724,7 @@ async function tick() {
     // WP-116: no baseline — a hold that predates a restart still needs the user.
     const holds = reviewHolds(WATCH_PRS)
     for (const h of holds) await inbox.add(h)
+    for (const u of watchPrsUnwatched(WATCH_PRS)) await inbox.add(u) // WP-187: one-shot, keyed on repo+at
     const resolved = await inbox.resolve(toResolve(inbox.items, needs, new Set(sugg.map((x) => x.ticket)), proposals, new Set(holds.map((h) => h.key))))
     if (resolved) broadcastEvent('inbox', { changed: true })
     sendTrayIfChanged(trayOfInbox())
