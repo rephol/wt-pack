@@ -125,3 +125,14 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   `promisify(execFile)` (`skills/wt-ask/scripts/wt-ask.test.mjs:13,27`), which fixed all six tests with no
   other change. Any future skill test that spins up its own stub server and shells out to its CLI in the same
   process needs the async form for this reason, not just because sync blocking is generally bad practice.
+- A markdown table that fires an LLM-judged lens/persona set (`wt-review/SKILL.md`'s trigger table) and a
+  JS module that offers the same set as a probability-judged shortcut (`wt-judge.mjs`'s `LENS_TRIGGERS`/
+  `LENS_FOCUS` maps) are a lockstep with no compile-time link, same shape as this file's other lockstep
+  entries — adding a row to one does not add it to the other, and nothing errors when it's missed. WP-183
+  added three lenses (agent-native, reliability, performance) to the trigger table and every persona file,
+  and its own review pass (checking "every lens file", "the trigger table") never grepped `wt-judge.mjs`
+  because that file is prose-adjacent tooling, not a lens persona — the omission was caught only by
+  `wt-review`'s regression lens dogfooding the branch, deliberately checking beyond the diff's own files.
+  Fixed by adding the three lenses to both maps (`skills/wt-shared/scripts/wt-judge.mjs:101-103,410-412`).
+  A completeness check for "every lens file updated" must also check every *judged shortcut* for the same
+  table, not just the table's own direct consumers.
