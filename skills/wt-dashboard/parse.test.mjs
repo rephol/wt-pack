@@ -1408,3 +1408,24 @@ test('WP-147 retireIdle: a DND or paired agent is never a candidate', async () =
   const agents = [idle('p1', 'sonnet', 100), idle('p2', 'sonnet', 200, { dnd: '1' }), idle('p3', 'sonnet', 300, { pair: 'WP-9' })]
   assert.deepEqual(retireIdle(agents, 0), ['p1']) // p2 (dnd) and p3 (paired) are excluded, not just kept
 })
+
+test('WP-172: paneStale re-reads idle/blocked on the readEvery cadence, not just working (a picker can appear with no state_change_seq bump)', async () => {
+  const { paneStale } = await import('./server.mjs')
+  const now = 1_000_000, readEvery = 15_000
+  // No prior parse, or the seq moved: always stale, regardless of status.
+  assert.equal(paneStale('idle', undefined, 5, now, readEvery), true)
+  assert.equal(paneStale('idle', { seq: 4, at: now }, 5, now, readEvery), true)
+  // Same seq, fresh parse, no held picker: not stale for any status.
+  assert.equal(paneStale('idle', { seq: 5, at: now - 1000 }, 5, now, readEvery), false)
+  assert.equal(paneStale('blocked', { seq: 5, at: now - 1000 }, 5, now, readEvery), false)
+  assert.equal(paneStale('working', { seq: 5, at: now - 1000 }, 5, now, readEvery), false)
+  // Same seq, past readEvery: idle and blocked are re-read too now (the WP-172 fix) — not just working.
+  const old = now - readEvery - 1
+  assert.equal(paneStale('idle', { seq: 5, at: old }, 5, now, readEvery), true)
+  assert.equal(paneStale('blocked', { seq: 5, at: old }, 5, now, readEvery), true)
+  assert.equal(paneStale('working', { seq: 5, at: old }, 5, now, readEvery), true)
+  // A status this predicate doesn't recognise (e.g. 'done') stays on seq-change-only, unaffected.
+  assert.equal(paneStale('done', { seq: 5, at: old }, 5, now, readEvery), false)
+  // A held picker is always stale (it can advance to a different question with no seq bump), any status.
+  assert.equal(paneStale('idle', { seq: 5, at: now, p: { picker: {} } }, 5, now, readEvery), true)
+})
