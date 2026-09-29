@@ -442,6 +442,16 @@ export function agentName(m, a, cwd) {
   return m.local && t && /^[a-z0-9_-]{1,32}$/.test(t) ? t : remoteName(m.local ? '' : m.label, cwd, a.pane_id)
 }
 
+// WP-172: a picker (AskUserQuestion) can appear on an idle/blocked agent with no state_change_seq bump — the
+// planner just sat there waiting on background agents, and herdr never flagged a state change when it popped
+// up. Re-reading only a 'working' pane on the readEvery cadence left that cached pre-picker parse stuck
+// forever. idle/blocked now get the same cheap (120-line) periodic re-read as working does.
+export function paneStale(status, seen, seq, now, readEvery) {
+  if (!seen) return true
+  if (seen.seq !== seq) return true
+  if ((status === 'working' || status === 'idle' || status === 'blocked') && now - seen.at > readEvery) return true
+  return Boolean(seen.p?.picker) // a picker itself can also advance without a status change
+}
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
 async function listAgents(m) {
   const { result } = JSON.parse(await herdrOn(m, 'agent', 'list'))
@@ -453,7 +463,7 @@ async function listAgents(m) {
     const prev = since.get(k)
     if (!prev || prev.status !== a.agent_status) since.set(k, { status: a.agent_status, at: Date.now() })
     const seen = parsed.get(k)
-    const stale = !seen || seen.seq !== a.state_change_seq || (a.agent_status === 'working' && Date.now() - seen.at > readEvery) || Boolean(seen.p?.picker) // a picker advances without a status change
+    const stale = paneStale(a.agent_status, seen, a.state_change_seq, Date.now(), readEvery)
     if (stale) {
       try {
         const raw = await readPane(m, a.pane_id, '120')
