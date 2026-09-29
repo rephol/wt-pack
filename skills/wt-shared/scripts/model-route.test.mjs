@@ -354,9 +354,9 @@ test('CLI: pick --json and floor --json carry effort', () => {
   // printed/`tier` floor itself is unaffected. The id is independent of live/shadow (an explicit tier resolves
   // to its id regardless of routing mode).
   const div = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
-  assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium'); assert.equal(div.model, 'claude-sonnet-5') // sonnet's own base, not opus's
+  assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium'); assert.equal(div.model, 'claude-sonnet-5-5') // sonnet's own base, not opus's
   const shadowDiv = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'shadow' }))
-  assert.equal(shadowDiv.tier, 'opus'); assert.equal(shadowDiv.effort, 'medium'); assert.equal(shadowDiv.model, 'claude-sonnet-5')
+  assert.equal(shadowDiv.tier, 'opus'); assert.equal(shadowDiv.effort, 'medium'); assert.equal(shadowDiv.model, 'claude-sonnet-5-5')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
 })
 
@@ -426,7 +426,7 @@ test('global off beats a per-skill live mode (kill switch)', async () => {
 // resolve on its own — configurable, same layers as everything else, falling back to the tier name if unmapped.
 test('modelIdFor: default map, a partial config override, and an unknown tier falls back to itself', () => {
   assert.equal(modelIdFor('opus', DEFAULTS), 'claude-opus-5-5')
-  assert.equal(modelIdFor('sonnet', DEFAULTS), 'claude-sonnet-5')
+  assert.equal(modelIdFor('sonnet', DEFAULTS), 'claude-sonnet-5-5')
   assert.equal(modelIdFor('haiku', DEFAULTS), 'claude-haiku-4-5-20251001')
   assert.equal(modelIdFor('opus', { modelIds: { opus: 'claude-opus-6' } }), 'claude-opus-6')
   assert.equal(modelIdFor('sonnet', {}), 'sonnet') // no map at all: the pre-WP-158 alias behaviour

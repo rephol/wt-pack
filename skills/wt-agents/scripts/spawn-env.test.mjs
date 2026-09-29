@@ -120,11 +120,11 @@ test('WP-128/158/160: --model is passed to claude as its explicit id, not the ba
   assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /--model claude-haiku-4-5-20251001/)
   // WP-160: the floor is a fixed computation, not Jev, so it applies with no explicit --model in every mode —
   // a worker gets its session floor (sonnet) even in shadow (default).
-  assert.match(start(spawn()), /--model claude-sonnet-5/)
+  assert.match(start(spawn()), /--model claude-sonnet-5-5/) // WP-178
   assert.match(start(spawn(['spawn', 'planner'])), /--model claude-opus-5-5/) // shadow (default): floor still applies
   assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'off' })), /--model claude-opus-5-5/) // off: same
   assert.match(start(spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' })), /--model claude-opus-5-5/)
-  assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model claude-sonnet-5/) // explicit wins
+  assert.match(start(spawn(['spawn', 'planner', '--model', 'sonnet'], { WT_MODEL_ROUTING: 'live' })), /--model claude-sonnet-5-5/) // explicit wins
   assert.throws(() => spawn(['spawn', 'worker', '--model', 'gpt']), (e) => e.status === 2)
 })
 
