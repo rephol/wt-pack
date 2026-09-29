@@ -414,6 +414,11 @@ A `refuted` or `unverifiable` finding never on its own forces Send back or Appro
 `confirmed` one does. The coverage line (below) always follows the verdict word as the last line; it never
 replaces it.
 
+**A Send back driven only by coverage, with no confirmed finding, is not the same as a Send back for a
+defect** — say which one it is in the reply. A caller maps them differently: `wt-watch-prs` posts a defect
+Send back as a hold (`--request-changes`) but a coverage-only Send back as a plain comment naming the gap,
+because an unread file is neither a question nor a defect (see its §3).
+
 ## Coverage line in the verdict
 
 The verdict's last line is always: `Coverage: N/M files read in full · lenses: <fired lenses> · tests:
