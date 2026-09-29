@@ -216,6 +216,88 @@ test('reconcile: stalled sets a flag without moving the card, noted once', async
   assert.equal(T.history.filter((h) => h.text?.startsWith('stalled:')).length, 1)
 })
 
+// WP-177: a handoff that reports success but never actually lands leaves the card silently in Building.
+test('WP-177: the assignee going working confirms delivery immediately, no resend', async () => {
+  const a = { name: 'wt-pack-worker-09', id: 'w9:p1', local: true, status: 'idle', lastActivity: Date.now() }
+  const { tickets, d, calls } = await setup({ agents: [a] })
+  const t = await ready(tickets, 'a')
+  const now = Date.now()
+  await d.tick(now)
+  d.deps.agents = async () => [{ ...a, status: 'working' }]
+  await d.tick(now + 5_000) // long before the 60s window — status alone confirms it
+  const c = await tickets.get(t.id)
+  assert.equal(c.dispatch.confirmed, true)
+  assert.equal(calls.length, 1)
+})
+
+test('WP-177: fast completion (done before 60s) also confirms delivery', async () => {
+  const a = { name: 'wt-pack-worker-09', id: 'w9:p1', local: true, status: 'idle', lastActivity: Date.now() }
+  const { tickets, d, calls } = await setup({ agents: [a] })
+  const t = await ready(tickets, 'a')
+  const now = Date.now()
+  await d.tick(now)
+  d.deps.agents = async () => [{ ...a, status: 'done' }]
+  await d.tick(now + 5_000)
+  assert.equal((await tickets.get(t.id)).dispatch.confirmed, true)
+  assert.equal(calls.length, 1)
+})
+
+test('WP-177: blocked (it asked a question) also confirms delivery — not a delivery failure', async () => {
+  const a = { name: 'wt-pack-worker-09', id: 'w9:p1', local: true, status: 'idle', lastActivity: Date.now() }
+  const { tickets, d, calls } = await setup({ agents: [a] })
+  const t = await ready(tickets, 'a')
+  const now = Date.now()
+  await d.tick(now)
+  d.deps.agents = async () => [{ ...a, status: 'blocked' }]
+  await d.tick(now + 5_000)
+  assert.equal((await tickets.get(t.id)).dispatch.confirmed, true)
+  assert.equal(calls.length, 1)
+})
+
+test('WP-177: no confirmation within 60s resends once, to the same pane with the same prompt', async () => {
+  const a = { name: 'wt-pack-worker-09', id: 'w9:p1', local: true, status: 'idle', lastActivity: Date.now() }
+  const { tickets, d, calls } = await setup({ agents: [a] })
+  const t = await ready(tickets, 'a')
+  const now = Date.now()
+  await d.tick(now)
+  await d.tick(now + 30_000) // too soon
+  assert.equal(calls.length, 1)
+  await d.tick(now + 61_000)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls[1].args.slice(0, 2), ['--pane', 'w9:p1'])
+  assert.equal(calls[1].prompt, calls[0].prompt)
+  const c = await tickets.get(t.id)
+  assert.ok(c.dispatch.redeliveredAt)
+  assert.ok(c.history.some((h) => h.text === 'resent handoff to wt-pack-worker-09: no confirmed delivery within 60s'))
+  // a second reconcile inside the same 60s window doesn't resend again
+  await d.tick(now + 90_000)
+  assert.equal(calls.length, 2)
+})
+
+test('WP-177: still unconfirmed 60s after the resend flags it — Inbox item, ticket comment, card left in Building', async () => {
+  const a = { name: 'wt-pack-worker-09', id: 'w9:p1', local: true, status: 'idle', lastActivity: Date.now() }
+  const notified = []
+  const { tickets, d, calls } = await setup({ agents: [a], extra: { notify: async (i) => notified.push(i) } })
+  const t = await ready(tickets, 'a')
+  const now = Date.now()
+  await d.tick(now)
+  await d.tick(now + 61_000) // resend
+  await d.tick(now + 61_000 + 30_000) // too soon after the resend
+  assert.equal(notified.length, 0)
+  await d.tick(now + 61_000 + 61_000)
+  assert.equal(calls.length, 2) // never a third resend
+  const c = await tickets.get(t.id)
+  assert.equal(c.column, 'building')
+  assert.equal(c.dispatch.undelivered, 'wt-pack-worker-09: handoff not confirmed even after a resend')
+  assert.ok(c.history.some((h) => h.text === `stalled: ${c.dispatch.undelivered}`))
+  assert.deepEqual(notified.map((n) => n.kind), ['dispatch-undelivered'])
+  assert.equal(d.events().filter((e) => e.kind === 'stalled').length, 1)
+  // confirmed still never lands
+  await d.tick(now + 61_000 + 61_000 + 61_000)
+  assert.equal(calls.length, 2)
+  assert.equal(notified.length, 1) // not re-notified every tick
+})
+
 test('runHandoff: prompt on stdin, HERDR_PANE_ID blanked, 120 s timeout', async () => {
   let seen
   const execFile = (bin, args, opts, cb) => {

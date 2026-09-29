@@ -228,6 +228,7 @@ export class Dispatch {
       }
       this.gone.delete(g)
       if (!a || t.column !== 'building') continue
+      await this.#confirmDelivery(project, t, a, now).catch((e) => this.log(`confirm delivery ${t.id}: ${e.message}`))
       const idleMin = (now - Number(new Date(a.lastActivity ?? a.statusSince ?? now))) / 60_000
       const stalled = (a.status === 'idle' || a.status === 'done') && idleMin > stallMin
       if (stalled && !t.dispatch?.stalled) {
@@ -296,6 +297,52 @@ export class Dispatch {
       })
     }
     this.event(project, 'pair-replaced', t.id, `${role} ${p.name} → ${repl.name}`, now)
+  }
+
+  // WP-177: handoff.sh reporting success only means herdr accepted the prompt — a Remote Control disconnect
+  // (or anything else between there and the pane) can still drop it, leaving the card silently in Building
+  // with an idle worker. Within ~60s of a 'sent' dispatch, confirm the assignee actually went working (or
+  // finished fast); not yet → resend the identical prompt once; still not within another ~60s → flag it
+  // instead of leaving it silent.
+  async #confirmDelivery(project, t, a, now) {
+    const d = t.dispatch
+    if (d?.state !== 'sent' || d.confirmed || d.undelivered) return
+    if (a.status === 'working' || a.status === 'done' || a.status === 'blocked') { // blocked = it got the prompt and asked something
+      await this.tickets.mutate(t.id, (tt) => { if (tt.dispatch?.state === 'sent') tt.dispatch.confirmed = true; return tt })
+      return
+    }
+    const since = Date.parse(d.redeliveredAt ?? d.at)
+    if (now - since < 60_000) return
+    const repo = await this.deps.repoOf(project)
+    if (!repo || !t.assignee?.pane) return
+    if (!d.redeliveredAt) {
+      const args = ['--pane', t.assignee.pane, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.slice(0, 80), repo]
+      const prompt = dispatchPrompt(t, roleFor(t), (await this.deps.reportOf?.(project)) ?? null)
+      // A failed resend still counts as the one retry (never resend on a loop): report it and move straight
+      // to the undelivered flag on the next check, same as a resend that landed but still isn't confirmed.
+      const failed = await this.deps.handoff(args, prompt, repo).then(() => null, (e) => String(e?.message ?? e).split('\n')[0].slice(0, 160))
+      // Anchored on the tick's own `now`, not the mutate call's real wall clock — the two drift apart under a
+      // fake clock (tests), and dispatch.at is itself `now`-anchored the same way from its first tick.
+      await this.tickets.mutate(t.id, (tt, at) => {
+        if (tt.dispatch?.state !== 'sent') return tt
+        tt.dispatch.redeliveredAt = new Date(now).toISOString()
+        tt.history.push({ at, author: 'dispatch', kind: 'comment', text: failed ? `resend to ${a.name} failed: ${failed}` : `resent handoff to ${a.name}: no confirmed delivery within 60s` })
+        return tt
+      })
+      return
+    }
+    const text = `${a.name}: handoff not confirmed even after a resend`
+    await this.tickets.mutate(t.id, (tt, at) => {
+      if (tt.dispatch?.state !== 'sent') return tt
+      tt.dispatch.undelivered = text
+      tt.history.push({ at, author: 'dispatch', kind: 'comment', text: `stalled: ${text}` })
+      return tt
+    })
+    this.event(project, 'stalled', t.id, text, now)
+    await this.deps.notify?.({ kind: 'dispatch-undelivered', key: `dispatch-undelivered|${t.id}`,
+      title: `${t.id}: dispatch never reached ${a.name}`,
+      body: 'Handoff reported success twice but the agent never went working — check the pane (Remote Control disconnect?).',
+      target: { ticket: t.id, project } })
   }
 
   // Merge commits on origin/<baseBranch> since the last scan (7 days on the first); fetch at most every 5 min per repo.

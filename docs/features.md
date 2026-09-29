@@ -90,8 +90,13 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
   project has no checkout. Handoff timeout 120s.
 - Failures retry after 2 min; the **3rd failure holds** the card. Card menu **Retry dispatch** (failed or
   held) or moving the card to Ready/Backlog clears it.
-- Badges: Dispatching…, Dispatch failed, Dispatch held, Stalled. The Automation sheet shows `Dispatching N…`,
-  `waiting: …`, `waiting for triage`, `last: … ago` or `idle`.
+- **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means herdr accepted the prompt, not
+  that it reached the agent's pane (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
+  card going Building/Planning, its assignee must show working, done or blocked (it asked something); if not,
+  the same prompt is resent once, targeting the same pane. Still unconfirmed ~60s after that resend: the card
+  gets the **Stalled** badge and an Inbox item, instead of sitting silently assigned to an idle worker.
+- Badges: Dispatching…, Dispatch failed, Dispatch held, Stalled (idle too long, or delivery never confirmed).
+  The Automation sheet shows `Dispatching N…`, `waiting: …`, `waiting for triage`, `last: … ago` or `idle`.
 - **Flag stalled after N min idle** (default 45, range 1–1440) shows under the switch while Dispatch is on.
 
 ### Reconcile
