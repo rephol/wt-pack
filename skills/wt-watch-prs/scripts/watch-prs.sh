@@ -16,9 +16,18 @@
 #   gate N                           green | red | pending | none   (GitHub Actions check runs only)
 #   describes N                      ok | no-body | branch-title
 #   diff N S [--sha SHA]             pinned-ref diff: delta vs the recorded head when it is an ancestor, else full
-# State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/<owner>-<repo>/{state.json,claims/,state.lock,poll/}
-# poll/ (WP-188) persists poll-shas' and poll-replies' dedupe baselines across process restarts: shas.prev,
-# shas.fired, replies-<S>.seen, replies-<S>.since. The dashboard reads state.json for held PRs (Inbox pr-held).
+#   register --session S              WP-187: from inside a repo checkout, add this repo/pane/cwd to the
+#                                    background poller's watch list ($WT_WATCH_PRS_HOME/watchers.json)
+#   unregister --session S            remove this repo/session from the watch list
+#   poller-status                     exit 0 when the poller's launchd agent is loaded and its heartbeat
+#                                    ($WT_WATCH_PRS_HOME/poller.beat) is <3 min old; else exit 1
+#   serve [--once]                    WP-187: the poller itself — for each registered watcher, poll-shas/
+#                                    poll-replies --once and deliver each line via handoff.sh --kind system;
+#                                    run by launchd (id.local.wtpack.watchprs), never by an interactive session
+# State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/{watchers.json,poller.beat,unwatched.json,
+#   <owner>-<repo>/{state.json,claims/,state.lock,poll/}}. poll/ (WP-188) persists poll-shas' and poll-replies'
+# dedupe baselines across process restarts: shas.prev, shas.fired, replies-<S>.seen, replies-<S>.since. The
+# dashboard reads state.json for held PRs (Inbox pr-held) and unwatched.json for poller notices (Inbox server).
 # Test knobs: WATCH_PRS_POLLS, WATCH_PRS_SLEEP, WATCH_PRS_TTL, WATCH_PRS_HANDOFF.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -308,5 +317,110 @@ poll-replies)
     sleep "${WATCH_PRS_SLEEP:-90}"
   done
   ;;
-*) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
+register|unregister)
+  S=""
+  while [ $# -gt 0 ]; do case "$1" in --session) S=${2:-}; shift 2;; *) die "unknown arg $1";; esac; done
+  sess "$S"; setup
+  WH="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}"; mkdir -p "$WH"; WF="$WH/watchers.json"
+  [ -s "$WF" ] || echo '[]' > "$WF"
+  L="$WH/watchers.lock"; for i2 in 1 2 3 4 5 6 7 8 9 10; do mkdir "$L" 2>/dev/null && break; sleep 1; done
+  [ -d "$L" ] || die "watchers lock held (stale? check $L mtime and remove by hand)"
+  trap 'rmdir "$L" 2>/dev/null' EXIT
+  if [ "$cmd" = unregister ]; then
+    jq --arg repo "$REPO" --arg s "$S" '[.[] | select(.session != $s or .repo != $repo)]' "$WF" > "$WF.tmp" && mv "$WF.tmp" "$WF"
+    echo "unregistered $REPO session $S"
+  else
+    # HERDR_PANE_ID may be the stable id, not the display id handoff.sh needs — resolve it (CLAUDE.md trap).
+    pane=""; command -v herdr >/dev/null 2>&1 && [ -n "${HERDR_PANE_ID:-}" ] \
+      && pane=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)
+    cwd=$(pwd)
+    at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    jq --arg repo "$REPO" --arg pane "$pane" --arg s "$S" --arg cwd "$cwd" --arg at "$at" \
+      '[.[] | select(.session != $s or .repo != $repo)] + [{repo:$repo, pane:$pane, session:$s, cwd:$cwd, at:$at}]' "$WF" > "$WF.tmp" && mv "$WF.tmp" "$WF"
+    echo "registered $REPO session $S${pane:+ pane $pane}"
+  fi
+  ;;
+poller-status)
+  WH="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}"; B="$WH/poller.beat"
+  [ -f "$B" ] || { echo "poller: no heartbeat ($B)"; exit 1; }
+  case "$(uname -s)" in
+    Darwin) command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$(id -u)/id.local.wtpack.watchprs" >/dev/null 2>&1 \
+      || { echo "poller: launchd agent not loaded"; exit 1; } ;;
+  esac
+  now=$(date +%s); mt=$(stat -f %m "$B" 2>/dev/null || stat -c %Y "$B" 2>/dev/null || echo 0)
+  age=$((now - mt))
+  if [ "$age" -lt 180 ]; then echo "poller: loaded, beat ${age}s ago"; exit 0
+  else echo "poller: loaded, beat ${age}s ago (stale)"; exit 1; fi
+  ;;
+serve)
+  [ "${1:-}" = --once ] && WATCH_PRS_POLLS=1
+  polls=${WATCH_PRS_POLLS:-0}
+  WH="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}"; mkdir -p "$WH"
+  WF="$WH/watchers.json"; [ -s "$WF" ] || echo '[]' > "$WF"
+  UW="$WH/unwatched.json"; [ -s "$UW" ] || echo '[]' > "$UW"
+  FC="$WH/unconsumed"; mkdir -p "$FC"  # per-pane consecutive handoff-failure counters
+  HANDOFF=${WATCH_PRS_HANDOFF:-"$here/../../wt-handoff/scripts/handoff.sh"}
+  mark_unwatched() { # repo reason — best-effort append, capped at the last 50 rows, under watchers.lock
+    local repo="$1" reason="$2" at L2
+    at=$(date -u +%Y-%m-%dT%H:%M:%SZ); L2="$WH/watchers.lock"
+    for i2 in 1 2 3 4 5; do mkdir "$L2" 2>/dev/null && break; sleep 0.2; done
+    [ -d "$L2" ] || return 0
+    jq --arg repo "$repo" --arg reason "$reason" --arg at "$at" '(. + [{repo:$repo, reason:$reason, at:$at}]) | .[-50:]' "$UW" > "$UW.tmp" 2>/dev/null && mv "$UW.tmp" "$UW"
+    rmdir "$L2" 2>/dev/null
+  }
+  i=0; last_replies=0
+  while :; do
+    touch "$WH/poller.beat"
+    now=$(date +%s); do_replies=0
+    if [ $((now - last_replies)) -ge 90 ]; then do_replies=1; last_replies=$now; fi
+    jq -c '.[]' "$WF" 2>/dev/null | while IFS= read -r w; do
+      wrepo=$(printf '%s' "$w" | jq -r .repo); wpane=$(printf '%s' "$w" | jq -r .pane)
+      wsess=$(printf '%s' "$w" | jq -r .session); wcwd=$(printf '%s' "$w" | jq -r .cwd)
+      [ -n "$wcwd" ] && [ -d "$wcwd" ] || continue
+      # decision 5 (1/3): the pane itself is gone.
+      if [ -n "$wpane" ] && command -v herdr >/dev/null 2>&1; then
+        herdr pane get "$wpane" >/dev/null 2>&1 || { mark_unwatched "$wrepo" "reviewer pane $wpane is gone"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
+      fi
+      out=$(cd "$wcwd" && "$0" poll-shas --once 2>/dev/null)
+      if [ "$do_replies" = 1 ] && [ -n "$wsess" ]; then
+        out2=$(cd "$wcwd" && "$0" poll-replies --session "$wsess" --once 2>/dev/null)
+        [ -n "$out2" ] && out="${out:+$out
+}$out2"
+      fi
+      [ -n "$out" ] || continue
+      printf '%s\n' "$out" | while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        [ -n "$wpane" ] || continue
+        if printf '%s' "$line" | "$HANDOFF" --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1; then
+          rm -f "$FC/$wpane"
+        else
+          n=$(( $(cat "$FC/$wpane" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FC/$wpane"
+          # decision 5 (2/3): handoff has failed 3 times in a row for this pane.
+          if [ "$n" -ge 3 ]; then
+            mark_unwatched "$wrepo" "handoff to $wpane failed 3 times in a row"
+            (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1)
+            rm -f "$FC/$wpane"
+          fi
+        fi
+      done
+      # decision 5 (3/3): a delivered "new commits" event that is still neither claimed nor recorded 30 min
+      # later, while poll-shas' own fired file says a delivery happened — the pane stopped acting on it.
+      wsd="$WH/${wrepo/\//-}"
+      [ -f "$wsd/poll/shas.fired" ] || continue
+      while read -r fn fs ft; do
+        [ -z "$fn" ] && continue
+        [ $((now - ft)) -ge 1800 ] || continue
+        [ -d "$wsd/claims/pr$fn" ] && continue
+        recorded=$(jq -r --arg n "$fn" '.reviewed[$n].sha // ""' "$wsd/state.json" 2>/dev/null)
+        [ "$recorded" = "$fs" ] && continue
+        mark_unwatched "$wrepo" "PR #$fn's new-commits event from 30+ min ago is still neither claimed nor reviewed"
+        (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1)
+        break
+      done < "$wsd/poll/shas.fired"
+    done
+    i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
+    sleep "${WATCH_PRS_SLEEP:-60}"
+  done
+  ;;
+*) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
 esac

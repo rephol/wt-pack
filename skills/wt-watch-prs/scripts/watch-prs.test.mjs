@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync, existsSync, utimesSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -34,24 +34,35 @@ esac
 `)
 chmodSync(join(bin, 'gh'), 0o755)
 // WP-121: herdr and handoff stubs for mode/dispatch (fixture files; a missing agents.json means herdr is absent).
+// WP-187: "pane get" also fails for whatever pane id is written to fx/gone-pane (a registered watcher whose
+// pane vanished); launchctl stubs poller-status' loaded check via fx/launchctl-loaded.
 writeFileSync(join(bin, 'herdr'), `#!/bin/sh
 case "$1 $2" in
-  "pane get") [ "$3" = none ] && exit 1; cat "${fx}/pane.json" ;;
+  "pane get") [ "$3" = none ] && exit 1
+    [ -f "${fx}/gone-pane" ] && [ "$3" = "$(cat "${fx}/gone-pane")" ] && exit 1
+    cat "${fx}/pane.json" ;;
   "agent list") cat "${fx}/agents.json" ;;
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"}]}}' ;;
 esac
 `)
 chmodSync(join(bin, 'herdr'), 0o755)
+writeFileSync(join(bin, 'launchctl'), `#!/bin/sh
+[ "$1" = print ] && { [ -f "${fx}/launchctl-loaded" ] && exit 0 || exit 1; }
+exit 0
+`)
+chmodSync(join(bin, 'launchctl'), 0o755)
 const handoff = join(tmp, 'handoff.sh')
 writeFileSync(handoff, `#!/bin/sh
 { echo "ARGS $*"; echo "BODY $(cat)"; } > "${fx}/handoff"
+{ echo "CALL $*"; } >> "${fx}/handoff-calls"
 [ -n "\${HANDOFF_FAIL:-}" ] && exit 1
 echo "created demo-reviewer-01 wR:p1"; echo "target demo-reviewer-01 wR:p1"
 `)
 chmodSync(handoff, 0o755)
 execFileSync('git', ['-C', repo, 'init', '-q'])
 
-const sd = join(home, '.local/share/wt-watch-prs/acme-demo'), stateFile = join(sd, 'state.json')
+const wh = join(home, '.local/share/wt-watch-prs') // WP-187: top-level poller state (watchers.json, unwatched.json, poller.beat, unconsumed/)
+const sd = join(wh, 'acme-demo'), stateFile = join(sd, 'state.json')
 const run = (args, env = {}) => {
   const r = spawnSync(script, args, { cwd: repo, encoding: 'utf8', env: {
     PATH: `${bin}:${process.env.PATH}`, HOME: home, WT_DASHBOARD_DATA: join(tmp, 'data'),
@@ -64,6 +75,10 @@ const reset = (state = { reviewed: {} }) => {
   rmSync(sd, { recursive: true, force: true }); mkdirSync(join(sd, 'claims'), { recursive: true })
   writeFileSync(stateFile, JSON.stringify(state)); rmSync(join(fx, 'n'), { force: true }); rmSync(join(fx, 'calls'), { force: true })
   for (const n of [1, 2, 3]) rmSync(join(fx, `list.${n}.json`), { force: true })
+  // WP-187: poller state is shared across tests (top-level, not per-repo) — clear it too.
+  for (const p of ['watchers.json', 'unwatched.json', 'poller.beat']) rmSync(join(wh, p), { force: true })
+  rmSync(join(wh, 'unconsumed'), { recursive: true, force: true })
+  for (const p of ['gone-pane', 'launchctl-loaded', 'handoff-calls', 'handoff']) rmSync(join(fx, p), { force: true })
 }
 const sha = (c) => c.repeat(40)
 const pr = (number, headRefOid, extra = {}) => ({ number, headRefOid, author: { login: 'dev' }, title: `pr ${number}`, isDraft: false, ...extra })
@@ -167,6 +182,101 @@ test('WP-188: poll-replies persists seen ids and the since cursor across separat
   // A fresh process for the same session does not re-announce the id it already saw.
   out = run(['poll-replies', '--session', 'sess-a', '--once']).stdout
   assert.doesNotMatch(out, /first reply/)
+})
+
+test('WP-187: register/unregister write watchers.json; re-registering the same session/repo replaces its row', () => {
+  reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  let r = run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /registered acme\/demo session sess-p pane wR:p9/)
+  let rows = JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8'))
+  assert.deepEqual(rows.map((w) => [w.repo, w.session, w.pane]), [['acme/demo', 'sess-p', 'wR:p9']])
+  assert.equal(rows[0].cwd, realpathSync(repo)) // macOS resolves /var -> /private/var inside the child process
+  // re-registering the same session+repo replaces the row rather than duplicating it
+  r = run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  assert.equal(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8'), 'utf8').length, 1)
+  // a second session on the same repo adds a second row
+  run(['register', '--session', 'sess-q'], { HERDR_PANE_ID: 'wR:p9' })
+  rows = JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8'))
+  assert.equal(rows.length, 2)
+  r = run(['unregister', '--session', 'sess-p'])
+  assert.equal(r.status, 0); assert.match(r.stdout, /unregistered acme\/demo session sess-p/)
+  rows = JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8'))
+  assert.deepEqual(rows.map((w) => w.session), ['sess-q'])
+  // no herdr / no HERDR_PANE_ID: registers with an empty pane rather than failing
+  r = run(['register', '--session', 'sess-r'], { HERDR_PANE_ID: '' })
+  assert.equal(r.status, 0); assert.doesNotMatch(r.stdout, / pane /)
+})
+
+test('WP-187: poller-status — no heartbeat, stale heartbeat, and the launchd-loaded gate', () => {
+  reset()
+  let r = run(['poller-status'])
+  assert.equal(r.status, 1); assert.match(r.stdout, /no heartbeat/)
+  mkdirSync(wh, { recursive: true }); writeFileSync(join(wh, 'poller.beat'), '')
+  r = run(['poller-status']) // beat exists but launchctl says not loaded (no launchctl-loaded fixture)
+  assert.equal(r.status, 1); assert.match(r.stdout, /not loaded/)
+  writeFileSync(join(fx, 'launchctl-loaded'), '1')
+  r = run(['poller-status']) // loaded, fresh beat
+  assert.equal(r.status, 0); assert.match(r.stdout, /loaded, beat \d+s ago/)
+  const old = new Date(Date.now() - 200_000)
+  utimesSync(join(wh, 'poller.beat'), old, old)
+  r = run(['poller-status']) // loaded, but the beat is stale
+  assert.equal(r.status, 1); assert.match(r.stdout, /\(stale\)/)
+})
+
+test('WP-187: serve delivers a new-commits event via handoff --kind system --pane <p>, once per line', () => {
+  reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  fixture('list.1.json', [pr(30, sha('3'))])
+  const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff })
+  assert.equal(r.status, 0, r.stderr)
+  const calls = readFileSync(join(fx, 'handoff-calls'), 'utf8').trim().split('\n')
+  assert.equal(calls.length, 1)
+  assert.match(calls[0], /--pane wR:p9 --kind system --no-goal --from wt-watch-prs/)
+  assert.match(readFileSync(join(fx, 'handoff'), 'utf8'), /BODY PR #30 — new commits/)
+  assert.ok(existsSync(join(wh, 'poller.beat')), 'heartbeat touched')
+})
+
+test('WP-187: serve unregisters and records an unwatched notice when the pane is gone', () => {
+  reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  writeFileSync(join(fx, 'gone-pane'), 'wR:p9')
+  const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')), [])
+  const uw = JSON.parse(readFileSync(join(wh, 'unwatched.json'), 'utf8'))
+  assert.equal(uw.length, 1); assert.equal(uw[0].repo, 'acme/demo'); assert.match(uw[0].reason, /pane wR:p9 is gone/)
+  assert.ok(!existsSync(join(fx, 'handoff')), 'never attempted a handoff for a gone pane')
+})
+
+test('WP-187: serve unregisters and records an unwatched notice after 3 consecutive handoff failures', () => {
+  reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  // three distinct new-commits events (distinct PR numbers) so WP-188's own TTL dedupe does not suppress
+  // the 2nd/3rd — the failure counter is per-pane, driven by three separate delivery attempts.
+  fixture('list.1.json', [pr(31, sha('1'))])
+  run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff, HANDOFF_FAIL: '1' })
+  fixture('list.2.json', [pr(31, sha('1')), pr(32, sha('2'))])
+  run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff, HANDOFF_FAIL: '1' })
+  assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')).map((w) => w.session), ['sess-p'])
+  fixture('list.3.json', [pr(31, sha('1')), pr(32, sha('2')), pr(33, sha('3'))])
+  const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff, HANDOFF_FAIL: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')), [])
+  const uw = JSON.parse(readFileSync(join(wh, 'unwatched.json'), 'utf8'))
+  assert.equal(uw.length, 1); assert.match(uw[0].reason, /handoff to wR:p9 failed 3 times in a row/)
+})
+
+test('WP-187: serve clears the failure counter on a successful delivery', () => {
+  reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  fixture('list.1.json', [pr(41, sha('4'))])
+  run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff, HANDOFF_FAIL: '1' })
+  fixture('list.2.json', [pr(41, sha('4')), pr(42, sha('5'))])
+  run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff }) // succeeds — resets the counter
+  fixture('list.3.json', [pr(41, sha('4')), pr(42, sha('5')), pr(43, sha('6'))])
+  run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff, HANDOFF_FAIL: '1' })
+  // only 2 consecutive failures since the reset — still watched
+  assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')).map((w) => w.session), ['sess-p'])
 })
 
 test('claim: second claim loses; release frees it', () => {
