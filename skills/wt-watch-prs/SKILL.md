@@ -129,6 +129,8 @@ $W diff 12 "$S" --sha <reported sha> > "$TMPDIR/pr12.diff"
   delta gets the delta only, with the earlier findings carried forward as context. Verify each finding against
   the code before relaying it. On a delta, walk your earlier findings: fixed / partly / untouched, and name the
   test that would catch each fix regressing.
+- **Read the verdict's coverage line** (`Coverage: N/M files read in full · lenses: <fired lenses> · tests:
+  …`, WP-175). `N < M` is partial coverage — carry it into §3 and §4 below.
 - **Re-run `$W gate` immediately before posting.** Approve only on `green`.
 
 ## 3. The verdict
@@ -138,18 +140,26 @@ $W diff 12 "$S" --sha <reported sha> > "$TMPDIR/pr12.diff"
 | Failing required check, P0/P1, must-fix P2 | `--request-changes` |
 | A question only the author can answer that changes what should merge | `--request-changes` as a **hold** — say it is for clarification, not a defect, and that you will approve on the answer |
 | No body / branch-name title | `--request-changes`, the only blocker; say what you verified anyway |
-| Nothing outstanding, gate green, distinct identity | `--approve` (observations ride along; they need no reply) |
+| Partial coverage (coverage line's `N < M`) | `gh pr comment` — never an approval (below) |
+| Nothing outstanding, gate green, full coverage, distinct identity | `--approve` (observations ride along; they need no reply) |
 | Same identity as the author, degraded, or gate not green | `gh pr comment` saying what the verdict would be and what it waits on |
 
 **Never approve with a question.** An approval means nothing outstanding; asking belongs in a hold, telling
 rides in an approval. A later blocker on a PR you approved → amend to `--request-changes`, saying it supersedes.
 Tag every body's first line with `reviewed by session S` — one identity, several sessions.
 
+**Never approve on partial coverage.** `wt-review`'s coverage line is the gate: a file left `skimmed`/
+`skipped`, an effort-floor miss it could not clear by re-dispatching, or a triggered lens that never ran means
+the diff was not actually read, whatever the findings so far say. Post `gh pr comment` naming exactly what's
+uncovered (from the coverage line) instead of `--approve` or `--request-changes` — it is neither a defect nor
+a question, so it is not a hold either. Re-review the same head once more before merge is plausible; if the
+author merges anyway, §5 below picks it up.
+
 ## 4. Record, only what actually posted
 
 ```bash
 $W gh pr review 12 --request-changes --body-file "$TMPDIR/r12.md" \
-  && $W record 12 <full 40-char head sha> changes-requested - "$S" < "$TMPDIR/note12.txt"
+  && $W record 12 <full 40-char head sha> changes-requested - "$S" --coverage full < "$TMPDIR/note12.txt"
 $W release 12 "$S"
 ```
 
@@ -159,13 +169,23 @@ $W release 12 "$S"
 - The note says what CI said (job, conclusion, SHA) and, on a delta, what was carried from which SHA.
 - `changes-requested` puts the PR in the dashboard Inbox as **Held PR** and in your reply watcher; recording
   any other state clears both.
+- **`--coverage full|partial`** (WP-176), from the review's coverage line (`N == M` vs `N < M`). Always pass
+  it — §5 reads it on merge to decide whether the merged diff needs a full re-review.
 
 ## 5. Other events
 
 - **Reply on a held PR** — verify the answer against the code (an answer is a claim), then approve superseding
   the hold, or hold again naming only what is still open, and `record`.
-- **NO LONGER OPEN** — `record` it `merged`/`closed` and delete `refs/review/S/pr-N-head`
-  and `refs/review/S/pr-N-base` (`git update-ref -d`). **Merged while you held a blocker → say so loudly, immediately.**
+- **NO LONGER OPEN** — before recording, check `reviewed[N].coverage` in `state.json`. **Merged with
+  `partial`** (WP-176): it shipped on a review that never actually covered it, so treat the merge itself as a
+  fresh review target — diff the merged commit against its parent (`git show --format= <merge sha>`, or `$W
+  diff`'s base/head refs before they're deleted) and run it through `wt-review` in diff mode as a full review
+  (a merged commit has no "delta from last round" to size against). File a ticket per finding (`wt-ticket new`
+  on this board, or the repo's own tracker via the orchestrator if it has one) tagged with the PR number, and
+  say so loudly wherever a held-blocker merge would be said (room post / reply to whoever dispatched you) — a
+  partial-coverage merge is exactly as serious as a merge past a held blocker. A merge recorded `full` needs
+  none of this. Either way, `record` it `merged`/`closed` and delete `refs/review/S/pr-N-head` and
+  `refs/review/S/pr-N-base` (`git update-ref -d`). **Merged while you held a blocker → say so loudly, immediately.**
 - **Negative results need a live probe**: a grep that finds nothing proves nothing until the pattern matches
   something you know is there; a ref must equal the reported head before you trust a file read from it.
 
