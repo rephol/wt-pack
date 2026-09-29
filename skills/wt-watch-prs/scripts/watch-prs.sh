@@ -7,8 +7,9 @@
 #   poll-shas [--once]               "PR #n — new commits <sha> — …" / "PR #n — NO LONGER OPEN — …", every 60s
 #   poll-replies --session S [--once]  human replies on holds this session placed, every 90s
 #   claim N S | release N S          atomic per-PR claim (mkdir)
-#   record N <sha40> <state> <outcome|-> S [--by NAME]   write reviewed[N] under the state lock (- = outcome
-#                                    from stdin); --by remembers the reviewer agent for re-dispatch (WP-121)
+#   record N <sha40> <state> <outcome|-> S [--by NAME] [--coverage full|partial]   write reviewed[N] under the
+#                                    state lock (- = outcome from stdin); --by remembers the reviewer agent for
+#                                    re-dispatch (WP-121); --coverage flags a thin review for merge-time re-review (WP-176)
 #   mode [dispatch|review|owner/repo]  dispatch | review | standalone (no arg: the pane's role token)
 #   dispatch N --sha <40> --session D  claim under D, hand the head to a pool reviewer (never reads a diff);
 #                                    exit 1 held or handoff failed, exit 3 queued at maxReviewers
@@ -103,18 +104,25 @@ claim|release)
   echo "held by ${o:-UNKNOWN (empty owner — suspect a dead session)} since $(sed -n 2p "$C/owner" 2>/dev/null)"; exit 1
   ;;
 record)
-  by=""; [ $# -eq 7 ] && [ "$6" = --by ] && { by=$7; set -- "$1" "$2" "$3" "$4" "$5"; }
-  [ $# -eq 5 ] || die "usage: record N <sha40> <state> <outcome|-> S [--by NAME]"
-  num "$1"; sess "$5"; setup
+  [ $# -ge 5 ] || die "usage: record N <sha40> <state> <outcome|-> S [--by NAME] [--coverage full|partial]"
+  n=$1; shaval=$2; st=$3; note=$4; s=$5; shift 5
+  by=""; cov=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --by|--coverage) [ $# -ge 2 ] || die "usage: record N <sha40> <state> <outcome|-> S [--by NAME] [--coverage full|partial]"
+      [ "$1" = --by ] && by=$2 || cov=$2; shift 2;;
+    *) die "usage: record N <sha40> <state> <outcome|-> S [--by NAME] [--coverage full|partial]";;
+  esac; done
+  num "$n"; sess "$s"; setup
   [ -z "$by" ] || printf '%s' "$by" | grep -qE '^[a-z0-9_-]{1,32}$' || die "bad --by agent name: $by"
-  printf '%s' "$2" | grep -qE '^[0-9a-f]{40}$' || die "record needs the full 40-char head SHA (gh pr view $1 --json headRefOid)"
-  case "$3" in approved|changes-requested|commented|merged|closed|open) ;; *) die "bad state: $3";; esac
-  note=$4; [ "$note" = - ] && note=$(cat)
+  [ -z "$cov" ] || case "$cov" in full|partial) ;; *) die "bad --coverage: $cov";; esac
+  printf '%s' "$shaval" | grep -qE '^[0-9a-f]{40}$' || die "record needs the full 40-char head SHA (gh pr view $n --json headRefOid)"
+  case "$st" in approved|changes-requested|commented|merged|closed|open) ;; *) die "bad state: $st";; esac
+  [ "$note" = - ] && note=$(cat)
   L="$SD/state.lock"; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir "$L" 2>/dev/null && break; sleep 1; done
   [ -d "$L" ] || die "state lock held (stale? check $L mtime and remove by hand)"
   trap 'rmdir "$L" 2>/dev/null' EXIT
-  jq --arg n "$1" --arg sha "$2" --arg st "$3" --arg note "$note" --arg s "$5" --arg by "$by" \
-    '.reviewed[$n] = ({sha: $sha, state: $st, outcome: $note, reviewer_session: $s} + (if $by == "" then {} else {reviewer: $by} end))' "$STATE" > "$STATE.tmp" \
+  jq --arg n "$n" --arg sha "$shaval" --arg st "$st" --arg note "$note" --arg s "$s" --arg by "$by" --arg cov "$cov" \
+    '.reviewed[$n] = ({sha: $sha, state: $st, outcome: $note, reviewer_session: $s} + (if $by == "" then {} else {reviewer: $by} end) + (if $cov == "" then {} else {coverage: $cov} end))' "$STATE" > "$STATE.tmp" \
     && mv "$STATE.tmp" "$STATE"
   ;;
 gate)

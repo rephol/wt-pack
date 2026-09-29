@@ -283,4 +283,25 @@ test('WP-121 record --by stores the reviewer; a bad name is refused', () => {
   assert.equal(run(['record', '12', sha('a'), 'approved', 'x', 'sess-d']).status, 0) // old callers unchanged
 })
 
+test('WP-176 record --coverage stores full/partial, rejects garbage, works with --by in either order', () => {
+  reset()
+  let r = run(['record', '12', sha('a'), 'changes-requested', 'x', 'sess-d', '--coverage', 'partial'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).reviewed[12].coverage, 'partial')
+  r = run(['record', '12', sha('a'), 'approved', 'x', 'sess-d', '--coverage', 'bogus'])
+  assert.equal(r.status, 1); assert.match(r.stderr, /bad --coverage/)
+  r = run(['record', '13', sha('b'), 'approved', 'x', 'sess-d', '--coverage', 'full', '--by', 'demo-reviewer-01'])
+  assert.equal(r.status, 0, r.stderr)
+  let e = JSON.parse(readFileSync(stateFile, 'utf8')).reviewed[13]
+  assert.equal(e.coverage, 'full'); assert.equal(e.reviewer, 'demo-reviewer-01')
+  r = run(['record', '14', sha('c'), 'approved', 'x', 'sess-d', '--by', 'demo-reviewer-01', '--coverage', 'full'])
+  assert.equal(r.status, 0, r.stderr)
+  e = JSON.parse(readFileSync(stateFile, 'utf8')).reviewed[14]
+  assert.equal(e.coverage, 'full'); assert.equal(e.reviewer, 'demo-reviewer-01')
+  assert.equal(run(['record', '15', sha('d'), 'approved', 'x', 'sess-d']).status, 0) // no options still works
+  assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).reviewed[15].coverage, undefined)
+  r = run(['record', '16', sha('e'), 'approved', 'x', 'sess-d', '--coverage']) // dangling flag: must not hang
+  assert.equal(r.status, 1); assert.match(r.stderr, /usage: record/)
+})
+
 test.after(() => { assert.ok(!existsSync(join(tmp, 'home', '.claude'))); rmSync(tmp, { recursive: true, force: true }) })
