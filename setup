@@ -232,12 +232,26 @@ doctor() {
   if has security && security find-generic-password -s wt-dashboard -a LINEAR_API_KEY >/dev/null 2>&1; then ok "Linear key (optional)"
   else opt "Linear key not set (optional: dashboard Settings › Integrations)"; fi
   # WP-136: a stale ~/.claude/.env key is used ahead of a rotated Keychain one nowhere any more (typesafe.mjs
-  # checks env, then Keychain, then the .env file), but a mismatch still means one of the two is stale.
+  # checks env, then Keychain, then the .env file). WP-171: that ordering only stopped the wrong source from
+  # *winning* — it never stopped the file copy existing at all, so every reader kept resolving the Keychain
+  # value correctly while doctor just re-warned about the same drift forever. The Keychain value is already
+  # what every reader prefers (config.mjs's own setSecret() already leaves no plaintext copy once one lands in
+  # the Keychain), so a differing file copy is pure dead weight — drop it rather than merely reporting it, so
+  # a future Keychain outage/deletion can't silently fall through to a value nobody meant to keep using.
   if has security; then
     envkey=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=//p' "$HOME/.claude/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'')
     keykey=$(security find-generic-password -s wt-dashboard -a TYPESAFE_API_KEY -w 2>/dev/null)
     if [ -n "$envkey" ] && [ -n "$keykey" ] && [ "$envkey" != "$keykey" ]; then
-      opt "TypeSafe key mismatch: ~/.claude/.env and the wt-dashboard Keychain entry hold different values — rotate whichever is stale"
+      # grep -v exits 1 (not an error) when every line is filtered out, e.g. this was the file's only line —
+      # gate on mv/chmod succeeding, not on grep's exit status.
+      tmp="$HOME/.claude/.env.tmp.$$"
+      grep -v '^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=' "$HOME/.claude/.env" > "$tmp" 2>/dev/null
+      if mv "$tmp" "$HOME/.claude/.env" && chmod 600 "$HOME/.claude/.env"; then
+        opt "TypeSafe key: removed the stale ~/.claude/.env copy — the Keychain entry is kept (already what every reader prefers)"
+      else
+        rm -f "$tmp"
+        opt "TypeSafe key mismatch: ~/.claude/.env and the wt-dashboard Keychain entry hold different values — rotate whichever is stale"
+      fi
     fi
   fi
   has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
@@ -357,10 +371,22 @@ svc() {
 secrets_step() {
   step "optional keys"
   env="$HOME/.claude/.env"
-  if [ -n "${TYPESAFE_API_KEY:-}" ] || grep -qs 'TYPESAFE_API_KEY=' "$env"; then ok "already: TypeSafe key"
+  # WP-171: this used to check the env file only, so a machine with the key already in the Keychain (set via
+  # the dashboard's own Settings, which prefers it) would prompt again here and write a SECOND copy into the
+  # file — the two can then drift and one starts 401ing once it goes stale. Check both; write a new key to the
+  # Keychain first (same medium the dashboard itself prefers), the file only when the Keychain isn't available.
+  haskeychain=0
+  if has security && security find-generic-password -s wt-dashboard -a TYPESAFE_API_KEY >/dev/null 2>&1; then haskeychain=1; fi
+  if [ -n "${TYPESAFE_API_KEY:-}" ] || [ "$haskeychain" -eq 1 ] || grep -qs 'TYPESAFE_API_KEY=' "$env"; then ok "already: TypeSafe key"
   elif [ -t 0 ]; then
     printf '  TypeSafe API key (optional, Enter to skip): '; stty -echo 2>/dev/null; read -r k; stty echo 2>/dev/null; echo
-    if [ -n "$k" ]; then mkdir -p "$HOME/.claude"; touch "$env"; chmod 600 "$env"; [ -z "$(tail -c1 "$env")" ] || echo >> "$env"; printf 'TYPESAFE_API_KEY=%s\n' "$k" >> "$env"; ok "TypeSafe key saved to $env"; else opt "TypeSafe key skipped"; fi
+    if [ -n "$k" ]; then
+      if has security && printf 'add-generic-password -s wt-dashboard -a TYPESAFE_API_KEY -w "%s" -U\n' "$k" | security -i >/dev/null 2>&1; then
+        ok "TypeSafe key saved to the Keychain"
+      else
+        mkdir -p "$HOME/.claude"; touch "$env"; chmod 600 "$env"; [ -z "$(tail -c1 "$env")" ] || echo >> "$env"; printf 'TYPESAFE_API_KEY=%s\n' "$k" >> "$env"; ok "TypeSafe key saved to $env"
+      fi
+    else opt "TypeSafe key skipped"; fi
   else opt "TypeSafe key: run ./setup secrets in a terminal"; fi
   opt "Linear key: dashboard Settings › Integrations (stored in the Keychain)"
 }
