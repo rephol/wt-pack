@@ -126,7 +126,7 @@ Read the target and compute the risk vector. Each trigger adds a lens; nothing e
 | touches auth, credentials, safety, secrets, or user data | security | `references/agents/security-lens.md` |
 | migration, schema or data-shape change; a backfill | data | `references/agents/data-lens.md` |
 | large, or it has a deferred section / unfinished work | scope | `references/agents/scope-lens.md` |
-| greenfield, or no validated upstream requirements | adversarial | `references/agents/adversarial-lens.md` |
+| plan: greenfield, or no validated upstream requirements. diff: ≥50 changed code lines; touches persistence, retries, concurrency or an external call; or the change itself is a guard, a test, or a CI gate | adversarial | `references/agents/adversarial-lens.md` |
 
 The two mandatory pairs are counterparts, not different jobs: coherence asks whether the plan agrees with
 itself and correctness whether the code does what it says; feasibility asks whether a step can be performed
@@ -208,12 +208,16 @@ exists so the sizing is repeatable rather than a mood.
 
 Each brief carries the target (they read it themselves — do not paste it), the findings table, the
 `[unsourced]` list or the plan path, their disjoint surface where one applies — in diff mode with more than
-one agent, an explicit file list (§ Per-file coverage) rather than "the diff" — and one instruction that
-shapes everything:
+one agent, an explicit file list (§ Per-file coverage) rather than "the diff" — `references/reviewer-contract.md`
+(every reviewer follows it: confidence, evidence, `suggested_fix`, the false-positive list, intent mismatch,
+the tool budget, `residual_risks`/`testing_gaps`), and one instruction that shapes everything:
 
-> Research has already run. Findings are measured, not remembered. **Do not re-derive the codebase.** Verify
-> the `[unsourced]` claims, check the reasoning, and challenge a cited finding only if you have reason to
-> think the evidence does not say what the target says it says.
+> Research has already run — its findings table is measured, not remembered. **Do not re-derive the
+> research:** verify the `[unsourced]` claims, check the reasoning, and challenge a cited finding only if you
+> have reason to think the evidence does not say what the target says it says. This scopes to the *research*,
+> never to the code. In diff mode, read the actual files you are assigned, trace a suspicious call to its
+> callers, and read whole functions rather than the hunk alone — a hunk shows what changed, not what the
+> function now does.
 
 And one prohibition:
 
@@ -236,7 +240,9 @@ the moment its question is answered.
 ### Every reviewer writes JSON, not prose
 
 **Tell each agent to append its findings to `<scratchpad>/findings/<lens>.json`** and to return only a short
-summary in its reply. One array, one object per finding:
+summary in its reply — plus its `residual_risks` and `testing_gaps` arrays (`references/reviewer-contract.md`;
+empty arrays are a legitimate, common reply, state them rather than omit the keys). One array, one object per
+finding:
 
 ```json
 [{ "lens": "correctness",
@@ -245,13 +251,20 @@ summary in its reply. One array, one object per finding:
    "file": "src/auth/otp-autofill.ts",
    "line": 78,
    "related": ["src/auth/__tests__/otp-autofill.test.tsx"],
-   "severity": "high" }]
+   "severity": "high",
+   "confidence": 75,
+   "evidence": "line 78: `await handshake()` has no timeout or AbortController wrapping it",
+   "suggested_fix": "wrap the call in Promise.race with a timeout, or pass an AbortSignal it can honour" }]
 ```
 
 `file` and `line` are **the location the finding is about** — in plan mode that is usually the plan itself
 (`docs/plans/….md`, and the line in it), in diff mode a source file. `related` names the paths where a
 *refutation* would live: the test that pins the string, the caller, the doc that contradicts it. A finding
-with no `related` is the one most likely to come back unverifiable.
+with no `related` is the one most likely to come back unverifiable. `confidence`, `evidence` and
+`suggested_fix` are required on every finding, every lens, both modes — `references/reviewer-contract.md`
+defines them (the confidence scale, what counts as evidence, why a fix idea is owed). A finding under 50
+confidence does not belong in this file at all; it is a lead for the reviewer to verify or drop before
+returning.
 
 This is the difference between the judgments being used and not. A panel that returns prose leaves the caller
 to retype eighteen findings into an array before `dedupe` or `verify` will run, so it reads them by hand
@@ -334,10 +347,33 @@ plan as written, exactly like one citing a source file. The reviewers already wr
 `related`, so this is a pipe, not a transcription job. A finding whose answer lives in a file nobody supplied
 comes back unverifiable, correctly.
 
-**Exit 3 means no key: verify by reading. The contract is unchanged** — the tool is the fast path to it, never
-the reason for it. And the tool is a filter on findings you already have, never a substitute for finding them:
-on that same run it confirmed at 60% a finding a pinning test refutes, with the test in front of it. Read the
-number.
+**Exit 3 means no key: verify by reading, through the independent validator below** — the contract is
+unchanged, the tool is the fast path to it, never the reason for it. And the tool is a filter on findings you
+already have, never a substitute for finding them: on that same run it confirmed at 60% a finding a pinning
+test refutes, with the test in front of it. Read the number.
+
+## Independent validation for high and medium findings
+
+**One fresh agent — no history in this review, not the one that ran or dedup'd it — re-checks every merged
+`high` and `medium` finding before it is returned.** The reviewer that found it is not the one who gets to
+confirm it stands; that is the same conflict a `settled:`-label check exists to prevent elsewhere in this
+skill, applied to the review's own output instead of the target's.
+
+This is the default path when `wt-judge.mjs verify` exits 3 (no key) — the caller does not self-verify by
+reading its own dispatched findings, which is exactly the confirmation bias a second, fresh agent removes.
+When a key is present, `wt-judge.mjs verify` still runs first (it is cheaper and catches the easy cases); the
+independent agent then re-checks whatever it left `confirmed` at `high`/`medium`, not the ones it already
+refuted.
+
+The validator gets the finding (title, detail, `file`, `line`, `evidence`, `related`) and nothing else from
+the review that produced it — no other lens's findings, no summary, no hint at the verdict. It opens the cited
+file itself and decides `confirmed`, `refuted`, or `unverifiable`, the same three states as above.
+
+**To reject (`refuted`) a finding that describes a security hole or data loss — from any lens, not only the
+`security` lens itself — the validator must cite the specific `file:line` that contradicts it.** "Looks fine"
+or "seems unlikely" is not a rejection — an unresolved doubt about a security or data-loss finding stays
+`confirmed` or moves to `unverifiable`, never silently drops to refuted on a validator's unsupported hunch.
+Every other finding may be refuted on the validator's read of the file without this extra bar.
 
 Findings ranked most-severe first. Each one: what is wrong, the concrete failure it produces, where, and its
 verification state.
