@@ -93,9 +93,14 @@ $W identity           # "<login> <source>" — the account reviews post as
   `poll-shas` and `poll-replies` keep their own progress in `state.json` under
   `~/.local/share/wt-watch-prs/<owner>-<repo>/` (durable across process restarts — `seen()` reads
   `.reviewed[n].sha` from it), so a re-armed process picks up where the expired one left off; nothing already
-  reviewed re-fires, and the short in-process de-dup windows each script keeps (the last-15-minutes reply
-  cursor, the vanished-PR comparison set) only reset to a slightly wider, overlapping window on restart —
-  at most a redundant notice right at the boundary, never a missed one.
+  reviewed re-fires, and `poll-replies`' in-process reply cursor only resets to a slightly wider, overlapping
+  window on restart — at most a redundant notice, never a missed one. **`poll-shas`' vanished-PR comparison is
+  the one gap this doesn't cover**: its baseline is a fresh, empty in-process file on every restart, so a PR
+  that merges or closes in the gap between the old process dying and the new one's first poll can be silently
+  dropped from the `NO LONGER OPEN` notice — including the §5 partial-coverage re-review it would otherwise
+  trigger. This is a pre-existing property of `watch-prs.sh`, not introduced here, but a 30-minute re-arm cycle
+  makes the gap a routine, expected event instead of a rare crash-restart — track it as its own fix (WP-187's
+  scope, or a dedicated ticket), not something to work around by hand in this loop.
 - **One Monitor exhausted, the other armed → keep going, degraded.** Report the failed one as DEGRADED
   (alongside the identity DEGRADED lines) rather than tearing down a Monitor that is working — losing
   `poll-replies` still leaves new-head detection running, which is most of the loop's value. Keep retrying the
