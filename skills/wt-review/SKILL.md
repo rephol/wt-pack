@@ -127,6 +127,13 @@ Read the target and compute the risk vector. Each trigger adds a lens; nothing e
 | migration, schema or data-shape change; a backfill | data | `references/agents/data-lens.md` |
 | large, or it has a deferred section / unfinished work | scope | `references/agents/scope-lens.md` |
 | plan: greenfield, or no validated upstream requirements. diff: ≥50 changed code lines; touches persistence, retries, concurrency or an external call; or the change itself is a guard, a test, or a CI gate | adversarial | `references/agents/adversarial-lens.md` |
+| the target changes SKILL.md prose, a prompt, handoff/wt-message text, or MCP tool descriptions | agent-native | `references/agents/agent-native-lens.md` |
+| touches timeouts, retries, launchd plists, child processes, kill paths, or a `Monitor` driving a long-running loop | reliability | `references/agents/reliability-lens.md` |
+| touches a polling interval, a render loop, work done per tick, or an unbounded read | performance | `references/agents/performance-lens.md` |
+
+Reliability and adversarial overlap on "retries an external call" by design — reliability looks for a defect
+in the retry itself, adversarial attacks whether the call can be broken at all. Both firing on the same
+target is expected, not a sizing bug.
 
 The two mandatory pairs are counterparts, not different jobs: coherence asks whether the plan agrees with
 itself and correctness whether the code does what it says; feasibility asks whether a step can be performed
@@ -138,36 +145,42 @@ guard that cannot fail just as easily as code can — earlier, and more cheaply.
 **Learnings is the read side of `wt-compound`.** A store nothing consults on the way in does not compound, it
 accumulates. Where a repo has one, this lens is what makes every earlier entry pay.
 
-**Floor 1 agent. Ceiling 3.** No trigger fires → one agent carrying the mandatory pair. Everything fires →
-three agents with lenses bundled, never nine.
+**Floor 1 agent. Ceiling 3 at ≤200 changed lines, 5 for a per-lens diff review past that (see next section).**
+No trigger fires → one agent carrying the mandatory pair. Everything fires, ≤200 lines → three agents with
+lenses bundled, never nine.
 
 Bundle by reading surface:
 
 | Agent | Lenses | What it reads |
 |---|---|---|
-| 1 | mandatory pair + standards | the target against the code and the repo's own rules |
+| 1 | mandatory pair + standards + agent-native | the target against the code and the repo's own rules |
 | 2 | testing + learnings | the guards, and what the repo already knows |
-| 3 | security · data · scope · adversarial | the risk surface and the target's own premise |
+| 3 | security · data · scope · adversarial · reliability · performance | the risk surface and the target's own premise |
 
 Collapse upward when few triggers fire — two lenses do not need two agents. Never split a bundle to give a
 lens its own agent.
 
 ## Size by diff, not just by lens (diff mode)
 
-The lens table decides *what* each agent looks for; diff size decides *how much of the diff* it can
-actually cover, and this floor is never lowered by a quiet lens set — a 23-file diff that only trips one
-lens still gets split for coverage. Read the changed-line count (`git diff <base>...HEAD --shortstat`, or
-`--numstat` summed) and the changed-file list (`git diff <base>...HEAD --name-only`) before assigning agents:
+The lens table decides *what* each agent looks for; diff size decides *how the fired lenses are split across
+agents*. Read the changed-line count (`git diff <base>...HEAD --shortstat`, or `--numstat` summed) before
+assigning agents:
 
-- **≤ 200 changed lines** — the lens-bundle agent count above stands; each agent reads the whole diff.
-- **200–800** — at least 2 agents (3 if the lens table already asked for 3), each given an explicit, disjoint
-  slice of `git diff --name-only` to read in full — not "skim the diff." Bundle lenses onto those agents
-  exactly as the table above groups them.
-- **> 800** — 3 agents, every path in `git diff --name-only` assigned to exactly one of them. No file goes
-  unassigned, and no agent gets "the rest" without an explicit list.
+- **≤ 200 changed lines** — the lens-bundle agent count and table above stand: bundle by reading surface,
+  floor 1, ceiling 3, each agent reads the whole diff.
+- **> 200 changed lines** — **one agent per fired lens**, capped at **5**. Each of those agents reads **every**
+  changed file in full — the lens is its filter, not a slice of the file list — so give each agent the
+  complete `git diff --name-only` list, not a disjoint subset. This replaces file-slicing: past 200 lines, the
+  split is by lens, not by file.
+  - When more than 5 lenses fire, bundle the extras using the existing 3-row bundle table's groupings above,
+    merging the smallest bundles first (the pair that combines into the fewest total lenses), until exactly 5
+    agents remain.
+  - `[unsourced]`: whether a per-lens agent can read a diff past ~800 lines in full within its ~40-call tool
+    budget. The effort floor and per-file coverage rows below surface it when an agent runs thin — report a
+    thin pass as partial coverage rather than assuming the read happened.
 
-Diff size can raise the agent count past what lenses alone would spawn; it never lowers it. The **ceiling
-stays 3** either way — a bigger diff means fewer files per agent, never a fourth agent.
+Diff size never lowers the lens-bundle count from the ≤200 table; past 200 lines it can only raise the agent
+count, up to the 5-agent ceiling.
 
 ## Per-file coverage, checked against the diff
 
