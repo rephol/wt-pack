@@ -133,6 +133,17 @@ test('poll-shas: NO LONGER OPEN only for a verified merge; an empty poll is not 
   assert.equal(out.trim(), 'PR #8 — NO LONGER OPEN — MERGED — dev: pr 8')
 })
 
+test('WP-188: restart seeds the vanished-PR baseline from state.json instead of starting empty', () => {
+  // #20 was reviewed and never recorded merged/closed (still "open" as far as state.json knows) but is gone
+  // from the very first poll after a restart — the old empty-baseline would silently miss it forever.
+  reset({ reviewed: { 20: { sha: sha('2') }, 21: { sha: sha('1') }, 22: { sha: sha('3'), state: 'merged' } } })
+  fixture('list.json', [pr(21, sha('1'))]) // #20 gone; #22 already recorded terminal, rightly not re-checked
+  fixture('view-20.json', { state: 'MERGED', title: 'pr 20', author: { login: 'dev' } })
+  const out = run(['poll-shas', '--once']).stdout
+  assert.equal(out.trim(), 'PR #20 — NO LONGER OPEN — MERGED — dev: pr 20')
+  assert.doesNotMatch(readFileSync(join(fx, 'calls'), 'utf8'), /view-22|view 22/) // never even asked about #22
+})
+
 test('claim: second claim loses; release frees it', () => {
   reset()
   assert.equal(run(['claim', '11', 'sess-a']).stdout.trim(), 'claimed')

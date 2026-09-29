@@ -217,7 +217,11 @@ dispatch)
 poll-shas)
   [ "${1:-}" = --once ] && WATCH_PRS_POLLS=1
   setup; polls=${WATCH_PRS_POLLS:-0}; TTL=${WATCH_PRS_TTL:-900}
-  T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; : > "$T/fired"; : > "$T/prev"
+  T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; : > "$T/fired"
+  # WP-188: seed the vanished-PR baseline from $STATE instead of starting empty, so a PR that merges/closes in
+  # the gap between a dying process and its restart (routine since WP-186's 30-min re-arm) is still caught on
+  # the very first poll — every PR this repo has ever reviewed and not yet recorded merged/closed is "was open".
+  jq -r '.reviewed | to_entries[] | select(.value.state != "merged" and .value.state != "closed") | .key' "$STATE" 2>/dev/null | sort -u > "$T/prev"
   seen() { # exact, or a stored short SHA that prefixes the head (else a short record re-fires forever)
     local s; s=$(jq -r --arg n "$1" '.reviewed[$n].sha // ""' "$STATE" 2>/dev/null)
     [ -n "$s" ] || return 1; [ "$2" = "$s" ] && return 0
