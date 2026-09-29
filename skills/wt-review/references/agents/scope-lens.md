@@ -1,6 +1,6 @@
 # Scope lens
 
-Triggered when the target is large, or has a deferred section.
+Triggered when the target is large, or it has a deferred section / unfinished work.
 
 ## Look for
 
