@@ -2,7 +2,8 @@
 # wt-pack setup: one command from a fresh clone to a working pack.
 #
 #   ./setup [install] [--yes] [--no-secrets] [--no-service]   # idempotent; ends with doctor
-#   ./setup doctor [--no-service]                             # one line per need; exit 1 if a required one fails
+#   ./setup doctor [--no-service] [--fix]                     # one line per need; exit 1 if a required one fails
+#                                                              # --fix: apply doctor's own safe repairs (below)
 #   ./setup secrets                                           # optional keys (TypeSafe; Linear via the dashboard)
 #   ./setup uninstall [--purge] [--yes]                       # links, plugin, service; keeps data unless --purge
 #
@@ -20,7 +21,7 @@ PLIST="$HOME/Library/LaunchAgents/id.local.wtdashboard.server.plist"
 PORT=${PORT:-7777}
 OS=$(uname -s)
 
-cmd=install; yes=0; secrets=1; service=1; purge=0
+cmd=install; yes=0; secrets=1; service=1; purge=0; fix=0
 for a in "$@"; do
   case "$a" in
     install|doctor|uninstall|secrets) cmd=$a ;;
@@ -28,7 +29,8 @@ for a in "$@"; do
     --no-secrets) secrets=0 ;;
     --no-service) service=0 ;;
     --purge) purge=1 ;;
-    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --fix) fix=1 ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "setup: unknown argument: $a (see ./setup --help)" >&2; exit 2 ;;
   esac
 done
@@ -232,25 +234,34 @@ doctor() {
   if has security && security find-generic-password -s wt-dashboard -a LINEAR_API_KEY >/dev/null 2>&1; then ok "Linear key (optional)"
   else opt "Linear key not set (optional: dashboard Settings › Integrations)"; fi
   # WP-136: a stale ~/.claude/.env key is used ahead of a rotated Keychain one nowhere any more (typesafe.mjs
-  # checks env, then Keychain, then the .env file). WP-171: that ordering only stopped the wrong source from
-  # *winning* — it never stopped the file copy existing at all, so every reader kept resolving the Keychain
-  # value correctly while doctor just re-warned about the same drift forever. The Keychain value is already
-  # what every reader prefers (config.mjs's own setSecret() already leaves no plaintext copy once one lands in
-  # the Keychain), so a differing file copy is pure dead weight — drop it rather than merely reporting it, so
-  # a future Keychain outage/deletion can't silently fall through to a value nobody meant to keep using.
+  # checks env, then Keychain, then the .env file). WP-171 then had doctor remove the file copy on sight
+  # whenever it disagreed with the Keychain — but doctor is a health check, run unattended and often, and the
+  # file copy could be the NEWER key (someone rotated it there and hasn't gotten to the Keychain yet); doctor
+  # has no way to tell which side is actually stale. WP-180: report-only by default, same as every other check
+  # here. `--fix` performs the same removal WP-171 did, but backs the file up first (0600, timestamped, never
+  # touched again by doctor) and names what it removed, never the value.
   if has security; then
     envkey=$(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=//p' "$HOME/.claude/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'')
     keykey=$(security find-generic-password -s wt-dashboard -a TYPESAFE_API_KEY -w 2>/dev/null)
     if [ -n "$envkey" ] && [ -n "$keykey" ] && [ "$envkey" != "$keykey" ]; then
-      # grep -v exits 1 (not an error) when every line is filtered out, e.g. this was the file's only line —
-      # gate on mv/chmod succeeding, not on grep's exit status.
-      tmp="$HOME/.claude/.env.tmp.$$"
-      grep -v '^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=' "$HOME/.claude/.env" > "$tmp" 2>/dev/null
-      if mv "$tmp" "$HOME/.claude/.env" && chmod 600 "$HOME/.claude/.env"; then
-        opt "TypeSafe key: removed the stale ~/.claude/.env copy — the Keychain entry is kept (already what every reader prefers)"
+      if [ "$fix" -eq 1 ]; then
+        bak="$HOME/.claude/.env.bak-$(date +%Y%m%d%H%M%S)"
+        if cp -p "$HOME/.claude/.env" "$bak" && chmod 600 "$bak"; then
+          # grep -v exits 1 (not an error) when every line is filtered out, e.g. this was the file's only
+          # line — gate on mv/chmod succeeding, not on grep's exit status.
+          tmp="$HOME/.claude/.env.tmp.$$"
+          grep -v '^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}TYPESAFE_API_KEY=' "$HOME/.claude/.env" > "$tmp" 2>/dev/null
+          if mv "$tmp" "$HOME/.claude/.env" && chmod 600 "$HOME/.claude/.env"; then
+            opt "TypeSafe key: removed the TYPESAFE_API_KEY line from ~/.claude/.env (backed up to $bak) — the Keychain entry is kept"
+          else
+            rm -f "$tmp"
+            opt "TypeSafe key mismatch: --fix couldn't rewrite ~/.claude/.env (backup at $bak) — rotate whichever copy is stale by hand"
+          fi
+        else
+          opt "TypeSafe key mismatch: --fix couldn't back up ~/.claude/.env, left both copies alone — rotate whichever is stale by hand"
+        fi
       else
-        rm -f "$tmp"
-        opt "TypeSafe key mismatch: ~/.claude/.env and the wt-dashboard Keychain entry hold different values — rotate whichever is stale"
+        opt "TypeSafe key mismatch: ~/.claude/.env and the wt-dashboard Keychain entry hold different values — ./setup doctor --fix removes the file copy (backed up first), or rotate whichever is stale by hand"
       fi
     fi
   fi
