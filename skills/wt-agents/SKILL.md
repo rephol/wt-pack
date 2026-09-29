@@ -19,15 +19,31 @@ Manages the two agent pools — `<repo>-workers` and `<repo>-planners` — each 
 on demand.
 
 ```bash
-scripts/agents.sh list [role] [--json]    # name, pane, status, cwd (--json: + pane tokens)
+scripts/agents.sh list [role] [--json]    # name, pane, status, cwd, dnd (+until), pair
+                                           # (--json: + raw pane tokens, plus dnd:{on,until} and pair)
 scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
 scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
 scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
 scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default
+scripts/agents.sh dnd <name|pane>              # print current dnd state (on/off, until-when if it expires)
+scripts/agents.sh dnd <name|pane> on [--for 2h]  # set dnd; --for writes an expiry, omitted never auto-clears
+scripts/agents.sh dnd <name|pane> off          # clear dnd
 scripts/agents.sh rm <name|pane> [--force]
 scripts/agents.sh respawn <name|pane> [--force]  # same name/role/cwd/tokens, claude --resume, in a NEW tab
 scripts/agents.sh respawn --stale [--force]      # every pool agent lacking the kill shim or plugin guard
 ```
+
+## DND and pairing
+
+Both are herdr pane tokens, both shown by `list`: **dnd** (do-not-disturb) and **pair** (a ticket id, set by
+`wt-handoff`'s `--buddy`). `dnd on --for <Nh|Nm|Nd|Ns>` writes an expiry in the same format the dashboard's own
+DND toggle uses, so either side's auto-off (a project's `dndAutoOffHours`) clears it; `dnd on` with no `--for`
+never auto-clears. `dnd <name|pane>` with no on/off just reports the current state.
+
+**A DND or paired agent is invisible to every free-agent pick** — `wt-handoff`'s `candidates()`, the
+dashboard's idle-retirement sweep, and routine agent-picks all skip it, so it neither gets handed new work nor
+gets reaped while idle. To target one anyway, address it explicitly with `--pane <id>` (`wt-handoff`'s
+`--pane` flag): an explicit target bypasses the skip, with a warning if it is DND.
 
 `respawn` exists because the pkill/pgrep/killall shims are pane env, set only when the tab is created, and
 plugin hooks load only at session start (WP-120). A same-pane restart gets the guard but not the shims.
