@@ -50,6 +50,15 @@ re-processes a growing context — so these two rules outrank any prose below th
 The mode swaps only the two mandatory lenses. Everything else — the conditional triggers, the sizing, the
 bundling, the prohibitions — is identical.
 
+## Delta reviews
+
+A review of a delta (only what changed since the last round — `wt-watch-prs`'s "review each new head", or a
+requested re-review after fixes) applies every sizing and coverage rule below to the **delta's own**
+line/file count, not the original diff's. A delta under the shrinking size ceiling can legitimately drop to
+fewer agents than the first round used — but it can never drop a lens the delta itself triggers, even one
+the first round already ran: if the delta touches auth again, security runs again, regardless of what the
+earlier round found.
+
 ## Optional: score the target first
 
 If it is configured, `../wt-shared/scripts/wt-eval.mjs` returns calibrated scores for the dimensions this pack keeps
@@ -143,6 +152,41 @@ Bundle by reading surface:
 Collapse upward when few triggers fire — two lenses do not need two agents. Never split a bundle to give a
 lens its own agent.
 
+## Size by diff, not just by lens (diff mode)
+
+The lens table decides *what* each agent looks for; diff size decides *how much of the diff* it can
+actually cover, and this floor is never lowered by a quiet lens set — a 23-file diff that only trips one
+lens still gets split for coverage. Read the changed-line count (`git diff <base>...HEAD --shortstat`, or
+`--numstat` summed) and the changed-file list (`git diff <base>...HEAD --name-only`) before assigning agents:
+
+- **≤ 200 changed lines** — the lens-bundle agent count above stands; each agent reads the whole diff.
+- **200–800** — at least 2 agents (3 if the lens table already asked for 3), each given an explicit, disjoint
+  slice of `git diff --name-only` to read in full — not "skim the diff." Bundle lenses onto those agents
+  exactly as the table above groups them.
+- **> 800** — 3 agents, every path in `git diff --name-only` assigned to exactly one of them. No file goes
+  unassigned, and no agent gets "the rest" without an explicit list.
+
+Diff size can raise the agent count past what lenses alone would spawn; it never lowers it. The **ceiling
+stays 3** either way — a bigger diff means fewer files per agent, never a fourth agent.
+
+## Per-file coverage, checked against the diff
+
+Once there is more than one agent, every brief carries **its own explicit file list** — never "read the
+diff" unqualified. Its reply's short summary (not the findings JSON) ends with one row per assigned file:
+`<path>: full | skimmed | skipped — <reason>`. Skimmed and skipped both need a reason; "ran out of turns" is
+a valid one, "looked simple" is not.
+
+The caller unions every agent's file rows and diffs that union against `git diff --name-only`. Any path
+missing from the union, or marked skimmed/skipped, is a coverage gap — carry it into the verdict's coverage
+line (below), never drop it silently.
+
+## Effort floor
+
+Fewer tool calls than a third of an agent's assigned file count is a thin pass, not a review — an agent
+handed 12 files and making 3 tool calls did not read them. Read the count from the agent's own completion
+notice. On a thin pass, re-dispatch that agent once with the same file list; if it is still thin, report the
+gap as partial coverage rather than silently accepting a skim as done.
+
 **Model per lens agent (WP-128).** Pipe each lens agent's brief to `node ../wt-shared/scripts/model-route.mjs pick --skill
 <lens agent name> --role reviewer`; when it prints a tier (live routing), pass it as that Agent call's `model`. When it
 prints nothing (shadow or off, the default), leave `model` unset. A hook cannot set it, so this is the only place it gets set.
@@ -163,7 +207,8 @@ exists so the sizing is repeatable rather than a mood.
 ## What reviewers are told
 
 Each brief carries the target (they read it themselves — do not paste it), the findings table, the
-`[unsourced]` list or the plan path, their disjoint surface where one applies, and one instruction that
+`[unsourced]` list or the plan path, their disjoint surface where one applies — in diff mode with more than
+one agent, an explicit file list (§ Per-file coverage) rather than "the diff" — and one instruction that
 shapes everything:
 
 > Research has already run. Findings are measured, not remembered. **Do not re-derive the codebase.** Verify
@@ -178,6 +223,15 @@ And one prohibition:
 In diff mode, add the plan's Definition of Done and one more line:
 
 > Work that does not meet the Definition of Done is a finding. Work beyond it is also a finding.
+
+**Every brief keeps an open-ended core, in these or equivalent words, regardless of anything else in it:**
+
+> Read every file assigned to you in full. Report anything wrong you find — not just what any targeted
+> question below asks about.
+
+A targeted question (a specific claim to verify, a specific risk to check) is an addition to that core,
+never a replacement for it. A brief that is only targeted questions is how a reviewer stops reading a file
+the moment its question is answered.
 
 ### Every reviewer writes JSON, not prose
 
@@ -296,3 +350,12 @@ it twice inflates the apparent yield of a bigger panel.
 
 State plainly which mode ran, which lenses ran, and which triggers fired. A caller cannot tell a clean
 target from a narrow review otherwise.
+
+## Coverage line in the verdict
+
+The verdict's last line is always: `Coverage: N/M files read in full · lenses: <fired lenses> · tests:
+run|not run (CI relied on)`. M is `git diff --name-only`'s count (or 1, undivided, in single-target plan
+mode); N is how many of those came back `full` in the § Per-file coverage union — a file one agent skimmed
+after another already read it in full still counts full. **Partial coverage (N < M) is stated, never rounded
+up, and the verdict cannot be an approval while it holds** — it is a send-back for coverage, the same as a
+send-back for a confirmed finding.
