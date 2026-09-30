@@ -80,6 +80,9 @@ skills() { for d in "$SK"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")"
 node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)'; }
 service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
 wpservice_root() {
+  # WP-191: the service runs a shim that names the checkout; older installs pointed at watch-prs.sh directly.
+  local shim="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}/bin/watch-prs"
+  if [ -f "$shim" ] && { [ -f "$WPPLIST" ] || [ -f "$WPUNIT" ]; }; then sed -n 's#^exec bash "\(.*\)/scripts/watch-prs\.sh" "\$@"$#\1#p' "$shim"; return; fi
   if [ "$OS" = Darwin ]; then [ -f "$WPPLIST" ] && plutil -extract ProgramArguments.1 raw "$WPPLIST" 2>/dev/null | sed 's#/scripts/watch-prs\.sh$##'
   else [ -f "$WPUNIT" ] && sed -n 's#^ExecStart=/bin/bash "\(.*\)/scripts/watch-prs\.sh" serve$#\1#p' "$WPUNIT"; fi
 }
@@ -418,7 +421,7 @@ wp_svc() {
   wproot=$(wpservice_root)
   if [ "$wproot" = "$WP" ] && node "$WP/scripts/poller-service.mjs" status 2>/dev/null | grep -q running; then ok "already: running from $WP"
   elif [ -n "$wproot" ] && [ "$wproot" != "$WP" ] && is_pack "$(root_of "$wproot")"; then opt "kept: the poller runs $wproot (another wt-pack checkout)"
-  else node "$WP/scripts/poller-service.mjs" install >/dev/null && ok "installed and started ($([ "$OS" = Darwin ] && echo "$WPPLIST" || echo "$WPUNIT"))" || bad "poller install failed — node $WP/scripts/poller-service.mjs install"; fi
+  else "$WP/scripts/watch-prs.sh" poller-install >/dev/null && ok "installed and started ($([ "$OS" = Darwin ] && echo "$WPPLIST" || echo "$WPUNIT"))" || bad "poller install failed — $WP/scripts/watch-prs.sh poller-install"; fi
   # A user unit stops at logout unless lingering is on; advise, never sudo.
   if [ "$OS" != Darwin ] && [ -f "$WPUNIT" ] && ! loginctl show-user "${USER:-$(id -un)}" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
     opt "the poller stops when you log out — keep it running: loginctl enable-linger ${USER:-$(id -un)}"
@@ -460,7 +463,7 @@ uninstall() {
   step "wt-pack uninstall ($REPO)"
   if [ "$OS" = Darwin ] && { [ "$(service_root)" = "$DASH" ] || [ "$(service_root)" = "$REPO/wt-dashboard" ]; }; then node "$DASH/scripts/service.mjs" uninstall >/dev/null && ok "service removed"
   else opt "service: not installed from this checkout, left alone"; fi
-  if [ "$(wpservice_root)" = "$WP" ]; then node "$WP/scripts/poller-service.mjs" uninstall >/dev/null && ok "watchprs poller removed"
+  if [ "$(wpservice_root)" = "$WP" ]; then "$WP/scripts/watch-prs.sh" poller-uninstall >/dev/null && ok "watchprs poller removed"
   else opt "watchprs poller: not installed from this checkout, left alone"; fi
   if has claude && [ "$(market_path)" = "$REPO" ]; then
     claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1

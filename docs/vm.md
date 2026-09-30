@@ -47,8 +47,10 @@ Edit the unit's paths if your checkout is not `~/wt-pack`, or if `node`, `gh`, `
 
 ### The PR-watch poller (wt-watch-prs)
 
-`./setup install` also installs the wt-watch-prs background poller as `~/.config/systemd/user/wt-watch-prs.service`
-(`ExecStart=bash <checkout>/skills/wt-watch-prs/scripts/watch-prs.sh serve`, `Restart=always`, your login `PATH`),
+`./setup install` — or, on a plugin-only install (`wt-pack@wt-pack`, no `./setup`), the skill's own
+`watch-prs.sh poller-install`, which wt-watch-prs runs for you when the poller isn't up — installs the wt-watch-prs background poller as `~/.config/systemd/user/wt-watch-prs.service`
+(`ExecStart=bash ~/.local/share/wt-watch-prs/bin/watch-prs serve`, a shim that each install points at the current
+`watch-prs.sh`, so plugin updates don't break it; `Restart=always`, your login `PATH`),
 then `daemon-reload` and `enable --now`. It never uses sudo, so run the linger command yourself when `setup`
 advises it, or the unit stops when you log out:
 
