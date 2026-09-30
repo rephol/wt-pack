@@ -460,4 +460,14 @@ test('WP-176 record --coverage stores full/partial, rejects garbage, works with 
   assert.equal(r.status, 1); assert.match(r.stderr, /usage: record/)
 })
 
+test('WP-191 poller-install/uninstall hand off to poller-service.mjs (node stubbed: never touches the real launchd/systemd)', () => {
+  writeFileSync(join(bin, 'node'), '#!/bin/sh\necho "NODE $*"\n'); chmodSync(join(bin, 'node'), 0o755)
+  try {
+    for (const c of ['install', 'uninstall']) {
+      const r = run([`poller-${c}`])
+      assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, new RegExp(`NODE .*poller-service\\.mjs ${c}\\n$`))
+    }
+  } finally { rmSync(join(bin, 'node'), { force: true }) }
+})
+
 test.after(() => { assert.ok(!existsSync(join(tmp, 'home', '.claude'))); rmSync(tmp, { recursive: true, force: true }) })

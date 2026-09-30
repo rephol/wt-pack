@@ -21,6 +21,9 @@
 #   unregister --session S            remove this repo/session from the watch list
 #   poller-status                     exit 0 when the poller's launchd agent (Linux: systemd unit, if installed) is up and its heartbeat
 #                                    ($WT_WATCH_PRS_HOME/poller.beat) is <3 min old; else exit 1
+#   poller-install | poller-uninstall  WP-191: idempotently install/remove the poller as a launchd agent (macOS) or systemd
+#                                    user unit (Linux) that runs the stable shim <state>/bin/watch-prs — works from a plugin-only
+#                                    install (no ./setup); no sudo, prints linger advice; exit 2 with a nohup line when no systemd
 #   serve [--once]                    WP-187: the poller itself — for each registered watcher, poll-shas/
 #                                    poll-replies --once and deliver each line via handoff.sh --kind system;
 #                                    run by launchd (id.local.wtpack.watchprs) or systemd (wt-watch-prs.service), never by an interactive session
@@ -345,6 +348,10 @@ register|unregister)
     echo "registered $REPO session $S${pane:+ pane $pane}"
   fi
   ;;
+poller-install|poller-uninstall)
+  command -v node >/dev/null 2>&1 || die "$cmd needs node on PATH"
+  exec node "$here/poller-service.mjs" "${cmd#poller-}"
+  ;;
 poller-status)
   WH="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}"; B="$WH/poller.beat"
   [ -f "$B" ] || { echo "poller: no heartbeat ($B)"; exit 1; }
@@ -437,5 +444,5 @@ serve)
     sleep "${WATCH_PRS_SLEEP:-60}"
   done
   ;;
-*) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
+*) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
 esac

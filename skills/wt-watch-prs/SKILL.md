@@ -81,8 +81,14 @@ $W identity           # "<login> <source>" — the account reviews post as
     to this pane from now on. No Monitor, no polling loop in this session — `register` records this pane
     (resolved via `herdr pane get`, the `HERDR_PANE_ID`-may-be-the-stable-id trap) and this repo's checkout
     path once, and returns immediately.
-  - **Exit non-zero → fall back to arming Monitors yourself**, below. The poller not running (not installed,
-    `--no-service`, or its own launchd agent down) is the ordinary degraded path, not a failure to report —
+  - **Exit non-zero, standalone mode → `$W poller-install` once, then `$W poller-status` again** (WP-191). It
+    installs the poller as a launchd agent (macOS) or systemd user unit (Linux) that runs a stable shim under
+    `$WT_WATCH_PRS_HOME/bin/`, so it works from a plugin-only install with no `./setup`, survives plugin updates
+    (each run rewrites the shim to the current path) and needs no sudo. Its output may advise
+    `loginctl enable-linger <user>` — pass that to the user, never run it. Exit 0 the second time → `register`
+    as above. Skip the install in dispatch and review modes, and when the user has declined a background service.
+  - **Still non-zero (install failed, no systemd — it exits 2 with a `nohup` line — or the poller down) → fall
+    back to arming Monitors yourself**, below. That is the ordinary degraded path, not a failure to report —
     say so in one line and continue with the fallback.
 - **Fallback: arm two Monitors, both `timeout_ms: 1800000`** (30 minutes — the maximum; `Monitor` has no
   `persistent` option, every monitor expires and must be re-armed, see below), after checking `TaskList` that
