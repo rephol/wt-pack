@@ -45,6 +45,23 @@ journalctl --user -u wt-dashboard -f    # its log
 Edit the unit's paths if your checkout is not `~/wt-pack`, or if `node`, `gh`, `herdr` and
 `claude` are not on its `PATH` line.
 
+### The PR-watch poller (wt-watch-prs)
+
+`./setup install` also installs the wt-watch-prs background poller as `~/.config/systemd/user/wt-watch-prs.service`
+(`ExecStart=bash <checkout>/skills/wt-watch-prs/scripts/watch-prs.sh serve`, `Restart=always`, your login `PATH`),
+then `daemon-reload` and `enable --now`. It never uses sudo, so run the linger command yourself when `setup`
+advises it, or the unit stops when you log out:
+
+```sh
+loginctl enable-linger "$USER"
+systemctl --user status wt-watch-prs      # or: node ~/wt-pack/skills/wt-watch-prs/scripts/poller-service.mjs status
+journalctl --user -u wt-watch-prs -f
+```
+
+`./setup doctor` checks the unit is active and its heartbeat is fresh; `./setup uninstall` removes it. With no
+systemd user manager (a container), `setup` prints a `nohup bash …/watch-prs.sh serve &` line instead; without the
+poller, wt-watch-prs falls back to arming its own Monitors.
+
 ## 4. Reach it
 
 The server listens on `127.0.0.1:7777` only. Keep it that way, and pick one of these:
