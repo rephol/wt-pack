@@ -385,7 +385,9 @@ respawn)
     why=
     case "$(ps eww -o command= -p "$pid" 2>/dev/null)" in *WT_KILL_SHIM_DIR=*) ;; *) why="no kill shim" ;; esac
     if [ "$g" -gt 0 ]; then
-      st=$(LC_ALL=C date -j -f '%a %b %d %T %Y' "$(LC_ALL=C ps -o lstart= -p "$pid" | sed 's/  */ /g; s/^ //')" +%s 2>/dev/null || echo 0)
+      # etime ([[dd-]hh:]mm:ss) is the one elapsed-time field both BSD and procps ps print; lstart needs BSD-only date -j.
+      st=$(ps -o etime= -p "$pid" 2>/dev/null | awk -v now="$(date +%s)" '{ n = split($1, a, /[-:]/); s = 0; for (i = 1; i <= n; i++) s = s * (i == 2 && n == 4 ? 24 : 60) + a[i]; if (n) print now - s }')
+      st=${st:-0}
       [ "$st" = 0 ] || [ "$st" -ge "$g" ] || why="${why:+$why, }predates the plugin guard"
     fi
     [ -n "$why" ] || continue

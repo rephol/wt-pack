@@ -24,6 +24,7 @@ esac`)
 // Fake process table: old agent has no shim env, ok agent has it.
 stub('ps', `case "$*" in
   "-axo pid=,command=") printf '101 /usr/bin/claude --name demo-worker-01\\n102 claude --name demo-worker-02 --resume x\\n' ;;
+  "-o etime= -p 102") echo "05:00" ;; # started 5 min ago
   *"-p 101"*) echo "claude --name demo-worker-01 PATH=/usr/bin" ;;
   *"-p 102"*) echo "claude --name demo-worker-02 WT_KILL_SHIM_DIR=/x/wt-agents/bin" ;;
 esac`)
@@ -74,6 +75,16 @@ test('respawn --stale: only the agent whose claude lacks the shim', () => {
   assert.match(r.stdout, /^respawned demo-worker-01 w1:p9 \(no kill shim\)$/m)
   assert.doesNotMatch(r.stdout, /demo-worker-02/)
   assert.ok(!r.calls.some((l) => /pgrep|pkill/.test(l)))
+})
+
+test('WP-194: --stale flags an agent started before the plugin install (etime, no BSD date -j)', () => {
+  const ip = join(tmp, 'plugin'), f = join(tmp, '.claude', 'plugins', 'installed_plugins.json')
+  mkdirSync(ip); mkdirSync(join(tmp, '.claude', 'plugins'), { recursive: true })
+  writeFileSync(f, JSON.stringify({ plugins: { 'wt-memory@wt-pack': [{ installPath: ip }] } }))
+  try {
+    setAgents([row(2, 'idle', 's-ok')])
+    assert.match(run(['respawn', '--stale']).stdout, /^respawned demo-worker-02 .*\(predates the plugin guard\)$/m)
+  } finally { rmSync(f) }
 })
 
 test('WP-143: respawn passes --model/--effort from the old tokens, and does not carry them as plain tokens too', () => {
