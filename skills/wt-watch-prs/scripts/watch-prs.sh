@@ -366,7 +366,7 @@ poller-status)
         || { echo "poller: systemd unit wt-watch-prs.service not active"; exit 1; }
       elif [ -f "$P" ]; then kill -0 "$(cat "$P" 2>/dev/null)" 2>/dev/null || { echo "poller: detached pid $(cat "$P" 2>/dev/null) is not running"; exit 1; }; fi ;;
   esac
-  now=$(date +%s); mt=$(stat -f %m "$B" 2>/dev/null || stat -c %Y "$B" 2>/dev/null || echo 0)
+  now=$(date +%s); mt=$(stat -c %Y "$B" 2>/dev/null || stat -f %m "$B" 2>/dev/null || echo 0) # GNU -c first: GNU `stat -f` succeeds with filesystem info (WP-193)
   age=$((now - mt))
   if [ "$age" -lt 180 ]; then echo "poller: loaded, beat ${age}s ago"; exit 0
   else echo "poller: loaded, beat ${age}s ago (stale)"; exit 1; fi
