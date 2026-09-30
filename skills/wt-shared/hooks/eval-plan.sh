@@ -22,7 +22,7 @@ esac
 # plenty to catch a weak Definition of Done, and the API is not free.
 stamp="${TMPDIR:-/tmp}/wt-eval-$(printf '%s' "$f" | shasum | cut -c1-12)"
 if [ -f "$stamp" ]; then
-  age=$(( $(date +%s) - $(stat -f %m "$stamp" 2>/dev/null || echo 0) ))
+  age=$(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null || echo 0) ))
   [ "$age" -lt 600 ] && exit 0
 fi
 touch "$stamp"
