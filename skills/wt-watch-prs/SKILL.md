@@ -88,7 +88,7 @@ $W identity           # "<login> <source>" — the account reviews post as
     updates (each run rewrites the shim to the current path) and needs no sudo. It is idempotent — a live,
     heartbeating poller is left alone, a wedged one is replaced by its recorded pid — so it is also the fix any
     time you later find `poller-status` failing. The detached mode does not survive a reboot or container
-    restart; its output says how to start it at boot. Output may also advise `loginctl enable-linger <user>` —
+    restart (its output says how to start it at boot), but a crashed `serve` is relaunched by its own restart loop. Output may also advise `loginctl enable-linger <user>` —
     pass that to the user, never run it. Exit 0 the second time → `register` as above. Skip the install in
     dispatch and review modes, and when the user has declined a background service.
   - **Still non-zero (the install failed or the poller is down) → fall back to arming Monitors yourself**,

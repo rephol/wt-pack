@@ -87,7 +87,7 @@ const lingerOn = () => { try { return /Linger=yes/.test(execFileSync('loginctl',
 
 // WP-192: no launchd and no systemd user manager (a container) — run `serve` detached under a pidfile. Node's
 // detached:true makes the child a session leader (setsid), so it outlives this process and gets no SIGHUP; the shim
-// `exec`s, so the recorded pid IS the poller. Everything below acts on that recorded pid, never on a name pattern.
+// `exec`s, so the recorded pid is a small restart loop (WP-192) around it. Everything below acts on that recorded pid, never on a name pattern.
 const WH = dirname(dirname(SHIM))
 const PID = join(WH, 'poller.pid'), BEAT = join(WH, 'poller.beat'), DLOG = join(WH, 'poller.log')
 const detachedMode = () => process.env.WT_POLLER_DETACHED === '1' || (LINUX && noSystemd())
@@ -97,7 +97,7 @@ const cmdline = (pid) => { // /proc first (Linux, and minimal containers with no
   try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return '' }
 }
 // alive AND still `watch-prs.sh serve` — a recycled pid must not be signalled
-const isPoller = (pid) => { try { process.kill(pid, 0) } catch { return false } return /watch-prs\.sh"? serve/.test(cmdline(pid)) }
+const isPoller = (pid) => { try { process.kill(pid, 0) } catch { return false } return /watch-prs-loop|watch-prs\.sh"? serve/.test(cmdline(pid)) }
 const beatAge = () => { try { return (Date.now() - statSync(BEAT).mtimeMs) / 1000 } catch { return Infinity } }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function stopDetached() {
@@ -125,7 +125,9 @@ async function installDetachedLocked() {
   await stopDetached() // a live pid with a stale beat is wedged: replace it
   writeShim()
   const started = Date.now(), fd = openSync(DLOG, 'a')
-  const child = spawn('/bin/bash', [SHIM, 'serve'], { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, PATH: loginPath() } })
+  // A tiny supervisor: the pidfile holds this loop's pid, so a crashed `serve` comes back without any session.
+  const LOOP = 'while :; do bash "$1" serve; sleep "${WATCH_PRS_RESTART:-5}"; done'
+  const child = spawn('/bin/bash', ['-c', LOOP, 'watch-prs-loop', SHIM], { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, PATH: loginPath() } })
   child.on('error', () => {}); child.unref(); writeFileSync(PID, `${child.pid}\n`)
   for (let i = 0; i < 60 && !(existsSync(BEAT) && statSync(BEAT).mtimeMs >= started); i++) await sleep(100) // first heartbeat
   if (!isPoller(child.pid)) { try { unlinkSync(PID) } catch { /* gone */ } throw new Error(`the poller exited at once — see ${DLOG}`) }

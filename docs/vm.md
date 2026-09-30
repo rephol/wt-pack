@@ -63,7 +63,8 @@ journalctl --user -u wt-watch-prs -f
 `./setup doctor` checks the unit is active and its heartbeat is fresh; `./setup uninstall` removes it.
 
 **No systemd (a container, WP-192).** `poller-install` then starts the poller detached instead: `watch-prs.sh serve`
-as its own session under `~/.local/share/wt-watch-prs/poller.pid`, log beside it in `poller.log`. It is idempotent
+as its own session under `~/.local/share/wt-watch-prs/poller.pid` (the pid of a small restart loop that relaunches
+a crashed `serve` after 5 seconds), log beside it in `poller.log`. It is idempotent
 (a live, heartbeating pid is left alone), `poller-status` checks the pid plus the heartbeat, and `poller-uninstall`
 kills it by that recorded pid only. A container restart kills it, so start it from the entrypoint too:
 
