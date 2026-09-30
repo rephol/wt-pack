@@ -200,11 +200,13 @@ by anything else.
 **Every new head gets its own approval.** An approval is for the head you read. On a delta review whose verdict is
 Approve or Approve with fixes, post `--approve` again even though an earlier head was approved — never skip it as
 "already approved", and never end a delta review that is an approve in a comment. Some repos dismiss approvals on
-push; check instead of assuming: `$W gh pr view N --json reviews` shows your earlier approval as `DISMISSED`, and
-`$W gh api repos/<owner>/<repo>/branches/<base>/protection --jq .required_pull_request_reviews.dismiss_stale_reviews`
-says whether the rule is on (it needs admin rights; a 403/404 means unknown, not off). When the repo dismisses, say
-so in the body — "this repo dismisses approvals on push, so this re-approves head <sha7>" — so the author
-knows why a second approval arrived. Partial coverage and every hold above still override this.
+push; check instead of assuming. The fact is `$W gh pr view N --json reviews`: your earlier approval reads
+`DISMISSED` (no admin rights needed, and it covers rulesets as well as classic branch protection). As a hint when
+nothing was dismissed yet, `$W gh api repos/<owner>/<repo>/branches/<base>/protection --jq
+.required_pull_request_reviews.dismiss_stale_reviews` shows the classic rule (admin only; a 403/404 means unknown,
+not off). When the repo dismisses, say so in the body — "this repo dismisses approvals on push, so this re-approves
+head <sha7>" — so the author knows why a second approval arrived. The gate/coverage/identity rows and every hold
+above, including the last table row (same identity, degraded, gate not green → comment), still override this.
 
 **Never approve with a question.** An approval means nothing outstanding; asking belongs in a hold, telling
 rides in an approval. A later blocker on a PR you approved → amend to `--request-changes`, saying it supersedes.
