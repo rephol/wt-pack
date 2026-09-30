@@ -364,6 +364,20 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
     await uwrite('x'.repeat(1_000_001))
     assert.deepEqual(I.watchPrsUnwatched(root), []) // oversized file: refused, same as reviewHolds
   }
+  // WP-196: a stalled poller with registered sessions raises one item per stall; no watchers or a fresh beat: none
+  {
+    const { mkdtemp, writeFile, utimes } = await import('node:fs/promises')
+    const root = await mkdtemp((await import('node:os')).tmpdir() + '/stale-')
+    assert.deepEqual(I.watchPrsStale(root), []) // nothing registered
+    await writeFile(root + '/watchers.json', '[]'); await writeFile(root + '/poller.beat', '')
+    assert.deepEqual(I.watchPrsStale(root, Date.now() + 600_000), []) // no watchers: a stale beat is fine
+    await writeFile(root + '/watchers.json', '[{"repo":"a/b"}]')
+    assert.deepEqual(I.watchPrsStale(root), []) // fresh beat
+    const old = new Date(Date.now() - 600_000); await utimes(root + '/poller.beat', old, old)
+    const [it] = I.watchPrsStale(root)
+    assert.equal(it.kind, 'server'); assert.match(it.key, /^watch-prs-stale\|\d+$/); assert.match(it.body, /1 session/)
+    assert.equal(I.watchPrsStale(root)[0].key, it.key) // same stall, same key: Inbox.add dedupes
+  }
   const { mkdtemp } = await import('node:fs/promises')
   const box = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
   assert.ok(await box.add({ kind: 'question', key: 'k', title: 't', body: '', target: { agent: 'a' } }))
