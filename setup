@@ -175,7 +175,7 @@ doctor() {
     # WP-120: plugin hooks load at session start — sessions older than the installed version run without its guard.
     ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json")
     if [ -n "$ip" ] && [ -d "$ip" ]; then
-      g=$(stat -f %B "$ip" 2>/dev/null || true)
+      g=$(stat -c %W "$ip" 2>/dev/null || stat -f %B "$ip" 2>/dev/null || true)
       n=$(LC_ALL=C ps -axo lstart=,command= | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const g=+process.argv[1]*1000;console.log(s.split("\n").filter(l=>/^(\S*\/)?claude\s.*--name[ =]/.test(l.slice(25).trim())&&Date.parse(l.slice(4,24))<g).length)})' "${g:-0}")
       [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — wt-agents respawn --stale (in each repo)"
     fi
