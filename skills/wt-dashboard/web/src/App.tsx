@@ -97,7 +97,7 @@ interface Agent {
   cwd: string
   recap: string | null
   context: { used: string; total: string; pct: number } | null
-  model?: { id: string | null; name: string | null; effort: string | null; source: string; routed: string | null } | null // WP-198
+  model?: { id: string | null; name: string | null; effort: string | null; effortSource?: string | null; source: string; routed: string | null } | null // WP-198
   asks: boolean
   question: string | null
   lastPrompt: string | null
@@ -592,7 +592,7 @@ export default function App() {
 // raw pane tokens fold away under Details. Only what the server already knows — rows without data vanish.
 const TOKEN_LABEL: Record<string, string> = { created: 'Created', project: 'Project', role: 'Role', spawned_by: 'Spawned by', branch: 'Branch', handoff_at: 'Handed off' }
 // 'Sonnet 5.5 · medium' — the friendly name, then the effort when known
-const modelLabel = (m?: Agent['model']) => (m?.name ? (m.effort ? `${m.name} · ${m.effort}` : m.name) : m?.effort ?? '')
+const modelLabel = (m?: Agent['model']) => (m?.name ? (m.effort ? `${m.name} · ${m.effort}${m.effortSource === 'default' ? ' (default)' : ''}` : m.name) : m?.effort ?? '')
 const SHOWN = new Set(['task', 'task_state', 'ticket', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane'])
 function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -796,7 +796,7 @@ const AGENT_COLS: AgentCol[] = [
   { id: 'project', label: 'Project', width: 120, hidden: true },
   { id: 'role', label: 'Role', width: 110, hidden: true },
   { id: 'context', label: 'Context', width: 110, hidden: true },
-  { id: 'model', label: 'Model', width: 130, hidden: true },
+  { id: 'model', label: 'Model', width: 200, hidden: true },
 ]
 type ColConfig = { order: string[]; hidden: string[] }
 const DEFAULT_COLS: ColConfig = { order: AGENT_COLS.map((c) => c.id), hidden: AGENT_COLS.filter((c) => c.hidden).map((c) => c.id) }

@@ -569,7 +569,7 @@ async function listAgents(m) {
       stall, // Jev's stall class (finished|stuck|looping|waiting_on_user) or undefined: today's rule
       lastPrompt: p.lastPrompt ?? null,
       session,
-      model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id) }),
+      model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id), settings: m.local ? claudeSettings() : null }),
     })
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
@@ -657,6 +657,17 @@ async function transcriptModel(id) {
   return model
 }
 
+// ~/.claude/settings.json's model/effort defaults, re-read when the file changes.
+const SETTINGS_FILE = join(homedir(), '.claude', 'settings.json')
+let settingsCache = { mtime: 0, v: null }
+function claudeSettings() {
+  try {
+    const mt = statSync(SETTINGS_FILE).mtimeMs
+    if (mt !== settingsCache.mtime) settingsCache = { mtime: mt, v: JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) }
+  } catch { settingsCache = { mtime: 0, v: null } }
+  return settingsCache.v
+}
+
 // "claude-sonnet-5-5" → "Sonnet 5.5"; the footer's own "Sonnet 5" passes through.
 export const friendlyModel = (m) => {
   const x = m?.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[.*)?$/)
@@ -666,13 +677,16 @@ const tierOf = (m) => m?.toLowerCase().match(/opus|sonnet|haiku|fable/)?.[0] ?? 
 // What the session runs. The footer says it live ("Sonnet 5") but not exactly; the transcript's id is exact, so it
 // names the model when there is one; the spawn-time tokens are the last resort. `routed` is set only when the
 // spawn token names a different tier than the one running.
-export function agentModel({ footerModel, footerEffort, transcript, tokens = {} }) {
+export function agentModel({ footerModel, footerEffort, transcript, tokens = {}, settings = null }) {
   const id = transcript ?? null
   const name = (id ? friendlyModel(id) : footerModel) ?? tokens.model ?? null
-  const effort = footerEffort ?? tokens.effort ?? null
+  // effort: the live footer, the spawn token, then the configured default (a narrow pane truncates the footer)
+  const dflt = settings ? (id && settings.modelSettings?.[id]?.effortLevel) || settings.effortLevel || null : null
+  const effort = footerEffort ?? tokens.effort ?? dflt
+  const effortSource = footerEffort ? 'footer' : tokens.effort ? 'token' : dflt ? 'default' : null
   if (!name && !effort) return null
   const running = tierOf(id ?? footerModel), asked = tierOf(tokens.model)
-  return { id, name, effort, source: id ? 'transcript' : footerModel ? 'footer' : 'token', routed: asked && running && asked !== running ? asked : null }
+  return { id, name, effort, effortSource, source: id ? 'transcript' : footerModel ? 'footer' : 'token', routed: asked && running && asked !== running ? asked : null }
 }
 
 const NOISE = /^\s*<(local-command-caveat|local-command-stdout|task-notification|system-reminder|command-message)/
