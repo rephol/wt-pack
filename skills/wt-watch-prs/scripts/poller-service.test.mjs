@@ -16,8 +16,8 @@ test('plist: runs watch-prs.sh serve via bash, KeepAlive restarts on any non-zer
 })
 
 test('WP-190 systemdUnit: bash serve via a quoted script path, Restart=always, PATH/HOME env, % and " escaped', () => {
-  const u = systemdUnit({ path: '/usr/bin:/bin', script: '/tmp/a b/100%/watch-prs.sh', home: '/home/u' })
-  assert.match(u, /^ExecStart=\/bin\/bash "\/tmp\/a b\/100%%\/watch-prs\.sh" serve$/m)
+  const u = systemdUnit({ path: '/usr/bin:/bin', script: '/tmp/a b/100%/$x/watch-prs.sh', home: '/home/u' })
+  assert.match(u, /^ExecStart=\/bin\/bash "\/tmp\/a b\/100%%\/\$\$x\/watch-prs\.sh" serve$/m)
   assert.match(u, /^Restart=always$/m)
   assert.match(u, /^Environment="PATH=\/usr\/bin:\/bin"$/m)
   assert.match(u, /^Environment="HOME=\/home\/u"$/m)

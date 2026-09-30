@@ -58,8 +58,8 @@ export function plist({ path, log, script = SCRIPT }) {
 `
 }
 
-// systemd: `"` and `%` are the only characters ExecStart= treats specially inside a quoted word.
-const q = (v) => v.replace(/%/g, '%%').replace(/"/g, '\\"')
+// systemd expands `%` specifiers and `$VAR` inside ExecStart=/Environment=, and `"` ends a quoted word.
+const q = (v) => v.replace(/%/g, '%%').replace(/\$/g, '$$$$').replace(/"/g, '\\"')
 export function systemdUnit({ path, script = SCRIPT, home = HOME }) {
   return `[Unit]
 Description=wt-watch-prs background poller (watch-prs.sh serve)
@@ -85,8 +85,8 @@ function installLinux() {
   if (noSystemd()) { console.log(NOHUP); process.exit(2) }
   mkdirSync(dirname(UNIT), { recursive: true })
   writeFileSync(UNIT, systemdUnit({ path: loginPath() }))
-  systemctl('daemon-reload'); systemctl('enable', '--now', UNIT_NAME)
-  systemctl('restart', UNIT_NAME) // pick up a changed unit
+  systemctl('daemon-reload'); systemctl('enable', UNIT_NAME)
+  systemctl('restart', UNIT_NAME) // starts it, or picks up a changed unit
   console.log(`installed ${UNIT}\n  script ${SCRIPT}\n  log: journalctl --user -u ${UNIT_NAME}`)
   if (!lingerOn()) console.log(`note: the service stops when you log out — keep it running with:  loginctl enable-linger ${userInfo().username}`)
 }
@@ -99,7 +99,7 @@ function uninstallLinux() {
 function statusLinux() {
   if (!existsSync(UNIT)) return console.log('not installed')
   let st = 'unknown'; try { st = systemctl('is-active', UNIT_NAME).trim() } catch (e) { st = String(e.stdout || 'inactive').trim() }
-  console.log(`${UNIT_NAME}: ${st === 'active' ? 'running' : st}\n  log: journalctl --user -u ${UNIT_NAME}`)
+  console.log(`${UNIT_NAME}: ${st === 'active' || st === 'activating' ? 'running' : st}\n  log: journalctl --user -u ${UNIT_NAME}`)
 }
 
 function install() {
