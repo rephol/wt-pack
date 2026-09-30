@@ -87,8 +87,15 @@ market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let
 # checkout_commit <dir>: that dir's current HEAD commit, to compare it against.
 plugin_ver() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).find(p=>p.id===process.argv[1])?.version||"")}catch{}})' "$1"; }
 checkout_commit() { git -C "$1" rev-parse HEAD 2>/dev/null; }
-# is_prefix <short> <full>: true only when <short> is non-empty and a real prefix of <full>.
-is_prefix() { [ -n "$1" ] && case "$2" in "$1"*) true ;; *) false ;; esac; }
+# plugin_current <short> <dir> <paths…> (WP-189): the installed plugin (version = the commit Claude Code installed
+# from) is current when that commit is HEAD, or when nothing under <paths> differs between it and HEAD — a commit
+# elsewhere in the repo does not change what the plugin ships. An unknown commit (not in this clone) is stale.
+plugin_current() {
+  local iv=$1 d=$2; shift 2
+  [ -n "$iv" ] || return 1
+  case "$(checkout_commit "$d")" in "$iv"*) return 0;; esac
+  git -C "$d" cat-file -e "$iv^{commit}" 2>/dev/null && git -C "$d" diff --quiet "$iv" HEAD -- "$@" 2>/dev/null
+}
 plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
 # Install hint for a missing package, for this OS.
 # sudo only when needed: root (a container) often has no sudo at all.
@@ -154,7 +161,7 @@ doctor() {
     # WP-118/WP-156: a stale install silently lacks newer hooks (the WP-109 pkill guard shipped in 0.4.4).
     # No version is pinned in plugin.json, so $iv is the commit Claude Code installed from — compare it
     # to the checkout's own HEAD rather than a manually maintained string.
-    if [ -n "$sv" ] && ! is_prefix "$iv" "$sv"; then bad "plugin wt-memory@wt-pack $(printf '%.12s' "$iv") installed, checkout is at $(printf '%.12s' "$sv") — ./setup install (then restart agents)"
+    if [ -n "$sv" ] && ! plugin_current "$iv" "${mp:-$REPO}" skills/wt-memory; then bad "plugin wt-memory@wt-pack $(printf '%.12s' "$iv") installed, checkout is at $(printf '%.12s' "$sv") — ./setup install (then restart agents)"
     else ok "plugin wt-memory@wt-pack $iv${mp:+ (marketplace $mp)}"; fi
     # WP-120: plugin hooks load at session start — sessions older than the installed version run without its guard.
     ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json")
@@ -171,7 +178,7 @@ doctor() {
     # WP-155/WP-156: every skill ships inside this plugin (WP-122), so any skill content change makes the
     # cached copy stale. No version is pinned in plugin.json, so $riv is the commit it was installed from —
     # compare it to the checkout's own HEAD rather than a manually maintained (and easily forgotten) string.
-    if [ -n "$rsv" ] && ! is_prefix "$riv" "$rsv"; then bad "plugin wt-pack@wt-pack $(printf '%.12s' "$riv") installed, checkout is at $(printf '%.12s' "$rsv") — ./setup install (then restart agents) or: claude plugin update wt-pack@wt-pack"
+    if [ -n "$rsv" ] && ! plugin_current "$riv" "${mp:-$REPO}" skills hooks .claude-plugin; then bad "plugin wt-pack@wt-pack $(printf '%.12s' "$riv") installed, checkout is at $(printf '%.12s' "$rsv") — ./setup install (then restart agents) or: claude plugin update wt-pack@wt-pack"
     elif ! plugin_ok enabled; then ok "plugin wt-pack@wt-pack $riv (plugin-only install; wt-memory's hooks come with it)"
     else ok "plugin wt-pack@wt-pack $riv"; fi
     plugin_ok enabled && opt "both wt-pack@wt-pack (plugin-only install) and wt-memory@wt-pack (./setup) are enabled — hooks run twice; pick one: claude plugin disable wt-pack@wt-pack"
@@ -364,10 +371,10 @@ plugin() {
   fi
   if plugin_ok; then
     iv=$(plugin_ver wt-memory@wt-pack); sv=$(checkout_commit "${mp:-$REPO}")
-    if [ -n "$sv" ] && ! is_prefix "$iv" "$sv"; then
+    if [ -n "$sv" ] && ! plugin_current "$iv" "${mp:-$REPO}" skills/wt-memory; then
       claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-memory@wt-pack >/dev/null 2>&1
       iv2=$(plugin_ver wt-memory@wt-pack)
-      if is_prefix "$iv2" "$sv"; then ok "updated wt-memory@wt-pack $iv → $iv2 (restart agents to load it)"; else bad "claude plugin update wt-memory@wt-pack left $iv2, checkout is at $(printf '%.12s' "$sv")"; fi
+      if plugin_current "$iv2" "${mp:-$REPO}" skills/wt-memory; then ok "updated wt-memory@wt-pack $iv → $iv2 (restart agents to load it)"; else bad "claude plugin update wt-memory@wt-pack left $iv2, checkout is at $(printf '%.12s' "$sv")"; fi
     else ok "already: wt-memory@wt-pack $iv installed"; fi
   else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
 }
