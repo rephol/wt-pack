@@ -420,8 +420,8 @@ wp_svc() {
   elif [ -n "$wproot" ] && [ "$wproot" != "$WP" ] && is_pack "$(root_of "$wproot")"; then opt "kept: the poller runs $wproot (another wt-pack checkout)"
   else node "$WP/scripts/poller-service.mjs" install >/dev/null && ok "installed and started ($([ "$OS" = Darwin ] && echo "$WPPLIST" || echo "$WPUNIT"))" || bad "poller install failed — node $WP/scripts/poller-service.mjs install"; fi
   # A user unit stops at logout unless lingering is on; advise, never sudo.
-  if [ "$OS" != Darwin ] && [ -f "$WPUNIT" ] && ! loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
-    opt "the poller stops when you log out — keep it running: loginctl enable-linger $USER"
+  if [ "$OS" != Darwin ] && [ -f "$WPUNIT" ] && ! loginctl show-user "${USER:-$(id -un)}" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
+    opt "the poller stops when you log out — keep it running: loginctl enable-linger ${USER:-$(id -un)}"
   fi
 }
 
