@@ -77,6 +77,7 @@ $W identity           # "<login> <source>" — the account reviews post as
   independently of any session and delivers events as `<wt-message kind=system>` prompts — it needs no
   tool call to keep running, so it has none of the next bullet's failure mode. `poller-status` exits 0 when
   the launchd agent is loaded and its heartbeat (`$WT_WATCH_PRS_HOME/poller.beat`) is under 3 minutes old.
+  - A poller that hangs is restarted by its supervisor (WP-196), and one that comes back after a 3+ min gap sends this pane a `poller resumed after Nm; replayed missed heads` system message — treat it as "events may have been late", not as an error. Never arm Monitors alongside the poller (duplicate events).
   - **Exit 0 → `$W register --session S`** and stop here; the poller drains the backlog and delivers events
     to this pane from now on. No Monitor, no polling loop in this session — `register` records this pane
     (resolved via `herdr pane get`, the `HERDR_PANE_ID`-may-be-the-stable-id trap) and this repo's checkout
