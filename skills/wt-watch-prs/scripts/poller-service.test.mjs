@@ -68,3 +68,26 @@ test('WP-192 detached poller: two simultaneous installs start exactly one poller
     assert.equal(out.filter((o) => /already running/.test(o)).length, 1, out.join('\n'))
   } finally { await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
 })
+
+test('WP-192 detached poller supervises itself: a killed serve is restarted under the same loop pid, uninstall stops both', async () => {
+  const { execFile } = await import('node:child_process'), { promisify } = await import('node:util')
+  const wh = mkdtempSync(join(tmpdir(), 'wt-poller-')), home = mkdtempSync(join(tmpdir(), 'wt-poller-home-'))
+  const env = { ...process.env, WT_POLLER_DETACHED: '1', WT_WATCH_PRS_HOME: wh, HOME: home, WATCH_PRS_RESTART: '1' }
+  const cli = (c) => promisify(execFile)(process.execPath, [join(import.meta.dirname, 'poller-service.mjs'), c], { env })
+  const serveChild = (loop) => { // the serve process whose parent is the recorded loop pid
+    const ps = spawnSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8' }).stdout.split('\n')
+    return ps.map((l) => l.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter((m) => m && Number(m[2]) === loop && /watch-prs.* serve/.test(m[3])).map((m) => Number(m[1]))[0]
+  }
+  const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+  const until = async (f) => { for (let i = 0; i < 100; i++) { const v = f(); if (v) return v; await new Promise((r) => setTimeout(r, 100)) } }
+  let loop = 0
+  try {
+    await cli('install'); loop = Number(readFileSync(join(wh, 'poller.pid'), 'utf8'))
+    const first = await until(() => serveChild(loop)); assert.ok(first, 'serve runs under the loop')
+    process.kill(first, 'SIGKILL') // the crash
+    const second = await until(() => { const c = serveChild(loop); return c && c !== first ? c : 0 })
+    assert.ok(second, 'a new serve came back'); assert.equal(Number(readFileSync(join(wh, 'poller.pid'), 'utf8')), loop, 'same loop pid')
+    await cli('uninstall'); await until(() => !alive(loop) && !alive(second))
+    assert.ok(!alive(loop) && !alive(second), 'uninstall stopped the loop and its serve')
+  } finally { for (const p of [loop]) if (p && alive(p)) try { process.kill(-p, 'SIGKILL') } catch {}; await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
+})
