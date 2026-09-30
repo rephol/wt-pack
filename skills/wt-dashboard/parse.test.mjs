@@ -1547,3 +1547,13 @@ test('WP-172: paneStale re-reads idle/blocked on the readEvery cadence, not just
   assert.equal(S.agentModel({ transcript: 'claude-sonnet-5-5', tokens: { effort: 'high' }, settings: st }).effortSource, 'token')
   assert.equal(S.agentModel({}), null)
 }
+
+test('WP-200: a slash command/skill turn (command-message first) normalises to "/name args"; plain text and noise unchanged', async () => {
+  const { normalizeEntry } = await import('./server.mjs')
+  const t = (content) => normalizeEntry({ type: 'user', uuid: 'u', message: { content } }).map((m) => m.text)
+  assert.deepEqual(t('<command-message>wt-plan</command-message>\n<command-name>/wt-plan</command-name>\n<command-args>WP-9 do it</command-args>'), ['/wt-plan WP-9 do it'])
+  assert.deepEqual(t('<command-message>goal</command-message>\n<command-name>/goal</command-name>'), ['/goal'])
+  assert.deepEqual(t('<command-name>/compact</command-name>\n<command-args></command-args>'), ['/compact'])
+  assert.deepEqual(t('plain words'), ['plain words'])
+  assert.deepEqual(t('<local-command-stdout>x</local-command-stdout>'), [])
+})

@@ -704,9 +704,12 @@ export function normalizeEntry(e, asks = new Set()) {
   const ts = e.timestamp, base = e.uuid
   const c = e.message?.content
   if (typeof c === 'string') {
-    if (e.type !== 'user' || NOISE.test(c)) return []
-    const cmd = c.match(/<command-name>(.*?)<\/command-name>[\s\S]*?<command-args>([\s\S]*?)<\/command-args>/)
-    const text = cmd ? `${cmd[1]} ${cmd[2]}`.trim() : c
+    if (e.type !== 'user') return []
+    // A slash command/skill is recorded as <command-message>…</command-message><command-name>/x</command-name><command-args>…</command-args>:
+    // read it before NOISE, which drops a bare command-message (WP-200: the chat chip never matched the sent '/x …').
+    const cmd = c.match(/<command-name>(.*?)<\/command-name>(?:[\s\S]*?<command-args>([\s\S]*?)<\/command-args>)?/)
+    if (!cmd && NOISE.test(c)) return []
+    const text = cmd ? `${cmd[1]} ${cmd[2] ?? ''}`.trim() : c
     return text.trim() ? [{ id: base, role: 'user', text, ts, src: sourceOf(c) }] : []
   }
   if (!Array.isArray(c)) return []
