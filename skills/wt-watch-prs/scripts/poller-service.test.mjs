@@ -30,3 +30,29 @@ test('WP-191 shimText: execs the current watch-prs.sh with all arguments, quotin
   assert.match(t, /^exec bash "\/a b\/\\\$x\/\\`y\\`\/watch-prs\.sh" "\$@"$/m)
   assert.match(SHIM, /\/bin\/watch-prs$/)
 })
+
+// WP-192: the detached fallback for hosts with no launchd/systemd, forced with WT_POLLER_DETACHED=1 and a temp home so
+// nothing real is touched. Runs the real `watch-prs.sh serve` (no watchers registered: it only heartbeats).
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+test('WP-192 detached poller: install starts it once, is idempotent, status sees it, uninstall kills the recorded pid', () => {
+  const wh = mkdtempSync(join(tmpdir(), 'wt-poller-')), home = mkdtempSync(join(tmpdir(), 'wt-poller-home-'))
+  const cli = (c) => spawnSync(process.execPath, [join(import.meta.dirname, 'poller-service.mjs'), c], { encoding: 'utf8',
+    env: { ...process.env, WT_POLLER_DETACHED: '1', WT_WATCH_PRS_HOME: wh, HOME: home } })
+  const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+  let pid = 0
+  try {
+    let r = cli('install'); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /started detached/)
+    pid = Number(readFileSync(join(wh, 'poller.pid'), 'utf8')); assert.ok(pid > 1 && alive(pid), 'pid recorded and alive')
+    assert.ok(existsSync(join(wh, 'poller.beat')), 'first heartbeat written before install returned')
+    assert.match(cli('status').stdout, new RegExp(`running, pid ${pid}`))
+    r = cli('install'); assert.match(r.stdout, /already running/); assert.equal(Number(readFileSync(join(wh, 'poller.pid'), 'utf8')), pid)
+    assert.equal(spawnSync('bash', [join(import.meta.dirname, 'watch-prs.sh'), 'poller-status'], { env: { ...process.env, WT_WATCH_PRS_HOME: wh, HOME: home } }).status, 0)
+    r = cli('uninstall'); assert.equal(r.status, 0, r.stderr)
+    assert.ok(!alive(pid), 'recorded pid killed'); assert.ok(!existsSync(join(wh, 'poller.pid')))
+    assert.match(cli('status').stdout, /not running/)
+  } finally { if (pid && alive(pid)) process.kill(pid, 'SIGKILL'); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
+})

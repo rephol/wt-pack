@@ -82,14 +82,18 @@ $W identity           # "<login> <source>" — the account reviews post as
     (resolved via `herdr pane get`, the `HERDR_PANE_ID`-may-be-the-stable-id trap) and this repo's checkout
     path once, and returns immediately.
   - **Exit non-zero, standalone mode → `$W poller-install` once, then `$W poller-status` again** (WP-191). It
-    installs the poller as a launchd agent (macOS) or systemd user unit (Linux) that runs a stable shim under
-    `$WT_WATCH_PRS_HOME/bin/`, so it works from a plugin-only install with no `./setup`, survives plugin updates
-    (each run rewrites the shim to the current path) and needs no sudo. Its output may advise
-    `loginctl enable-linger <user>` — pass that to the user, never run it. Exit 0 the second time → `register`
-    as above. Skip the install in dispatch and review modes, and when the user has declined a background service.
-  - **Still non-zero (install failed, no systemd — it exits 2 with a `nohup` line — or the poller down) → fall
-    back to arming Monitors yourself**, below. That is the ordinary degraded path, not a failure to report —
-    say so in one line and continue with the fallback.
+    installs the poller as a launchd agent (macOS), a systemd user unit (Linux) or — on a host with neither, such
+    as a container (WP-192) — a detached process under `$WT_WATCH_PRS_HOME/poller.pid`, all running a stable shim
+    under `$WT_WATCH_PRS_HOME/bin/`, so it works from a plugin-only install with no `./setup`, survives plugin
+    updates (each run rewrites the shim to the current path) and needs no sudo. It is idempotent — a live,
+    heartbeating poller is left alone, a wedged one is replaced by its recorded pid — so it is also the fix any
+    time you later find `poller-status` failing. The detached mode does not survive a reboot or container
+    restart; its output says how to start it at boot. Output may also advise `loginctl enable-linger <user>` —
+    pass that to the user, never run it. Exit 0 the second time → `register` as above. Skip the install in
+    dispatch and review modes, and when the user has declined a background service.
+  - **Still non-zero (the install failed or the poller is down) → fall back to arming Monitors yourself**,
+    below. That is the ordinary degraded path, not a failure to report — say so in one line and continue with
+    the fallback.
 - **Fallback: arm two Monitors, both `timeout_ms: 1800000`** (30 minutes — the maximum; `Monitor` has no
   `persistent` option, every monitor expires and must be re-armed, see below), after checking `TaskList` that
   this session has neither yet (another session's pair is fine — claims resolve overlap):

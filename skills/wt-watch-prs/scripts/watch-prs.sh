@@ -23,7 +23,8 @@
 #                                    ($WT_WATCH_PRS_HOME/poller.beat) is <3 min old; else exit 1
 #   poller-install | poller-uninstall  WP-191: idempotently install/remove the poller as a launchd agent (macOS) or systemd
 #                                    user unit (Linux) that runs the stable shim <state>/bin/watch-prs — works from a plugin-only
-#                                    install (no ./setup); no sudo, prints linger advice; exit 2 with a nohup line when no systemd
+#                                    install (no ./setup); no sudo, prints linger advice; with no launchd/systemd (a container) WP-192
+#                                    runs it detached under $WT_WATCH_PRS_HOME/poller.pid, killed by that pid on uninstall
 #   serve [--once]                    WP-187: the poller itself — for each registered watcher, poll-shas/
 #                                    poll-replies --once and deliver each line via handoff.sh --kind system;
 #                                    run by launchd (id.local.wtpack.watchprs) or systemd (wt-watch-prs.service), never by an interactive session
@@ -360,8 +361,10 @@ poller-status)
       || { echo "poller: launchd agent not loaded"; exit 1; } ;;
     Linux) # WP-190: a systemd unit, when installed, must be active; a hand-run (nohup) poller has none and only needs the beat
       U="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/wt-watch-prs.service"
-      [ ! -f "$U" ] || systemctl --user is-active --quiet wt-watch-prs.service 2>/dev/null \
-        || { echo "poller: systemd unit wt-watch-prs.service not active"; exit 1; } ;;
+      P="$WH/poller.pid" # WP-192: a detached poller (no systemd) records its pid; a hand-run one has neither unit nor pidfile
+      if [ -f "$U" ]; then systemctl --user is-active --quiet wt-watch-prs.service 2>/dev/null \
+        || { echo "poller: systemd unit wt-watch-prs.service not active"; exit 1; }
+      elif [ -f "$P" ]; then kill -0 "$(cat "$P" 2>/dev/null)" 2>/dev/null || { echo "poller: detached pid $(cat "$P" 2>/dev/null) is not running"; exit 1; }; fi ;;
   esac
   now=$(date +%s); mt=$(stat -f %m "$B" 2>/dev/null || stat -c %Y "$B" 2>/dev/null || echo 0)
   age=$((now - mt))
@@ -444,5 +447,5 @@ serve)
     sleep "${WATCH_PRS_SLEEP:-60}"
   done
   ;;
-*) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
+*) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || exit 2 ;;
 esac
