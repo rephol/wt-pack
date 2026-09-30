@@ -97,6 +97,7 @@ interface Agent {
   cwd: string
   recap: string | null
   context: { used: string; total: string; pct: number } | null
+  model?: { id: string | null; name: string | null; effort: string | null; source: string; routed: string | null } | null // WP-198
   asks: boolean
   question: string | null
   lastPrompt: string | null
@@ -590,6 +591,8 @@ export default function App() {
 // What the agent is on (ticket, state, who handed it over), where the work lives, what it did last; the
 // raw pane tokens fold away under Details. Only what the server already knows — rows without data vanish.
 const TOKEN_LABEL: Record<string, string> = { created: 'Created', project: 'Project', role: 'Role', spawned_by: 'Spawned by', branch: 'Branch', handoff_at: 'Handed off' }
+// 'Sonnet 5.5 · medium' — the friendly name, then the effort when known
+const modelLabel = (m?: Agent['model']) => (m?.name ? (m.effort ? `${m.name} · ${m.effort}` : m.name) : m?.effort ?? '')
 const SHOWN = new Set(['task', 'task_state', 'ticket', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane'])
 function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -660,6 +663,17 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         {plan && <SummaryRow label="Plan"><Text size="sm" type="code" maxLines={2}>{plan}</Text></SummaryRow>}
         {task?.pr && <SummaryRow label="PR"><PrCell pr={task.pr} /></SummaryRow>}
       </SummarySection>
+
+      {agent.model && (
+        <SummarySection title="Model">
+          <SummaryRow label="Running">
+            <Tooltip content={agent.model.id ?? `from the ${agent.model.source}`}>
+              <Text size="sm">{modelLabel(agent.model)}</Text>
+            </Tooltip>
+          </SummaryRow>
+          {agent.model.routed && <Text size="sm" type="supporting">{`routed ${agent.model.routed}, running ${agent.model.name?.split(' ')[0].toLowerCase() ?? 'another tier'}`}</Text>}
+        </SummarySection>
+      )}
 
       {(agent.recap || agent.context) && (
         <SummarySection title="Activity">
@@ -782,6 +796,7 @@ const AGENT_COLS: AgentCol[] = [
   { id: 'project', label: 'Project', width: 120, hidden: true },
   { id: 'role', label: 'Role', width: 110, hidden: true },
   { id: 'context', label: 'Context', width: 110, hidden: true },
+  { id: 'model', label: 'Model', width: 130, hidden: true },
 ]
 type ColConfig = { order: string[]; hidden: string[] }
 const DEFAULT_COLS: ColConfig = { order: AGENT_COLS.map((c) => c.id), hidden: AGENT_COLS.filter((c) => c.hidden).map((c) => c.id) }
@@ -790,7 +805,8 @@ const loadCols = (): ColConfig => {
     const v = JSON.parse(localStorage.getItem('agentCols') ?? 'null') as ColConfig | null
     if (!v || !Array.isArray(v.order) || !Array.isArray(v.hidden)) return DEFAULT_COLS
     const known = DEFAULT_COLS.order
-    return { order: [...v.order.filter((id) => known.includes(id)), ...known.filter((id) => !v.order.includes(id))], hidden: v.hidden }
+    return { order: [...v.order.filter((id) => known.includes(id)), ...known.filter((id) => !v.order.includes(id))],
+      hidden: [...v.hidden, ...DEFAULT_COLS.hidden.filter((id) => !v.order.includes(id))] } // a column added later keeps its default visibility
   } catch { return DEFAULT_COLS }
 }
 const TASK_MIN = 260, AGENT_W = 220, ACT_W = 48
@@ -891,7 +907,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 {rows.map((a) => {
                   const t = taskOf(a)
                   const what = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap
-                  const line2 = [needsYou(a) ? 'needs you' : a.status, taskLabel(a.tags) ?? what, a.local ? null : a.machine, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
+                  const line2 = [needsYou(a) ? 'needs you' : a.status, taskLabel(a.tags) ?? what, a.local ? null : a.machine, a.model?.name ?? null, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
                   return (
                     <div key={a.key} role="button" tabIndex={0} onClick={() => onOpen(a.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(a.key)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', minWidth: 0, cursor: 'pointer', borderBottom: '1px solid var(--color-border-default, rgba(128,128,128,.2))', background: selected === a.key ? 'var(--color-background-secondary, rgba(128,128,128,.12))' : undefined }}>
@@ -950,6 +966,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                         case 'branch': return <Text type="code" color={color} maxLines={1}>{t?.branch ?? shortPath(a.cwd) ?? '—'}</Text>
                         case 'project': return <Text type="supporting" maxLines={1}>{a.project ?? '—'}</Text>
                         case 'role': return <Text type="supporting" maxLines={1}>{roleTitle(a.pool)}</Text>
+                        case 'model': return <Text size="sm" maxLines={1}>{modelLabel(a.model)}</Text>
                         case 'context': return a.context ? (
                           <ProgressBar label="Context" isLabelHidden hasValueLabel value={a.context.pct}
                             variant={a.context.pct > 80 ? 'error' : a.context.pct > 60 ? 'warning' : 'neutral'} />
