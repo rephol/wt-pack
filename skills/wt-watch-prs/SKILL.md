@@ -177,7 +177,9 @@ $W diff 12 "$S" --sha <reported sha> > "$TMPDIR/pr12.diff"
 ## 3. The verdict
 
 `wt-review`'s own verdict word (its first line: **Approve**, **Approve with fixes**, or **Send back**) maps
-onto what gets posted: Approve → `--approve`, Approve with fixes → `gh pr comment`, a **defect** Send back
+onto what gets posted: Approve → `--approve`, Approve with fixes → `--approve` too (WP-195: the findings ride in the
+body, marked non-blocking — a comment is not an approval, and a PR whose only findings are non-blocking must not be
+left unapproved), a **defect** Send back
 (a confirmed high finding or intent mismatch) → `--request-changes` as a **hold**. A **coverage-only** Send
 back (nothing confirmed, but the coverage line shows `N < M`) is its own row below, posted as `gh pr comment`
 — an unread file is neither a defect nor a question, so it is not a hold either. The situations below are
@@ -191,9 +193,20 @@ by anything else.
 | A question only the author can answer that changes what should merge | `--request-changes` as a **hold** — say it is for clarification, not a defect, and that you will approve on the answer |
 | No body / branch-name title | `--request-changes`, the only blocker; say what you verified anyway |
 | `wt-review` verdict: Send back on coverage alone (coverage line's `N < M`, no confirmed defect) — cannot issue Approve here | `gh pr comment` naming exactly what's uncovered — never an approval, never a hold (below) |
-| `wt-review` verdict: Approve with fixes | `gh pr comment` naming the confirmed medium/low findings and what applying them would take |
+| `wt-review` verdict: Approve with fixes, gate green, full coverage, distinct identity | `--approve` with the confirmed medium/low findings and the suggested fixes in the body under a **Non-blocking** heading — the author may apply them or not; none of it needs a reply before merge |
 | `wt-review` verdict: Approve, gate green, full coverage, distinct identity | `--approve` (observations ride along; they need no reply) |
 | Same identity as the author, degraded, or gate not green | `gh pr comment` saying what the verdict would be and what it waits on |
+
+**Every new head gets its own approval.** An approval is for the head you read. On a delta review whose verdict is
+Approve or Approve with fixes, post `--approve` again even though an earlier head was approved — never skip it as
+"already approved", and never end a delta review that is an approve in a comment. Some repos dismiss approvals on
+push; check instead of assuming. The fact is `$W gh pr view N --json reviews`: your earlier approval reads
+`DISMISSED` (no admin rights needed, and it covers rulesets as well as classic branch protection). As a hint when
+nothing was dismissed yet, `$W gh api repos/<owner>/<repo>/branches/<base>/protection --jq
+.required_pull_request_reviews.dismiss_stale_reviews` shows the classic rule (admin only; a 403/404 means unknown,
+not off). When the repo dismisses, say so in the body — "this repo dismisses approvals on push, so this re-approves
+head <sha7>" — so the author knows why a second approval arrived. The gate/coverage/identity rows and every hold
+above, including the last table row (same identity, degraded, gate not green → comment), still override this.
 
 **Never approve with a question.** An approval means nothing outstanding; asking belongs in a hold, telling
 rides in an approval. A later blocker on a PR you approved → amend to `--request-changes`, saying it supersedes.
