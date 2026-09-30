@@ -1520,3 +1520,25 @@ test('WP-172: paneStale re-reads idle/blocked on the readEvery cadence, not just
   // A held picker is always stale (it can advance to a different question with no seq bump), any status.
   assert.equal(paneStale('idle', { seq: 5, at: now, p: { picker: {} } }, 5, now, readEvery), true)
 })
+
+// WP-198: the statusline's model/effort, the exact-id label, and the routed-vs-running note
+{
+  const S = await import('./server.mjs')
+  const box = '─'.repeat(20)
+  const foot = (line) => `⏺ ok\n\n${box}\n❯ \n${box}\n   ${line}\n  cwd: /x\n`
+  const a = S.parsePane(foot('Context: ▓▓░░ 156k/1M (16%)  Model: Sonnet 5  Thinking: medium'))
+  assert.deepEqual([a.model, a.effort], ['Sonnet 5', 'medium'])
+  const b = S.parsePane(foot('Model: Opus 4.1 · Context: 1k/1M (0%)'))
+  assert.deepEqual([b.model, b.effort], ['Opus 4.1', null])
+  assert.deepEqual([S.parsePane(foot('nothing here')).model], [null])
+  assert.equal(S.friendlyModel('claude-sonnet-5-5'), 'Sonnet 5.5')
+  assert.equal(S.friendlyModel('claude-haiku-4-5-20251001'), 'Haiku 4.5')
+  assert.equal(S.friendlyModel('claude-opus-5'), 'Opus 5')
+  // exact transcript id names it; effort from the footer; a differing spawn tier is flagged
+  assert.deepEqual(S.agentModel({ footerModel: 'Sonnet 5', footerEffort: 'medium', transcript: 'claude-sonnet-5-5', tokens: { model: 'opus', effort: 'high' } }),
+    { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', effort: 'medium', source: 'transcript', routed: 'opus' })
+  assert.deepEqual(S.agentModel({ footerModel: 'Sonnet 5', footerEffort: null, transcript: null, tokens: { model: 'sonnet', effort: 'low' } }),
+    { id: null, name: 'Sonnet 5', effort: 'low', source: 'footer', routed: null })
+  assert.deepEqual(S.agentModel({ tokens: { model: 'haiku' } }), { id: null, name: 'haiku', effort: null, source: 'token', routed: null })
+  assert.equal(S.agentModel({}), null)
+}

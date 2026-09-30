@@ -137,6 +137,11 @@ export function parsePane(text, raw = '') {
     ? { session: { pct: Number(sess[1]), reset: sess[2] }, weekly: { pct: Number(week[1]), reset: week[2] } }
     : null
 
+  // WP-198: the statusline's "Model: Sonnet 5  Thinking: medium". A model name is words/digits/dots; it ends at the
+  // next field ("Thinking:"), a glyph, or a double space.
+  const model = stripNbsp.match(/Model:\s*([A-Za-z0-9][\w.\-]*(?: [\w.\-]+)*?)\s*(?=Thinking:|[^\w\s.\-]|\s{2}|\n|$)/)?.[1] ?? null
+  const effort = stripNbsp.match(/Thinking:\s*(\w+)/)?.[1]?.toLowerCase() ?? null
+
   // Turns: ❯ = user, ⏺ = assistant; continuation lines belong to the current turn.
   const turns = []
   let cur = null
@@ -181,6 +186,8 @@ export function parsePane(text, raw = '') {
     recap,
     context: ctx ? { used: ctx[1], total: ctx[2], pct: Number(ctx[3]) } : null,
     planUsage,
+    model,
+    effort,
     cwd,
     asks: Boolean(question),
     question,
@@ -562,6 +569,7 @@ async function listAgents(m) {
       stall, // Jev's stall class (finished|stuck|looping|waiting_on_user) or undefined: today's rule
       lastPrompt: p.lastPrompt ?? null,
       session,
+      model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id) }),
     })
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
@@ -623,6 +631,48 @@ async function findTranscript(id) {
 async function transcriptMtime(id) {
   const f = id && (await findTranscript(id).catch(() => null))
   return (f && statSync(f, { throwIfNoEntry: false })?.mtimeMs) || 0
+}
+
+// WP-198: the model a local session really runs — the last assistant entry's `message.model` in its transcript
+// (exact id, e.g. claude-sonnet-5-5). Only the file's tail is read, and the answer is cached per mtime.
+const modelCache = new Map() // session id → { mtime, model }
+async function transcriptModel(id) {
+  const f = id && (await findTranscript(id).catch(() => null))
+  const st = f && statSync(f, { throwIfNoEntry: false })
+  if (!st) return null
+  if (modelCache.get(id)?.mtime === st.mtimeMs) return modelCache.get(id).model
+  let model = null
+  try {
+    const h = await fopen(f, 'r')
+    try {
+      const n = Math.min(st.size, 256 * 1024), buf = Buffer.alloc(n)
+      await h.read(buf, 0, n, st.size - n)
+      for (const l of buf.toString('utf8').split('\n').reverse()) {
+        const m = l.includes('"assistant"') && l.match(/"model":"([^"]+)"/)?.[1]
+        if (m && !m.startsWith('<')) { model = m; break } // "<synthetic>" is not a model
+      }
+    } finally { await h.close() }
+  } catch {}
+  modelCache.set(id, { mtime: st.mtimeMs, model })
+  return model
+}
+
+// "claude-sonnet-5-5" → "Sonnet 5.5"; the footer's own "Sonnet 5" passes through.
+export const friendlyModel = (m) => {
+  const x = m?.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[.*)?$/)
+  return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}${x[3] ? `.${x[3]}` : ''}` : m ?? null
+}
+const tierOf = (m) => m?.toLowerCase().match(/opus|sonnet|haiku|fable/)?.[0] ?? null
+// What the session runs. The footer says it live ("Sonnet 5") but not exactly; the transcript's id is exact, so it
+// names the model when there is one; the spawn-time tokens are the last resort. `routed` is set only when the
+// spawn token names a different tier than the one running.
+export function agentModel({ footerModel, footerEffort, transcript, tokens = {} }) {
+  const id = transcript ?? null
+  const name = (id ? friendlyModel(id) : footerModel) ?? tokens.model ?? null
+  const effort = footerEffort ?? tokens.effort ?? null
+  if (!name && !effort) return null
+  const running = tierOf(id ?? footerModel), asked = tierOf(tokens.model)
+  return { id, name, effort, source: id ? 'transcript' : footerModel ? 'footer' : 'token', routed: asked && running && asked !== running ? asked : null }
 }
 
 const NOISE = /^\s*<(local-command-caveat|local-command-stdout|task-notification|system-reminder|command-message)/
