@@ -105,6 +105,7 @@ async function stopDetached() {
   // the group (detached made the poller its leader) takes its poll-* children with it
   if (pid && isPoller(pid)) { try { process.kill(-pid, 'SIGTERM') } catch { try { process.kill(pid, 'SIGTERM') } catch { /* gone */ } } for (let i = 0; i < 20 && isPoller(pid); i++) await sleep(100) }
   if (existsSync(PID)) unlinkSync(PID)
+  if (pid && existsSync(BEAT)) unlinkSync(BEAT) // a stale beat must not read as a live hand-run poller for the next 3 minutes
   return pid
 }
 async function installDetached() {

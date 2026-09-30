@@ -204,15 +204,22 @@ test('WP-187: register/unregister write watchers.json; re-registering the same s
   assert.equal(r.status, 0); assert.doesNotMatch(r.stdout, / pane /)
 })
 
-test('WP-187: poller-status — no heartbeat, stale heartbeat, and the launchd-loaded gate', () => {
+test('WP-187: poller-status — no heartbeat, stale heartbeat, and the launchd-loaded gate (Linux: the pidfile gate, WP-192)', () => {
+  const linux = process.platform === 'linux' // launchctl is macOS-only; Linux gates on the detached pidfile instead
   reset()
   let r = run(['poller-status'])
   assert.equal(r.status, 1); assert.match(r.stdout, /no heartbeat/)
   mkdirSync(wh, { recursive: true }); writeFileSync(join(wh, 'poller.beat'), '')
-  r = run(['poller-status']) // beat exists but launchctl says not loaded (no launchctl-loaded fixture)
-  assert.equal(r.status, 1); assert.match(r.stdout, /not loaded/)
-  writeFileSync(join(fx, 'launchctl-loaded'), '1')
-  r = run(['poller-status']) // loaded, fresh beat
+  if (linux) {
+    writeFileSync(join(wh, 'poller.pid'), '2999999\n') // a recorded pid that is not running
+    r = run(['poller-status']); assert.equal(r.status, 1); assert.match(r.stdout, /detached pid 2999999 is not running/)
+    rmSync(join(wh, 'poller.pid'))
+  } else {
+    r = run(['poller-status']) // beat exists but launchctl says not loaded (no launchctl-loaded fixture)
+    assert.equal(r.status, 1); assert.match(r.stdout, /not loaded/)
+    writeFileSync(join(fx, 'launchctl-loaded'), '1')
+  }
+  r = run(['poller-status']) // loaded (or hand-run on Linux), fresh beat
   assert.equal(r.status, 0); assert.match(r.stdout, /loaded, beat \d+s ago/)
   const old = new Date(Date.now() - 200_000)
   utimesSync(join(wh, 'poller.beat'), old, old)
