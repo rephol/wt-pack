@@ -3,7 +3,7 @@
 // launchctl directly, the same untested-by-design boundary as wt-dashboard/scripts/service.mjs.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { plist, systemdUnit, LABEL } from './poller-service.mjs'
+import { plist, systemdUnit, shimText, SHIM, LABEL } from './poller-service.mjs'
 
 test('plist: runs watch-prs.sh serve via bash, KeepAlive restarts on any non-zero exit, PATH and log are escaped', () => {
   const xml = plist({ path: '/usr/bin:/bin', log: '/tmp/a & b.log', script: '/tmp/watch-prs.sh' })
@@ -22,4 +22,11 @@ test('WP-190 systemdUnit: bash serve via a quoted script path, Restart=always, P
   assert.match(u, /^Environment="PATH=\/usr\/bin:\/bin"$/m)
   assert.match(u, /^Environment="HOME=\/home\/u"$/m)
   assert.match(u, /^WantedBy=default\.target$/m)
+})
+
+test('WP-191 shimText: execs the current watch-prs.sh with all arguments, quoting shell metacharacters', () => {
+  const t = shimText('/a b/$x/`y`/watch-prs.sh')
+  assert.match(t, /^#!\/bin\/bash\n/)
+  assert.match(t, /^exec bash "\/a b\/\\\$x\/\\`y\\`\/watch-prs\.sh" "\$@"$/m)
+  assert.match(SHIM, /\/bin\/watch-prs$/)
 })

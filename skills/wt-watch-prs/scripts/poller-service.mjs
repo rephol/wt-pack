@@ -7,7 +7,7 @@
 // approach) — a small, self-contained copy rather than a cross-skill import, since the two labels are
 // otherwise unrelated and a change to one's plist shape has no reason to touch the other's.
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync, chmodSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,11 @@ const PLIST = join(HOME, 'Library', 'LaunchAgents', `${LABEL}.plist`)
 const LOG = join(HOME, 'Library', 'Logs', 'wt-watch-prs', 'poller.log')
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url))) // skills/wt-watch-prs
 const SCRIPT = join(ROOT, 'scripts', 'watch-prs.sh')
+// WP-191: the service runs a stable shim, not SCRIPT — a plugin update moves the plugin's directory, and the
+// shim (rewritten by every install) is the one path the unit/plist never has to change.
+export const SHIM = join(process.env.WT_WATCH_PRS_HOME || join(HOME, '.local', 'share', 'wt-watch-prs'), 'bin', 'watch-prs')
+export const shimText = (script = SCRIPT) => `#!/bin/bash\n# written by poller-service.mjs install; points at the current watch-prs.sh\nexec bash "${script.replace(/[\\"$`]/g, '\\$&')}" "$@"\n`
+function writeShim() { mkdirSync(dirname(SHIM), { recursive: true }); writeFileSync(SHIM, shimText()); chmodSync(SHIM, 0o755) }
 const LINUX = process.platform === 'linux'
 const UNIT_NAME = 'wt-watch-prs.service'
 const UNIT = join(process.env.XDG_CONFIG_HOME || join(HOME, '.config'), 'systemd', 'user', UNIT_NAME)
@@ -84,7 +89,7 @@ const lingerOn = () => { try { return /Linger=yes/.test(execFileSync('loginctl',
 function installLinux() {
   if (noSystemd()) { console.log(NOHUP); process.exit(2) }
   mkdirSync(dirname(UNIT), { recursive: true })
-  writeFileSync(UNIT, systemdUnit({ path: loginPath() }))
+  writeShim(); writeFileSync(UNIT, systemdUnit({ path: loginPath(), script: SHIM }))
   systemctl('daemon-reload'); systemctl('enable', UNIT_NAME)
   systemctl('restart', UNIT_NAME) // starts it, or picks up a changed unit
   console.log(`installed ${UNIT}\n  script ${SCRIPT}\n  log: journalctl --user -u ${UNIT_NAME}`)
@@ -93,6 +98,7 @@ function installLinux() {
 function uninstallLinux() {
   if (!noSystemd()) { try { systemctl('disable', '--now', UNIT_NAME) } catch { /* not enabled */ } }
   if (existsSync(UNIT)) unlinkSync(UNIT)
+  if (existsSync(SHIM)) unlinkSync(SHIM)
   if (!noSystemd()) systemctl('daemon-reload')
   console.log('uninstalled')
 }
@@ -107,7 +113,7 @@ function install() {
   const path = loginPath()
   mkdirSync(dirname(PLIST), { recursive: true })
   mkdirSync(dirname(LOG), { recursive: true })
-  writeFileSync(PLIST, plist({ path, log: LOG }))
+  writeShim(); writeFileSync(PLIST, plist({ path, log: LOG, script: SHIM }))
   if (loaded()) launchctl('bootout', `${DOMAIN}/${LABEL}`) // pick up a changed plist
   launchctl('bootstrap', DOMAIN, PLIST)
   console.log(`installed ${PLIST}\n  script ${SCRIPT}\n  log ${LOG}`)
@@ -116,6 +122,7 @@ function uninstall() {
   if (LINUX) return uninstallLinux()
   if (loaded()) launchctl('bootout', `${DOMAIN}/${LABEL}`)
   if (existsSync(PLIST)) unlinkSync(PLIST)
+  if (existsSync(SHIM)) unlinkSync(SHIM)
   console.log('uninstalled')
 }
 function status() {
