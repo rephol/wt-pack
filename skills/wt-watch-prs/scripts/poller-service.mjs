@@ -6,8 +6,8 @@
 // wt-dashboard/scripts/service.mjs's own plist shape deliberately (same KeepAlive/ThrottleInterval/login-PATH
 // approach) — a small, self-contained copy rather than a cross-skill import, since the two labels are
 // otherwise unrelated and a change to one's plist shape has no reason to touch the other's.
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync, chmodSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync, chmodSync, statSync, openSync, rmSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -83,19 +83,70 @@ WantedBy=default.target
 }
 const systemctl = (...a) => execFileSync('systemctl', ['--user', ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 const noSystemd = () => { try { systemctl('show-environment'); return false } catch { return true } }
-const NOHUP = `no systemd user manager here (container?) — run it by hand:\n  nohup bash ${SCRIPT} serve >> ~/.local/share/wt-watch-prs/poller.log 2>&1 &`
 const lingerOn = () => { try { return /Linger=yes/.test(execFileSync('loginctl', ['show-user', userInfo().username, '-p', 'Linger'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) } catch { return false } }
 
+// WP-192: no launchd and no systemd user manager (a container) — run `serve` detached under a pidfile. Node's
+// detached:true makes the child a session leader (setsid), so it outlives this process and gets no SIGHUP; the shim
+// `exec`s, so the recorded pid IS the poller. Everything below acts on that recorded pid, never on a name pattern.
+const WH = dirname(dirname(SHIM))
+const PID = join(WH, 'poller.pid'), BEAT = join(WH, 'poller.beat'), DLOG = join(WH, 'poller.log')
+const detachedMode = () => process.env.WT_POLLER_DETACHED === '1' || (LINUX && noSystemd())
+const readPid = () => { try { const n = Number(readFileSync(PID, 'utf8').trim()); return Number.isInteger(n) && n > 1 ? n : 0 } catch { return 0 } }
+const cmdline = (pid) => { // /proc first (Linux, and minimal containers with no ps), then ps
+  try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') } catch { /* no /proc */ }
+  try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return '' }
+}
+// alive AND still `watch-prs.sh serve` — a recycled pid must not be signalled
+const isPoller = (pid) => { try { process.kill(pid, 0) } catch { return false } return /watch-prs\.sh"? serve/.test(cmdline(pid)) }
+const beatAge = () => { try { return (Date.now() - statSync(BEAT).mtimeMs) / 1000 } catch { return Infinity } }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+async function stopDetached() {
+  const pid = readPid()
+  // the group (detached made the poller its leader) takes its poll-* children with it
+  if (pid && isPoller(pid)) { try { process.kill(-pid, 'SIGTERM') } catch { try { process.kill(pid, 'SIGTERM') } catch { /* gone */ } } for (let i = 0; i < 20 && isPoller(pid); i++) await sleep(100) }
+  if (existsSync(PID)) unlinkSync(PID)
+  return pid
+}
+async function installDetached() {
+  mkdirSync(WH, { recursive: true })
+  const LOCK = join(WH, 'poller.lock') // two sessions installing at once must not both spawn
+  for (let i = 0; ; i++) {
+    try { mkdirSync(LOCK); break } catch (e) {
+      if (e.code !== 'EEXIST') throw e
+      if (i >= 100) { try { rmSync(LOCK, { recursive: true }) } catch { /* raced */ } continue } // stale after ~10s
+      await sleep(100)
+    }
+  }
+  try { await installDetachedLocked() } finally { try { rmSync(LOCK, { recursive: true }) } catch { /* gone */ } }
+}
+async function installDetachedLocked() {
+  const pid = readPid()
+  if (pid && isPoller(pid) && beatAge() < 180) return console.log(`already running (detached, pid ${pid}, beat ${Math.round(beatAge())}s ago)`)
+  await stopDetached() // a live pid with a stale beat is wedged: replace it
+  writeShim()
+  const started = Date.now(), fd = openSync(DLOG, 'a')
+  const child = spawn('/bin/bash', [SHIM, 'serve'], { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, PATH: loginPath() } })
+  child.on('error', () => {}); child.unref(); writeFileSync(PID, `${child.pid}\n`)
+  for (let i = 0; i < 60 && !(existsSync(BEAT) && statSync(BEAT).mtimeMs >= started); i++) await sleep(100) // first heartbeat
+  if (!isPoller(child.pid)) { try { unlinkSync(PID) } catch { /* gone */ } throw new Error(`the poller exited at once — see ${DLOG}`) }
+  console.log(`started detached (pid ${child.pid}; no launchd/systemd here)\n  script ${SHIM} → ${SCRIPT}\n  log ${DLOG}\n  it does not survive a reboot or container restart — start it there with:  bash ${SCRIPT} serve &`)
+}
+function statusDetached() {
+  const pid = readPid()
+  console.log(pid && isPoller(pid) ? `detached poller: running, pid ${pid}, beat ${Number.isFinite(beatAge()) ? Math.round(beatAge()) + 's ago' : 'none'}\n  log ${DLOG}` : 'detached poller: not running')
+}
+
 function installLinux() {
-  if (noSystemd()) { console.log(NOHUP); process.exit(2) }
   mkdirSync(dirname(UNIT), { recursive: true })
+  if (readPid()) { const p = readPid(); if (isPoller(p)) try { process.kill(p, 'SIGTERM') } catch {} ; try { unlinkSync(PID) } catch {} } // a leftover detached poller
   writeShim(); writeFileSync(UNIT, systemdUnit({ path: loginPath(), script: SHIM }))
   systemctl('daemon-reload'); systemctl('enable', UNIT_NAME)
   systemctl('restart', UNIT_NAME) // starts it, or picks up a changed unit
   console.log(`installed ${UNIT}\n  script ${SHIM} → ${SCRIPT}\n  log: journalctl --user -u ${UNIT_NAME}`)
   if (!lingerOn()) console.log(`note: the service stops when you log out — keep it running with:  loginctl enable-linger ${userInfo().username}`)
 }
-function uninstallLinux() {
+async function uninstallLinux() {
+  await stopDetached()
   if (!noSystemd()) { try { systemctl('disable', '--now', UNIT_NAME) } catch { /* not enabled */ } }
   if (existsSync(UNIT)) unlinkSync(UNIT)
   if (existsSync(SHIM)) unlinkSync(SHIM)
@@ -103,12 +154,13 @@ function uninstallLinux() {
   console.log('uninstalled')
 }
 function statusLinux() {
-  if (!existsSync(UNIT)) return console.log('not installed')
+  if (!existsSync(UNIT)) return existsSync(PID) ? statusDetached() : console.log('not installed')
   let st = 'unknown'; try { st = systemctl('is-active', UNIT_NAME).trim() } catch (e) { st = String(e.stdout || 'inactive').trim() }
   console.log(`${UNIT_NAME}: ${st === 'active' || st === 'activating' ? 'running' : st}\n  log: journalctl --user -u ${UNIT_NAME}`)
 }
 
-function install() {
+async function install() {
+  if (detachedMode()) return installDetached()
   if (LINUX) return installLinux()
   const path = loginPath()
   mkdirSync(dirname(PLIST), { recursive: true })
@@ -118,14 +170,16 @@ function install() {
   launchctl('bootstrap', DOMAIN, PLIST)
   console.log(`installed ${PLIST}\n  script ${SHIM} → ${SCRIPT}\n  log ${LOG}`)
 }
-function uninstall() {
+async function uninstall() {
   if (LINUX) return uninstallLinux()
+  if (process.env.WT_POLLER_DETACHED === '1') { await stopDetached(); if (existsSync(SHIM)) unlinkSync(SHIM); return console.log('uninstalled') }
   if (loaded()) launchctl('bootout', `${DOMAIN}/${LABEL}`)
   if (existsSync(PLIST)) unlinkSync(PLIST)
   if (existsSync(SHIM)) unlinkSync(SHIM)
   console.log('uninstalled')
 }
 function status() {
+  if (process.env.WT_POLLER_DETACHED === '1') return statusDetached()
   if (LINUX) return statusLinux()
   if (!existsSync(PLIST)) return console.log('not installed')
   if (!loaded()) return console.log(`installed (${PLIST}) but not loaded — run poller-service:install`)
@@ -137,9 +191,10 @@ function status() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2]
   try {
-    if (cmd === 'install') install()
-    else if (cmd === 'uninstall') uninstall()
+    if (cmd === 'install') await install()
+    else if (cmd === 'uninstall') await uninstall()
     else if (cmd === 'restart') {
+      if (detachedMode() || (LINUX && !existsSync(UNIT) && readPid())) { await stopDetached(); await installDetached(); process.exit(0) }
       if (LINUX) { if (!existsSync(UNIT)) throw new Error('not installed — run poller-service.mjs install'); systemctl('restart', UNIT_NAME) }
       else { if (!loaded()) throw new Error('not installed — run poller-service:install'); launchctl('kickstart', '-k', `${DOMAIN}/${LABEL}`) }
       console.log('restarted')

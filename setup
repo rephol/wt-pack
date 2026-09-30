@@ -82,7 +82,7 @@ service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLI
 wpservice_root() {
   # WP-191: the service runs a shim that names the checkout; older installs pointed at watch-prs.sh directly.
   local shim="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}/bin/watch-prs"
-  if [ -f "$shim" ] && { [ -f "$WPPLIST" ] || [ -f "$WPUNIT" ]; }; then sed -n 's#^exec bash "\(.*\)/scripts/watch-prs\.sh" "\$@"$#\1#p' "$shim"; return; fi
+  if [ -f "$shim" ] && { [ -f "$WPPLIST" ] || [ -f "$WPUNIT" ] || [ -f "$(dirname "$(dirname "$shim")")/poller.pid" ]; }; then sed -n 's#^exec bash "\(.*\)/scripts/watch-prs\.sh" "\$@"$#\1#p' "$shim"; return; fi
   if [ "$OS" = Darwin ]; then [ -f "$WPPLIST" ] && plutil -extract ProgramArguments.1 raw "$WPPLIST" 2>/dev/null | sed 's#/scripts/watch-prs\.sh$##'
   else [ -f "$WPUNIT" ] && sed -n 's#^ExecStart=/bin/bash "\(.*\)/scripts/watch-prs\.sh" serve$#\1#p' "$WPUNIT"; fi
 }
@@ -236,15 +236,13 @@ doctor() {
   # WP-187: optional — SKILL.md's §1 arms Monitors instead when this isn't running, so a failure here is a
   # note, not a required check (never `bad`).
   if [ "$service" -eq 0 ]; then opt "watchprs poller not checked (--no-service)"
-  elif [ "$OS" = Darwin ] || have_systemd_user || [ -f "$WPUNIT" ]; then
+  else
     wpst=$("$WP/scripts/watch-prs.sh" poller-status 2>&1)
     case "$wpst" in
       *"(stale)"*) opt "watchprs $wpst — node $WP/scripts/poller-service.mjs restart" ;;
       *"loaded, beat"*) opt "watchprs $wpst" ;;
       *) opt "watchprs $wpst — node $WP/scripts/poller-service.mjs install (optional: SKILL.md falls back to Monitors without it)" ;;
     esac
-  else
-    opt "no launchd or systemd user manager on $OS: run the poller with  nohup bash $WP/scripts/watch-prs.sh serve &"
   fi
   code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null)
   case "$code" in 2*|3*|401|403) ok "dashboard answers on http://127.0.0.1:$PORT ($code)" ;;
@@ -415,14 +413,14 @@ svc() {
 # WP-187: the wt-watch-prs background poller — optional (SKILL.md's §1 falls back to arming Monitors when it
 # isn't running), installed the same way the dashboard's watchdog probe is: on by default, --no-service skips it.
 wp_svc() {
-  step "wt-watch-prs poller ($([ "$OS" = Darwin ] && echo launchd || echo systemd))"
+  WH_PID="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}/poller.pid"
+  step "wt-watch-prs poller ($([ "$OS" = Darwin ] && echo launchd || { have_systemd_user && echo systemd || echo detached; }))"
   if [ "$service" -eq 0 ]; then opt "skipped (--no-service)"; return 0; fi
-  if [ "$OS" != Darwin ] && ! have_systemd_user; then opt "no systemd user manager on $OS — run: nohup bash $WP/scripts/watch-prs.sh serve >> ~/.local/share/wt-watch-prs/poller.log 2>&1 &"; return 0; fi
   wproot=$(wpservice_root)
   # WP-191: a service installed before the shim existed runs the script path directly — reinstall once to move it.
   if [ "$wproot" = "$WP" ] && [ -f "${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}/bin/watch-prs" ] && node "$WP/scripts/poller-service.mjs" status 2>/dev/null | grep -q running; then ok "already: running from $WP"
   elif [ -n "$wproot" ] && [ "$wproot" != "$WP" ] && is_pack "$(root_of "$wproot")"; then opt "kept: the poller runs $wproot (another wt-pack checkout)"
-  else "$WP/scripts/watch-prs.sh" poller-install >/dev/null && ok "installed and started ($([ "$OS" = Darwin ] && echo "$WPPLIST" || echo "$WPUNIT"))" || bad "poller install failed — $WP/scripts/watch-prs.sh poller-install"; fi
+  else "$WP/scripts/watch-prs.sh" poller-install >/dev/null && ok "installed and started ($([ "$OS" = Darwin ] && echo "$WPPLIST" || { [ -f "$WPUNIT" ] && echo "$WPUNIT" || echo "detached, pid file $WH_PID"; }))" || bad "poller install failed — $WP/scripts/watch-prs.sh poller-install"; fi
   # A user unit stops at logout unless lingering is on; advise, never sudo.
   if [ "$OS" != Darwin ] && [ -f "$WPUNIT" ] && ! loginctl show-user "${USER:-$(id -un)}" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
     opt "the poller stops when you log out — keep it running: loginctl enable-linger ${USER:-$(id -un)}"
