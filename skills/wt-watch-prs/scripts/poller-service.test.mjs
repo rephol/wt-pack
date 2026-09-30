@@ -114,3 +114,29 @@ test('WP-196 detached supervisor kills a serve whose beat went stale and starts 
     assert.ok(alive(loop), 'the loop itself survives')
   } finally { await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
 })
+
+test('WP-197 a running detached poller exits on a code change and the loop restarts it under the same loop pid', async () => {
+  const { execFile } = await import('node:child_process'), { promisify } = await import('node:util')
+  const { copyFileSync, appendFileSync, writeFileSync } = await import('node:fs')
+  const wh = mkdtempSync(join(tmpdir(), 'wt-poller-')), home = mkdtempSync(join(tmpdir(), 'wt-poller-home-'))
+  const env = { ...process.env, WT_POLLER_DETACHED: '1', WT_WATCH_PRS_HOME: wh, HOME: home, WATCH_PRS_RESTART: '1', WATCH_PRS_SLEEP: '1' }
+  const cli = (c) => promisify(execFile)(process.execPath, [join(import.meta.dirname, 'poller-service.mjs'), c], { env })
+  const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+  const until = async (f) => { for (let i = 0; i < 150; i++) { const v = f(); if (v) return v; await new Promise((r) => setTimeout(r, 100)) } }
+  const log = () => { try { return readFileSync(join(wh, 'poller.log'), 'utf8') } catch { return '' } }
+  const changed = () => (log().match(/code changed, restarting/g) || []).length
+  const copy = join(home, 'watch-prs.sh')
+  let loop = 0
+  try {
+    await cli('install'); loop = Number(readFileSync(join(wh, 'poller.pid'), 'utf8'))
+    copyFileSync(join(import.meta.dirname, 'watch-prs.sh'), copy)
+    writeFileSync(join(wh, 'bin', 'watch-prs'), shimText(copy)) // a plugin update re-points the shim
+    assert.ok(await until(() => changed() >= 1), 'exits when the shim points at another script\n' + log())
+    const b1 = statSync(join(wh, 'poller.beat')).mtimeMs; assert.ok(await until(() => statSync(join(wh, 'poller.beat')).mtimeMs > b1), 'restarted serve is up') // it fingerprints at start
+    appendFileSync(copy, '\n# edited\n') // and an edit in place
+    assert.ok(await until(() => changed() >= 2), 'exits when the script itself changes\n' + log())
+    assert.ok(alive(loop) && Number(readFileSync(join(wh, 'poller.pid'), 'utf8')) === loop, 'same loop pid throughout')
+    const beat = statSync(join(wh, 'poller.beat')).mtimeMs; await new Promise((r) => setTimeout(r, 2500))
+    assert.ok(statSync(join(wh, 'poller.beat')).mtimeMs > beat, 'and a restarted serve is beating')
+  } finally { await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
+})

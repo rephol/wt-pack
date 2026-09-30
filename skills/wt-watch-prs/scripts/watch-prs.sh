@@ -387,6 +387,17 @@ serve)
     jq --arg repo "$repo" --arg reason "$reason" --arg at "$at" '(. + [{repo:$repo, reason:$reason, at:$at}]) | .[-50:]' "$UW" > "$UW.tmp" 2>/dev/null && mv "$UW.tmp" "$UW"
     rmdir "$L2" 2>/dev/null
   }
+  # WP-197: pick up our own updates. The fingerprint is the script the shim points at now plus a checksum of it and
+  # the handoff helper; when it changes (a plugin update re-pointed the shim, or the file was edited) we finish the
+  # round and exit non-zero so every supervisor restarts us (launchd's KeepAlive only restarts a failed exit).
+  fp() {
+    local sh="$WH/bin/watch-prs" s="$0" h
+    [ "$useshim" = 1 ] && [ -f "$sh" ] && s=$(sed -n 's/^exec bash "\(.*\)" "\$@"$/\1/p' "$sh" | head -1 | sed 's/\\\(.\)/\1/g')
+    [ -f "$s" ] || s="$0"; h="$(dirname "$s")/../../wt-handoff/scripts/handoff.sh"
+    printf '%s %s' "$s" "$(cat "$s" "$h" 2>/dev/null | cksum)"
+  }
+  useshim=0; [ -f "$WH/bin/watch-prs" ] && useshim=1 # a hand-run poller has no supervisor to restart it: it never self-exits
+  fp0=$(fp)
   # WP-196: a beat older than 3 min at start-up means the poller was down (hung and killed, crashed, box asleep):
   # tell each registered pane once, after its first successful poll, so the session knows there was a gap.
   gap=0
@@ -457,6 +468,7 @@ $out}"
     done
     gap=0
     i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
+    [ "$useshim" = 1 ] && [ "$(fp)" != "$fp0" ] && { echo "wt-watch-prs: code changed, restarting"; exit 75; }
     sleep "${WATCH_PRS_SLEEP:-60}"
   done
   ;;
