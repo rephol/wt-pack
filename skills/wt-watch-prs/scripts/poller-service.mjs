@@ -7,7 +7,7 @@
 // approach) — a small, self-contained copy rather than a cross-skill import, since the two labels are
 // otherwise unrelated and a change to one's plist shape has no reason to touch the other's.
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync, chmodSync, statSync, openSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync, chmodSync, statSync, openSync, rmSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,26 +92,43 @@ const WH = dirname(dirname(SHIM))
 const PID = join(WH, 'poller.pid'), BEAT = join(WH, 'poller.beat'), DLOG = join(WH, 'poller.log')
 const detachedMode = () => process.env.WT_POLLER_DETACHED === '1' || (LINUX && noSystemd())
 const readPid = () => { try { const n = Number(readFileSync(PID, 'utf8').trim()); return Number.isInteger(n) && n > 1 ? n : 0 } catch { return 0 } }
-const isPoller = (pid) => { // alive AND still a watch-prs process (a recycled pid must not be signalled)
-  try { process.kill(pid, 0); return /watch-prs/.test(execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' })) } catch { return false }
+const cmdline = (pid) => { // /proc first (Linux, and minimal containers with no ps), then ps
+  try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') } catch { /* no /proc */ }
+  try { return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return '' }
 }
+// alive AND still `watch-prs.sh serve` — a recycled pid must not be signalled
+const isPoller = (pid) => { try { process.kill(pid, 0) } catch { return false } return /watch-prs\.sh"? serve/.test(cmdline(pid)) }
 const beatAge = () => { try { return (Date.now() - statSync(BEAT).mtimeMs) / 1000 } catch { return Infinity } }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function stopDetached() {
   const pid = readPid()
-  if (pid && isPoller(pid)) { try { process.kill(pid, 'SIGTERM') } catch { /* gone */ } for (let i = 0; i < 20 && isPoller(pid); i++) await sleep(100) }
+  // the group (detached made the poller its leader) takes its poll-* children with it
+  if (pid && isPoller(pid)) { try { process.kill(-pid, 'SIGTERM') } catch { try { process.kill(pid, 'SIGTERM') } catch { /* gone */ } } for (let i = 0; i < 20 && isPoller(pid); i++) await sleep(100) }
   if (existsSync(PID)) unlinkSync(PID)
   return pid
 }
 async function installDetached() {
+  mkdirSync(WH, { recursive: true })
+  const LOCK = join(WH, 'poller.lock') // two sessions installing at once must not both spawn
+  for (let i = 0; ; i++) {
+    try { mkdirSync(LOCK); break } catch (e) {
+      if (e.code !== 'EEXIST') throw e
+      if (i >= 100) { try { rmSync(LOCK, { recursive: true }) } catch { /* raced */ } continue } // stale after ~10s
+      await sleep(100)
+    }
+  }
+  try { await installDetachedLocked() } finally { try { rmSync(LOCK, { recursive: true }) } catch { /* gone */ } }
+}
+async function installDetachedLocked() {
   const pid = readPid()
   if (pid && isPoller(pid) && beatAge() < 180) return console.log(`already running (detached, pid ${pid}, beat ${Math.round(beatAge())}s ago)`)
   await stopDetached() // a live pid with a stale beat is wedged: replace it
-  mkdirSync(WH, { recursive: true }); writeShim()
+  writeShim()
   const started = Date.now(), fd = openSync(DLOG, 'a')
   const child = spawn('/bin/bash', [SHIM, 'serve'], { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, PATH: loginPath() } })
-  child.unref(); writeFileSync(PID, `${child.pid}\n`)
+  child.on('error', () => {}); child.unref(); writeFileSync(PID, `${child.pid}\n`)
   for (let i = 0; i < 60 && !(existsSync(BEAT) && statSync(BEAT).mtimeMs >= started); i++) await sleep(100) // first heartbeat
+  if (!isPoller(child.pid)) { try { unlinkSync(PID) } catch { /* gone */ } throw new Error(`the poller exited at once — see ${DLOG}`) }
   console.log(`started detached (pid ${child.pid}; no launchd/systemd here)\n  script ${SHIM} → ${SCRIPT}\n  log ${DLOG}\n  it does not survive a reboot or container restart — start it there with:  bash ${SCRIPT} serve &`)
 }
 function statusDetached() {

@@ -56,3 +56,15 @@ test('WP-192 detached poller: install starts it once, is idempotent, status sees
     assert.match(cli('status').stdout, /not running/)
   } finally { if (pid && alive(pid)) process.kill(pid, 'SIGKILL'); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
 })
+
+test('WP-192 detached poller: two simultaneous installs start exactly one poller', async () => {
+  const { execFile } = await import('node:child_process'), { promisify } = await import('node:util')
+  const wh = mkdtempSync(join(tmpdir(), 'wt-poller-')), home = mkdtempSync(join(tmpdir(), 'wt-poller-home-'))
+  const env = { ...process.env, WT_POLLER_DETACHED: '1', WT_WATCH_PRS_HOME: wh, HOME: home }
+  const cli = (c) => promisify(execFile)(process.execPath, [join(import.meta.dirname, 'poller-service.mjs'), c], { env })
+  try {
+    const out = (await Promise.all([cli('install'), cli('install')])).map((r) => r.stdout)
+    assert.equal(out.filter((o) => /started detached/.test(o)).length, 1, out.join('\n'))
+    assert.equal(out.filter((o) => /already running/.test(o)).length, 1, out.join('\n'))
+  } finally { await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
+})
