@@ -18,7 +18,7 @@ test('plist: runs watch-prs.sh serve via bash, KeepAlive restarts on any non-zer
 test('WP-190 systemdUnit: bash serve via a quoted script path, Restart=always, PATH/HOME env, % and " escaped', () => {
   const u = systemdUnit({ path: '/usr/bin:/bin', script: '/tmp/a b/100%/$x/watch-prs.sh', home: '/home/u' })
   assert.match(u, /^ExecStart=\/bin\/bash "\/tmp\/a b\/100%%\/\$\$x\/watch-prs\.sh" serve$/m)
-  assert.match(u, /^Restart=always$/m)
+  assert.match(u, /^Restart=always$/m); assert.match(u, /^WatchdogSec=180$/m); assert.match(u, /^Type=notify$/m)
   assert.match(u, /^Environment="PATH=\/usr\/bin:\/bin"$/m)
   assert.match(u, /^Environment="HOME=\/home\/u"$/m)
   assert.match(u, /^WantedBy=default\.target$/m)
@@ -34,7 +34,7 @@ test('WP-191 shimText: execs the current watch-prs.sh with all arguments, quotin
 // WP-192: the detached fallback for hosts with no launchd/systemd, forced with WT_POLLER_DETACHED=1 and a temp home so
 // nothing real is touched. Runs the real `watch-prs.sh serve` (no watchers registered: it only heartbeats).
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, mkdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -94,4 +94,23 @@ test('WP-192 detached poller supervises itself: a killed serve is restarted unde
     await cli('uninstall'); await until(() => !alive(loop) && !alive(second))
     assert.ok(!alive(loop) && !alive(second), 'uninstall stopped the loop and its serve')
   } finally { for (const p of [loop]) if (p && alive(p)) try { process.kill(-p, 'SIGKILL') } catch {}; await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
+})
+
+test('WP-196 detached supervisor kills a serve whose beat went stale and starts a new one', async () => {
+  const { execFile } = await import('node:child_process'), { promisify } = await import('node:util')
+  const wh = mkdtempSync(join(tmpdir(), 'wt-poller-')), home = mkdtempSync(join(tmpdir(), 'wt-poller-home-'))
+  // a fake serve that never beats: the first (install-time) beat is written by us, so install can finish
+  mkdirSync(join(wh, 'bin'), { recursive: true })
+  const env = { ...process.env, WT_POLLER_DETACHED: '1', WT_WATCH_PRS_HOME: wh, HOME: home, WATCH_PRS_RESTART: '1', WATCH_PRS_WD_TICK: '1', WATCH_PRS_STALE: '3', WATCH_PRS_SLEEP: '600' }
+  const cli = (c) => promisify(execFile)(process.execPath, [join(import.meta.dirname, 'poller-service.mjs'), c], { env })
+  const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+  let loop = 0
+  try {
+    await cli('install'); loop = Number(readFileSync(join(wh, 'poller.pid'), 'utf8'))
+    const beat = join(wh, 'poller.beat'), first = statSync(beat).mtimeMs
+    // serve sleeps 600s between beats, so after WATCH_PRS_STALE the watchdog must restart it (new beat)
+    for (let i = 0; i < 150 && statSync(beat).mtimeMs === first; i++) await new Promise((r) => setTimeout(r, 100))
+    assert.notEqual(statSync(beat).mtimeMs, first, 'serve was restarted (beat rewritten)')
+    assert.ok(alive(loop), 'the loop itself survives')
+  } finally { await cli('uninstall').catch(() => {}); rmSync(wh, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }) }
 })

@@ -72,6 +72,9 @@ After=network.target
 
 [Service]
 ExecStart=/bin/bash "${q(script)}" serve
+Type=notify
+NotifyAccess=all
+WatchdogSec=180
 Restart=always
 RestartSec=10
 Environment="PATH=${q(path)}"
@@ -127,8 +130,9 @@ async function installDetachedLocked() {
   writeShim()
   const started = Date.now(), fd = openSync(DLOG, 'a')
   // A tiny supervisor: the pidfile holds this loop's pid, so a crashed `serve` comes back without any session.
-  const LOOP = 'while :; do bash "$1" serve; sleep "${WATCH_PRS_RESTART:-5}"; done'
-  const child = spawn('/bin/bash', ['-c', LOOP, 'watch-prs-loop', SHIM], { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, PATH: loginPath() } })
+  // WP-196: it also watches the beat — a `serve` that hangs (beat older than 3 min) is killed and comes back here.
+  const LOOP = 'while :; do bash "$1" serve & p=$!; s=$(date +%s); (while sleep "${WATCH_PRS_WD_TICK:-30}"; do m=$(stat -c %Y "$2" 2>/dev/null || stat -f %m "$2" 2>/dev/null || echo 0); [ "$m" -lt "$s" ] && m=$s; [ $(($(date +%s) - m)) -ge "${WATCH_PRS_STALE:-180}" ] && { kill $p 2>/dev/null; break; }; done) & w=$!; wait $p 2>/dev/null; kill $w 2>/dev/null; sleep "${WATCH_PRS_RESTART:-5}"; done'
+  const child = spawn('/bin/bash', ['-c', LOOP, 'watch-prs-loop', SHIM, BEAT], { detached: true, stdio: ['ignore', fd, fd], env: { ...process.env, PATH: loginPath() } })
   child.on('error', () => {}); child.unref(); writeFileSync(PID, `${child.pid}\n`)
   for (let i = 0; i < 60 && !(existsSync(BEAT) && statSync(BEAT).mtimeMs >= started); i++) await sleep(100) // first heartbeat
   if (!isPoller(child.pid)) { try { unlinkSync(PID) } catch { /* gone */ } throw new Error(`the poller exited at once — see ${DLOG}`) }

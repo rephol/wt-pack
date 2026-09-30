@@ -240,6 +240,18 @@ test('WP-187: serve delivers a new-commits event via handoff --kind system --pan
   assert.ok(existsSync(join(wh, 'poller.beat')), 'heartbeat touched')
 })
 
+test('WP-196: serve tells a registered pane once when it resumes after a stale beat', () => {
+  reset(); rmSync(join(fx, 'handoff-calls'), { force: true }); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  fixture('list.1.json', [])
+  const old = new Date(Date.now() - 600_000); writeFileSync(join(wh, 'poller.beat'), ''); utimesSync(join(wh, 'poller.beat'), old, old)
+  const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(readFileSync(join(fx, 'handoff'), 'utf8'), /poller resumed after 10m; replayed missed heads/)
+  run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff }) // fresh beat now: no second notice
+  assert.doesNotMatch(readFileSync(join(fx, 'handoff'), 'utf8'), /poller resumed/) // the last delivery is not the gap notice
+})
+
 test('WP-187: serve unregisters and records an unwatched notice for a watcher with no resolved pane', () => {
   // registered with no herdr / no HERDR_PANE_ID (empty pane) -- would otherwise poll forever with no
   // delivery and no unwatched notice, a silent black hole distinct from the three cases decision 5 covers.

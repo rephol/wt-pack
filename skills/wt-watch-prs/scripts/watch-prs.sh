@@ -387,9 +387,18 @@ serve)
     jq --arg repo "$repo" --arg reason "$reason" --arg at "$at" '(. + [{repo:$repo, reason:$reason, at:$at}]) | .[-50:]' "$UW" > "$UW.tmp" 2>/dev/null && mv "$UW.tmp" "$UW"
     rmdir "$L2" 2>/dev/null
   }
+  # WP-196: a beat older than 3 min at start-up means the poller was down (hung and killed, crashed, box asleep):
+  # tell each registered pane once, after its first successful poll, so the session knows there was a gap.
+  gap=0
+  if [ -f "$WH/poller.beat" ]; then
+    a=$(( $(date +%s) - $(stat -c %Y "$WH/poller.beat" 2>/dev/null || stat -f %m "$WH/poller.beat" 2>/dev/null || echo 0) ))
+    [ "$a" -ge 180 ] && gap=$a
+  fi
   i=0; last_replies=0
   while :; do
     touch "$WH/poller.beat"
+    # WP-196: under systemd (Type=notify, WatchdogSec) each beat also pets the watchdog; a hung serve stops petting it
+    [ -n "${NOTIFY_SOCKET:-}" ] && command -v systemd-notify >/dev/null 2>&1 && systemd-notify --ready WATCHDOG=1 2>/dev/null
     now=$(date +%s); do_replies=0
     if [ $((now - last_replies)) -ge 90 ]; then do_replies=1; last_replies=$now; fi
     jq -c '.[]' "$WF" 2>/dev/null | while IFS= read -r w; do
@@ -404,6 +413,9 @@ serve)
         herdr pane get "$wpane" >/dev/null 2>&1 || { mark_unwatched "$wrepo" "reviewer pane $wpane is gone"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
       fi
       out=$(cd "$wcwd" && "$0" poll-shas --once 2>/dev/null)
+      # the missed heads themselves need no replay step: poll-shas seeds from state.json, so this poll just found them
+      [ "$gap" -gt 0 ] && out="wt-watch-prs: poller resumed after $((gap / 60))m; replayed missed heads${out:+
+$out}"
       if [ "$do_replies" = 1 ] && [ -n "$wsess" ]; then
         out2=$(cd "$wcwd" && "$0" poll-replies --session "$wsess" --once 2>/dev/null)
         [ -n "$out2" ] && out="${out:+$out
@@ -443,6 +455,7 @@ serve)
         break
       done < "$wsd/poll/shas.fired"
     done
+    gap=0
     i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break
     sleep "${WATCH_PRS_SLEEP:-60}"
   done

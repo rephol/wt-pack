@@ -1,7 +1,7 @@
 // Notifications inbox: one feed in <data root>/data/wt.db (table notifications), the single source for the
 // in-app inbox, native notifications and the tray count. Items are inserted; read/resolved/cleared update the row. Pure pieces (kind mapping, actionable, resolution) are exported for parse.test.mjs.
 import { join } from 'node:path'
-import { readdirSync, lstatSync, readFileSync } from 'node:fs'
+import { readdirSync, lstatSync, readFileSync, statSync } from 'node:fs'
 import { open, tx } from './store.mjs'
 import { randomUUID } from 'node:crypto'
 
@@ -75,6 +75,19 @@ export function watchPrsUnwatched(root) {
       body: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
       target: {},
     }))
+  } catch { return [] }
+}
+
+// WP-196: registered sessions get events only from the poller, so a stalled one (beat older than 3 min while
+// watchers.json has rows) must not be silent. One item per stall, keyed on the last beat's time.
+export function watchPrsStale(root, now = Date.now()) {
+  try {
+    const rows = JSON.parse(readFileSync(join(root, 'watchers.json'), 'utf8'))
+    if (!Array.isArray(rows) || !rows.length) return []
+    const beat = statSync(join(root, 'poller.beat')).mtimeMs
+    if (now - beat < 180_000) return []
+    return [{ kind: 'server', key: `watch-prs-stale|${Math.floor(beat / 1000)}`, title: 'wt-watch-prs: the poller has stalled',
+      body: `No heartbeat for ${Math.round((now - beat) / 60000)} min while ${rows.length} session(s) are registered — they get no PR events until it is back. Run: watch-prs.sh poller-install`, target: {} }]
   } catch { return [] }
 }
 
