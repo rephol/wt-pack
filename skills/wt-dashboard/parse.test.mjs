@@ -1536,9 +1536,14 @@ test('WP-172: paneStale re-reads idle/blocked on the readEvery cadence, not just
   assert.equal(S.friendlyModel('claude-opus-5'), 'Opus 5')
   // exact transcript id names it; effort from the footer; a differing spawn tier is flagged
   assert.deepEqual(S.agentModel({ footerModel: 'Sonnet 5', footerEffort: 'medium', transcript: 'claude-sonnet-5-5', tokens: { model: 'opus', effort: 'high' } }),
-    { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', effort: 'medium', source: 'transcript', routed: 'opus' })
+    { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', effort: 'medium', effortSource: 'footer', source: 'transcript', routed: 'opus' })
   assert.deepEqual(S.agentModel({ footerModel: 'Sonnet 5', footerEffort: null, transcript: null, tokens: { model: 'sonnet', effort: 'low' } }),
-    { id: null, name: 'Sonnet 5', effort: 'low', source: 'footer', routed: null })
-  assert.deepEqual(S.agentModel({ tokens: { model: 'haiku' } }), { id: null, name: 'haiku', effort: null, source: 'token', routed: null })
+    { id: null, name: 'Sonnet 5', effort: 'low', effortSource: 'token', source: 'footer', routed: null })
+  assert.deepEqual(S.agentModel({ tokens: { model: 'haiku' } }), { id: null, name: 'haiku', effort: null, effortSource: null, source: 'token', routed: null })
+  // effort falls back to settings.json: the model's own ceiling, else the top-level level, marked 'default'
+  const st = { effortLevel: 'medium', modelSettings: { 'claude-opus-5-5': { effortLevel: 'low' } } }
+  assert.deepEqual([S.agentModel({ transcript: 'claude-opus-5-5', settings: st }).effort, S.agentModel({ transcript: 'claude-opus-5-5', settings: st }).effortSource], ['low', 'default'])
+  assert.deepEqual([S.agentModel({ transcript: 'claude-sonnet-5-5', settings: st }).effort, S.agentModel({ transcript: 'claude-sonnet-5-5', settings: st }).effortSource], ['medium', 'default'])
+  assert.equal(S.agentModel({ transcript: 'claude-sonnet-5-5', tokens: { effort: 'high' }, settings: st }).effortSource, 'token')
   assert.equal(S.agentModel({}), null)
 }

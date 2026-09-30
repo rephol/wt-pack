@@ -196,8 +196,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   closes; a worktree it used stays on disk.
 - **Model and effort** (WP-198): the Summary tab's **Model** section shows what the session actually runs, e.g.
   `Sonnet 5.5 · medium` (tooltip: the exact id). The name comes from the transcript's last assistant `model` id
-  (local sessions) or, without one, the pane footer's `Model:`; the effort from the footer's `Thinking:`; either
-  falls back to the spawn-time `model`/`effort` pane tokens. When the spawn token names a different tier than the
+  (local sessions) or, without one, the pane footer's `Model:`; the effort from the footer's `Thinking:` (a narrow pane truncates the footer), then the spawn-time `effort`
+  pane token, then the `~/.claude/settings.json` default for that model (`modelSettings[id].effortLevel`, else the
+  top-level `effortLevel`), shown as `low (default)`; the name falls back to the spawn-time `model` token. When the spawn token names a different tier than the
   one running it adds `routed opus, running sonnet`. The Agents list has an optional **Model** column (hidden by
   default, like Context) and the phone rows carry the model name.
 - **Do Not Disturb** (WP-147): a per-agent toggle (agent page header, and the Summary tab/panel — moon badge
