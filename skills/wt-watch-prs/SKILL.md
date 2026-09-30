@@ -86,7 +86,7 @@ $W identity           # "<login> <source>" — the account reviews post as
     `$WT_WATCH_PRS_HOME/bin/`, so it works from a plugin-only install with no `./setup`, survives plugin updates
     (each run rewrites the shim to the current path) and needs no sudo. Its output may advise
     `loginctl enable-linger <user>` — pass that to the user, never run it. Exit 0 the second time → `register`
-    as above. Skip the install in dispatch and review modes, and when the user chose `--no-service`.
+    as above. Skip the install in dispatch and review modes, and when the user has declined a background service.
   - **Still non-zero (install failed, no systemd — it exits 2 with a `nohup` line — or the poller down) → fall
     back to arming Monitors yourself**, below. That is the ordinary degraded path, not a failure to report —
     say so in one line and continue with the fallback.

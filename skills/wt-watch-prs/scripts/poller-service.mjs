@@ -92,7 +92,7 @@ function installLinux() {
   writeShim(); writeFileSync(UNIT, systemdUnit({ path: loginPath(), script: SHIM }))
   systemctl('daemon-reload'); systemctl('enable', UNIT_NAME)
   systemctl('restart', UNIT_NAME) // starts it, or picks up a changed unit
-  console.log(`installed ${UNIT}\n  script ${SCRIPT}\n  log: journalctl --user -u ${UNIT_NAME}`)
+  console.log(`installed ${UNIT}\n  script ${SHIM} → ${SCRIPT}\n  log: journalctl --user -u ${UNIT_NAME}`)
   if (!lingerOn()) console.log(`note: the service stops when you log out — keep it running with:  loginctl enable-linger ${userInfo().username}`)
 }
 function uninstallLinux() {
@@ -116,7 +116,7 @@ function install() {
   writeShim(); writeFileSync(PLIST, plist({ path, log: LOG, script: SHIM }))
   if (loaded()) launchctl('bootout', `${DOMAIN}/${LABEL}`) // pick up a changed plist
   launchctl('bootstrap', DOMAIN, PLIST)
-  console.log(`installed ${PLIST}\n  script ${SCRIPT}\n  log ${LOG}`)
+  console.log(`installed ${PLIST}\n  script ${SHIM} → ${SCRIPT}\n  log ${LOG}`)
 }
 function uninstall() {
   if (LINUX) return uninstallLinux()
