@@ -19,11 +19,11 @@
 #   register --session S              WP-187: from inside a repo checkout, add this repo/pane/cwd to the
 #                                    background poller's watch list ($WT_WATCH_PRS_HOME/watchers.json)
 #   unregister --session S            remove this repo/session from the watch list
-#   poller-status                     exit 0 when the poller's launchd agent is loaded and its heartbeat
+#   poller-status                     exit 0 when the poller's launchd agent (Linux: systemd unit, if installed) is up and its heartbeat
 #                                    ($WT_WATCH_PRS_HOME/poller.beat) is <3 min old; else exit 1
 #   serve [--once]                    WP-187: the poller itself — for each registered watcher, poll-shas/
 #                                    poll-replies --once and deliver each line via handoff.sh --kind system;
-#                                    run by launchd (id.local.wtpack.watchprs), never by an interactive session
+#                                    run by launchd (id.local.wtpack.watchprs) or systemd (wt-watch-prs.service), never by an interactive session
 # State: ${WT_WATCH_PRS_HOME:-~/.local/share/wt-watch-prs}/{watchers.json,poller.beat,unwatched.json,
 #   <owner>-<repo>/{state.json,claims/,state.lock,poll/}}. poll/ (WP-187) persists poll-shas' and poll-replies'
 # dedupe baselines across process restarts: shas.fired, replies-<S>.seen, replies-<S>.since (poll-shas' own
@@ -351,6 +351,10 @@ poller-status)
   case "$(uname -s)" in
     Darwin) command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$(id -u)/id.local.wtpack.watchprs" >/dev/null 2>&1 \
       || { echo "poller: launchd agent not loaded"; exit 1; } ;;
+    Linux) # WP-190: a systemd unit, when installed, must be active; a hand-run (nohup) poller has none and only needs the beat
+      U="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/wt-watch-prs.service"
+      [ ! -f "$U" ] || systemctl --user is-active --quiet wt-watch-prs.service 2>/dev/null \
+        || { echo "poller: systemd unit wt-watch-prs.service not active"; exit 1; } ;;
   esac
   now=$(date +%s); mt=$(stat -f %m "$B" 2>/dev/null || stat -c %Y "$B" 2>/dev/null || echo 0)
   age=$((now - mt))

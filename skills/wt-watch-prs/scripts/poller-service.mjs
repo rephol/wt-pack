@@ -1,5 +1,6 @@
 // WP-187: the wt-watch-prs background poller (watch-prs.sh serve) as a macOS LaunchAgent, independent of any
-// session. node scripts/poller-service.mjs install | uninstall | restart | status
+// session; WP-190: on Linux the same commands manage a systemd user unit (wt-watch-prs.service) instead.
+// node scripts/poller-service.mjs install | uninstall | restart | status
 // Idempotent. launchd restarts it after a crash (KeepAlive SuccessfulExit=false, at most every 10s) and starts
 // it at login; stdout/stderr go to ~/Library/Logs/wt-watch-prs/poller.log. This mirrors
 // wt-dashboard/scripts/service.mjs's own plist shape deliberately (same KeepAlive/ThrottleInterval/login-PATH
@@ -17,6 +18,9 @@ const PLIST = join(HOME, 'Library', 'LaunchAgents', `${LABEL}.plist`)
 const LOG = join(HOME, 'Library', 'Logs', 'wt-watch-prs', 'poller.log')
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url))) // skills/wt-watch-prs
 const SCRIPT = join(ROOT, 'scripts', 'watch-prs.sh')
+const LINUX = process.platform === 'linux'
+const UNIT_NAME = 'wt-watch-prs.service'
+const UNIT = join(process.env.XDG_CONFIG_HOME || join(HOME, '.config'), 'systemd', 'user', UNIT_NAME)
 const DOMAIN = `gui/${userInfo().uid}`
 const launchctl = (...a) => execFileSync('/bin/launchctl', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 const loaded = () => { try { launchctl('print', `${DOMAIN}/${LABEL}`); return true } catch { return false } }
@@ -25,7 +29,8 @@ const loaded = () => { try { launchctl('print', `${DOMAIN}/${LABEL}`); return tr
 // serve shells out to gh/jq/herdr, none of which launchd's own minimal PATH carries.
 export function loginPath() {
   const parts = []
-  try { parts.push(execFileSync('/bin/zsh', ['-lc', 'echo $PATH'], { encoding: 'utf8' }).trim()) } catch { /* no zsh */ }
+  if (LINUX) parts.push(process.env.PATH ?? '') // systemd's own user PATH is minimal; the installing shell's is not
+  else try { parts.push(execFileSync('/bin/zsh', ['-lc', 'echo $PATH'], { encoding: 'utf8' }).trim()) } catch { /* no zsh */ }
   try { for (const v of readdirSync(join(HOME, '.nvm/versions/node'))) parts.push(join(HOME, '.nvm/versions/node', v, 'bin')) } catch { /* no nvm */ }
   parts.push('/opt/homebrew/bin', '/usr/local/bin', join(HOME, '.cargo/bin'), join(HOME, '.local/bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin')
   return [...new Set(parts.join(':').split(':').filter(Boolean))].join(':')
@@ -53,7 +58,52 @@ export function plist({ path, log, script = SCRIPT }) {
 `
 }
 
+// systemd: `"` and `%` are the only characters ExecStart= treats specially inside a quoted word.
+const q = (v) => v.replace(/%/g, '%%').replace(/"/g, '\\"')
+export function systemdUnit({ path, script = SCRIPT, home = HOME }) {
+  return `[Unit]
+Description=wt-watch-prs background poller (watch-prs.sh serve)
+After=network.target
+
+[Service]
+ExecStart=/bin/bash "${q(script)}" serve
+Restart=always
+RestartSec=10
+Environment="PATH=${q(path)}"
+Environment="HOME=${q(home)}"
+
+[Install]
+WantedBy=default.target
+`
+}
+const systemctl = (...a) => execFileSync('systemctl', ['--user', ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+const noSystemd = () => { try { systemctl('show-environment'); return false } catch { return true } }
+const NOHUP = `no systemd user manager here (container?) — run it by hand:\n  nohup bash ${SCRIPT} serve >> ~/.local/share/wt-watch-prs/poller.log 2>&1 &`
+const lingerOn = () => { try { return /Linger=yes/.test(execFileSync('loginctl', ['show-user', userInfo().username, '-p', 'Linger'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })) } catch { return false } }
+
+function installLinux() {
+  if (noSystemd()) { console.log(NOHUP); process.exit(2) }
+  mkdirSync(dirname(UNIT), { recursive: true })
+  writeFileSync(UNIT, systemdUnit({ path: loginPath() }))
+  systemctl('daemon-reload'); systemctl('enable', '--now', UNIT_NAME)
+  systemctl('restart', UNIT_NAME) // pick up a changed unit
+  console.log(`installed ${UNIT}\n  script ${SCRIPT}\n  log: journalctl --user -u ${UNIT_NAME}`)
+  if (!lingerOn()) console.log(`note: the service stops when you log out — keep it running with:  loginctl enable-linger ${userInfo().username}`)
+}
+function uninstallLinux() {
+  if (!noSystemd()) { try { systemctl('disable', '--now', UNIT_NAME) } catch { /* not enabled */ } }
+  if (existsSync(UNIT)) unlinkSync(UNIT)
+  if (!noSystemd()) systemctl('daemon-reload')
+  console.log('uninstalled')
+}
+function statusLinux() {
+  if (!existsSync(UNIT)) return console.log('not installed')
+  let st = 'unknown'; try { st = systemctl('is-active', UNIT_NAME).trim() } catch (e) { st = String(e.stdout || 'inactive').trim() }
+  console.log(`${UNIT_NAME}: ${st === 'active' ? 'running' : st}\n  log: journalctl --user -u ${UNIT_NAME}`)
+}
+
 function install() {
+  if (LINUX) return installLinux()
   const path = loginPath()
   mkdirSync(dirname(PLIST), { recursive: true })
   mkdirSync(dirname(LOG), { recursive: true })
@@ -63,11 +113,13 @@ function install() {
   console.log(`installed ${PLIST}\n  script ${SCRIPT}\n  log ${LOG}`)
 }
 function uninstall() {
+  if (LINUX) return uninstallLinux()
   if (loaded()) launchctl('bootout', `${DOMAIN}/${LABEL}`)
   if (existsSync(PLIST)) unlinkSync(PLIST)
   console.log('uninstalled')
 }
 function status() {
+  if (LINUX) return statusLinux()
   if (!existsSync(PLIST)) return console.log('not installed')
   if (!loaded()) return console.log(`installed (${PLIST}) but not loaded — run poller-service:install`)
   const out = launchctl('print', `${DOMAIN}/${LABEL}`)
@@ -80,7 +132,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     if (cmd === 'install') install()
     else if (cmd === 'uninstall') uninstall()
-    else if (cmd === 'restart') { if (!loaded()) throw new Error('not installed — run poller-service:install'); launchctl('kickstart', '-k', `${DOMAIN}/${LABEL}`); console.log('restarted') }
+    else if (cmd === 'restart') {
+      if (LINUX) { if (!existsSync(UNIT)) throw new Error('not installed — run poller-service.mjs install'); systemctl('restart', UNIT_NAME) }
+      else { if (!loaded()) throw new Error('not installed — run poller-service:install'); launchctl('kickstart', '-k', `${DOMAIN}/${LABEL}`) }
+      console.log('restarted')
+    }
     else if (cmd === 'status') status()
     else { console.error('usage: poller-service.mjs install|uninstall|restart|status'); process.exit(2) }
   } catch (e) { console.error(String(e.stderr || e.message).trim()); process.exit(1) }
