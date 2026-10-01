@@ -138,6 +138,9 @@ spawn|mcp-args|mcp-file)
   # repo — where it still works, but `git rev-parse` finds nothing and the
   # handoff candidate filter can never see it again.
   cwd=$(cd "$cwd" && pwd)
+  # WP-199: the pool, the name's slug and the project token follow the TARGET directory's repo — not the caller's.
+  # Spawning `orchestrator ~/Work/projects/other` from this checkout made wt-pack-orchestrator-NN in wt-pack's pool.
+  tmain=$(repo_root "$cwd"); case "$tmain" in ''|.) ;; *) main=$tmain; repo=$(basename "$main") ;; esac
 
   [ "$cmd" != spawn ] || {
   ws=$(pool_ws "$(role_label "$role" "$repo")" "$main")

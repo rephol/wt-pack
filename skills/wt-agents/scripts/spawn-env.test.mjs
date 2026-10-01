@@ -17,6 +17,7 @@ stub('herdr', `case "$1 $2" in
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-workers","workspace_id":"w1"}]}}' ;;
   "agent list") echo '{"result":{"agents":[]}}' ;;
   "tab create") echo '{"result":{"root_pane":{"pane_id":"w1:p9"}}}' ;;
+  "workspace create") echo '{"result":{"workspace":{"workspace_id":"w7"}}}' ;;
 esac`)
 stub('gh', `[ "$1 $2 $3 $4" = "auth token --user rephol" ] && { echo tok123; exit 0; }; exit 1`)
 execFileSync('git', ['-C', repo, 'init', '-q'])
@@ -155,4 +156,16 @@ test('WP-143/160: the final model/effort actually spawned are written as pane to
   s = spawn(['spawn', 'planner'], { WT_MODEL_ROUTING: 'live' }) // live routing: floor's tier/effort recorded
   assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token model=opus/.test(l)))
   assert.ok(s.calls.some((l) => /^herdr pane report-metadata w1:p9 .*--token effort=high/.test(l)))
+})
+
+test('WP-199: a cwd (before or after --model/--effort) wins — the pool, name and project follow it, not the caller\'s repo', () => {
+  const other = join(tmp, 'other'); mkdirSync(other); execFileSync('git', ['-C', other, 'init', '-q'])
+  for (const args of [['spawn', 'orchestrator', other, '--model', 'opus', '--effort', 'low'], ['spawn', 'orchestrator', '--model', 'opus', '--effort', 'low', other], ['spawn', 'orchestrator', other]]) {
+    const s = spawn(args) // run from `demo`
+    assert.match(s.out, /^other-orchestrator-01 /, args.join(' '))
+    assert.ok(s.calls.some((l) => /^herdr workspace create --label other-orchestrators --cwd \S+\/other /.test(l)), args.join(' '))
+    assert.match(s.tab, new RegExp(`--workspace w7 --label other-orchestrator-01 --cwd ${other}`))
+    assert.ok(s.calls.some((l) => /report-metadata w1:p9 .*--token project=other/.test(l)))
+    if (args.includes('--model')) assert.ok(s.calls.some((l) => /^herdr agent start .*--model claude-opus-5-5 --effort low/.test(l)))
+  }
 })
