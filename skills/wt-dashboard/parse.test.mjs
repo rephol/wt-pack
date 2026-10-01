@@ -354,6 +354,9 @@ test('inbox: transitions map to kinds; actionable items resolve when their condi
     const rows = I.watchPrsUnwatched(root)
     assert.deepEqual(rows.map((r) => [r.key, r.kind, r.title, r.body]),
       [['watch-prs-unwatched|acme/demo|2026-01-01T00:00:00Z', 'server', 'wt-watch-prs: acme/demo is unwatched', 'handoff failed 3 times']])
+    await uwrite([{ repo: 'acme/demo', reason: 'still registered', at: '2026-01-01T00:00:01Z', nudge: true }]) // WP-202: a nudge is not "unwatched"
+    assert.equal(I.watchPrsUnwatched(root)[0].title, 'wt-watch-prs: acme/demo has an unclaimed event')
+    await uwrite([{ repo: 'acme/demo', reason: 'handoff failed 3 times', at: '2026-01-01T00:00:00Z' }, { repo: 'x' }])
     const ubox = new I.Inbox(await mkdtemp((await import('node:os')).tmpdir() + '/inbox-'))
     for (const r of rows) await ubox.add(r)
     for (const r of I.watchPrsUnwatched(root)) assert.equal(await ubox.add(r), null) // re-scanning the same row is a no-op

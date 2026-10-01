@@ -71,7 +71,7 @@ export function watchPrsUnwatched(root) {
     if (!Array.isArray(rows)) return []
     return rows.filter((r) => typeof r?.repo === 'string' && typeof r?.at === 'string').map((r) => ({
       kind: 'server', key: `watch-prs-unwatched|${r.repo}|${r.at}`,
-      title: `wt-watch-prs: ${r.repo} is unwatched`,
+      title: r.nudge ? `wt-watch-prs: ${r.repo} has an unclaimed event` : `wt-watch-prs: ${r.repo} is unwatched`,
       body: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
       target: {},
     }))
