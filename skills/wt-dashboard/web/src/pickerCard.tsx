@@ -19,6 +19,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { CodeBlock } from '@astryxdesign/core/CodeBlock'
 import { ChatMarkdown } from './links'
 import { isUserSkip } from './pickerGuard.ts'
+import { matchBatch, hasPreview, isAnswered, toPayload, summary, initialAnswer, fingerprint, OTHER as BATCH_OTHER, type BatchQuestion, type TabAnswer } from './pickerBatch.ts'
 
 export interface Picker {
   review: boolean
@@ -91,8 +92,134 @@ export function useHeldPicker(agent: PickerAgent): [Picker | null, () => void] {
   }, [q.dataUpdatedAt]) // eslint-disable-line react-hooks/exhaustive-deps
   return [held, () => setFastUntil(Date.now() + 5000)]
 }
-// The pending picker, read off the agent's screen. One question per submit — Claude Code's own flow.
+// The pending picker. A multi-tab one is scanned once (the server steps through its tabs and back) and then answered
+// locally, sent once at Submit (WP-203); a single question, a failed scan or a popup without a scan mirrors the
+// terminal one tab at a time. The scan is keyed by the picker's headers + the tab it sits on, so a new question
+// set re-scans while polling never does.
 export function PickerCard({ agent, picker, onSent }: { agent: PickerAgent; picker: Picker; onSent: () => void }) {
+  const multi = !picker.review && picker.tabs.length >= 2
+  const scan = useQuery({
+    queryKey: ['picker-scan', agent.key, picker.tabs.map((t) => t.header).join('|'), picker.current ?? 0, picker.question],
+    queryFn: async () => {
+      const r = await fetch(`${agentUrl(agent)}/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'scan' }) })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? String(r.status))
+      return (await r.json()).questions as BatchQuestion[]
+    },
+    enabled: multi, staleTime: Infinity, gcTime: 60_000, retry: false, refetchOnWindowFocus: false,
+  })
+  const qs = multi ? matchBatch(picker.tabs, picker.review, scan.data) : null
+  if (multi && scan.isPending) return <Card variant="yellow" padding={3}><Text type="supporting">Reading the questions…</Text></Card>
+  return qs ? <BatchPickerCard agent={agent} picker={picker} qs={qs} onSent={onSent} /> : <TerminalPickerCard agent={agent} picker={picker} onSent={onSent} />
+}
+
+// Per-picker answers survive a remount or a poll; dropped once sent.
+const batchDrafts = new Map<string, { tab: number; ans: TabAnswer[] }>()
+function BatchPickerCard({ agent, picker, qs, onSent }: { agent: PickerAgent; picker: Picker; qs: BatchQuestion[]; onSent: () => void }) {
+  const qc = useQueryClient()
+  const fp = fingerprint(agent.key, qs)
+  const [st, setSt] = useState(() => batchDrafts.get(fp) ?? { tab: 0, ans: qs.map(initialAnswer) })
+  useEffect(() => { setSt(batchDrafts.get(fp) ?? { tab: 0, ans: qs.map(initialAnswer) }) }, [fp]) // eslint-disable-line react-hooks/exhaustive-deps
+  const put = (next: { tab: number; ans: TabAnswer[] }) => { batchDrafts.set(fp, next); setSt(next) }
+  const n = qs.length, tab = Math.min(st.tab, n)
+  const setAns = (i: number, patch: Partial<TabAnswer>) => put({ ...st, ans: st.ans.map((a, j) => (j === i ? { ...a, ...patch } : a)) })
+  const send = useMutation({
+    mutationFn: async (body: object) => {
+      const r = await fetch(`${agentUrl(agent)}/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? r.status)
+    },
+    onSuccess: () => { batchDrafts.delete(fp); onSent(); qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['picker', agent.key] }) },
+  })
+  const busy = send.isPending
+  const allDone = qs.every((q, i) => isAnswered(q, st.ans[i]))
+  const submit = () => send.mutate({ action: 'bulk', answers: qs.map((q, i) => toPayload(q, st.ans[i])) })
+  const skip = () => send.mutate({ action: 'skip', question: picker.question })
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => { box.current?.focus({ preventScroll: true }) }, [tab])
+  const q = qs[tab], a = st.ans[tab]
+  const onKey = (e: import('react').KeyboardEvent) => {
+    if (busy) return
+    const inField = (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type === 'text'
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      if (isUserSkip({ key: e.key, cardHasFocus: Boolean(box.current?.contains(document.activeElement)), inFlight: busy, targetIsTextField: inField })) skip()
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (tab === n) { if (allDone) submit() } else put({ ...st, tab: tab + 1 })
+    }
+  }
+  return (
+    <div ref={box} tabIndex={-1} onKeyDown={onKey} style={{ outline: 'none', flexShrink: 0 }}>
+    <Card variant="yellow" padding={3}>
+      <VStack gap={3} style={{ maxHeight: '55vh' }}>
+        <VStack gap={2}>
+          <HStack gap={2} align="center">
+            <StatusDot variant="warning" label="Waiting for your answer" isPulsing={!busy} />
+            <Text weight="semibold">{tab === n ? 'Review your answers' : 'Question'}</Text>
+          </HStack>
+          <Stepper activeStep={tab} density="compact" label="Questions" onStepClick={(i) => { if (!busy) put({ ...st, tab: i }) }}
+            horizontalOptions={{ minimumStepWidth: 64, collapsedVariant: 'withLabel' }}>
+            {[...qs.map((x) => x.header ?? ''), 'Submit'].map((h, i) => (
+              <Step key={h + i} step={i} label={h} isDisabled={busy}
+                indicator={i < n && isAnswered(qs[i], st.ans[i]) && i !== tab ? '✓' : 'auto'} />
+            ))}
+          </Stepper>
+        </VStack>
+        <VStack gap={3} isScrollable style={{ flex: 1, minHeight: 0 }}>
+          {send.isError && <Banner status="error" title="Couldn't send — answer in the terminal" description={`${String(send.error)}. Your answers are kept here.`} />}
+          {tab === n ? (
+            qs.map((x, i) => (
+              <Card key={i} padding={2} onClick={() => put({ ...st, tab: i })} style={{ cursor: busy ? 'default' : 'pointer' }}>
+                <HStack gap={2} justify="between" align="center">
+                  <VStack gap={0.5}>
+                    <Text type="supporting" size="sm">{x.question}</Text>
+                    <Text weight="medium">{isAnswered(x, st.ans[i]) ? summary(x, st.ans[i]) : 'Not answered yet'}</Text>
+                  </VStack>
+                  <Button label="Edit" size="sm" variant="ghost" isDisabled={busy} onClick={(e) => { e.stopPropagation(); put({ ...st, tab: i }) }} />
+                </HStack>
+              </Card>
+            ))
+          ) : (
+            <>
+              <ChatMarkdown>{q.question}</ChatMarkdown>
+              {q.multiSelect ? (
+                <CheckboxList label="Choose any" isLabelHidden value={a.multi} onChange={(v: string[]) => setAns(tab, { multi: v })}>
+                  {q.options.map((o) => (
+                    <CheckboxListItem key={o.label} value={o.label} label={<OptionLabel label={o.label} />} description={o.description && o.description !== o.label ? <Text type="supporting">{o.description}</Text> : undefined} isDisabled={busy} />
+                  ))}
+                </CheckboxList>
+              ) : (
+                <RadioList label="Choose one" isLabelHidden value={a.single} onChange={(v: string) => setAns(tab, { single: v })}>
+                  {q.options.map((o) => (
+                    <RadioListItem key={o.label} value={o.label} label={<OptionLabel label={o.label} />} description={o.description ? <Text type="supporting">{o.description}</Text> : undefined} isDisabled={busy} />
+                  ))}
+                  {!hasPreview(q) && <RadioListItem value={BATCH_OTHER} label="Other…" isDisabled={busy} />}
+                </RadioList>
+              )}
+              {(q.multiSelect || a.single === BATCH_OTHER) && (
+                <TextInput label={q.multiSelect ? 'Other (optional)' : 'Your answer'} value={a.other} onChange={(v: string) => setAns(tab, { other: v })} isDisabled={busy} placeholder="Type something" />
+              )}
+            </>
+          )}
+        </VStack>
+        <HStack gap={2} justify="between" align="center" wrap="wrap">
+          <HStack gap={1}>
+            <Button label="Cancel" size="sm" variant="ghost" tooltip="Cancels the question in the terminal (Esc)" isDisabled={busy} onClick={skip} />
+          </HStack>
+          <HStack gap={2} align="center">
+            {tab > 0 && <Button label="Back" size="sm" variant="ghost" isDisabled={busy} onClick={() => put({ ...st, tab: tab - 1 })} />}
+            {tab === n
+              ? <Button label="Submit answers" variant="primary" isLoading={busy} isDisabled={busy || !allDone} onClick={submit} />
+              : <Button label="Next" variant="primary" isDisabled={busy} onClick={() => put({ ...st, tab: tab + 1 })} />}
+          </HStack>
+        </HStack>
+      </VStack>
+    </Card>
+    </div>
+  )
+}
+
+// The pending picker, read off the agent's screen. One question per submit — Claude Code's own flow.
+function TerminalPickerCard({ agent, picker, onSent }: { agent: PickerAgent; picker: Picker; onSent: () => void }) {
   const qc = useQueryClient()
   const [single, setSingle] = useState('')
   const [multi, setMulti] = useState<string[]>([])
