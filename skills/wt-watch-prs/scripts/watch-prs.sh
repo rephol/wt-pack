@@ -19,7 +19,7 @@
 #   register --session S              WP-187: from inside a repo checkout, add this repo/pane/cwd to the
 #                                    background poller's watch list ($WT_WATCH_PRS_HOME/watchers.json)
 #   unregister --session S            remove this repo/session from the watch list
-#   poller-status                     exit 0 when the poller's launchd agent (Linux: systemd unit, if installed) is up and its heartbeat
+#   poller-status [--expect-registered]  exit 0 when the poller's launchd agent (Linux: systemd unit, if installed) is up and its heartbeat
 #                                    ($WT_WATCH_PRS_HOME/poller.beat) is <3 min old; else exit 1
 #   poller-install | poller-uninstall  WP-191: idempotently install/remove the poller as a launchd agent (macOS) or systemd
 #                                    user unit (Linux) that runs the stable shim <state>/bin/watch-prs — works from a plugin-only
@@ -354,6 +354,7 @@ poller-install|poller-uninstall)
   exec node "$here/poller-service.mjs" "${cmd#poller-}"
   ;;
 poller-status)
+  expect=0; [ "${1:-}" = --expect-registered ] && expect=1 # WP-202: also unhealthy when the poller runs but nobody is registered for this repo
   WH="${WT_WATCH_PRS_HOME:-$HOME/.local/share/wt-watch-prs}"; B="$WH/poller.beat"
   [ -f "$B" ] || { echo "poller: no heartbeat ($B)"; exit 1; }
   case "$(uname -s)" in
@@ -368,7 +369,12 @@ poller-status)
   esac
   now=$(date +%s); mt=$(stat -c %Y "$B" 2>/dev/null || stat -f %m "$B" 2>/dev/null || echo 0) # GNU -c first: GNU `stat -f` succeeds with filesystem info (WP-193)
   age=$((now - mt))
-  if [ "$age" -lt 180 ]; then echo "poller: loaded, beat ${age}s ago"; exit 0
+  if [ "$age" -lt 180 ]; then
+    if [ "$expect" = 1 ]; then
+      setup; n=$(jq --arg r "$REPO" '[.[] | select(.repo == $r)] | length' "$WH/watchers.json" 2>/dev/null || echo 0)
+      [ "${n:-0}" -gt 0 ] || { echo "poller: running but 0 watchers for $REPO — register again"; exit 1; }
+    fi
+    echo "poller: loaded, beat ${age}s ago"; exit 0
   else echo "poller: loaded, beat ${age}s ago (stale)"; exit 1; fi
   ;;
 serve)
@@ -380,12 +386,32 @@ serve)
   FC="$WH/unconsumed"; mkdir -p "$FC"  # per-pane consecutive handoff-failure counters
   HANDOFF=${WATCH_PRS_HANDOFF:-"$here/../../wt-handoff/scripts/handoff.sh"}
   mark_unwatched() { # repo reason — best-effort append, capped at the last 50 rows, under watchers.lock
-    local repo="$1" reason="$2" at L2
+    local repo="$1" reason="$2" nudge="${3:-}" at L2
     at=$(date -u +%Y-%m-%dT%H:%M:%SZ); L2="$WH/watchers.lock"
     for i2 in 1 2 3 4 5; do mkdir "$L2" 2>/dev/null && break; sleep 0.2; done
     [ -d "$L2" ] || return 0
-    jq --arg repo "$repo" --arg reason "$reason" --arg at "$at" '(. + [{repo:$repo, reason:$reason, at:$at}]) | .[-50:]' "$UW" > "$UW.tmp" 2>/dev/null && mv "$UW.tmp" "$UW"
+    jq --arg repo "$repo" --arg reason "$reason" --arg at "$at" --arg nudge "$nudge" '(. + [{repo:$repo, reason:$reason, at:$at} + (if $nudge != "" then {nudge:true} else {} end)]) | .[-50:]' "$UW" > "$UW.tmp" 2>/dev/null && mv "$UW.tmp" "$UW"
     rmdir "$L2" 2>/dev/null
+  }
+  stale_nudge() { # per watcher, from the serve loop's vars; must run even in a round with no events
+    # decision 5 (3/3), WP-202: a delivered "new commits" event still neither claimed nor recorded 30 min later.
+    # The pane passed the liveness check above, so it is NOT dropped (a session waiting on CI looks exactly like
+    # this, and unregistering it left watchers.json empty so later heads reached nobody): re-deliver once, raise
+    # a notice once, and keep the registration. Only a gone pane or 3 failed handoffs unregister.
+    wsd="$WH/${wrepo/\//-}"
+    [ -f "$wsd/poll/shas.fired" ] || return 0
+    while read -r fn fs ft; do
+      [ -z "$fn" ] && continue
+      [ $((now - ft)) -ge 1800 ] || continue
+      [ -d "$wsd/claims/pr$fn" ] && continue
+      recorded=$(jq -r --arg n "$fn" '.reviewed[$n].sha // ""' "$wsd/state.json" 2>/dev/null)
+      [ "$recorded" = "$fs" ] && continue
+      nm="$wsd/poll/nudged.$fn.$fs"; [ -f "$nm" ] && continue
+      : > "$nm"
+      printf 'wt-watch-prs: PR #%s head %s was delivered 30+ min ago and is still unclaimed — claim it now (watch-prs.sh claim %s <session>); if it is waiting on CI, claim first and wait on the gate.' "$fn" "${fs:0:12}" "$fn" \
+        | "$HANDOFF" --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1 || true
+      mark_unwatched "$wrepo" "PR #$fn's new-commits event from 30+ min ago is still unclaimed (pane $wpane alive; re-delivered once, still registered)" nudge
+    done < "$wsd/poll/shas.fired"
   }
   # WP-197: pick up our own updates. The fingerprint is the script the shim points at now plus a checksum of it and
   # the handoff helper; when it changes (a plugin update re-pointed the shim, or the file was edited) we finish the
@@ -432,7 +458,7 @@ $out}"
         [ -n "$out2" ] && out="${out:+$out
 }$out2"
       fi
-      [ -n "$out" ] || continue
+      [ -n "$out" ] || { stale_nudge; continue; }
       printf '%s\n' "$out" | while IFS= read -r line; do
         [ -z "$line" ] && continue
         if printf '%s' "$line" | "$HANDOFF" --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1; then
@@ -451,20 +477,7 @@ $out}"
       # doesn't reach this scope directly — re-read from disk to skip a redundant unwatched-notice below.
       still_watched=$(jq --arg s "$wsess" --arg repo "$wrepo" 'any(.[]; .session == $s and .repo == $repo)' "$WF" 2>/dev/null)
       [ "$still_watched" = "true" ] || continue
-      # decision 5 (3/3): a delivered "new commits" event that is still neither claimed nor recorded 30 min
-      # later, while poll-shas' own fired file says a delivery happened — the pane stopped acting on it.
-      wsd="$WH/${wrepo/\//-}"
-      [ -f "$wsd/poll/shas.fired" ] || continue
-      while read -r fn fs ft; do
-        [ -z "$fn" ] && continue
-        [ $((now - ft)) -ge 1800 ] || continue
-        [ -d "$wsd/claims/pr$fn" ] && continue
-        recorded=$(jq -r --arg n "$fn" '.reviewed[$n].sha // ""' "$wsd/state.json" 2>/dev/null)
-        [ "$recorded" = "$fs" ] && continue
-        mark_unwatched "$wrepo" "PR #$fn's new-commits event from 30+ min ago is still neither claimed nor reviewed"
-        (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1)
-        break
-      done < "$wsd/poll/shas.fired"
+      stale_nudge
     done
     gap=0
     i=$((i + 1)); [ "$polls" -gt 0 ] && [ "$i" -ge "$polls" ] && break

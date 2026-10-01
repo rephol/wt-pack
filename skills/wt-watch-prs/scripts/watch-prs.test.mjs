@@ -308,6 +308,36 @@ test('WP-187: serve clears the failure counter on a successful delivery', () => 
   assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')).map((w) => w.session), ['sess-p'])
 })
 
+test('WP-202: an alive pane with an unclaimed event for 30+ min stays registered — re-delivered once, noticed once', () => {
+  reset(); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' })
+  mkdirSync(join(sd, 'poll'), { recursive: true })
+  const ft = Math.floor(Date.now() / 1000) - 3600
+  writeFileSync(join(sd, 'poll', 'shas.fired'), `77 ${sha('7')} ${ft}\n`)
+  fixture('list.1.json', []); fixture('list.2.json', []) // PR 77 absent from the open list, so poll-shas leaves its fired line alone
+  const go = () => run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff })
+  let r = go(); assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')).map((w) => w.session), ['sess-p'])
+  assert.match(readFileSync(join(fx, 'handoff-calls'), 'utf8'), /CALL --pane wR:p9 --kind system/)
+  let uw = JSON.parse(readFileSync(join(wh, 'unwatched.json'), 'utf8'))
+  assert.equal(uw.length, 1); assert.equal(uw[0].nudge, true); assert.match(uw[0].reason, /pane wR:p9 alive/)
+  rmSync(join(fx, 'handoff-calls'), { force: true }); go() // second round: no repeat delivery, no second notice
+  assert.ok(!existsSync(join(fx, 'handoff-calls')))
+  assert.equal(JSON.parse(readFileSync(join(wh, 'unwatched.json'), 'utf8')).length, 1)
+  assert.equal(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')).length, 1)
+})
+
+test('WP-202: poller-status --expect-registered is unhealthy when running with 0 watchers for this repo', () => {
+  reset(); mkdirSync(wh, { recursive: true }); writeFileSync(join(wh, 'poller.beat'), '')
+  const linux = process.platform === 'linux'
+  if (!linux) writeFileSync(join(fx, 'launchctl-loaded'), '1')
+  assert.equal(run(['poller-status']).status, 0)
+  let r = run(['poller-status', '--expect-registered'])
+  assert.equal(r.status, 1); assert.match(r.stdout, /running but 0 watchers for acme\/demo/)
+  run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: '' })
+  assert.equal(run(['poller-status', '--expect-registered']).status, 0)
+})
+
 test('claim: second claim loses; release frees it', () => {
   reset()
   assert.equal(run(['claim', '11', 'sess-a']).stdout.trim(), 'claimed')
