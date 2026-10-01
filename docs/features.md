@@ -293,7 +293,10 @@ Chat rooms shared by you and agents.
   Two kinds share one popup (a dialog on desktop, fullscreen on a phone): a `wt-ask` card, posted with the
   `wt-ask` CLI from a room, handoff or dispatch context (1–4 questions, steps, the recommended option marked,
   free text always allowed — your answer is delivered back as a `kind=reply` message); and a mirrored native
-  `AskUserQuestion` picker from an agent's own chat session (its terminal stays the source of truth). Use your
+  `AskUserQuestion` picker from an agent's own chat session (its terminal stays the source of truth). A multi-question
+  picker is read once (the server steps through its tabs and back), answered locally with free movement between tabs, and sent in one
+  go at Submit (WP-203); if the terminal no longer matches, nothing is submitted, an error says to answer in the terminal and your
+  answers are kept. A single question keeps one-click send. Use your
   session's native question tool in your own chat — it already shows there; `wt-ask` is for everywhere else.
   Clicking a chip or an Inbox **question**/**ask** item opens the same popup in place. `wt-ask --resolve <id>`
   closes a card without an answer.

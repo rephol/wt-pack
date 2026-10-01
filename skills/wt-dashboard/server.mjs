@@ -1962,11 +1962,76 @@ export function answerPlan(pk, { selected = [], other = null }) {
   }
   return steps.filter((st) => st.text || st.keys.length)
 }
+// WP-203: answer EVERY tab in one request, then submit. The client holds each tab's answer until Submit; this walks
+// the terminal picker from tab 0, planning each tab off a fresh read (answerPlan needs the live checked/cursor state),
+// waits for the screen to advance, and only presses Submit when the review step shows all n answers. Any mismatch
+// throws 409 BEFORE submit, leaving the terminal on screen for the user. `io` = { read() → picker|null, send(steps) }.
+export async function runBulk(io, answers, nap = sleep) {
+  const fail = (m) => Object.assign(new Error(m), { status: 409 })
+  const settle = async (done) => { // poll the screen until `done(pk)`; a few hundred ms covers Claude Code's redraw
+    let pk
+    for (let i = 0; i < 20; i++) { pk = await io.read(); if (done(pk)) return pk; await nap(150) }
+    throw fail('the terminal did not advance — answer in the terminal')
+  }
+  let pk = await io.read()
+  const n = answers.length
+  if (!pk || pk.tabs.length !== n || n < 1) throw fail('the picker changed — answer in the terminal')
+  const from = pk.review ? n : pk.current ?? 0
+  if (from) { await io.send([{ keys: Array(from).fill('left') }]); pk = await settle((p) => p && !p.review && (p.current ?? 0) === 0) }
+  for (let i = 0; i < n; i++) {
+    if (!pk || pk.review || pk.tabs[i]?.header !== answers[i].header) throw fail('the picker changed — answer in the terminal')
+    const prev = pk.question
+    await io.send(answerPlan(pk, answers[i]))
+    pk = await settle((p) => p && (p.review || p.question !== prev))
+  }
+  if (!pk.review || (pk.answers ?? []).length !== n) throw fail('the terminal does not show all answers — answer in the terminal')
+  await io.send([{ keys: ['1'] }])
+  await settle((p) => !p || !p.review) // submitted: the picker is gone
+}
+// WP-203: the terminal draws only the focused tab and Claude Code writes the AskUserQuestion call to the transcript only
+// once it is answered, so the other tabs' options are read by stepping ←/→ (verified safe, same as `goto`) through
+// them and back to the tab the user was on. Returns one entry per tab, or throws 409 if the screen is not a tab picker.
+export async function scanTabs(io, nap = sleep) {
+  const fail = (m) => Object.assign(new Error(m), { status: 409 })
+  const at = async (i) => { // wait for the screen to show tab i
+    for (let k = 0; k < 20; k++) { const p = await io.read(); if (p && !p.review && (p.current ?? 0) === i) return p; await nap(150) }
+    throw fail('could not read the question tabs')
+  }
+  const pk = await io.read()
+  if (!pk || pk.review || pk.tabs.length < 2) throw fail('not a multi-question picker')
+  const n = pk.tabs.length, from = pk.current ?? 0, out = []
+  if (from) await io.send([{ keys: Array(from).fill('left') }])
+  for (let i = 0; i < n; i++) {
+    const p = await at(i)
+    out.push({ header: p.tabs[i].header, question: p.question, multiSelect: Boolean(p.multiSelect), layout: p.layout,
+      options: p.options.map((o) => ({ label: o.label, description: o.description, checked: o.checked })) })
+    if (i < n - 1) await io.send([{ keys: ['right'] }])
+  }
+  const back = n - 1 - from
+  if (back > 0) await io.send([{ keys: Array(back).fill('left') }])
+  await at(from)
+  return out
+}
 async function answerQuestion(a, req) {
   const m = await machineBy(a.machine)
   const raw = await readPane(m, a.id, '80')
   const pk = parsePicker(stripAnsi(raw), raw)
   if (!pk) return [409, { error: 'no question is waiting on screen' }]
+  const sendSteps = async (steps) => {
+    for (const st of steps) {
+      if (st.text) await herdrOn(m, 'pane', 'send-text', a.id, st.text)
+      else await herdrOn(m, 'agent', 'send-keys', a.id, ...st.keys)
+      await sleep(150)
+    }
+  }
+  const io = { read: async () => { const r = await readPane(m, a.id, '80'); return parsePicker(stripAnsi(r), r) }, send: sendSteps }
+  if (req.action === 'scan') return [200, { questions: await scanTabs(io) }]
+  if (req.action === 'bulk') {
+    if (!Array.isArray(req.answers) || req.answers.length > 4) return [400, { error: 'bad answers' }]
+    await runBulk(io, req.answers)
+    parsed.delete(`${m.label}|${a.id}`)
+    return [200, { ok: true }]
+  }
   let steps
   if (req.action === 'goto') {
     // ←/→ switch questions (verified); only from the screen the user saw.
@@ -1989,11 +2054,7 @@ async function answerQuestion(a, req) {
     if (pk.review || pk.question !== req.question) return [409, { error: 'that question is no longer on screen' }]
     steps = answerPlan(pk, req)
   }
-  for (const st of steps) {
-    if (st.text) await herdrOn(m, 'pane', 'send-text', a.id, st.text)
-    else await herdrOn(m, 'agent', 'send-keys', a.id, ...st.keys)
-    await sleep(150)
-  }
+  await sendSteps(steps)
   parsed.delete(`${m.label}|${a.id}`) // force a fresh pane read
   return [200, { ok: true }]
 }

@@ -1560,3 +1560,57 @@ test('WP-200: a slash command/skill turn (command-message first) normalises to "
   assert.deepEqual(t('plain words'), ['plain words'])
   assert.deepEqual(t('<local-command-stdout>x</local-command-stdout>'), [])
 })
+
+// WP-203: runBulk walks a simulated N-tab terminal picker from tab 0, answers each off a fresh read, submits once.
+function fakeTerminal(n, { start = 0, review = false } = {}) {
+  const tabs = Array.from({ length: n }, (_, i) => ({ header: `H${i}`, multi: i % 2 === 1, options: ['a', 'b', 'c'].map((l) => `${l}${i}`) }))
+  const t = { tab: review ? n : start, chosen: tabs.map(() => []), submitted: false, sent: [] }
+  const view = () => t.submitted ? null : t.tab >= n
+    ? { review: true, tabs: tabs.map((x) => ({ header: x.header, done: true })), answers: t.chosen.map((c, i) => ({ question: `Q${i}`, answer: c.join(', ') })) }
+    : { review: false, tabs: tabs.map((x) => ({ header: x.header, done: false })), current: t.tab, question: `Q${t.tab}`, multiSelect: tabs[t.tab].multi,
+        options: tabs[t.tab].options.map((label, k) => ({ label, description: '', checked: t.chosen[t.tab].includes(label) })), other: null, cursor: 1 }
+  const send = async (steps) => {
+    for (const { keys = [] } of steps) {
+      t.sent.push(keys.join('+'))
+      for (const k of keys) {
+        if (k === 'left') t.tab--
+        else if (k === 'right') t.tab++
+        else if (t.tab >= n) { if (k === '1') t.submitted = true }
+        else if (/^\d$/.test(k) && !tabs[t.tab].multi) { t.chosen[t.tab] = [tabs[t.tab].options[k - 1]]; t.tab++ }
+        else if (/^\d$/.test(k)) { const l = tabs[t.tab].options[k - 1]; if (l) t.chosen[t.tab] = t.chosen[t.tab].includes(l) ? t.chosen[t.tab].filter((x) => x !== l) : [...t.chosen[t.tab], l] }
+        else if (k === 'enter') t.tab++
+      }
+    }
+  }
+  return { t, io: { read: async () => view(), send } }
+}
+test('WP-203: runBulk answers every tab then submits once, for 1-4 tabs, from tab 0 or from review', async () => {
+  const { runBulk } = await import('./server.mjs')
+  for (const n of [1, 2, 3, 4]) for (const mode of [{}, { start: n - 1 }, { review: true }]) {
+    const { t, io } = fakeTerminal(n, mode)
+    const answers = Array.from({ length: n }, (_, i) => ({ header: `H${i}`, selected: i % 2 ? [`a${i}`, `c${i}`] : [`b${i}`] }))
+    await runBulk(io, answers, async () => {})
+    assert.equal(t.submitted, true, `n=${n} ${JSON.stringify(mode)}`)
+    assert.deepEqual(t.chosen, answers.map((a) => a.selected))
+    assert.equal(t.sent.at(-1), '1')
+  }
+})
+test('WP-203: runBulk refuses (409) before submitting when the picker does not match', async () => {
+  const { runBulk } = await import('./server.mjs')
+  const bad = async (answers, term) => { await assert.rejects(runBulk(term.io, answers, async () => {}), (e) => e.status === 409); assert.ok(!term.t.submitted) }
+  await bad([{ header: 'H0', selected: ['a0'] }, { header: 'WRONG', selected: ['a1'] }], fakeTerminal(2))
+  await bad([{ header: 'H0', selected: ['a0'] }], fakeTerminal(2)) // tab count differs
+  const gone = { io: { read: async () => null, send: async () => {} }, t: {} }
+  await bad([{ header: 'H0', selected: ['a0'] }], gone)
+})
+test('WP-203: scanTabs reads every tab off the terminal and leaves it on the tab it started on', async () => {
+  const { scanTabs } = await import('./server.mjs')
+  for (const n of [2, 3, 4]) for (const start of [0, n - 1]) {
+    const { t, io } = fakeTerminal(n, { start })
+    const qs = await scanTabs(io, async () => {})
+    assert.deepEqual(qs.map((q) => [q.header, q.multiSelect, q.options.length]), Array.from({ length: n }, (_, i) => [`H${i}`, i % 2 === 1, 3]))
+    assert.equal(t.tab, start); assert.ok(!t.submitted)
+  }
+  await assert.rejects(scanTabs(fakeTerminal(1).io, async () => {}), (e) => e.status === 409) // one question: nothing to scan
+  await assert.rejects(scanTabs(fakeTerminal(3, { review: true }).io, async () => {}), (e) => e.status === 409)
+})
