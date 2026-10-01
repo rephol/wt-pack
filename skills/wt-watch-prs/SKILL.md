@@ -78,7 +78,7 @@ $W identity           # "<login> <source>" — the account reviews post as
   tool call to keep running, so it has none of the next bullet's failure mode. `poller-status` exits 0 when
   the launchd agent is loaded and its heartbeat (`$WT_WATCH_PRS_HOME/poller.beat`) is under 3 minutes old.
   - A poller that hangs is restarted by its supervisor (WP-196), and one that comes back after a 3+ min gap sends this pane a `poller resumed after Nm; replayed missed heads` system message — treat it as "events may have been late", not as an error. Never arm Monitors alongside the poller (duplicate events).
-  - **Exit 0 → `$W register --session S`** and stop here; the poller drains the backlog and delivers events
+  - **Exit 0 → `$W register --session S`**, confirm with `$W poller-status --expect-registered` (exit 1 "running but 0 watchers" → register again), and stop here; the poller drains the backlog and delivers events
     to this pane from now on. No Monitor, no polling loop in this session — `register` records this pane
     (resolved via `herdr pane get`, the `HERDR_PANE_ID`-may-be-the-stable-id trap) and this repo's checkout
     path once, and returns immediately.
@@ -152,7 +152,9 @@ $W gate 12                          # green | red | pending | none
 $W diff 12 "$S" --sha <reported sha> > "$TMPDIR/pr12.diff"
 ```
 
-- **Claim first**, before any reading, so a losing session spends nothing. Release on every exit path,
+- **Claim first**, on receipt, before any reading *and before waiting on the gate*, so a losing session spends
+  nothing and a CI wait is "claimed, waiting for the gate", never an open event the poller reads as a pane that
+  stopped consuming. Never record a not-yet-reviewed head (e.g. as `commented`) to quiet the poller. Release on every exit path,
   including abandonment: `$W release 12 "$S"`. A claim older than ~2h with no record is a dead session —
   say so and remove `~/.local/share/wt-watch-prs/<owner>-<repo>/claims/pr12` by hand; never auto-expire.
 - **Describes.** An empty body or a raw branch-name title is a hold in its own right (bots exempt): the
@@ -258,8 +260,8 @@ $W release 12 "$S"
 
 **Fallback path is session-scoped**: the Monitors die with this session (the state survives). **`register`ed
 watching is not** — the poller keeps delivering to this pane after the session that registered it ends, until
-it is explicitly `unregister`ed or the poller itself decides the pane stopped consuming (§1's decision-5
-criteria: pane gone, handoff failed 3 times, or an event unclaimed and unreviewed 30+ minutes on). Inline
+it is explicitly `unregister`ed or the poller itself decides the pane is unreachable (§1's decision-5
+criteria: pane gone or handoff failed 3 times; an event unclaimed 30+ minutes on re-delivers once and posts an Inbox notice but never unregisters a live pane). Every unregister posts an Inbox notice naming the pane and why. Inline
 diff-line comments (`pulls/N/comments`) are not watched — post holds as review bodies so answers land in the
 conversation. State: `~/.local/share/wt-watch-prs/<owner>-<repo>/` (`state.json`, `claims/`, `state.lock`,
 `poll/`) and, top-level, `watchers.json`, `poller.beat`, `unwatched.json` (WP-187).
