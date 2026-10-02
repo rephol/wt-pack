@@ -1,11 +1,14 @@
 // Desktop (Tauri) glue: relays the server's /api/events stream to the native side (tray + notifications)
 // and opens an agent when the tray or a notification asks. No-op in a plain browser.
 import { useEffect, useRef } from 'react'
+import { isPrimaryWindow } from './windowLabel'
 import { gate, DEFAULT_PREFS, type Prefs, type InboxItem } from './notifyGate'
 
 type TauriEvent = { emit: (n: string, p?: unknown) => Promise<void>; listen: (n: string, cb: (e: { payload: unknown }) => void) => Promise<() => void> }
 const tauri = (window as unknown as { __TAURI__?: { event: TauriEvent } }).__TAURI__
 export const isDesktop = Boolean(tauri)
+
+export { isPrimaryWindow }
 
 export const PREFS_KEY = 'notify-prefs-v2'
 export const loadPrefs = (): Prefs => {
@@ -15,9 +18,12 @@ export const loadPrefs = (): Prefs => {
   } catch { return structuredClone(DEFAULT_PREFS) }
 }
 
-export function useDesktop(openKeys: string[], open: (key: string) => void) {
-  const ref = useRef({ openKeys, open })
-  ref.current = { openKeys, open }
+export function useDesktop(openKeys: string[], open: (key: string) => void, project = 'all', projects: string[] = []) {
+  const ref = useRef({ openKeys, open, project })
+  ref.current = { openKeys, open, project }
+  const primary = isPrimaryWindow()
+  // The tray's "Open in new window" list comes from the primary window.
+  useEffect(() => { if (tauri && primary) tauri.event.emit('projects', projects) }, [primary, projects.join('\n')])
   useEffect(() => {
     if (!tauri) return
     const seen = new Set<string>()
@@ -26,14 +32,14 @@ export function useDesktop(openKeys: string[], open: (key: string) => void) {
     // shortly after a notification posted while we were in the background opens that agent.
     let pending: { key: string; at: number } | null = null
     const es = new EventSource('/api/events')
-    es.addEventListener('tray', (m) => { tauri.event.emit('tray', JSON.parse((m as MessageEvent).data)) })
+    if (primary) es.addEventListener('tray', (m) => { tauri.event.emit('tray', JSON.parse((m as MessageEvent).data)) })
     let build: number | null = null
     es.addEventListener('build', (m) => {
       const b = JSON.parse((m as MessageEvent).data) as number
       if (build !== null && b !== build) dispatchEvent(new Event('hd-update')) // PwaHost: toast, or reload while hidden
       build = b
     })
-    es.addEventListener('notification', (m) => {
+    if (primary) es.addEventListener('notification', (m) => {
       const e = JSON.parse((m as MessageEvent).data) as InboxItem
       const focused = document.hasFocus()
       if (!gate(e, { prefs: loadPrefs(), focused, openKeys: ref.current.openKeys, seen, lastAt, now: Date.now() })) return
@@ -44,7 +50,9 @@ export function useDesktop(openKeys: string[], open: (key: string) => void) {
     const onFocus = () => { if (pending && Date.now() - pending.at < 60_000) ref.current.open(pending.key); pending = null }
     addEventListener('focus', onFocus)
     const un = tauri.event.listen('open-agent', (e) => { pending = null; ref.current.open(String(e.payload)) })
-    return () => { es.close(); removeEventListener('focus', onFocus); un.then((f) => f()) }
+    // File › New Window asks the focused window which project it shows.
+    const unNew = tauri.event.listen('new-window-request', () => { tauri.event.emit('open-window', { project: ref.current.project }) })
+    return () => { es.close(); removeEventListener('focus', onFocus); un.then((f) => f()); unNew.then((f) => f()) }
   }, [])
 }
 

@@ -252,6 +252,9 @@ struct TrayAgent {
     name: String,
     #[serde(default)]
     question: Option<String>,
+    /// The agent's project (WP-166): a tray click opens that project's window when one exists.
+    #[serde(default)]
+    project: Option<String>,
 }
 #[derive(serde::Deserialize, Default, Clone, PartialEq)]
 struct TrayState {
@@ -267,6 +270,76 @@ struct Notify {
 fn short(s: &str, n: usize) -> String {
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > n { format!("{}…", s.chars().take(n).collect::<String>()) } else { s }
+}
+
+// ---- one window per project (WP-166) ----
+// `main` is the primary window (tray relay, default project, Dock/shortcut target). A project window is `p-<project>`.
+/// (label, project) of the open project windows; persisted so a relaunch reopens them.
+static WINDOWS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+/// Projects offered by the tray's "Open in new window" (reported by the main window).
+static PROJECTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// `p-` + the project with anything outside [a-zA-Z0-9-_] replaced by `-`; a hash is appended when that changed
+/// the name, so `a.b` and `a-b` don't share a window.
+fn win_label(project: &str) -> String {
+    let clean: String = project.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect();
+    if clean == project { return format!("p-{clean}") }
+    let h = project.bytes().fold(0x811c9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x01000193));
+    format!("p-{clean}-{h:08x}")
+}
+fn project_url(project: &str) -> tauri::Url {
+    let enc: String = project.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    format!("{URL}?project={enc}").parse().unwrap()
+}
+fn windows_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("windows.json"))
+}
+fn save_windows(app: &AppHandle) {
+    if EXITING.load(Ordering::Relaxed) { return } // a Quit keeps the list for the next launch
+    let Some(f) = windows_file(app) else { return };
+    let projects: Vec<String> = lock(&WINDOWS).iter().map(|w| w.1.clone()).collect();
+    if let Some(d) = f.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(f, serde_json::to_string(&projects).unwrap_or_default());
+}
+fn show_label(app: &AppHandle, label: &str) -> bool {
+    let Some(w) = app.get_webview_window(label) else { return false };
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
+    true
+}
+/// Opens (or focuses) the window for `project`. Builds off the calling thread: menu callbacks run on the main one.
+fn open_project_window(app: &AppHandle, project: &str, restore: bool) {
+    let (app, project) = (app.clone(), project.to_string());
+    std::thread::spawn(move || {
+        let label = win_label(&project);
+        if show_label(&app, &label) { return }
+        let r = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(project_url(&project)))
+            .title(format!("wt-dashboard — {project}"))
+            .inner_size(1280.0, 840.0)
+            .min_inner_size(900.0, 600.0)
+            .build();
+        match r {
+            Ok(_) => {
+                log(&format!("window: {} {label}", if restore { "restore" } else { "open" }));
+                lock(&WINDOWS).push((label, project));
+                save_windows(&app);
+            }
+            Err(e) => log(&format!("window: open {label} failed: {e}")),
+        }
+    });
+}
+/// Reopens what windows.json lists (after `main` exists).
+fn restore_windows(app: &AppHandle) {
+    let Some(f) = windows_file(app) else { return };
+    let Ok(raw) = std::fs::read_to_string(f) else { return };
+    for p in serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default() { open_project_window(app, &p, true) }
+}
+/// The window that should show an agent of `project`: its project window if open, else main. Shows it, returns its label.
+fn focus_for(app: &AppHandle, project: Option<&str>) -> String {
+    let label = project.map(win_label).filter(|l| app.get_webview_window(l).is_some()).unwrap_or_else(|| "main".into());
+    show_label(app, &label);
+    label
 }
 
 // ---- server lifecycle: who owns :7777, supervision, restart/take over ----
@@ -423,7 +496,7 @@ fn control(app: &AppHandle, action: &str) {
         };
         log(&format!("control: {action} -> {r:?}"));
         update_state(&app);
-        let _ = app.emit_to("main", "server-control-result", serde_json::json!({ "action": action, "ok": r.is_ok(), "error": r.err() }));
+        let _ = app.emit("server-control-result", serde_json::json!({ "action": action, "ok": r.is_ok(), "error": r.err() }));
         BUSY.store(false, Ordering::SeqCst);
     });
 }
@@ -490,6 +563,13 @@ fn build_menu(app: &AppHandle, st: &TrayState) -> tauri::Result<Menu<Wry>> {
     let wrefs: Vec<&dyn IsMenuItem<Wry>> = working.iter().map(|m| m as &dyn IsMenuItem<Wry>).collect();
     items.push(Box::new(Submenu::with_items(app, format!("Working ({})", working.len()), !working.is_empty(), &wrefs)?));
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    let projects = lock(&PROJECTS).clone();
+    let prefs: Vec<MenuItem<Wry>> = std::iter::once("all".to_string()).chain(projects.iter().cloned())
+        .map(|p| MenuItem::with_id(app, format!("win:{p}"), if p == "all" { "All projects" } else { &p }, true, None::<&str>))
+        .collect::<tauri::Result<_>>()?;
+    let prefs: Vec<&dyn IsMenuItem<Wry>> = prefs.iter().map(|m| m as &dyn IsMenuItem<Wry>).collect();
+    items.push(Box::new(Submenu::with_items(app, "Open in new window", true, &prefs)?));
+    items.push(Box::new(PredefinedMenuItem::separator(app)?));
     let s = srv();
     let line = match s {
         Srv::Starting => "Server: starting…",
@@ -525,16 +605,22 @@ fn show(app: &AppHandle) {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "open" => show(app),
-        "quit" => app.exit(0),
+        "quit" => {
+            EXITING.store(true, Ordering::Relaxed); // before the windows go: keep windows.json
+            app.exit(0)
+        }
         "autostart" => {
             let al = app.autolaunch();
             let r = if al.is_enabled().unwrap_or(false) { al.disable() } else { al.enable() };
             log(&format!("autostart toggled: {r:?} now={:?}", al.is_enabled()));
         }
         id if id.starts_with("srv:") => control(app, &id[4..]),
+        id if id.starts_with("win:") => open_project_window(app, &id[4..], false),
         id if id.starts_with("agent:") => {
-            show(app);
-            let _ = app.emit_to("main", "open-agent", &id[6..]);
+            let key = &id[6..];
+            let project = lock(&LAST_TRAY).as_ref().and_then(|t| t.needs.iter().chain(&t.working).find(|a| a.key == key).and_then(|a| a.project.clone()));
+            let label = focus_for(app, project.as_deref());
+            let _ = app.emit_to(label.as_str(), "open-agent", key);
         }
         _ => {}
     }
@@ -570,11 +656,42 @@ fn main() {
             if EXITING.load(Ordering::Relaxed) {
                 return;
             }
-            // Closing hides; the app lives on in the tray. Quit is in the tray menu.
-            if let WindowEvent::CloseRequested { api, .. } = ev {
-                api.prevent_close();
-                let _ = w.hide();
+            match ev {
+                // Closing main hides it; the app lives on in the tray. Quit is in the tray menu.
+                // A project window really closes, freeing its WKWebView.
+                WindowEvent::CloseRequested { api, .. } if w.label() == "main" => {
+                    api.prevent_close();
+                    let _ = w.hide();
+                }
+                WindowEvent::Destroyed if w.label() != "main" => {
+                    let app = w.app_handle();
+                    lock(&WINDOWS).retain(|x| x.0 != w.label());
+                    log(&format!("window: destroyed {}", w.label()));
+                    save_windows(app);
+                }
+                _ => {}
             }
+        })
+        .menu(|h| {
+            let new = MenuItem::with_id(h, "new-window", "New Window", true, Some("CmdOrCtrl+Shift+N"))?;
+            Menu::with_items(h, &[
+                &Submenu::with_items(h, "wt-dashboard", true, &[
+                    &PredefinedMenuItem::hide(h, None)?, &PredefinedMenuItem::hide_others(h, None)?, &PredefinedMenuItem::show_all(h, None)?,
+                    &PredefinedMenuItem::separator(h)?, &PredefinedMenuItem::quit(h, None)?,
+                ])?,
+                &Submenu::with_items(h, "File", true, &[&new, &PredefinedMenuItem::close_window(h, None)?])?,
+                &Submenu::with_items(h, "Edit", true, &[
+                    &PredefinedMenuItem::undo(h, None)?, &PredefinedMenuItem::redo(h, None)?, &PredefinedMenuItem::separator(h)?,
+                    &PredefinedMenuItem::cut(h, None)?, &PredefinedMenuItem::copy(h, None)?, &PredefinedMenuItem::paste(h, None)?,
+                    &PredefinedMenuItem::select_all(h, None)?,
+                ])?,
+            ])
+        })
+        .on_menu_event(|app, e| {
+            // ⌘⇧N: ask the focused window (else main) which project it shows; it answers with `open-window`.
+            if e.id().as_ref() != "new-window" || EXITING.load(Ordering::Relaxed) { return }
+            let label = app.webview_windows().into_iter().find(|(_, w)| w.is_focused().unwrap_or(false)).map(|(l, _)| l).unwrap_or_else(|| "main".into());
+            let _ = app.emit_to(label.as_str(), "new-window-request", ());
         })
         .manage(Sidecar(Mutex::new(None)))
         .setup(|app| {
@@ -613,6 +730,23 @@ fn main() {
                 if let Ok(m) = build_menu(&hh, &st) {
                     let _ = tray.set_menu(Some(m));
                 }
+            });
+            let hh = h.clone();
+            app.listen("projects", move |e| {
+                if EXITING.load(Ordering::Relaxed) { return }
+                let Ok(p) = serde_json::from_str::<Vec<String>>(e.payload()) else { return };
+                let mut cur = lock(&PROJECTS);
+                if *cur == p { return }
+                *cur = p;
+                drop(cur);
+                refresh_tray(&hh);
+            });
+            let hh = h.clone();
+            app.listen("open-window", move |e| {
+                if EXITING.load(Ordering::Relaxed) { return }
+                let Some(p) = serde_json::from_str::<serde_json::Value>(e.payload()).ok()
+                    .and_then(|v| v.get("project").and_then(|p| p.as_str()).map(String::from)) else { return };
+                open_project_window(&hh, &p, false);
             });
             let hh = h.clone();
             app.listen("update", move |e| {
@@ -681,6 +815,7 @@ fn main() {
                     .inner_size(1440.0, 900.0)
                     .min_inner_size(900.0, 600.0)
                     .build();
+                restore_windows(&handle);
             });
             Ok(())
         })
@@ -703,4 +838,18 @@ fn main() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_are_valid_and_collision_free() {
+        assert_eq!(win_label("wt-pack"), "p-wt-pack");
+        let (a, b) = (win_label("a.b"), win_label("a-b"));
+        assert_ne!(a, b); // sanitising `.` to `-` must not merge two projects into one window
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(project_url("my proj/é").as_str().ends_with("?project=my%20proj%2F%C3%A9"));
+    }
 }

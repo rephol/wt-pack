@@ -1670,10 +1670,16 @@ export function transitions(prev, next) {
 const inbox = new Inbox(DATA)
 const subs = new Set()
 let lastSnap = null
-const trayOfInbox = () => ({
-  needs: inbox.open().map((it) => ({ key: it.target.agent ?? (it.target.room ? `room:${it.target.room}` : `memory:${it.target.memory}`), name: it.title, question: it.body })),
-  working: lastSnap ? [...lastSnap.agents.values()].filter((a) => a.state === 'working').map((a) => ({ key: a.key, name: a.name })) : [],
+// WP-166: `project` lets the app route a tray click to that project's window (absent for rooms/memory items).
+// Pure: `agents` is the snapshot's Map<key, agent> (or null before the first poll).
+export const trayOf = (items, agents) => ({
+  needs: items.map((it) => {
+    const key = it.target.agent ?? (it.target.room ? `room:${it.target.room}` : `memory:${it.target.memory}`)
+    return { key, name: it.title, question: it.body, project: agents?.get(key)?.project ?? undefined }
+  }),
+  working: agents ? [...agents.values()].filter((a) => a.state === 'working').map((a) => ({ key: a.key, name: a.name, project: a.project ?? undefined })) : [],
 })
+const trayOfInbox = () => trayOf(inbox.open(), lastSnap?.agents ?? null)
 const broadcastEvent = (event, data) => { for (const res of subs) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) }
 // WP-146: the app rebuilds a whole native NSMenu per 'tray' event — broadcast only on change (~15/min otherwise).
 let lastTraySent = null
