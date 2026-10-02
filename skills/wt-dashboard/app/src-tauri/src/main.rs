@@ -329,6 +329,29 @@ fn open_project_window(app: &AppHandle, project: &str, restore: bool) {
         }
     });
 }
+/// WT_DASHBOARD_SELFTEST=windows: what a person does with ⌘⇧N, a project switch and a close, without clicking
+/// (osascript has no assistive access). Results are `selftest:` lines in app.log.
+fn selftest_windows(app: &AppHandle) {
+    let nap = |s| std::thread::sleep(Duration::from_secs(s));
+    app.listen("selftest-ls", |e| log(&format!("selftest: ls {}", e.payload())));
+    let probe = |label: &str| if let Some(w) = app.get_webview_window(label) {
+        let _ = w.eval("window.__TAURI__.event.emit('selftest-ls', { ls: localStorage.getItem('project'), q: location.search, label: window.__TAURI_INTERNALS__.metadata.currentWindow.label })");
+    };
+    probe("main");
+    let _ = app.emit_to("main", "new-window-request", ()); // the File › New Window path: main answers with its project
+    nap(6);
+    let Some(label) = lock(&WINDOWS).first().map(|w| w.0.clone()) else { return log("selftest: no project window opened") };
+    let Some(w) = app.get_webview_window(&label) else { return };
+    // The same event a ticket chip fires: App.setProject() runs in that window.
+    let _ = w.eval("dispatchEvent(new CustomEvent('wt:open-ticket', { detail: { project: 'selftest-other', id: 'WP-0' } }))");
+    nap(3);
+    probe(&label);
+    probe("main");
+    nap(3);
+    let _ = w.close();
+    nap(3);
+    log(&format!("selftest: windows.json = {}", windows_file(app).and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default()));
+}
 /// Reopens what windows.json lists (after `main` exists).
 fn restore_windows(app: &AppHandle) {
     let Some(f) = windows_file(app) else { return };
@@ -800,14 +823,14 @@ fn main() {
                 update_state(&handle);
                 let sup = handle.clone();
                 std::thread::spawn(move || supervise(sup));
-                // Test hook: WT_DASHBOARD_SELFTEST=restart|takeover|start runs that control 15s after launch,
+                // Test hook: WT_DASHBOARD_SELFTEST=restart|takeover|start|windows runs that control 15s after launch,
                 // through the same path as the tray and the status bar.
                 if let Ok(action) = std::env::var("WT_DASHBOARD_SELFTEST") {
                     let t = handle.clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(Duration::from_secs(15));
                         log(&format!("selftest: {action}"));
-                        control(&t, &action);
+                        if action == "windows" { selftest_windows(&t) } else { control(&t, &action) }
                     });
                 }
                 let _ = WebviewWindowBuilder::new(&handle, "main", url)
