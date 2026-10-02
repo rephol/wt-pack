@@ -18,7 +18,7 @@ import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { ServerStatus } from './status'
 import { ImageRow, FileCards, useAttachments, AttachmentChip, ATTACH_ACCEPT, MAX_IMAGES, type SharedFile } from './attachments'
 import { useToast } from '@astryxdesign/core/Toast'
-import { useDesktop } from './desktop'
+import { useDesktop, isPrimaryWindow } from './desktop'
 import { Dock } from './ChatDock'
 import { dockReducer, load as loadDock, save as saveDock, unread as dockUnread, dockKind } from './dock'
 import { SettingsHost, openSettings } from './settings'
@@ -347,7 +347,8 @@ export default function App() {
     if (p === 'all') u.searchParams.delete('project')
     else u.searchParams.set('project', p)
     history.replaceState(null, '', u)
-    try { localStorage.setItem('project', p) } catch { /* private mode */ }
+    // WP-166: a project window (p-*) must not overwrite the saved default; only main and a browser tab do.
+    if (isPrimaryWindow()) try { localStorage.setItem('project', p) } catch { /* private mode */ }
   }
   // A ticket chip in a room or chat (WP-93): switch to its project, then #board/<ID> opens it.
   useEffect(() => {
@@ -417,7 +418,7 @@ export default function App() {
   const openTerm = openPane?.startsWith('term:') ? openPane.slice(5) : null
   const fabHidden = (page === 'rooms' && !!roomSlug) || !!fullKey || !!termPage || (!!openTerm && !narrow && !collapsed) || (!!openAgent && !narrow && !collapsed) || (!!openRoom && !narrow && !collapsed)
   const dockOpen = narrow ? [] : dock.items.filter((i) => !i.min).map((i) => i.key)
-  useDesktop([...(collapsed || !openPane ? [] : [openPane]), ...dockOpen], open)
+  useDesktop([...(collapsed || !openPane ? [] : [openPane]), ...dockOpen], open, project, counts.by.map(([p]) => p))
   const dockMarks = dockUnread(dock, { agents: all?.agents ?? [], rooms: roomsQ.data?.rooms ?? [] })
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
