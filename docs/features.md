@@ -547,6 +547,14 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   (Restart server / Install as service, Open, Launch at login, Quit); ⌥⌘H toggles the window; native
   notifications; links open in an in-app browser window. An app-managed server that dies is restarted up to
   3 times in 5 min. Log: `~/Library/Logs/wt-dashboard/app.log`.
+- **Window per project** (Mac app, WP-166): **File › New Window** (⌘⇧N) opens another window on the focused
+  window's project; the tray's **Open in new window** lists every project (and All projects). A project that
+  already has a window is focused, not duplicated. The first window (`main`) keeps the saved default project;
+  switching project in a project window changes only that window. Only `main` relays the tray and native
+  notifications, so two windows never notify twice; a tray click on an agent opens it in that project's window
+  when one is open, else in `main`. Closing `main` hides it to the tray; closing a project window really closes
+  it (each window is its own WebView, so open ones cost memory). Project windows reopen after a Quit and relaunch
+  (list in the app config dir, `windows.json`); a window you closed does not. App log lines: `window: open|restore|destroyed p-<project>`.
 - **Service**: launchd `id.local.wtdashboard.server` (`npm run service:install|restart|status|uninstall`).
   `service:install` also installs the **watchdog probe** `id.local.wtdashboard.watchdog`: every 2 min it curls
   `/api/health` and shows a macOS notification when the server stops answering (and once when it is back).
