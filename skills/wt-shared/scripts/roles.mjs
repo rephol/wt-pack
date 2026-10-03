@@ -7,8 +7,8 @@
 // which needs `base:` in its frontmatter). Frontmatter is flat `key: value` lines plus `[a, b]` lists, no YAML.
 // Pure and synchronous: wt-memory's hook imports it (dynamically) under a 2 s timeout.
 import { execFileSync } from 'node:child_process'
-import { readdirSync, readFileSync } from 'node:fs'
-import { basename, dirname, join, resolve as resolvePath } from 'node:path'
+import { readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const BASES = ['orchestrator', 'planner', 'worker', 'auditor', 'reviewer']
@@ -17,16 +17,17 @@ export const CAP = 6 * 1024
 const KEYS = { base: 'str', model: ['haiku', 'sonnet', 'opus'], effort: ['low', 'medium', 'high'], mcp: 'list', skills: 'list', labels: 'list' }
 
 // The repo's MAIN checkout (a worktree resolves to its main repo), or null outside a repo.
-export function mainCheckout(cwd = process.cwd()) {
+// `timeout` ms: the hook keeps the 500 default (2 s budget); CLIs pass more, a loaded machine trips 500.
+export function mainCheckout(cwd = process.cwd(), timeout = 500) {
   try {
-    const common = execFileSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    const common = execFileSync('git', ['-C', cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     return basename(common) === '.git' ? dirname(common) : common.replace(/\.git$/, '')
   } catch { return null }
 }
 export const rolesDir = (checkout) => join(checkout, '.wt-pack', 'roles')
 
 const val = (s) => {
-  s = s.trim()
+  s = s.replace(/\s+#.*$/, '').trim() // a trailing `# comment`, as in the SKILL.md example
   if (s.startsWith('[') && s.endsWith(']')) return s.slice(1, -1).split(',').map((x) => x.trim()).filter(Boolean)
   return s.replace(/^(["'])(.*)\1$/, '$2')
 }
@@ -45,7 +46,11 @@ export function parse(text) {
 function load(checkout, name) {
   const file = join(rolesDir(checkout), `${name}.md`)
   let text
-  try { text = readFileSync(file, 'utf8') } catch { return null }
+  try {
+    // a symlink out of the checkout (file or .wt-pack/roles itself) is not a role file
+    if (!realpathSync(file).startsWith(realpathSync(checkout) + sep)) return null
+    text = readFileSync(file, 'utf8').slice(0, 4 * CAP) // bounded: a hostile file must not stall the 2 s hook
+  } catch { return null }
   const { meta, body } = parse(text)
   const override = BASES.includes(name)
   return { name, file, override, base: override ? name : meta.base, meta, body, bytes: Buffer.byteLength(body) }
@@ -81,7 +86,7 @@ export function sections(checkout, role, persona) {
   for (const name of [BASES.includes(role) ? role : null, persona].filter((n) => n && NAME.test(n))) {
     const r = load(checkout, name)
     if (!r) continue
-    let text = r.body.replace(/ *<!--[\s\S]*?-->/g, '').trim()
+    let text = r.body.replace(/<!--[\s\S]*?-->/g, '').replace(/[ \t]+$/gm, '').trim()
     if (Buffer.byteLength(text) > CAP) {
       let cut = Buffer.from(text).subarray(0, CAP).toString('utf8')
       cut = cut.slice(0, Math.max(cut.lastIndexOf('\n'), 0))
@@ -102,16 +107,14 @@ export function catalog() {
   } catch { return undefined }
 }
 
-// Findings for every role file. `catalog` = the MCP server names the pack knows (omit to skip that check);
-// `settingsRoles` = the dashboard's Settings role ids (omit to skip the collision check).
-export function check(checkout, { catalog, settingsRoles } = {}) {
+// Findings for every role file. `catalog` = the MCP server names the pack knows (omit to skip that check).
+export function check(checkout, { catalog } = {}) {
   const f = []
   const warn = (name, msg, level = 'warn') => f.push({ name, level, msg })
   for (const r of list(checkout)) {
     if (!NAME.test(r.name)) warn(r.name, `name must match ${NAME}`, 'error')
     if (!r.override && !BASES.includes(r.base)) warn(r.name, `a persona needs \`base:\` one of ${BASES.join(', ')} (got ${r.base ?? 'none'})`, 'error')
     if (r.override && r.meta.base && r.meta.base !== r.name) warn(r.name, `\`base:\` is ignored on an override file`)
-    if (settingsRoles?.includes(r.name) && !r.override) warn(r.name, 'collides with a Settings role id')
     for (const [k, v] of Object.entries(r.meta)) {
       const spec = KEYS[k]
       if (!spec) warn(r.name, `unknown key \`${k}\``)
@@ -129,7 +132,7 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
   const [cmd, ...rest] = process.argv.slice(2)
   const i = rest.indexOf('--cwd')
   const cwd = i >= 0 ? rest.splice(i, 2)[1] : process.cwd()
-  const checkout = mainCheckout(cwd)
+  const checkout = mainCheckout(cwd, 5000)
   const out = (x) => console.log(JSON.stringify(x))
   if (!checkout) { console.error('not in a git repo'); process.exit(2) }
   if (cmd === 'list') out(list(checkout).map(({ name, base, meta, bytes }) => ({ name, base, meta, bytes })))

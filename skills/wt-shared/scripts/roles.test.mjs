@@ -30,13 +30,12 @@ test('override + persona resolve; a persona without a valid base does not', () =
   assert.equal(list(repo).length, 3)
 })
 
-test('check: bad base, unknown mcp, bad enum, unknown key, collision, size', () => {
+test('check: bad base, unknown mcp, bad enum, unknown key, size', () => {
   put('big', `---\nbase: worker\nmcp: [nope]\neffort: max\ncolor: red\n---\n${'x\n'.repeat(CAP)}`)
-  const f = check(repo, { catalog: ['figma'], settingsRoles: ['frontend-worker'] })
+  const f = check(repo, { catalog: ['figma'] })
   const has = (name, re) => f.some((x) => x.name === name && re.test(x.msg))
   assert.ok(has('broken', /needs `base:`/))
   assert.ok(has('big', /unknown MCP/) && has('big', /effort/) && has('big', /unknown key/) && has('big', /bytes; only/))
-  assert.ok(has('frontend-worker', /collides/))
   assert.ok(!f.some((x) => x.name === 'worker'))
 })
 
@@ -55,4 +54,33 @@ test('a worktree reads the main checkout; outside a repo is null', () => {
 
 test('personas: only valid persona files (not broken ones), with labels, in filename order', () => {
   assert.deepEqual(personas(repo).map((p) => [p.name, p.base, p.labels]), [['big', 'worker', []], ['frontend-worker', 'worker', ['ui']]])
+})
+
+test('parse: trailing # comments are dropped, so the SKILL.md example file is valid', async () => {
+  const { readFileSync } = await import('node:fs')
+  const md = readFileSync(new URL('../../wt-roles/SKILL.md', import.meta.url), 'utf8')
+  const ex = /```markdown\n(---[\s\S]*?\n---\n)/.exec(md)[1]
+  const { meta } = parse(ex)
+  assert.deepEqual(meta, { base: 'worker', model: 'sonnet', effort: 'low', mcp: ['figma'], skills: ['impeccable'], labels: ['ui', 'frontend'] })
+})
+
+test('hostile files: a huge run of spaces / unclosed comments is bounded; a symlink out of the checkout is ignored', async () => {
+  const { symlinkSync } = await import('node:fs')
+  put('hostile', `---\nbase: worker\n---\n${' '.repeat(70_000)}<!-- ${'<!--'.repeat(10_000)}`)
+  const t = Date.now()
+  sections(repo, null, 'hostile')
+  assert.ok(Date.now() - t < 500, `took ${Date.now() - t} ms`)
+  const outside = join(tmpdir(), `roles-outside-${process.pid}.md`)
+  writeFileSync(outside, '---\nbase: worker\n---\nSECRET')
+  symlinkSync(outside, join(dir, 'linked.md'))
+  assert.equal(resolve(repo, 'linked'), null)
+  assert.ok(!sections(repo, null, 'linked').length)
+})
+
+test('a linked git worktree reads the main checkout', () => {
+  const wt = join(realpathSync(tmpdir()), `roles-wt-${process.pid}`)
+  execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x'])
+  execFileSync('git', ['-C', repo, 'worktree', 'add', '-q', wt, '-b', 'wtb'])
+  assert.equal(mainCheckout(wt), repo)
+  assert.equal(sections(mainCheckout(wt), 'worker', null).length, 1)
 })
