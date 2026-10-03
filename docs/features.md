@@ -311,8 +311,8 @@ Chat rooms shared by you and agents.
   Inbox card, the terminal shows "asked in wt-dashboard…" instead of the picker, and your answer returns as the tool
   result (no reply message). It falls back to the native picker when the dashboard is unreachable, outside a herdr
   pane, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).
-  Plugins load at session start, so already-running agents keep the native picker until respawned. The pane-scrape
-  mirror above still serves those agents. `wt-ask --wait <id>`, `--ping` and `--no-deliver` are the mod's building blocks.
+  A session picks the mod up on `/reload-plugins` or at its next start (mods reload without a respawn); until then it
+  keeps the native picker, which the pane-scrape mirror above still serves. `wt-ask --wait <id>`, `--ping` and `--no-deliver` are the mod's building blocks.
 
 ## Inbox
 
