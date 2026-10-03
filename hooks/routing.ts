@@ -1,0 +1,78 @@
+// WP-211 — per-request model routing: the first model request of each main-loop turn is routed through
+// model-route.mjs (Jev + the mode gate + sessionFloor), and the turn's remaining steps reuse that pick. In
+// off/shadow `pick` applies nothing (shadow only logs the decision), so the request goes through untouched;
+// only `live` rewrites model/effort. No routing logic here: the script owns the gate, floors and the log.
+import type { Register } from 'claude-code'
+
+const ROUTE = 'skills/wt-shared/scripts/model-route.mjs'
+
+type Pick = { apply: string | null; applyEffort: string | null; ref: string | null; source: string }
+type Efforts = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+// `pick --json` stdout → the decision, or null when it is not one (a failed script never blocks a request).
+export const parsePick = (stdout: string): Pick | null => {
+  try {
+    const d = JSON.parse(stdout)
+    return { apply: typeof d.apply === 'string' ? d.apply : null, applyEffort: typeof d.applyEffort === 'string' ? d.applyEffort : null, ref: typeof d.ref === 'string' ? d.ref : null, source: String(d.source ?? '') }
+  } catch { return null }
+}
+
+// One hooks module per plugin (hooks.json `modules` takes a single entry), so commands.ts registers this.
+export const registerRouting: Register = on => {
+  let prompt = '' // the last submitted prompt: the task text for the next turn's first request
+  let turn: { id: string; pick: Pick | null; from?: string; model?: string } | undefined
+  const modelIds = new Map<string, string>()
+
+  on('prompt.submit', (_$, e, next) => {
+    // Only a person's own prompt is a task: not a slash command, a background notification or a peer's message.
+    const o = e.origin as { kind?: string; asUser?: boolean } | undefined // absent: the user's own
+    const person = !o?.kind || o.kind === 'composer' || o.kind === 'bridge' || o.kind === 'sdk' || (o.kind === 'plugin' && o.asUser === true)
+    if (person && !e.text.trimStart().startsWith('/')) prompt = e.text
+    return next(e)
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId) return yield* next(e) // a subagent's tier is its Agent call's; this routes the main loop
+    const script = `${$.plugin.root}/${ROUTE}`
+    if (e.index === 0 && prompt) {
+      const text = prompt
+      prompt = '' // a turn with no prompt of its own (a background wake-up) is not routed on a stale one
+      const r = await $.process.run(['node', script, 'pick', '--skill', 'turn-step', '--session', '--json'], { stdin: text, timeoutMs: 8000 }).catch(() => null)
+      turn = { id: e.turnId, pick: r?.exitCode === 0 ? parsePick(r.stdout) : null }
+    }
+    const pick = turn?.id === e.turnId ? turn.pick : null
+    // Nothing to apply: off/shadow, a failed pick, an unrouted turn — or Jev being down (fail-open lands on
+    // sonnet, which would silently downgrade a session that is on opus).
+    if (!turn || !pick?.apply || pick.source.startsWith('jev-failopen')) return yield* next(e)
+    turn.from ??= e.model
+    if (e.model !== turn.from) return yield* next(e) // the engine switched model itself (a fallback): leave it
+    if (!turn.model) {
+      let id = modelIds.get(pick.apply)
+      if (!id) {
+        const m = await $.process.run(['node', script, 'model-id', pick.apply], { timeoutMs: 5000 }).catch(() => null)
+        id = m?.exitCode === 0 ? m.stdout.trim() : ''
+        if (id) modelIds.set(pick.apply, id)
+      }
+      if (!id) return yield* next(e) // no pinned id for the tier: an alias is not known to be valid here
+      turn.model = id + (e.model.match(/\[[^\]]+\]$/)?.[0] ?? '') // keep a [1m]-style variant suffix
+    }
+    const effort = pick.applyEffort && EFFORTS.includes(pick.applyEffort) ? (pick.applyEffort as Efforts) : e.effort
+    return yield* next({ ...e, model: turn.model, effort })
+  })
+
+  // WP-159's outcomes, per turn, deliberately thin: a routed turn that answered is 'ok', one the model refused is
+  // 'returned' (the tier could not do it). An interruption or an API error says nothing about the pick, and a
+  // shadow/off pick applied nothing, so those record none. An answer is a weak signal next to WP-159's "ticket
+  // reached Done"; the per-turn log is for the tuning's volume, not a verdict.
+  on('turn.complete', async ($, e, next) => {
+    const t = turn
+    if (!e.agentId && t?.id === e.turnId) {
+      turn = undefined
+      if (t.pick?.apply && t.pick.ref && (e.reason === 'answer' || e.reason === 'refusal')) {
+        await $.process.run(['node', `${$.plugin.root}/${ROUTE}`, 'outcome', t.pick.ref, e.reason === 'answer' ? 'ok' : 'returned', `turn ${e.reason}`], { timeoutMs: 8000 }).catch(() => null)
+      }
+    }
+    return next(e)
+  })
+}
