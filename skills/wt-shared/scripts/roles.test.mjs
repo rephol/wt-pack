@@ -53,6 +53,6 @@ test('a worktree reads the main checkout; outside a repo is null', () => {
   assert.equal(mainCheckout(tmpdir()), null)
 })
 
-test('personas: only valid persona files, with labels, in filename order', () => {
-  assert.deepEqual(personas(repo).map((p) => [p.name, p.base, p.labels]), [['frontend-worker', 'worker', ['ui']]])
+test('personas: only valid persona files (not broken ones), with labels, in filename order', () => {
+  assert.deepEqual(personas(repo).map((p) => [p.name, p.base, p.labels]), [['big', 'worker', []], ['frontend-worker', 'worker', ['ui']]])
 })
