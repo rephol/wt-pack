@@ -102,7 +102,8 @@ export interface RoomItem { from: string; text: string }
 export interface RoomTurns { rooms: Map<string, { slug: string; items: RoomItem[] }>; posts: Map<string, string>; postResults: Set<string>; collapse: Set<string> }
 // The room CLI itself: at command start, after ; & | or as …/wt-room/scripts/room — not `echo room post x`.
 const POST = /(?:^|[;&|]\s*|\/wt-room\/scripts\/)room\s+post\s+["']?([\w-]+)/
-const ITEM = /<room-message [^>]*from="([^"]*)"[^>]*>([\s\S]*?)<\/room-message>/g
+// WP-219: a kind=context tag is earlier room chatter, not part of this turn.
+const ITEM = /<room-message (?![^>]*kind=context)[^>]*from="([^"]*)"[^>]*>([\s\S]*?)<\/room-message>/g
 export function roomTurns(msgs: TMsg[]): RoomTurns {
   const out: RoomTurns = { rooms: new Map(), posts: new Map(), postResults: new Set(), collapse: new Set() }
   let turn: TMsg[] = [], inRoom = false
