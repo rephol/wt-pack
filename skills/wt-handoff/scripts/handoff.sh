@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
 #   handoff.sh --cancel <pane|name> ["why"]               # stop a /goal-driven agent: escape, end its goal,
 #                                                          # clear task/ticket tokens, return its card if assigned
@@ -59,6 +59,7 @@ set -eu
 
 mode=auto
 role=
+persona=
 pane_arg=
 clear=0
 kind=handoff
@@ -96,6 +97,8 @@ while :; do
     --task)  task=$2; shift 2 ;;
     --role)  role=$2; shift 2
              case "$role" in worker|planner|reviewer) ;; *) echo "--role: worker, planner or reviewer" >&2; exit 2 ;; esac ;;
+    --persona) persona=$2; shift 2   # WP-204: only agents tagged persona=<name>, or a spawn of that persona
+             printf '%s' "$persona" | grep -qE '^[a-z][a-z0-9-]{0,23}$' || { echo "--persona: a name like frontend-worker" >&2; exit 2; } ;;
     --pr)    pr=$2; shift 2 ;;   # WP-121: pr=/sha= on the wt-message (wt-watch-prs dispatch)
     --sha)   sha=$2; shift 2 ;;
     --mcp)   mcp=$2; shift 2 ;;
@@ -213,10 +216,11 @@ candidates() {
   ws=$(worker_ws)
   panes=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')
   herdr agent list \
-    | jq -r --arg ws "$ws" --argjson panes "$panes" \
+    | jq -r --arg ws "$ws" --arg persona "$persona" --argjson panes "$panes" \
       '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws)
        | . as $a | ($panes[$a.pane_id] // {}) as $t
        | select(($t.dnd // "") == "") | select(($t.pair // "") == "")
+       | select(($t.persona // "") == $persona)
        | [$a.pane_id, $a.tab_id, $a.cwd, ($t.model // ""), ($t.effort // "")] | @tsv' \
     | while IFS="$tab" read -r id tid acwd amodel aeffort; do
         # Target by PANE ID, not name: an agent started by hand rather than by
@@ -239,6 +243,11 @@ if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] &&
   && [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh" --cwd "${main_checkout:-$cwd}")" = lean ]; then
   jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
   mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
+fi
+# WP-204: a persona's base role comes from its project-role file when --role is not given.
+if [ -n "$persona" ] && [ -z "$role" ]; then
+  role=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
+  case "$role" in worker|planner|reviewer) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner or reviewer base" >&2; exit 2 ;; esac
 fi
 # Worker or planner? Decided before the footer (Jev judges the request, not the routing) and before any reuse,
 # because reuse is restricted to the chosen role's pool.
@@ -430,6 +439,10 @@ dry() {  # <what would happen>
   exit 0
 }
 
+# WP-204: a persona's own model/effort (its role file, applied by agents.sh spawn) outranks the routed tier, so a
+# persona agent is reused by persona, never by tier.
+[ -z "$persona" ] || { route_tier=; route_effort=; }
+
 if [ "$mode" = pane ]; then
   target_dnd=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.dnd // empty')
   [ -z "$target_dnd" ] || echo "warning: $(name_of "$pane_arg") is DND" >&2
@@ -471,10 +484,10 @@ if [ "$role" = worker ]; then
   fi
 fi
 
-[ "$dry" -eq 1 ] && dry "would spawn a $role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}"
+[ "$dry" -eq 1 ] && dry "would spawn a ${persona:+$persona }$role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
-created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "$role" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"})
+created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"})
 label=${created%% *}
 pane=${created##* }
 
