@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+// wt-roles — project role files (.wt-pack/roles/<name>.md in the repo's MAIN checkout). WP-204.
+//   wt-roles list  [--cwd D]
+//   wt-roles new <name> [--base <role>] [--from-default] [--cwd D]   (an override needs no --base; a persona does)
+//   wt-roles check [--cwd D]                                         exit 1 on an error
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir } from '../../wt-shared/scripts/roles.mjs'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const [cmd, ...rest] = process.argv.slice(2)
+const o = { _: [] }
+for (let i = 0; i < rest.length; i++) {
+  if (rest[i] === '--cwd' || rest[i] === '--base') o[rest[i].slice(2)] = rest[++i]
+  else if (rest[i] === '--from-default') o.fromDefault = true
+  else o._.push(rest[i])
+}
+const die = (m, code = 1) => { console.error(`wt-roles: ${m}`); process.exit(code) }
+const checkout = mainCheckout(o.cwd || process.cwd())
+if (!['list', 'new', 'check'].includes(cmd)) die('usage: wt-roles list | new <name> [--base <role>] [--from-default] | check  [--cwd D]', 2)
+if (!checkout) die('not in a git repo', 2)
+
+if (cmd === 'list') {
+  const found = list(checkout)
+  if (!found.length) console.log(`no role files in ${rolesDir(checkout)} (agents run with the pack's defaults)`)
+  const bad = new Set(check(checkout, { catalog: catalog() }).filter((f) => f.level === 'error').map((f) => f.name))
+  for (const r of found) {
+    const kind = r.override ? 'override' : 'persona'
+    const status = bad.has(r.name) ? 'ERROR' : r.bytes > CAP ? `over cap (${r.bytes} B)` : 'ok'
+    console.log(`${r.name.padEnd(24)} ${kind.padEnd(9)} base=${String(r.base ?? '?').padEnd(12)} ${String(r.bytes).padStart(5)} B  ${status}`)
+  }
+} else if (cmd === 'check') {
+  const f = check(checkout, { catalog: catalog() })
+  if (!f.length) console.log('ok')
+  for (const x of f) console.log(`${x.level.padEnd(5)} ${x.name}: ${x.msg}`)
+  process.exit(f.some((x) => x.level === 'error') ? 1 : 0)
+} else {
+  const name = o._[0]
+  if (!NAME.test(name ?? '')) die(`name must match ${NAME}`, 2)
+  const override = BASES.includes(name)
+  const base = override ? name : o.base
+  if (!BASES.includes(base)) die(`a persona needs --base <${BASES.join('|')}>`, 2)
+  const file = join(rolesDir(checkout), `${name}.md`)
+  if (existsSync(file)) die(`${file} already exists`)
+  const read = (...p) => readFileSync(join(here, '..', ...p), 'utf8')
+  let text
+  if (o.fromDefault) text = (override ? '' : `---\nbase: ${base}\n---\n`) + read('defaults', `${base}.md`)
+  else text = read('template.md').replaceAll('{{name}}', name).replaceAll('{{base}}', base).replace(override ? /^---[\s\S]*?---\n/ : /(?!)/, '')
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, text)
+  console.log(`${file}\n${override ? `override for every ${base}` : `persona of ${base}`}; edit it, \`wt-roles check\`, then commit it (agents read the main checkout)`)
+}
