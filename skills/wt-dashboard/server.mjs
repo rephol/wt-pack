@@ -3112,6 +3112,8 @@ const dispatcher = new Dispatch({
     triageOn: (project) => jevOn('TICKET_TRIAGE', project),
     pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
+    // WP-204: the repo's persona files (dynamic import: wt-shared may be absent).
+    personasOf: async (repo) => { const r = await import('../wt-shared/scripts/roles.mjs'); const co = r.mainCheckout(repo); return co ? r.personas(co) : [] },
     // The project's room is the one named after it (WP-74); archived rooms don't count.
     // WP-75: where the dispatched agent reports (dispatch.mjs resolveReport).
     reportOf: async (project) => { await rooms.list(); return resolveReport(project, await tickets.settings(project), (s) => rooms.room(s), await agents().catch(() => [])) },

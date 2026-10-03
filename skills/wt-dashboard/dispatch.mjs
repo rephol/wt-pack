@@ -10,6 +10,11 @@ const HANDOFF = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import
 
 // Size L or the needs-plan label (set by hand or by Jev triage) → planner; anything else → worker.
 export const roleFor = (t) => (t.size === 'L' || t.labels?.includes('needs-plan') ? 'planner' : 'worker')
+// WP-204: the first persona (filename order) whose base is the ticket's role and whose labels meet the ticket's.
+export const personaFor = (t, personas, role) => {
+  const have = new Set((t.labels ?? []).map((l) => String(l).toLowerCase()))
+  return (personas ?? []).find((p) => p.base === role && (p.labels ?? []).some((l) => have.has(String(l).toLowerCase()))) ?? null
+}
 const DAY = 86_400_000
 const FETCH_MS = 5 * 60_000
 const prio = (t) => t.priority || 5 // 1 urgent … 4 low; 0 (none) last
@@ -172,8 +177,9 @@ export class Dispatch {
     const buddy = role === 'worker' && !next.pair
       ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair)
       : null
+    const persona = personaFor(next, await this.deps.personasOf?.(repo).catch(() => []), role)
     try {
-      const args = ['--role', role, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
+      const args = ['--role', role, ...(persona ? ['--persona', persona.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
       const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
       const { name, pane } = parseHandoff(out)
       this.log(`dispatch ${next.id} → ${name} ${pane}`)

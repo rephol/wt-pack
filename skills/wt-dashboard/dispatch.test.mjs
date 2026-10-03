@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { Dispatch, mergeIds, dispatchPrompt, resolveReport } from './dispatch.mjs'
+import { Dispatch, mergeIds, dispatchPrompt, resolveReport, personaFor } from './dispatch.mjs'
 
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
@@ -527,4 +527,25 @@ test('WP-147 reconcile: no free replacement → Inbox notify, card left where it
   assert.equal(T.column, 'building')
   assert.equal(T.pair.worker, null)
   assert.ok(notified.some((n) => n.kind === 'pair-gone'))
+})
+
+// WP-204
+test('personaFor: first persona in order whose base matches the role and a label matches (case-insensitive)', () => {
+  const ps = [{ name: 'a-planner', base: 'planner', labels: ['ui'] }, { name: 'b-worker', base: 'worker', labels: ['backend'] }, { name: 'c-worker', base: 'worker', labels: ['UI', 'css'] }]
+  assert.equal(personaFor({ labels: ['ui'] }, ps, 'worker').name, 'c-worker')
+  assert.equal(personaFor({ labels: ['ui'] }, ps, 'planner').name, 'a-planner')
+  assert.equal(personaFor({ labels: ['docs'] }, ps, 'worker'), null)
+  assert.equal(personaFor({}, ps, 'worker'), null)
+  assert.equal(personaFor({ labels: ['ui'] }, undefined, 'worker'), null)
+})
+
+test('dispatch passes --persona for a matching label, and nothing for a plain ticket', async () => {
+  const { tickets, d, calls } = await setup({ extra: { personasOf: async () => [{ name: 'frontend-worker', base: 'worker', labels: ['ui'] }] } })
+  await ready(tickets, 'ui thing', { labels: ['ui'] })
+  await d.tick()
+  assert.deepEqual(calls[0].args.slice(0, 4), ['--role', 'worker', '--persona', 'frontend-worker'])
+  const s2 = await setup({ extra: { personasOf: async () => [{ name: 'frontend-worker', base: 'worker', labels: ['ui'] }] } })
+  await ready(s2.tickets, 'plain')
+  await s2.d.tick()
+  assert.ok(!s2.calls[0].args.includes('--persona'))
 })
