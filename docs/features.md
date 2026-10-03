@@ -613,6 +613,9 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - **Dispatch** hands a Ready ticket to the first persona (filename order) whose `labels` meet the ticket's and
   whose `base` is the ticket's role; `wt-handoff --persona <name>` does the same by hand. Matching is strict: a
   plain worker never takes a persona ticket and a persona agent never takes a plain one. No match: unchanged.
+  Persona agents are also skipped by a routine's role-based pick and as a ticket's reviewer buddy, and the
+  `WT_WORKERS_MAX` cap counts per kind (a plain handoff counts plain workers, `--persona P` counts persona P). Spawning
+  a `*-worker`-style name with no valid role file warns that it becomes a plain role.
 - Settings › Projects › **Roles** lists the files with their check findings, edits them (writes the main checkout,
   never commits; shows `git status` for the folder) and creates new ones.
 - The `wt-roles` skill is the guide and CLI: `wt-roles list | new <name> [--base <role>] [--from-default] | check`.
