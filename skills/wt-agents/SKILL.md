@@ -24,6 +24,8 @@ scripts/agents.sh list [role] [--json]    # name, pane, status, cwd, dnd (+until
 scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
 scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
 scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
+scripts/agents.sh spawn <persona> [cwd]   # WP-204: a name with .wt-pack/roles/<name>.md spawns in its BASE role's pool,
+                                          # role=<base> persona=<name>, the file's model/effort/mcp as defaults
 scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s workspace, main checkout by default;
                                           # an explicit cwd in another repo names the agent and pool after THAT repo (WP-199)
 scripts/agents.sh dnd <name|pane>              # print current dnd state (on/off, until-when if it expires)

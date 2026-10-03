@@ -368,7 +368,7 @@ respawn)
     row=$(herdr agent list | jq -c --arg t "$1" '[.result.agents[] | select(.name == $t or .pane_id == $t)][0] // empty')
     [ -n "$row" ] || { echo "no such agent: $1" >&2; return 1; }
     name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
-    r=$(printf '%s' "$row" | jq -r '.tokens.persona // .tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
+    r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
     sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')
     m=$(printf '%s' "$row" | jq -r '.tokens.model // empty'); e=$(printf '%s' "$row" | jq -r '.tokens.effort // empty')
     [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role token and a cwd to respawn" >&2; return 1; }
@@ -381,6 +381,10 @@ respawn)
     if [ -z "$(find "$HOME/.claude/projects" -name "$sess.jsonl" 2>/dev/null | head -1)" ]; then
       echo "$name: no transcript for session $sess; starting fresh" >&2; sess=
     fi
+    # WP-204: a persona agent respawns as its persona while that role file still resolves; otherwise as its base role
+    # (spawn would take the bare persona name for a brand-new role and pool).
+    pn=$(printf '%s' "$row" | jq -r '.tokens.persona // empty')
+    if [ -n "$pn" ] && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$pn" --cwd "$dir" >/dev/null 2>&1; then r=$pn; fi
     "$self" rm "$old" --force >/dev/null || return 1
     out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
     new=${out#* }
