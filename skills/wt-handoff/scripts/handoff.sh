@@ -477,7 +477,11 @@ if [ "$role" = worker ]; then
   cap=${WT_WORKERS_MAX:-$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get WT_WORKERS_MAX --cwd "${main_checkout:-$cwd}" 2>/dev/null)}
   case "$cap" in ''|*[!0-9]*) cap= ;; esac
   if [ -n "$cap" ]; then
-    n=$(herdr agent list | jq --arg ws "$(worker_ws)" '[.result.agents[] | select(.workspace_id == $ws)] | length')
+    # WP-205: the cap counts the agents this handoff could otherwise have reused — the same persona token (none for
+    # a plain handoff) — so idle persona agents never fill the cap against a plain ticket, nor the reverse.
+    pt=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens.persona // "")}] | from_entries')
+    n=$(herdr agent list | jq --arg ws "$(worker_ws)" --arg persona "$persona" --argjson pt "$pt" \
+      '[.result.agents[] | select(.workspace_id == $ws) | select(($pt[.pane_id] // "") == $persona)] | length')
     if [ "$n" -ge "$cap" ]; then
       full="pool full: $n/$cap workers in $(basename "${main_checkout:-$cwd}")"
       [ "$dry" -eq 1 ] && dry "$full"

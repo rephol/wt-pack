@@ -243,3 +243,16 @@ test('WP-204: --persona alone resolves the base from its role file; a conflictin
   assert.match(run(['--persona', 'qa-reviewer', '--no-goal', '--dry-run', repo], 'check it'), /would spawn a qa-reviewer reviewer in/)
   assert.throws(() => run(['--persona', 'qa-reviewer', '--role', 'worker', '--dry-run', repo], 'x'), (e) => e.status === 2)
 })
+
+test('WP-205: the worker cap counts only agents of the same persona kind (none for a plain handoff)', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-frontend-worker-01', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p2', tokens: { persona: 'frontend-worker' } }] } }))
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
+  const go = (extra) => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', ...extra, '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env })
+  assert.match(go([]), /would spawn a worker/) // an idle persona agent does not fill a plain ticket's cap
+  assert.match(go(['--persona', 'frontend-worker']), /would reuse worker demo-frontend-worker-01/)
+  assert.match(go(['--persona', 'other-worker']), /would spawn/) // a different persona counts its own kind only (0 here), so it is not full
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
