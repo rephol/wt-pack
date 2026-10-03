@@ -169,3 +169,18 @@ test('WP-199: a cwd (before or after --model/--effort) wins — the pool, name a
     if (args.includes('--model')) assert.ok(s.calls.some((l) => /^herdr agent start .*--model claude-opus-5-5 --effort low/.test(l)))
   }
 })
+
+test('WP-204: a persona spawns into its base pool with role=<base> persona=<name>, its mcp merged and floored model', () => {
+  mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'frontend-worker.md'), '---\nbase: worker\nmodel: opus\neffort: low\nmcp: [figma]\n---\nUI.')
+  setAccount(null)
+  const s = spawn(['spawn', 'frontend-worker', repo])
+  assert.match(s.out, /^demo-frontend-worker-01 w1:p9/)
+  assert.ok(s.calls.some((l) => /^herdr workspace list/.test(l)))
+  const meta = s.calls.find((l) => l.startsWith('herdr pane report-metadata') && l.includes('role='))
+  assert.match(meta, /--token role=worker .*--token persona=frontend-worker/)
+  assert.ok(s.calls.some((l) => /^herdr agent start demo-frontend-worker-01 .*--model claude-opus.* --effort low/.test(l) || /^herdr agent start demo-frontend-worker-01 .*--model opus/.test(l)))
+  assert.ok(s.calls.some((l) => /^herdr agent start .*--mcp-config /.test(l)))
+  // an unknown name with no file is still just a role name
+  assert.match(spawn(['spawn', 'nofile', repo]).out, /^demo-nofile-01 /)
+})

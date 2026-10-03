@@ -218,3 +218,28 @@ test('WP-132: --cancel resolves a name to its pane and reports what it did', () 
   assert.throws(() => runCancel(['--cancel', 'no-such-agent']), (e) => e.status === 1)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
+
+test('WP-204: --persona lists/reuses only agents tagged with that persona; a plain handoff skips them', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo },
+    { name: 'demo-frontend-worker-01', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p2', tokens: { persona: 'frontend-worker' } }] } }))
+  const plain = run(['--list', repo], '')
+  assert.ok(plain.includes('wW:p1') && !plain.includes('wW:p2'))
+  const pers = run(['--persona', 'frontend-worker', '--list', repo], '')
+  assert.ok(pers.includes('wW:p2') && !pers.includes('wW:p1'))
+  assert.match(run(['--persona', 'frontend-worker', '--role', 'worker', '--no-goal', '--dry-run', repo], 'do ui'), /would reuse worker demo-frontend-worker-01/)
+  // no free persona agent: it spawns the persona, not a plain worker
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  assert.match(run(['--persona', 'frontend-worker', '--role', 'worker', '--no-goal', '--dry-run', repo], 'do ui'), /would spawn a frontend-worker worker in/)
+  // base from the role file when --role is absent; unresolvable persona → exit 2
+  assert.throws(() => run(['--persona', 'ghost', '--dry-run', repo], 'x'), (e) => e.status === 2)
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-204: --persona alone resolves the base from its role file; a conflicting --role is exit 2', () => {
+  mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'qa-reviewer.md'), '---\nbase: reviewer\n---\nQA.')
+  assert.match(run(['--persona', 'qa-reviewer', '--no-goal', '--dry-run', repo], 'check it'), /would spawn a qa-reviewer reviewer in/)
+  assert.throws(() => run(['--persona', 'qa-reviewer', '--role', 'worker', '--dry-run', repo], 'x'), (e) => e.status === 2)
+})

@@ -65,6 +65,8 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop a /goal-driven agent fo
   and `route: planner (p=…)` is printed after the target lines. A prompt starting `Use wt-work` (wt-plan's own
   handoff) is never re-routed; Jev failing means a worker, as before. `--role worker|planner` forces the role —
   a caller that must get a worker (e.g. an orchestrator handing a clear task) passes `--role worker`.
+  `--persona <name>` (WP-204) restricts reuse to agents tagged `persona=<name>` (else it spawns that persona);
+  without it, persona agents are never picked.
 - `--dry-run` prints what would happen (reuse which worker, or spawn with which `--mcp`) and Jev's
   probabilities, and sends, tags and spawns nothing.
 - `--task` labels the target: herdr pane token `task` (source `wt-dashboard`), shown in the dashboard's agent

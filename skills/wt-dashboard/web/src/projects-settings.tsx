@@ -16,6 +16,7 @@ import { api } from './rooms'
 import { openSettings } from './settings'
 import { SettingsCard, SettingsRow, CONTROL_WIDTH } from './settingsRows'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
+import { RolesCard } from './projectRoles'
 
 type Source = 'env' | 'project' | 'global' | 'default'
 type Item = { key: string; label: string; scope: 'project' | 'overridable'; value: string | null; source: Source; project: string | null; inherited: { value: string | null; source: Source } }
@@ -50,6 +51,7 @@ export function ProjectsSection() {
       <Text type="supporting" size="sm">Order: server env var › this project › global (Settings) › default. Reset returns a key to what it inherits.</Text>
       <ProjectKeys project={current} />
       <BoardAutomation project={current} />
+      <RolesCard project={current} />
     </VStack>
   )
 }

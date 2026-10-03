@@ -159,6 +159,7 @@ Each directory under `skills/` is one skill, linked as `~/.claude/skills/<name>`
 | `wt-ticket` | The local kanban board CLI |
 | `wt-room` | The rooms CLI |
 | `wt-memory` | Durable preferences for every agent, per role and per project |
+| `wt-roles` | Per-repo role instructions and named personas (`.wt-pack/roles/`): a guide and a CLI to create and check them |
 | `wt-dashboard` | The control room: a Node server, the web UI and the Mac app |
 | `wt-setup` | Runs `./setup` |
 | `wt-shared` | Not a skill: scripts the other skills call by path |

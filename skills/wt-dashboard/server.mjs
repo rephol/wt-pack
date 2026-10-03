@@ -12,6 +12,7 @@ import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
+import { rolesState, writeRole } from './project-roles.mjs'
 import { Asks } from './asks.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
@@ -2690,11 +2691,22 @@ async function configApi(req, res, parts) {
   send(res, 200, state())
 }
 
+// WP-204 role files: GET /api/projects/:p/roles; PUT /api/projects/:p/roles/:name {text}. Writes the main checkout's
+// .wt-pack/roles/<name>.md (project-roles.mjs confines the name) and never commits.
+async function projectRolesApi(req, res, project, name) {
+  const root = (await projectRoots()).get(project)
+  if (!root) return send(res, 404, { error: `no checkout for ${project}` })
+  if (req.method === 'PUT' && name) writeRole(root, name, JSON.parse((await body(req)) || '{}').text)
+  else if (req.method !== 'GET' || name) return send(res, 404, { error: 'not found' })
+  send(res, 200, await rolesState(root, git))
+}
+
 // WP-107 project settings: GET /api/projects/:p/settings; PUT|DELETE /api/projects/:p/settings/:key {value}.
 // Saving githubAccount also points git's credential helper at that account in the project's checkout (repo-local,
 // every worktree shares it), so `git push` there matches the agents' GH_TOKEN.
 async function projectSettingsApi(req, res, parts) {
   const [, , project, sub, key] = parts
+  if (sub === 'roles') return projectRolesApi(req, res, project, key)
   if (sub !== 'settings') return send(res, 404, { error: 'not found' })
   const state = () => ({ project, items: psettings.list(project) })
   if (req.method === 'GET' && !key) return send(res, 200, state())
@@ -3112,6 +3124,8 @@ const dispatcher = new Dispatch({
     triageOn: (project) => jevOn('TICKET_TRIAGE', project),
     pending: (busy) => routines.pendingSpawns(busy),
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
+    // WP-204: the repo's persona files (dynamic import: wt-shared may be absent).
+    personasOf: async (repo) => { const r = await import('../wt-shared/scripts/roles.mjs'); const co = r.mainCheckout(repo, 3000); return co ? r.personas(co) : [] },
     // The project's room is the one named after it (WP-74); archived rooms don't count.
     // WP-75: where the dispatched agent reports (dispatch.mjs resolveReport).
     reportOf: async (project) => { await rooms.list(); return resolveReport(project, await tickets.settings(project), (s) => rooms.room(s), await agents().catch(() => [])) },

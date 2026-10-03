@@ -157,3 +157,25 @@ test('hook (WP-105): a room or wt-pack prompt gets a per-turn reminder of its ch
   // Without the wt-memory CLI the reminder still arrives.
   assert.match(ctx('<room-message id=abc room=ops from="x" kind=user>hi</room-message>', { ...env, WT_MEMORY_BIN: '/nope/missing', HOME: mkdtempSync(join(tmpdir(), 'nohome-')) }), /answered in #ops/)
 })
+
+// WP-204: project-role files from the repo's main checkout.
+test('project-role files: override, persona via token, cap note, and no dir = unchanged output', () => {
+  const repo = join(home, 'rolerepo')
+  mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
+  execFileSync('git', ['init', '-q', repo])
+  const before = run(['context', '--role', 'worker', '--cwd', repo])
+  assert.doesNotMatch(before, /Project role/)
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'worker.md'), 'Run lint first.')
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'frontend-worker.md'), '---\nbase: worker\n---\nUI only.')
+  const out = run(['context', '--role', 'worker', '--cwd', repo])
+  assert.ok(out.startsWith(before) && out.endsWith('## Project role (worker, .wt-pack/roles/worker.md)\n\nRun lint first.'))
+  const withPersona = run(['context', '--role', 'worker', '--persona', 'frontend-worker', '--cwd', repo])
+  assert.match(withPersona, /Run lint first\.[\s\S]*## Project role \(frontend-worker, \.wt-pack\/roles\/frontend-worker\.md\)\n\nUI only\./)
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'worker.md'), 'line\n'.repeat(1500)) // 7.5 KB
+  assert.match(run(['context', '--role', 'worker', '--cwd', repo]), /… truncated \(\d+ bytes over the 6 KB cap; see the file\)$/)
+})
+test('persona token from the pane is picked up', () => {
+  const repo = join(home, 'rolerepo')
+  writeFileSync(join(fakeBin, 'herdr'), `#!/bin/sh\necho '{"result":{"pane":{"cwd":"${repo}","tokens":{"role":"worker","project":"x","persona":"frontend-worker"}}}}'\n`)
+  assert.match(run(['context'], { HERDR_PANE_ID: 'w1:p1', PATH: `${fakeBin}:${process.env.PATH}` }), /Project role \(frontend-worker/)
+})

@@ -591,7 +591,7 @@ export default function App() {
 // ---------- agent summary ----------
 // What the agent is on (ticket, state, who handed it over), where the work lives, what it did last; the
 // raw pane tokens fold away under Details. Only what the server already knows — rows without data vanish.
-const TOKEN_LABEL: Record<string, string> = { created: 'Created', project: 'Project', role: 'Role', spawned_by: 'Spawned by', branch: 'Branch', handoff_at: 'Handed off' }
+const TOKEN_LABEL: Record<string, string> = { created: 'Created', project: 'Project', role: 'Role', persona: 'Persona', spawned_by: 'Spawned by', branch: 'Branch', handoff_at: 'Handed off' }
 // 'Sonnet 5.5 · medium' — the friendly name, then the effort when known
 const modelLabel = (m?: Agent['model']) => (m?.name ? (m.effort ? `${m.name} · ${m.effort}${m.effortSource === 'default' ? ' (default)' : ''}` : m.name) : m?.effort ?? '')
 const SHOWN = new Set(['task', 'task_state', 'ticket', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane'])
@@ -1436,6 +1436,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
               <HStack gap={1} align="center" style={{ minWidth: 0 }}>
                 <Text weight="semibold" maxLines={1} style={{ minWidth: 0, flex: 1 }}>{agent.name}</Text>
                 {agent.background > 0 && <Badge label={`${agent.background} background`} style={{ flexShrink: 0 }} />}
+                {agent.tags?.persona && <Badge variant="neutral" label={agent.tags.persona} style={{ flexShrink: 0 }} />}
                 {agent.tags?.pair && <Badge variant="neutral" label={`paired · ${agent.tags.pair}`} style={{ flexShrink: 0 }} />}
               </HStack>
               {agent.tags?.task && <Text size="sm" weight="medium" maxLines={1}>{taskLabel(agent.tags)}</Text>}

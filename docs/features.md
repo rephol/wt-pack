@@ -212,7 +212,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   instead of a flat `1`, cleared by the 4s server tick once it's past.
 - `wt-agents list` (plain and `--json`) shows DND (with its expiry, when set) and `pair` per agent — `--json`
   adds structured `dnd:{on,until}` and `pair` fields alongside the existing raw pane `tokens` map.
-- CLI: `wt-agents spawn <role>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
+- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
 - Skills: wt-agents, wt-handoff.
 
 ## Rooms
@@ -597,6 +597,25 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - A **global** note is never written directly: it waits as a proposal for Accept in the Inbox or
   `wt-memory accept`.
 - Dashboard: Settings › Memory.
+
+## Project roles and personas
+
+- A repo can carry its own role instructions in `.wt-pack/roles/<name>.md` (read from the repo's **main checkout**,
+  so every agent in a repo agrees; commit them like code). They are injected after the wt-memory global, role and
+  project notes as `## Project role (<name>, …)`, capped at 6 KB per file (cut at a line, with a note). With no
+  files present nothing changes.
+- A file named after a base role (`worker.md`, `reviewer.md`, …) is an **override** for every agent of that role. Any
+  other name is a **persona** (`frontend-worker.md`): frontmatter `base` (required), `model`, `effort`, `mcp`
+  (catalog names), `skills` (hints) and `labels` (Dispatch). A persona agent gets the base override first, then its own file.
+- `wt-agents spawn frontend-worker` starts a persona in its **base role's pool** with `role=<base>` and a `persona`
+  token (so retirement, DND, pairing and Dispatch still see it), the file's model/effort and merged `--mcp`
+  (explicit flags win). The agents table shows the persona as a chip beside the name.
+- **Dispatch** hands a Ready ticket to the first persona (filename order) whose `labels` meet the ticket's and
+  whose `base` is the ticket's role; `wt-handoff --persona <name>` does the same by hand. Matching is strict: a
+  plain worker never takes a persona ticket and a persona agent never takes a plain one. No match: unchanged.
+- Settings › Projects › **Roles** lists the files with their check findings, edits them (writes the main checkout,
+  never commits; shows `git status` for the folder) and creates new ones.
+- The `wt-roles` skill is the guide and CLI: `wt-roles list | new <name> [--base <role>] [--from-default] | check`.
 
 ## wt-ticket CLI
 
