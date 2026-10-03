@@ -271,3 +271,21 @@ test('WP-205: a persona at its own cap is full (exit 3) while a plain handoff is
     writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
   }
 })
+
+test('WP-210: --reply queues through the dashboard when the target mod is live, pastes otherwise', () => {
+  const curlBin = join(tmp, 'curlbin210')
+  mkdirSync(curlBin, { recursive: true })
+  const stub = (body) => { writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${body}'\n`); chmodSync(join(curlBin, 'curl'), 0o755) }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
+  const reply = () => { const before = readFileSync(log, 'utf8').length; const out = execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', 'hi'], { encoding: 'utf8', env }); return [out, readFileSync(log, 'utf8').slice(before)] }
+  stub('{"queued":true,"id":"x"}')
+  let [out, calls] = reply()
+  assert.match(out, /replied wW:p7 \(queued\)/)
+  assert.doesNotMatch(calls, /agent prompt wW:p7/)
+  stub('{"queued":false}')
+  ;[out, calls] = reply()
+  assert.match(calls, /agent prompt wW:p7 .*<wt-message/)
+  writeFileSync(join(curlBin, 'curl'), '#!/bin/sh\nexit 7\n') // dashboard down
+  ;[out, calls] = reply()
+  assert.match(calls, /agent prompt wW:p7 /)
+})

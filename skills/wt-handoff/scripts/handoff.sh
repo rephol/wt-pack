@@ -129,6 +129,13 @@ if [ -n "$reply" ]; then
   nm=$( [ -n "$me" ] && name_of "$me" || true)
   msg=$(printf '%s' "$text" | node "$WTMSG" --kind reply --from "${from_arg:-${nm:-${me:-wt-handoff}}}") || { echo "wt-message wrap failed" >&2; exit 1; }
   [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
+  # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
+  # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
+  if [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
+    q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" \
+      -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
+    [ "$q" = true ] && { echo "replied $reply (queued)"; exit 0; }
+  fi
   herdr agent prompt "$reply" "$msg" >/dev/null
   echo "replied $reply"
   exit 0

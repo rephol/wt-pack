@@ -111,6 +111,8 @@ plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.
 # .claude-plugin, so Claude Code lists them as <name>@skills-dir. plugin_on <id>: that plugin is listed and enabled.
 plugin_on() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1]&&p.enabled)?0:1)}catch{process.exit(1)}})' "$1"; }
 plugin_listed() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1])?0:1)}catch{process.exit(1)}})' "$1"; }
+# WP-210: wt-deliver-mod@wt-pack (skills/wt-room/mod) — wt-message/room delivery as a plugin-origin prompt.
+mod_enabled() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1]+"@wt-pack"&&p.enabled)?0:1)}catch{process.exit(1)}})' "${1:-wt-ask-mod}"; }
 # Install hint for a missing package, for this OS.
 # sudo only when needed: root (a container) often has no sudo at all.
 SUDO=$([ "$(id -u)" -eq 0 ] && echo "" || echo "sudo ")
@@ -191,6 +193,11 @@ doctor() {
       if plugin_on "$m@skills-dir"; then ok "mod $m@skills-dir loaded"
       else bad "mod $m@skills-dir not loaded (claude plugin list) — ./setup install links it; then /reload-plugins"; fi
     done
+    if mod_enabled wt-deliver-mod; then
+      miv=$(plugin_ver wt-deliver-mod@wt-pack)
+      if [ -n "$(checkout_commit "${mp:-$REPO}")" ] && ! plugin_current "$miv" "${mp:-$REPO}" skills/wt-room/mod; then bad "plugin wt-deliver-mod@wt-pack $(printf '%.12s' "$miv") installed, checkout is newer — ./setup install (then restart agents)"
+      else ok "plugin wt-deliver-mod@wt-pack $miv enabled (wt-messages submitted as prompts; agents spawned after install)"; fi
+    else bad "plugin wt-deliver-mod@wt-pack not enabled — ./setup install"; fi
   fi
   # The pre-WP-212 marketplace copy of the AskUserQuestion mod: same name, so it shadows the skills-dir one.
   plugin_listed wt-ask-mod@wt-pack && bad "plugin wt-ask-mod@wt-pack is installed and clashes with the skill-linked wt-ask-mod — claude plugin uninstall wt-ask-mod@wt-pack (./setup install does)"
@@ -400,6 +407,12 @@ plugin() {
   else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
   # WP-212: the mods load from the skill links (see plugin_on); the marketplace copy WP-206 installed would shadow it.
   if plugin_listed wt-ask-mod@wt-pack; then claude plugin uninstall wt-ask-mod@wt-pack >/dev/null 2>&1 && ok "removed the old wt-ask-mod@wt-pack (the skill link loads the mod)" || bad "claude plugin uninstall wt-ask-mod@wt-pack failed"; fi
+  # WP-210: the delivery mod, its own plugin so it can be disabled alone (it injects prompts).
+  if mod_enabled wt-deliver-mod; then
+    miv=$(plugin_ver wt-deliver-mod@wt-pack)
+    if plugin_current "$miv" "${mp:-$REPO}" skills/wt-room/mod; then ok "already: wt-deliver-mod@wt-pack $miv installed"
+    else claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-deliver-mod@wt-pack >/dev/null 2>&1 && ok "updated wt-deliver-mod@wt-pack (restart agents to load it)" || bad "claude plugin update wt-deliver-mod@wt-pack failed"; fi
+  else claude plugin install wt-deliver-mod@wt-pack >/dev/null 2>&1 && ok "installed wt-deliver-mod@wt-pack (agents spawned from now on use it)" || bad "claude plugin install wt-deliver-mod@wt-pack failed"; fi
 }
 
 web() {
@@ -481,8 +494,8 @@ uninstall() {
   if [ "$(wpservice_root)" = "$WP" ]; then "$WP/scripts/watch-prs.sh" poller-uninstall >/dev/null && ok "watchprs poller removed"
   else opt "watchprs poller: not installed from this checkout, left alone"; fi
   if has claude && [ "$(market_path)" = "$REPO" ]; then
-    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
-    ok "plugin wt-memory@wt-pack and marketplace wt-pack removed"
+    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-deliver-mod@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
+    ok "plugins wt-memory@wt-pack, wt-deliver-mod@wt-pack and marketplace wt-pack removed"
   else opt "plugin: not installed from this checkout, left alone"; fi
   n=0
   for l in "$SKILLS"/*; do

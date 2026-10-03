@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# wt-deliver — the wt-deliver-mod's calls to wt-dashboard's delivery queue (WP-210). Identity: $HERDR_PANE_ID.
+#   wt-deliver hello           liveness: the dashboard queues for this pane while hellos are fresh
+#   wt-deliver next            print the oldest queued delivery as JSON ({} when none)
+#   wt-deliver ack <id> [delivered|failed]
+# Exit 0 ok, 1 unreachable or API error.
+set -u
+API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
+[ -n "${HERDR_PANE_ID:-}" ] || exit 1
+call() {
+  local out code
+  out=$(curl -sS --max-time 4 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: $HERDR_PANE_ID" -H 'content-type: application/json' ${3:+--data "$3"} "$API$2" 2>/dev/null) || exit 1
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  [ "$code" -lt 400 ] || exit 1
+  printf '%s\n' "$out"
+}
+case "${1:-}" in
+  hello) call POST /api/deliveries/hello '{}' >/dev/null ;;
+  next) call GET /api/deliveries/next ;;
+  ack) [ -n "${2:-}" ] || exit 2; call POST "/api/deliveries/$2/ack" "{\"status\":\"${3:-delivered}\"}" >/dev/null ;;
+  *) echo "usage: wt-deliver hello|next|ack <id> [status]" >&2; exit 2 ;;
+esac

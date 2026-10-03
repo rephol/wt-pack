@@ -148,4 +148,9 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   sibling skill's script by `../`. WP-206's AskUserQuestion mod needs `skills/wt-ask/scripts/wt-ask`; the plan put the
   plugin at `skills/wt-ask/mod`, where the cache copy would have lost the script. The plugin root is `skills/wt-ask`
   itself (`.claude-plugin/` + `hooks/` beside `scripts/`), reached as `$.plugin.root/scripts/wt-ask`. Mods have no Node
-  and no env access: gate through the CLI (`wt-ask --ping`), never by reading `HERDR_PANE_ID` in the module.
+  and no env access: gate through the CLI (`wt-ask --ping`), never by reading `HERDR_PANE_ID` in the module. The marketplace copy of that mod
+  (`wt-ask-mod@wt-pack`) also clashed by *name* with the skills-dir plugin Claude Code builds from the same
+  `~/.claude/skills/wt-ask` link (`wt-ask@skills-dir` "not loaded"). A skill dir carrying `.claude-plugin/` is already a
+  plugin on a full install, so mods ship that way (`skills/wt-ask`, `skills/wt-mods`) and `./setup` no longer installs
+  them from the marketplace (WP-212). `hooks.json` `modules` takes ONE entry, and the validator rejects `$.plugin` used
+  other than as `.name`/`.root`.

@@ -136,12 +136,17 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   This gives every `wt-*` skill (namespaced: `/wt-pack:wt-plan`), wt-memory's hooks and its MCP server, with no
   `./setup`. Agents still need herdr. There is no board, rooms or dashboard: `wt-ticket` and `room` exit with
   "needs wt-dashboard … (see README › Install)".
-  - **Instant slash commands** (WP-207, `hooks/commands.ts`, a Claude Code mod module): `/room`, `/ticket`, `/dnd`,
-    `/herd` (`wt-agents list`; `/agents` is built in) and `/watch status` run the existing scripts directly, with no
-    Claude turn, and `immediate` so they also work while the agent is mid-turn. Wrappers only: arguments are split
-    like a shell would and passed as argv, output is shown as the command's row. `/dnd` acts on the current pane.
-    They need a Claude Code build with mods (the hooks file carries a `modules` key, which is the mod format).
-    Its test (`hooks/commands.test.ts`) runs under `claude plugin test .` (that scans every `*.test.ts` in the repo, so read only its own line).
+  - **Instant slash command** (WP-207, WP-212): one namespaced `/wt <sub> …` — `/wt room list|read|post`,
+    `/wt ticket show|move|list|comment`, `/wt dnd [on|off]` (this pane), `/wt herd [role]` (`wt-agents list`; `/agents`
+    is built in), `/wt watch status` — runs the existing script directly, with no Claude turn, and `immediate` so it
+    also works while the agent is mid-turn. `/wt` alone prints the usage. Wrappers only: arguments are split like a
+    shell would and passed as argv, output is shown as the command's row. One command, not `/room` `/ticket` …,
+    so it cannot clash with another plugin's commands or our own `/wt-*` skills (WP-212 replaced the bare WP-207 ones).
+    The code is `skills/wt-mods` (a skill that is also a Claude Code *mod* plugin: `/wt` plus the per-request model
+    routing, see Model routing). A full `./setup` install loads it from the skill link (listed as `wt-mods@skills-dir`;
+    `./setup doctor` checks it, and `/reload-plugins` or a new session picks it up); the plugin-only install loads
+    the same code from the root plugin's `hooks/commands.ts`. They need a Claude Code build with mods. Tests:
+    `claude plugin test skills/wt-mods`.
   - Scripts and the strings sent to agents name sibling skills by resolved path, not `~/.claude/skills`. A path
     guard test (`wt-shared/scripts/paths.test.mjs`) keeps it that way.
   - `./setup doctor` warns when this plugin and `./setup`'s wt-memory plugin are both enabled, or when this plugin
@@ -306,8 +311,8 @@ Chat rooms shared by you and agents.
   session's native question tool in your own chat — it already shows there; `wt-ask` is for everywhere else.
   Clicking a chip or an Inbox **question**/**ask** item opens the same popup in place. `wt-ask --resolve <id>`
   closes a card without an answer.
-  **Native capture (WP-206):** the `wt-ask-mod@wt-pack` plugin (`./setup install` enables it; `./setup doctor`
-  reports it) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip (when the agent has a ticket) and
+  **Native capture (WP-206):** the `wt-ask-mod` mod (the `skills/wt-ask` link, `wt-ask-mod@skills-dir`; `./setup doctor`
+  reports it — `./setup install` also removes the older `wt-ask-mod@wt-pack` copy, which clashed by name) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip (when the agent has a ticket) and
   Inbox card, the terminal shows "asked in wt-dashboard…" instead of the picker, and your answer returns as the tool
   result (no reply message). It falls back to the native picker when the dashboard is unreachable, outside a herdr
   pane, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).
@@ -315,6 +320,16 @@ Chat rooms shared by you and agents.
   keeps the native picker, which the pane-scrape mirror above still serves. `wt-ask --wait <id>`, `--ping` and `--no-deliver` are the mod's building blocks.
   An ask the mod never got to close (the agent was killed mid-wait, or the dashboard blipped during `--resolve`) is
   closed by a server sweep every minute once its pane is gone or it is over 24 h old (WP-209).
+
+**Queued delivery (WP-210):** the `wt-deliver-mod@wt-pack` plugin (its own plugin, so it can be disabled alone;
+`./setup install` enables it, `./setup doctor` reports it) makes a herdr agent pull its `wt-message` replies, room
+mentions and routine prompts from a dashboard queue and submit each as a plugin-origin prompt, one at a time and
+only between turns — no pasted keystrokes. Each delivery is a `deliveries` row in `wt.db`: `queued` → `delivered`
+(the prompt entered the session) or `pasted` (the mod went quiet before it pulled; the dashboard pasted it). The mod
+says hello every 20 s; a pane without a fresh hello (mod off, crashed, session started before install, dashboard
+down) is pasted exactly as before. Slash-command traffic (`/goal …` handoffs, `/wt-… ` routines) always pastes: a
+command must be typed. A delivery waits for the running turn to end (a pasted message used to sit in the TUI's own queue
+instead). A session loads the mod at its next start or `/reload-plugins`.
 
 ## Inbox
 
@@ -546,7 +561,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   effort parameter, so this is session-only. `pick --json` and `floor --role R --json` include
   `effort`/`applyEffort`; logged next to the tier (with Jev's raw pick and confidence) in the judge log and shown
   as an Effort column in Settings › Observability › Model routing.
-- **Per request** (WP-211, `wt-pack@wt-pack` only): the root plugin's `hooks/routing.ts` mod routes the first model
+- **Per request** (WP-211): the `wt-mods` mod's `hooks/routing.ts` (full install: the skill link; plugin-only: the root plugin) routes the first model
   request of every main-loop turn (`pick --skill turn-step --session`, task = the person's submitted prompt, not a
   slash command or notification) and the turn's later requests reuse that pick through `turn.step`. Same gate as
   everywhere: `off` does nothing, `shadow` (the default) asks Jev and logs the decision — so the first 600
@@ -556,7 +571,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   model id or a model the engine switched to itself (a fallback) leaves the request untouched; a `[1m]` variant
   keeps its suffix; subagents are left to their Agent call. Outcomes (WP-159) are thin: an applied pick's turn that
   answered is `ok`, one the model refused is `returned`; an interruption or API error records nothing. A session
-  picks the mod up on `/reload-plugins` or at its next start. Test: `claude plugin test .` (the `hooks/` results).
+  picks the mod up on `/reload-plugins` or at its next start. Test: `claude plugin test skills/wt-mods`.
 - **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
   pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
   hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a
