@@ -137,3 +137,10 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   Fixed by adding the three lenses to both maps (`skills/wt-shared/scripts/wt-judge.mjs:101-103,410-412`).
   A completeness check for "every lens file updated" must also check every *judged shortcut* for the same
   table, not just the table's own direct consumers.
+- A helper that runs inside a hook under a hard timeout (wt-memory's SessionStart `context`, 2 s) must bound its own
+  input and its own subprocess timeouts, and a CLI reusing the same helper must not inherit that tight budget.
+  WP-204: `roles.mjs` stripped HTML comments with `/ *<!--[\s\S]*?-->/g`; a repo file with a 65 KB run of spaces took
+  41 s (the leading ` *` makes it quadratic) and would have hung every agent's session start, because the cap was
+  applied *after* the strip. Fixed by slicing to 4×cap before any regex (`load()`), and dropping the leading ` *`.
+  The same helper's 500 ms `git rev-parse` was right for the hook but made `wt-roles` fail "not in a git repo" under
+  load, so `mainCheckout(cwd, timeout)` takes the budget from its caller (`skills/wt-shared/scripts/roles.mjs`).
