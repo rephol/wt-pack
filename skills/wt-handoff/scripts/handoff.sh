@@ -479,11 +479,12 @@ if [ "$role" = worker ]; then
   if [ -n "$cap" ]; then
     # WP-205: the cap counts the agents this handoff could otherwise have reused — the same persona token (none for
     # a plain handoff) — so idle persona agents never fill the cap against a plain ticket, nor the reverse.
-    pt=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens.persona // "")}] | from_entries')
+    pt=$(herdr pane list 2>/dev/null | jq -c '[(.result.panes // [])[] | select(.pane_id != null) | {key: .pane_id, value: (.tokens.persona // "")}] | from_entries' 2>/dev/null) || pt=
+    [ -n "$pt" ] || pt='{}'
     n=$(herdr agent list | jq --arg ws "$(worker_ws)" --arg persona "$persona" --argjson pt "$pt" \
-      '[.result.agents[] | select(.workspace_id == $ws) | select(($pt[.pane_id] // "") == $persona)] | length')
+      '[.result.agents[] | select(.workspace_id == $ws) | select(($pt[.pane_id // ""] // "") == $persona)] | length')
     if [ "$n" -ge "$cap" ]; then
-      full="pool full: $n/$cap workers in $(basename "${main_checkout:-$cwd}")"
+      full="pool full: $n/$cap ${persona:-plain} workers in $(basename "${main_checkout:-$cwd}")"
       [ "$dry" -eq 1 ] && dry "$full"
       echo "$full" >&2
       exit 3

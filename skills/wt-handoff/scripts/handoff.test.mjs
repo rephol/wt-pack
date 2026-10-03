@@ -112,11 +112,11 @@ test('WP-143: WT_WORKERS_MAX caps the worker pool; a full pool exits 3 and never
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
   const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
   assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'do a thing', encoding: 'utf8', env }),
-    (e) => { assert.equal(e.status, 3); assert.match(e.stderr, /pool full: 1\/1 workers in demo/); return true })
+    (e) => { assert.equal(e.status, 3); assert.match(e.stderr, /pool full: 1\/1 plain workers in demo/); return true })
   assert.ok(!readFileSync(log, 'utf8').includes('tab create'))
 
   const out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'do a thing', encoding: 'utf8', env })
-  assert.match(out, /dry-run: pool full: 1\/1 workers in demo/)
+  assert.match(out, /dry-run: pool full: 1\/1 plain workers in demo/)
 
   // under the cap: still spawns, never treated as full
   const under = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo],
@@ -255,4 +255,19 @@ test('WP-205: the worker cap counts only agents of the same persona kind (none f
   assert.match(go(['--persona', 'other-worker']), /would spawn/) // a different persona counts its own kind only (0 here), so it is not full
   writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
+test('WP-205: a persona at its own cap is full (exit 3) while a plain handoff is not', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-frontend-worker-01', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p2', tokens: { persona: 'frontend-worker' } }] } }))
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
+  try {
+    assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--persona', 'frontend-worker', '--no-goal', repo], { input: 'x', encoding: 'utf8', env }),
+      (e) => { assert.equal(e.status, 3); assert.match(e.stderr, /pool full: 1\/1 frontend-worker workers/); return true })
+    assert.match(execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env }), /would spawn a worker/)
+  } finally {
+    writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+    writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+  }
 })

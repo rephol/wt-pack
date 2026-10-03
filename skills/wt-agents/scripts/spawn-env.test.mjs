@@ -188,6 +188,7 @@ test('WP-204: a persona spawns into its base pool with role=<base> persona=<name
 test('WP-205: a *-worker name with no valid role file warns that it spawns a plain role', () => {
   const r = spawnSync(join(here, 'agents.sh'), ['spawn', 'ghost-worker', repo], { cwd: repo, encoding: 'utf8',
     env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
+  assert.equal(r.status, 0)
   assert.match(r.stdout, /^demo-ghost-worker-01 /)
   assert.match(r.stderr, /warning: no valid \.wt-pack\/roles\/ghost-worker\.md/)
 })
