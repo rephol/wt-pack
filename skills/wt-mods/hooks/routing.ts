@@ -3,8 +3,9 @@
 // off/shadow `pick` applies nothing (shadow only logs the decision), so the request goes through untouched;
 // only `live` rewrites model/effort. No routing logic here: the script owns the gate, floors and the log.
 import type { Register } from 'claude-code'
+import type { SkillsDir } from './commands'
 
-const ROUTE = 'skills/wt-shared/scripts/model-route.mjs'
+const ROUTE = 'wt-shared/scripts/model-route.mjs'
 
 type Pick = { apply: string | null; applyEffort: string | null; ref: string | null; source: string }
 type Efforts = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -18,8 +19,8 @@ export const parsePick = (stdout: string): Pick | null => {
   } catch { return null }
 }
 
-// One hooks module per plugin (hooks.json `modules` takes a single entry), so commands.ts registers this.
-export const registerRouting: Register = on => {
+// One hooks module per plugin (hooks.json `modules` takes a single entry): the entry file registers this beside the commands.
+export const registerRouting = (on: Parameters<Register>[0], skills: SkillsDir) => {
   let prompt = '' // the last submitted prompt: the task text for the next turn's first request
   let turn: { id: string; pick: Pick | null; from?: string; model?: string } | undefined
   const modelIds = new Map<string, string>()
@@ -34,7 +35,7 @@ export const registerRouting: Register = on => {
 
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) return yield* next(e) // a subagent's tier is its Agent call's; this routes the main loop
-    const script = `${$.plugin.root}/${ROUTE}`
+    const script = `${skills($.plugin.root)}/${ROUTE}`
     if (e.index === 0 && prompt) {
       const text = prompt
       prompt = '' // a turn with no prompt of its own (a background wake-up) is not routed on a stale one
@@ -70,7 +71,7 @@ export const registerRouting: Register = on => {
     if (!e.agentId && t?.id === e.turnId) {
       turn = undefined
       if (t.pick?.apply && t.pick.ref && (e.reason === 'answer' || e.reason === 'refusal')) {
-        await $.process.run(['node', `${$.plugin.root}/${ROUTE}`, 'outcome', t.pick.ref, e.reason === 'answer' ? 'ok' : 'returned', `turn ${e.reason}`], { timeoutMs: 8000 }).catch(() => null)
+        await $.process.run(['node', `${skills($.plugin.root)}/${ROUTE}`, 'outcome', t.pick.ref, e.reason === 'answer' ? 'ok' : 'returned', `turn ${e.reason}`], { timeoutMs: 8000 }).catch(() => null)
       }
     }
     return next(e)
