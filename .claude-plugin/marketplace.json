@@ -3,22 +3,12 @@
   "owner": {
     "name": "wt-pack"
   },
-  "description": "Local plugins shipped with wt-pack.",
+  "description": "Local plugin shipped with wt-pack.",
   "plugins": [
     {
       "name": "wt-pack",
       "source": "./",
-      "description": "Every wt-* skill plus wt-memory's hooks and MCP server. Pick this OR ./setup, not both."
-    },
-    {
-      "name": "wt-memory",
-      "source": "./skills/wt-memory/claude-plugin",
-      "description": "wt-memory preferences injected into Claude Code sessions."
-    },
-    {
-      "name": "wt-deliver-mod",
-      "source": "./skills/wt-room/mod",
-      "description": "Mod: wt-message / room traffic reaches a herdr agent as a plugin-origin prompt pulled from wt-dashboard's queue instead of pasted keystrokes."
+      "description": "Every wt-* skill, wt-memory's hooks and MCP server, and the mods (/wt, model routing, AskUserQuestion capture, wt-message delivery) in one plugin. Plugin-only install; a full ./setup loads the same plugin from the checkout."
     }
   ]
 }

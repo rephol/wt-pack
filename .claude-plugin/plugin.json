@@ -13,5 +13,13 @@
         "${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/mcp/server.mjs"
       ]
     }
+  },
+  "userConfig": {
+    "timeoutMin": {
+      "type": "number",
+      "title": "Answer timeout (minutes)",
+      "description": "How long a captured question waits for an answer in wt-dashboard before the tool call is denied.",
+      "default": 30
+    }
   }
 }
