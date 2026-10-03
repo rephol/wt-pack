@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tool-agnostic agent preferences: plain markdown files any agent runtime can be fed.
 //
-//   wt-memory context [--role R] [--project P] [--cwd D]   # merged markdown: global → role → project
+//   wt-memory context [--role R] [--project P] [--cwd D]   # merged markdown: global → role → project → project-role files (.wt-pack/roles/, WP-204)
 //   wt-memory hash    [same flags]                         # short content hash of that output
 //   wt-memory path    [global | role R | project P]        # the store dir, or one file's path
 //   wt-memory remember "<note>" [--scope role|project|global] [--role R] [--project P] [--strict]
@@ -31,33 +31,41 @@ const body = (s) => s.replace(/ *<!--[\s\S]*?-->/g, '').replace(/\n{3,}/g, '\n\n
 const TRAILER = / *<!-- wtm:([^>]*?) *-->/
 const strip = (s) => s.replace(/ *<!-- wtm:[^>]*?-->/g, '')
 
-function merge({ role, project }) {
+async function merge({ role, project, persona, cwd }) {
   const parts = [['Global preferences', body((read(file('global'))))]]
   if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body((read(file('role', role))))])
   if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body((read(file('project', project))))])
+  // WP-204: project-role files from the repo's main checkout. Dynamic import: only `context` needs wt-shared.
+  if (role || persona) {
+    try {
+      const r = await import('../../wt-shared/scripts/roles.mjs')
+      parts.push(...r.sections(r.mainCheckout(cwd || process.cwd()), role, persona).map(([h, t]) => [h, body(t)]))
+    } catch {}
+  }
   return parts.filter(([, t]) => t).map(([h, t]) => `## ${h}\n\n${t}`).join('\n\n')
 }
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] })
-function infer({ role, project, cwd }) {
+function infer({ role, project, cwd, persona }) {
   if ((!role || !project) && process.env.HERDR_PANE_ID) {
     try {
       const p = JSON.parse(sh('herdr', ['pane', 'get', process.env.HERDR_PANE_ID])).result?.pane ?? {}
       role ||= p.tokens?.role
       project ||= p.tokens?.project
+      persona ||= p.tokens?.persona
       cwd ||= p.cwd
     } catch {}
   }
   if (!project) {
     try { project = basename(dirname(sh('git', ['-C', cwd || process.cwd(), 'rev-parse', '--path-format=absolute', '--git-common-dir']).trim())) } catch {}
   }
-  return { role, project }
+  return { role, project, persona, cwd }
 }
 
 function flags(argv) {
   const o = { _: [] }
   for (let i = 0; i < argv.length; i++) {
-    if (/^--(role|project|cwd|scope)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
+    if (/^--(role|project|cwd|scope|persona)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
     else if (argv[i] === '--json') o.json = true
     else if (argv[i] === '--strict') o.strict = true
     else o._.push(argv[i])
@@ -167,7 +175,7 @@ function accept(id) {
   const [cmd, ...rest] = process.argv.slice(2)
   if (cmd === 'context' || cmd === 'hash') {
     let out = ''
-    try { out = merge(infer(flags(rest))) } catch {}
+    try { out = await merge(infer(flags(rest))) } catch {}
     if (cmd === 'hash') console.log(createHash('sha256').update(out).digest('hex').slice(0, 16))
     else if (out) console.log(out)
   } else if (['remember', 'forget', 'accept', 'reject', 'list'].includes(cmd)) {
