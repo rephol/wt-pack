@@ -140,12 +140,29 @@ export function withAttachments(text, atts, local) {
 export const replySnippet = (text) => { const l = String(text ?? '').trim().split('\n')[0]; return l.length > 80 ? `${l.slice(0, 79)}…` : l }
 // WP-67: each message is wrapped in a tag carrying a per-delivery nonce and the server-set author, so text
 // that imitates the user, the dashboard or a closing tag cannot pass for anything but that author's words.
-export function batchPrompt(slug, msgs, broadcast = false, local = true, nonce = randomBytes(6).toString('hex')) {
+// WP-219: room messages since the agent last saw the room, before this delivery. Newest kept: at most `max`
+// lines and `bytes` chars, oldest dropped; one line each ("author: text", attachments by name).
+export function roomContext(all, since, upto, max = 10, bytes = 2000) {
+  const out = []
+  let size = 0
+  for (let i = upto - 1; i >= Math.max(0, since) && out.length < max; i--) {
+    const m = all[i]
+    const names = m.attachments?.length ? ` [${m.attachments.map((a) => a.name ?? String(a.path ?? '').split('/').pop()).join(', ')}]` : ''
+    const line = `${m.author.name}: ${String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}${names}`
+    if (size + line.length > bytes) break
+    size += line.length + 1
+    out.unshift(line)
+  }
+  return out
+}
+export function batchPrompt(slug, msgs, broadcast = false, local = true, nonce = randomBytes(6).toString('hex'), context = null) {
   const lines = msgs.map((m) => {
     const kind = ['user', 'agent', 'system'].includes(m.author.kind) ? m.author.kind : 'agent'
     const body = withAttachments(`${m.replyTo ? `(replying to ${m.replyTo.name}: "${m.replyTo.text}") ` : ''}${m.text}`, m.attachments, local)
     return `<room-message id=${nonce} room=${slug} from="${attr(m.author.name)}" kind=${kind}${broadcast ? ' broadcast=1' : ''}>${unTag(body)}</room-message>`
   })
+  // Context rides first, in its own room-message tag (a delivery must still start with one, WP-210's mod check).
+  if (context?.lines.length) lines.unshift(`<room-message id=${nonce} room=${slug} from="dashboard" kind=context since=${context.since}>(earlier in #${slug}, context only — not addressed to you)\n${unTag(context.lines.join('\n'))}</room-message>`)
   return lines.join('\n')
 }
 
@@ -417,6 +434,8 @@ export class Rooms {
     if (author.kind === 'agent') mem.add(author.name)
     for (const k of plan.deliver) mem.add(agents.find((a) => a.key === k)?.name)
     room.members = [...mem].filter(Boolean)
+    // WP-219: an agent that posts has seen the room up to and including its post.
+    if (author.kind === 'agent') room.seen = { ...room.seen, [author.name]: (await this.messages(slug)).length + 1 }
     await this.saveIndex()
     await this.add(slug, msg)
     for (const key of plan.deliver) this.enqueue(key, { slug, msg, broadcast: plan.broadcast, command: Boolean(cmd) })
@@ -523,8 +542,16 @@ export class Rooms {
         if (this.room(slug)?.paused) { requeue(its); continue }
         if (!this.room(slug) || this.room(slug).archived) { if (this.room(slug)) for (const m of msgs) this.undeliverable(slug, m, a.name, 'not delivered: room archived'); continue }
         try {
-          await this.promptFn(a, batchPrompt(slug, msgs, broadcast, a.local))
+          // WP-219: what the room said since this agent last saw it, before the first delivered message.
+          const room = this.room(slug)
+          const all = await this.messages(slug)
+          const first = all.indexOf(msgs[0])
+          const since = room.seen?.[a.name] ?? 0
+          const context = first > since ? { since, lines: roomContext(all, since, first) } : null
+          await this.promptFn(a, batchPrompt(slug, msgs, broadcast, a.local, undefined, context))
           for (const m of msgs) await this.markDelivered(slug, m, a)
+          room.seen = { ...room.seen, [a.name]: Math.max(since, all.indexOf(msgs.at(-1)) + 1) }
+          await this.saveIndex()
         } catch (e) {
           this.log(`room delivery to ${a.name} failed: ${e.message}`)
           requeue(its)

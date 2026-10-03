@@ -1614,3 +1614,38 @@ test('WP-203: scanTabs reads every tab off the terminal and leaves it on the tab
   await assert.rejects(scanTabs(fakeTerminal(1).io, async () => {}), (e) => e.status === 409) // one question: nothing to scan
   await assert.rejects(scanTabs(fakeTerminal(3, { review: true }).io, async () => {}), (e) => e.status === 409)
 })
+
+test('WP-219: roomContext keeps the newest lines within the cap, attachments by name', async () => {
+  const R = await import('./rooms.mjs')
+  const all = Array.from({ length: 15 }, (_, i) => ({ author: { name: `a${i}` }, text: `m${i}` }))
+  all[13].attachments = [{ path: '/x/shot.png' }]
+  assert.deepEqual(R.roomContext(all, 0, 14), ['a4: m4', 'a5: m5', 'a6: m6', 'a7: m7', 'a8: m8', 'a9: m9', 'a10: m10', 'a11: m11', 'a12: m12', 'a13: m13 [shot.png]'])
+  assert.deepEqual(R.roomContext(all, 12, 14), ['a12: m12', 'a13: m13 [shot.png]'])
+  assert.deepEqual(R.roomContext([{ author: { name: 'x' }, text: 'y'.repeat(250) }, ...all.slice(0, 1).map(() => ({ author: { name: 'z' }, text: 'w'.repeat(250) }))], 0, 2, 10, 300), ['z: ' + 'w'.repeat(250)])
+  const p = R.batchPrompt('x', [{ author: { kind: 'user', name: 'you' }, text: 'hi' }], false, true, 'n1', { since: 3, lines: ['a: b'] })
+  assert.match(p, /^<room-message id=n1 room=x from="dashboard" kind=context since=3>[^]*\na: b<\/room-message>\n<room-message id=n1 room=x from="you" kind=user>hi/)
+})
+
+test('WP-219: a delivery carries what the room said since the agent last saw it, then advances last-seen', async () => {
+  const R = await import('./rooms.mjs')
+  const { mkdtemp } = await import('node:fs/promises')
+  const dir = await mkdtemp((await import('node:os')).tmpdir() + '/rooms-ctx-')
+  const agents = [{ key: 'A', name: 'ag', status: 'idle', local: true }, { key: 'B', name: 'bo', status: 'idle', local: true }]
+  const sent = []
+  const rooms = new R.Rooms({ dir, agents: async () => agents, prompt: async (a, t) => { sent.push([a.name, t]) }, log: () => {} })
+  await rooms.load()
+  await rooms.create({ title: 'r' })
+  const user = { kind: 'user', name: 'me' }
+  await rooms.post('r', { author: user, text: 'chatter one' })
+  await rooms.post('r', { author: { kind: 'agent', name: 'bo', key: 'B' }, text: 'bo says hi' })
+  await rooms.post('r', { author: user, text: '@ag what now?' })
+  await rooms.flush()
+  const first = sent.find(([n]) => n === 'ag')[1]
+  assert.match(first, /kind=context since=0>[^]*\nme: chatter one\nbo: bo says hi<\/room-message>\n<room-message [^>]*kind=user>@ag what now\?/)
+  assert.equal(rooms.room('r').seen.ag, 3)
+  assert.equal(rooms.room('r').seen.bo, 2)
+  sent.length = 0
+  await rooms.post('r', { author: user, text: '@ag again' })
+  await rooms.flush()
+  assert.doesNotMatch(sent.find(([n]) => n === 'ag')[1], /kind=context/) // nothing new in between
+})
