@@ -55,37 +55,33 @@ export const routingHooks = (st: State, skills: SkillsDir): Hooks => ({
 })
 
 export const registerRouting = (on: Parameters<Register>[0], st: State, skills: SkillsDir) => {
-  {
-    {
-      on('turn.step', async function* ($, e, next) {
-        if (e.agentId) return yield* next(e) // a subagent's tier is its Agent call's; this routes the main loop
-        const script = `${skills($.plugin.root)}/${ROUTE}`
-        if (e.index === 0 && st.prompt) {
-          const text = st.prompt
-          st.prompt = '' // a turn with no prompt of its own (a background wake-up) is not routed on a stale one
-          const r = await $.process.run(['node', script, 'pick', '--skill', 'turn-step', '--session', '--json'], { stdin: text, timeoutMs: 8000 }).catch(() => null)
-          st.turn = { id: e.turnId, pick: r?.exitCode === 0 ? parsePick(r.stdout) : null }
-        }
-        const turn = st.turn
-        const pick = turn?.id === e.turnId ? turn.pick : null
-        // Nothing to apply: off/shadow, a failed pick, an unrouted turn — or Jev being down (fail-open lands on
-        // sonnet, which would silently downgrade a session that is on opus).
-        if (!turn || !pick?.apply || pick.source.startsWith('jev-failopen')) return yield* next(e)
-        turn.from ??= e.model
-        if (e.model !== turn.from) return yield* next(e) // the engine switched model itself (a fallback): leave it
-        if (!turn.model) {
-          let id = st.modelIds.get(pick.apply)
-          if (!id) {
-            const m = await $.process.run(['node', script, 'model-id', pick.apply], { timeoutMs: 5000 }).catch(() => null)
-            id = m?.exitCode === 0 ? m.stdout.trim() : ''
-            if (id) st.modelIds.set(pick.apply, id)
-          }
-          if (!id) return yield* next(e) // no pinned id for the tier: an alias is not known to be valid here
-          turn.model = id + (e.model.match(/\[[^\]]+\]$/)?.[0] ?? '') // keep a [1m]-style variant suffix
-        }
-        const effort = pick.applyEffort && EFFORTS.includes(pick.applyEffort) ? (pick.applyEffort as Efforts) : e.effort
-        return yield* next({ ...e, model: turn.model, effort })
-      })
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId) return yield* next(e) // a subagent's tier is its Agent call's; this routes the main loop
+    const script = `${skills($.plugin.root)}/${ROUTE}`
+    if (e.index === 0 && st.prompt) {
+      const text = st.prompt
+      st.prompt = '' // a turn with no prompt of its own (a background wake-up) is not routed on a stale one
+      const r = await $.process.run(['node', script, 'pick', '--skill', 'turn-step', '--session', '--json'], { stdin: text, timeoutMs: 8000 }).catch(() => null)
+      st.turn = { id: e.turnId, pick: r?.exitCode === 0 ? parsePick(r.stdout) : null }
     }
-  }
+    const turn = st.turn
+    const pick = turn?.id === e.turnId ? turn.pick : null
+    // Nothing to apply: off/shadow, a failed pick, an unrouted turn — or Jev being down (fail-open lands on
+    // sonnet, which would silently downgrade a session that is on opus).
+    if (!turn || !pick?.apply || pick.source.startsWith('jev-failopen')) return yield* next(e)
+    turn.from ??= e.model
+    if (e.model !== turn.from) return yield* next(e) // the engine switched model itself (a fallback): leave it
+    if (!turn.model) {
+      let id = st.modelIds.get(pick.apply)
+      if (!id) {
+        const m = await $.process.run(['node', script, 'model-id', pick.apply], { timeoutMs: 5000 }).catch(() => null)
+        id = m?.exitCode === 0 ? m.stdout.trim() : ''
+        if (id) st.modelIds.set(pick.apply, id)
+      }
+      if (!id) return yield* next(e) // no pinned id for the tier: an alias is not known to be valid here
+      turn.model = id + (e.model.match(/\[[^\]]+\]$/)?.[0] ?? '') // keep a [1m]-style variant suffix
+    }
+    const effort = pick.applyEffort && EFFORTS.includes(pick.applyEffort) ? (pick.applyEffort as Efforts) : e.effort
+    return yield* next({ ...e, model: turn.model, effort })
+  })
 }

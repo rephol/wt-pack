@@ -25,7 +25,8 @@ function ctx($: EngineInterface): Ctx {
 
 export const register: Register = (on, options) => {
   const routing = routingState()
-  const mods = [commandsHooks(), routingHooks(routing, skills), deliverHooks(skills)]
+  // deliver before routing: routing's turn.complete awaits a subprocess, which must not delay deliver's next pull
+  const mods = [commandsHooks(), deliverHooks(skills), routingHooks(routing, skills)]
   registerCommands(on, skills)
   registerRouting(on, routing, skills)
   registerAsk(on, options, skills)
