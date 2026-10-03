@@ -19,6 +19,11 @@
       "name": "wt-ask-mod",
       "source": "./skills/wt-ask",
       "description": "Mod: a herdr agent's AskUserQuestion is answered in wt-dashboard (room chip + Inbox) instead of the native picker."
+    },
+    {
+      "name": "wt-deliver-mod",
+      "source": "./skills/wt-room/mod",
+      "description": "Mod: wt-message / room traffic reaches a herdr agent as a plugin-origin prompt pulled from wt-dashboard's queue instead of pasted keystrokes."
     }
   ]
 }

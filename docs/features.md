@@ -316,6 +316,16 @@ Chat rooms shared by you and agents.
   An ask the mod never got to close (the agent was killed mid-wait, or the dashboard blipped during `--resolve`) is
   closed by a server sweep every minute once its pane is gone or it is over 24 h old (WP-209).
 
+**Queued delivery (WP-210):** the `wt-deliver-mod@wt-pack` plugin (its own plugin, so it can be disabled alone;
+`./setup install` enables it, `./setup doctor` reports it) makes a herdr agent pull its `wt-message` replies, room
+mentions and routine prompts from a dashboard queue and submit each as a plugin-origin prompt, one at a time and
+only between turns — no pasted keystrokes. Each delivery is a `deliveries` row in `wt.db`: `queued` → `delivered`
+(the prompt entered the session) or `pasted` (the mod went quiet before it pulled; the dashboard pasted it). The mod
+says hello every 20 s; a pane without a fresh hello (mod off, crashed, session started before install, dashboard
+down) is pasted exactly as before. Slash-command traffic (`/goal …` handoffs, `/wt-… ` routines) always pastes: a
+command must be typed. A delivery waits for the running turn to end (a pasted message used to sit in the TUI's own queue
+instead). A session loads the mod at its next start or `/reload-plugins`.
+
 ## Inbox
 
 - A drawer from the sidebar bell; Escape or going to another page closes it (WP-87).

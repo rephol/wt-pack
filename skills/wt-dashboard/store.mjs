@@ -183,6 +183,11 @@ export const MIGRATIONS = [
   // Not exported: the JSON rollback loses them, like routines/board_events.
   { sql: `CREATE TABLE asks (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, json TEXT NOT NULL);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-210 deliveries: wt-message / room traffic queued for a pane's wt-deliver-mod (deliveries.mjs). Not exported.
+  { sql: `CREATE TABLE deliveries (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, pane TEXT NOT NULL, kind TEXT NOT NULL,
+          body TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL, delivered_at TEXT);
+          CREATE INDEX deliveries_pane ON deliveries (pane, status);`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
