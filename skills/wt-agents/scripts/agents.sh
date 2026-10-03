@@ -164,7 +164,11 @@ spawn|mcp-args|mcp-file)
   tmain=$(repo_root "$cwd"); case "$tmain" in ''|.) ;; *) main=$tmain; repo=$(basename "$main") ;; esac
 
   [ "$cmd" != spawn ] || {
+  # WP-216: a workspace herdr creates here comes with a default tab "1" (a plain shell); remember it to close below.
+  fresh_tab= fresh_new=
+  herdr workspace list | jq -e --arg l "$(role_label "$role" "$repo")" '.result.workspaces[] | select(.label == $l)' >/dev/null || fresh_new=1
   ws=$(pool_ws "$(role_label "$role" "$repo")" "$main")
+  [ -z "${fresh_new:-}" ] || fresh_tab=$(herdr tab list --workspace "$ws" | jq -r '.result.tabs[0].tab_id // ""')
   sync_names "$ws"
 
   # Number from existing AGENT NAMES across all pools: herdr names are GLOBAL,
@@ -258,6 +262,9 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   set -- "$@" --env "WT_MEMORY_MCP=$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs"
   pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@" \
     | jq -r .result.root_pane.pane_id)
+  # Close that default tab once the agent's tab exists — only while it is still an idle shell (no agent in it).
+  [ -z "$fresh_tab" ] || [ "$(herdr tab get "$fresh_tab" 2>/dev/null | jq -r '.result.tab | "\(.pane_count) \(.agent_status)"')" != "1 unknown" ] \
+    || herdr tab close "$fresh_tab" >/dev/null 2>&1 || true
 
   # Tags go on the pane BEFORE claude starts: wt-memory's SessionStart hook reads the
   # role token from this pane, and a tag set after start arrives too late for it.
