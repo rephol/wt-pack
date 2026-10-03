@@ -18,13 +18,21 @@ const jsonl = (p) => { try { return readFileSync(p, 'utf8').split('\n').filter(B
 const readJson = (p) => { try { return JSON.parse(readFileSync(p, 'utf8')) } catch { return null } }
 const days = (s) => Number(/^(\d+)d$/.exec(s ?? '')?.[1] ?? 7)
 
-// Decisions since `since`, each with the outcomes recorded for it.
+// Not a routing decision (WP-215): nothing to attribute it to (an ad-hoc `pick` with no --skill/--role), or a floor
+// overruled what was picked (a main session's spawn floor), so the pick never mattered.
+export const noise = (it) => (!it.skill && !it.role) || (/floor/.test(it.source ?? '') && it.choice !== it.tier)
+
+// Decisions since `since`, each with the outcomes recorded for it. `shadow`: what the turn did on the model that
+// actually ran while a shadow pick applied nothing (WP-215) — kept out of `outcomes`, so tuning never reads it.
 export function load({ sinceDays = 7, now = Date.now() } = {}) {
   const from = now - sinceDays * 864e5
   const outs = new Map()
   for (const o of jsonl(paths().outcomes)) outs.set(o.run, [...(outs.get(o.run) ?? []), o.outcome])
-  return jsonl(paths().log).filter((e) => e.cmd === 'routing' && Date.parse(e.ts) >= from)
-    .map((e) => ({ ...e.item, p: e.p, run: e.run, state: e.state, outcomes: outs.get(e.run) ?? [] }))
+  return jsonl(paths().log).filter((e) => e.cmd === 'routing' && Date.parse(e.ts) >= from && e.item && !noise(e.item))
+    .map((e) => {
+      const os = outs.get(e.run) ?? []
+      return { ...e.item, p: e.p, run: e.run, state: e.state, outcomes: os.filter((o) => !o.startsWith('shadow-')), shadow: os.filter((o) => o.startsWith('shadow-')).map((o) => o.slice(7)) }
+    })
 }
 
 // Per skill×tier: picks, applied (live), send-backs, returns, escalations, ok. `effort` (WP-137) is the most
@@ -33,9 +41,10 @@ export function report(ds) {
   const rows = new Map()
   for (const d of ds) {
     const k = `${d.skill || d.role || '-'}|${d.tier}`
-    const r = rows.get(k) ?? { skill: d.skill || d.role || '-', tier: d.tier, effort: null, picks: 0, applied: 0, sendBack: 0, returned: 0, escalated: 0, ok: 0 }
+    const r = rows.get(k) ?? { skill: d.skill || d.role || '-', tier: d.tier, effort: null, picks: 0, applied: 0, sendBack: 0, returned: 0, escalated: 0, ok: 0, shadowOk: 0, shadowReturned: 0 }
     r.picks++; if (d.mode === 'live') r.applied++
     if (d.effort) r.effort = d.effort
+    for (const o of d.shadow ?? []) if (o === 'ok') r.shadowOk++; else if (o === 'returned') r.shadowReturned++
     for (const o of d.outcomes) if (o === 'send-back') r.sendBack++; else if (o === 'returned') r.returned++; else if (o === 'escalated') r.escalated++; else if (o === 'ok') r.ok++
     rows.set(k, r)
   }
@@ -112,8 +121,9 @@ export async function main(argv) {
   // line in the report — it means routing silently defaulted to sonnet for the whole window.
   const failOpen = ds.filter((d) => d.source === 'jev-failopen').length
   if (failOpen) console.log(`${failOpen} decision(s) fell back to sonnet (Jev unavailable) — excluded from tuning`)
-  console.log('skill\ttier\teffort\tpicks\tapplied\tsend-back\treturned\tescalated\tok')
-  for (const r of rows) console.log([r.skill, r.tier, r.effort ?? '-', r.picks, r.applied, r.sendBack, r.returned, r.escalated, r.ok].join('\t'))
+  // shadow ok/ret: the turn answered or refused on the model that ran, while this shadow pick applied nothing.
+  console.log('skill\ttier\teffort\tpicks\tapplied\tsend-back\treturned\tescalated\tok\tshadow-ok\tshadow-ret')
+  for (const r of rows) console.log([r.skill, r.tier, r.effort ?? '-', r.picks, r.applied, r.sendBack, r.returned, r.escalated, r.ok, r.shadowOk, r.shadowReturned].join('\t'))
   const cfg = loadConfig({ cwd: process.cwd() })
   const { thresholds, changes } = tune(ds, cfg)
   for (const c of changes) console.log(`threshold ${c.tier}: ${c.from} → ${c.to} (n=${c.n}, bad=${c.bad})`)
