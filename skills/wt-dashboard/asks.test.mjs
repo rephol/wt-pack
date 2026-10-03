@@ -79,3 +79,22 @@ test('answer: a gone pane → undeliverable, keeps the answer', async () => {
   assert.equal(out.status, 'undeliverable')
   assert.deepEqual(out.answer.selected, [['A']])
 })
+
+// WP-206: the plugin mod waits on the ask and returns the answer as the tool result, so no wt-message goes out.
+test('noDeliver: answer closes the ask without delivering', async () => {
+  const dir = await tmp()
+  const delivered = []
+  const a = new Asks({ dir, notify: async (d) => ({ id: 'n1', ...d }), deliver: async (p, t) => delivered.push([p, t]) })
+  const created = await a.create(q({ noDeliver: true }), author)
+  const out = await a.answer(created.id, { selected: [['A']] }, { name: 'Rep' })
+  assert.equal(out.status, 'answered')
+  assert.equal(delivered.length, 0)
+})
+
+test('get by another pane → 403; by the asking pane → the ask', async () => {
+  const dir = await tmp()
+  const a = new Asks({ dir, notify: async (d) => ({ id: 'n1', ...d }) })
+  const created = await a.create(q(), author)
+  await assert.rejects(a.get(created.id, 'w9:p9'), (e) => e.status === 403)
+  assert.equal((await a.get(created.id, author.pane)).id, created.id)
+})

@@ -27,7 +27,7 @@ export function clean(b) {
   const questions = b.questions.map(cleanQuestion)
   if (b.room !== undefined && b.room !== null && (typeof b.room !== 'string' || b.room.length > 64)) throw err(400, 'room: a slug up to 64 chars')
   if (b.ticket !== undefined && b.ticket !== null && (typeof b.ticket !== 'string' || b.ticket.length > 20)) throw err(400, 'ticket: up to 20 chars')
-  return { questions, room: b.room ?? null, ticket: b.ticket ?? null }
+  return { questions, room: b.room ?? null, ticket: b.ticket ?? null, noDeliver: b.noDeliver === true }
 }
 
 // The answer shape POST /api/asks/:id/answer takes: { selected: [label,...] per question, text? }.
@@ -60,7 +60,11 @@ export class Asks {
     if (!r) throw err(404, `no ask ${id}`)
     return JSON.parse(r.json)
   }
-  async get(id) { return this.row(id) }
+  async get(id, pane) {
+    const a = this.row(id)
+    if (pane !== undefined && a.pane !== pane) throw err(403, `${id} was not asked by ${pane}`)
+    return a
+  }
   // room: filter to one room's asks; open: true → only status 'open'.
   async list(room, open) {
     const all = this.db.prepare('SELECT json FROM asks ORDER BY seq').all().map((r) => JSON.parse(r.json))
@@ -70,7 +74,7 @@ export class Asks {
     const f = clean(body)
     const at = new Date().toISOString()
     const a = { id: randomUUID(), pane: author.pane, agent: author.name, project: author.project ?? null,
-      room: f.room, ticket: f.ticket, questions: f.questions, status: 'open', answer: null, created: at, closed: null }
+      room: f.room, ticket: f.ticket, questions: f.questions, ...(f.noDeliver ? { noDeliver: true } : {}), status: 'open', answer: null, created: at, closed: null }
     this.db.prepare('INSERT INTO asks (id, json) VALUES (?, ?)').run(a.id, JSON.stringify(a))
     const it = await this.notify({
       kind: 'ask', key: `ask:${a.id}`, title: `${a.agent} · ${a.questions[0].header}`,
@@ -92,7 +96,7 @@ export class Asks {
     if (!changes) throw err(409, `${id} is no longer open`)
     let next = claimed
     try {
-      await this.deliver(a.pane, text)
+      if (!a.noDeliver) await this.deliver(a.pane, text) // noDeliver (WP-206): the mod waits on GET and returns the answer as the tool result
     } catch (e) {
       next = { ...claimed, status: 'undeliverable' }
       this.db.prepare('UPDATE asks SET json = ? WHERE id = ?').run(JSON.stringify(next), id)
