@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { parse, list, resolve, check, sections, mainCheckout, CAP } from './roles.mjs'
+import { parse, list, resolve, check, sections, mainCheckout, personas, CAP } from './roles.mjs'
 
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'roles-')))
 execFileSync('git', ['init', '-q', repo])
@@ -51,4 +51,8 @@ test('sections: base override first, then persona; cap truncates at a line with 
 test('a worktree reads the main checkout; outside a repo is null', () => {
   assert.equal(mainCheckout(join(repo, '.wt-pack')), repo)
   assert.equal(mainCheckout(tmpdir()), null)
+})
+
+test('personas: only valid persona files, with labels, in filename order', () => {
+  assert.deepEqual(personas(repo).map((p) => [p.name, p.base, p.labels]), [['frontend-worker', 'worker', ['ui']]])
 })

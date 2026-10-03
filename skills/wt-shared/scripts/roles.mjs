@@ -66,6 +66,13 @@ export function resolve(checkout, name) {
   return { name, base: r.base, model: r.meta.model, effort: r.meta.effort, mcp: arr(r.meta.mcp), skills: arr(r.meta.skills), labels: arr(r.meta.labels) }
 }
 
+// Dispatch's view of the personas: [{name, base, labels}] in filename order (invalid ones left out).
+export function personas(checkout) {
+  const arr = (v) => (Array.isArray(v) ? v : v ? [v] : [])
+  return list(checkout).filter((r) => !r.override && NAME.test(r.name) && BASES.includes(r.base))
+    .map((r) => ({ name: r.name, base: r.base, labels: arr(r.meta.labels) }))
+}
+
 // Prompt sections for an agent with role token `role` and optional `persona`: [[heading, text]]. Base override
 // first, then the persona. A body beyond CAP is cut at a line boundary and says so.
 export function sections(checkout, role, persona) {
