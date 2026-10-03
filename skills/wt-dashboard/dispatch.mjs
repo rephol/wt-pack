@@ -282,7 +282,7 @@ export class Dispatch {
     const p = cur.pair?.[role]
     if (!p) return
     const wantPool = role === 'worker' ? 'worker' : (p.role || 'reviewer')
-    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair)
+    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair && !x.paneTokens?.persona)
     const repl = i < 0 ? null : local[i]
     if (repl) local.splice(i, 1)
     const pair = { ...cur.pair, [role]: repl ? { name: repl.name, pane: repl.id, ...(role === 'buddy' ? { role: wantPool } : {}) } : null }

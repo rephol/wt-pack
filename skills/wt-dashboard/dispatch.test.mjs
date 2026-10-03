@@ -557,3 +557,15 @@ test('WP-205: an idle persona reviewer is not picked as a buddy', async () => {
   await d.tick()
   assert.ok(!calls[0].args.includes('--buddy'))
 })
+
+test('WP-205: a gone paired buddy is not replaced by an idle persona reviewer', async () => {
+  const persona = { name: 'wt-pack-qa-reviewer-01', id: 'wR:p3', local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: { persona: 'qa-reviewer' } }
+  const worker = { name: 'wt-pack-worker-07', id: 'w7:p1', local: true, pool: 'worker', project: 'wt-pack', status: 'working', paneTokens: {} }
+  const { tickets, d } = await setup({ agents: [persona, worker], extra: { tagPair: async () => {} } })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t.id, { pair: { worker: { name: 'wt-pack-worker-07', pane: 'w7:p1' }, buddy: { name: 'wt-pack-reviewer-01', pane: 'wR:p1', role: 'reviewer' } } },
+    user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await d.tick(); await d.tick()
+  assert.notEqual((await tickets.get(t.id)).pair?.buddy?.name, 'wt-pack-qa-reviewer-01')
+})
