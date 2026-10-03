@@ -6,7 +6,7 @@
 //   plugin-env.mjs remove [settings] <dir>  drop <dir>; an emptied variable is removed from env
 // settings defaults to ~/.claude/settings.json. Exit 0 ok, 2 usage, 1 an unreadable (not JSON) settings file —
 // never overwritten.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -40,7 +40,13 @@ function main(argv) {
   try { s = read(path) } catch (e) { console.error(`plugin-env: ${path}: ${e.message}`); return 1 }
   if (op === 'list') { for (const d of entries(s)) console.log(d); return 0 }
   const next = edit(s, op, dir)
-  if (JSON.stringify(next) !== JSON.stringify(s)) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(next, null, 2) + '\n') }
+  if (JSON.stringify(next) !== JSON.stringify(s)) {
+    mkdirSync(dirname(path), { recursive: true })
+    const target = existsSync(path) ? realpathSync(path) : path // a dotfiles symlink survives
+    const tmp = `${target}.tmp.${process.pid}`
+    writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n') // Claude Code rewrites this file too: swap it whole
+    renameSync(tmp, target)
+  }
   return 0
 }
 
