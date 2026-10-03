@@ -53,7 +53,7 @@ test('plugin is idempotent: a second run uninstalls nothing and changes nothing'
 })
 
 test('plugin keeps another wt-pack checkout\'s plugin dir and skill links', () => {
-  const r = rig([])
+  const r = rig(['wt-memory@wt-pack', 'wt-pack@wt-pack'])
   const other = join(r.home, 'other-pack')
   mkdirSync(join(other, '.claude-plugin'), { recursive: true }); mkdirSync(join(other, 'skills', 'wt-agents'), { recursive: true })
   writeFileSync(join(other, '.claude-plugin', 'marketplace.json'), '{ "name": "wt-pack" }')
@@ -63,6 +63,7 @@ test('plugin keeps another wt-pack checkout\'s plugin dir and skill links', () =
   assert.equal(r.settings().env.CLAUDE_CODE_PLUGIN_DIRS, other)
   assert.equal(existsSync(join(r.skills, 'wt-agents')), true)
   assert.match(out, /another wt-pack checkout/)
+  assert.deepEqual(r.calls().filter((c) => c.startsWith('plugin uninstall')), []) // the live install is not touched
 })
 
 test('plugin-check: exactly one wt-pack plugin and none of the old four is clean; extras or none are failures', () => {
@@ -74,4 +75,23 @@ test('plugin-check: exactly one wt-pack plugin and none of the old four is clean
   assert.match(r.run('plugin-check'), /✗ 2 wt-pack plugins loaded/)
   r.setList([])
   assert.match(r.run('plugin-check'), /✗ no wt-pack plugin loaded/)
+})
+
+test('uninstall: removes this checkout\'s plugin dir and plugins, and leaves another checkout\'s alone', () => {
+  const r = rig(['wt-memory@wt-pack', 'wt-pack@wt-pack'])
+  writeFileSync(join(r.home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: `/other:${REPO}` } }))
+  r.run('uninstall')
+  assert.equal(r.settings().env.CLAUDE_CODE_PLUGIN_DIRS, '/other')
+  assert.deepEqual(r.calls().filter((c) => c.startsWith('plugin uninstall')).map((c) => c.split(' ')[2]).sort(), ['wt-memory@wt-pack', 'wt-pack@wt-pack'])
+  const o = rig(['wt-memory@wt-pack'])
+  writeFileSync(join(o.home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_PLUGIN_DIRS: '/other' } }))
+  o.run('uninstall')
+  assert.equal(o.settings().env.CLAUDE_CODE_PLUGIN_DIRS, '/other')
+  assert.deepEqual(o.calls().filter((c) => c.startsWith('plugin uninstall')), [])
+})
+
+test('plugin-check: an unreadable plugin list is reported as such, not as "no plugin"', () => {
+  const r = rig([])
+  writeFileSync(join(r.home, 'list.json'), 'not json')
+  assert.match(r.run('plugin-check'), /could not read the plugin list/)
 })

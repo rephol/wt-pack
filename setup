@@ -308,18 +308,27 @@ OLD_PLUGINS="wt-memory@wt-pack wt-deliver-mod@wt-pack wt-ask-mod@wt-pack"
 plugin_dir() {
   step "plugin wt-pack (one plugin: this checkout)"
   if ! has claude; then bad "claude not on PATH — install Claude Code, then re-run"; return 1; fi
-  other=""; have=0
-  for d in $(node "$PENV" list "$SETTINGS" 2>/dev/null); do
+  # Another wt-pack checkout already owns the install (a plugin-dir entry, or the marketplace the plugin-only install
+  # came from): keep it, add nothing and uninstall nothing — setup never repoints a live install from a worktree.
+  other=""; have=0; mp=$(market_path)
+  entries=$(node "$PENV" list "$SETTINGS" 2>/dev/null)
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
     if [ "$d" = "$REPO" ]; then have=1; elif is_pack "$d"; then other=$d; fi
-  done
-  if [ -n "$other" ]; then opt "kept plugin dir $other in $SETTINGS (another wt-pack checkout)"
-  elif [ "$have" -eq 1 ]; then ok "already: $REPO in CLAUDE_CODE_PLUGIN_DIRS"
-  elif node "$PENV" add "$SETTINGS" "$REPO"; then ok "added $REPO to CLAUDE_CODE_PLUGIN_DIRS in $SETTINGS (agents started before this need a respawn: plugin hooks load at session start)"
-  else bad "could not edit $SETTINGS (is it valid JSON?)"; return 1; fi
-  for id in $OLD_PLUGINS wt-pack@wt-pack; do
-    plugin_listed "$id" || continue
-    if claude plugin uninstall "$id" >/dev/null 2>&1; then ok "removed $id (the one wt-pack plugin replaces it)"; else bad "claude plugin uninstall $id failed"; fi
-  done
+  done <<ENTRIES
+$entries
+ENTRIES
+  [ -z "$other" ] && [ -n "$mp" ] && [ "$mp" != "$REPO" ] && is_pack "$mp" && other=$mp
+  if [ -n "$other" ]; then opt "kept the wt-pack plugin install owned by $other (another wt-pack checkout): nothing added, nothing uninstalled"
+  else
+    if [ "$have" -eq 1 ]; then ok "already: $REPO in CLAUDE_CODE_PLUGIN_DIRS"
+    elif node "$PENV" add "$SETTINGS" "$REPO"; then ok "added $REPO to CLAUDE_CODE_PLUGIN_DIRS in $SETTINGS (agents started before this need a respawn: plugin hooks load at session start)"
+    else bad "could not edit $SETTINGS (is it valid JSON?)"; return 1; fi
+    for id in $OLD_PLUGINS wt-pack@wt-pack; do
+      plugin_listed "$id" || continue
+      if claude plugin uninstall "$id" >/dev/null 2>&1; then ok "removed $id (the one wt-pack plugin replaces it)"; else bad "claude plugin uninstall $id failed"; fi
+    done
+  fi
   # The skill links are the old way in; the plugin carries every skill now. wt-dashboard stays linked: the desktop app
   # launches $SKILLS/wt-dashboard (WT_DASHBOARD_HOME overrides it).
   n=0; kept=""
@@ -339,7 +348,8 @@ plugin_dir() {
 # plugin_check: exactly one wt-pack plugin is loaded, none of the old four (WP-213).
 plugin_check() {
   has claude || return 0
-  ids=$(claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const p of JSON.parse(s))if(p.enabled)console.log(p.id)}catch{}})')
+  ids=$(claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const p of JSON.parse(s))if(p.enabled)console.log(p.id)}catch{process.exit(3)}})') \
+    || { bad "could not read the plugin list (claude plugin list --json failed)"; return 0; }
   wp=$(printf '%s\n' "$ids" | grep -c '^wt-pack@')
   extras=""
   for id in $OLD_PLUGINS wt-mods@skills-dir wt-ask-mod@skills-dir; do printf '%s\n' "$ids" | grep -qx "$id" && extras="$extras $id"; done
@@ -443,9 +453,13 @@ uninstall() {
   if [ "$(wpservice_root)" = "$WP" ]; then "$WP/scripts/watch-prs.sh" poller-uninstall >/dev/null && ok "watchprs poller removed"
   else opt "watchprs poller: not installed from this checkout, left alone"; fi
   if has claude; then
-    for id in $OLD_PLUGINS wt-pack@wt-pack; do plugin_listed "$id" && claude plugin uninstall "$id" >/dev/null 2>&1; done
-    [ "$(market_path)" = "$REPO" ] && claude plugin marketplace remove wt-pack >/dev/null 2>&1
-    node "$PENV" remove "$SETTINGS" "$REPO" && ok "plugin dir $REPO removed from $SETTINGS; wt-pack plugins uninstalled"
+    mine=0; node "$PENV" list "$SETTINGS" 2>/dev/null | grep -qxF "$REPO" && mine=1
+    [ "$(market_path)" = "$REPO" ] && mine=1
+    if [ "$mine" -eq 1 ]; then
+      for id in $OLD_PLUGINS wt-pack@wt-pack; do plugin_listed "$id" && claude plugin uninstall "$id" >/dev/null 2>&1 && ok "uninstalled $id"; done
+      [ "$(market_path)" = "$REPO" ] && claude plugin marketplace remove wt-pack >/dev/null 2>&1 && ok "marketplace wt-pack removed"
+      if node "$PENV" remove "$SETTINGS" "$REPO"; then ok "plugin dir $REPO removed from $SETTINGS (if it was there)"; else bad "could not edit $SETTINGS (is it valid JSON?)"; fi
+    else opt "plugin: not installed from this checkout, left alone"; fi
   else opt "claude not on PATH: plugin left alone"; fi
   n=0
   for l in "$SKILLS"/*; do
