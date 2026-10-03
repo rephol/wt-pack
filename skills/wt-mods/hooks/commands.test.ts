@@ -7,7 +7,7 @@ test('split honours quotes without a shell', () => {
 })
 
 test('argv mapping', () => {
-  expect(COMMANDS.watch.argv(['foo'], '')).toBe('usage: /watch status')
+  expect(COMMANDS.watch.argv(['foo'], '')).toBe('usage: /wt watch status')
   expect(COMMANDS.watch.argv([], '')).toEqual(['poller-status'])
   expect(COMMANDS.dnd.argv(['on'], 'w1:p2')).toEqual(['dnd', 'w1:p2', 'on'])
   expect(COMMANDS.room.argv([], '')).toEqual(['list'])

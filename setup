@@ -494,7 +494,7 @@ uninstall() {
   if [ "$(wpservice_root)" = "$WP" ]; then "$WP/scripts/watch-prs.sh" poller-uninstall >/dev/null && ok "watchprs poller removed"
   else opt "watchprs poller: not installed from this checkout, left alone"; fi
   if has claude && [ "$(market_path)" = "$REPO" ]; then
-    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-deliver-mod@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
+    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-ask-mod@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-deliver-mod@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
     ok "plugins wt-memory@wt-pack, wt-deliver-mod@wt-pack and marketplace wt-pack removed"
   else opt "plugin: not installed from this checkout, left alone"; fi
   n=0

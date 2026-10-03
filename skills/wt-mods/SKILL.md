@@ -5,8 +5,7 @@ description: The wt-pack Claude Code mods — the instant `/wt <room|ticket|dnd|
 
 # wt-mods
 
-A Claude Code *mod* (a plugin of function hooks, `hooks/register.ts`), linked in by `./setup` like every skill
-like every skill. The other skills are its siblings, which is how it reaches their scripts.
+A Claude Code *mod* (a plugin of function hooks, `hooks/register.ts`), linked in by `./setup` like every skill. The other skills are its siblings, which is how it reaches their scripts.
 
 - `/wt <sub> …` runs a script directly, with no model turn, also while the agent is mid-turn: `/wt room list|read|post`,
   `/wt ticket show|move|list|comment`, `/wt dnd [on|off]` (this pane), `/wt herd [role]`, `/wt watch status`. `/wt`
