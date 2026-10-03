@@ -54,8 +54,10 @@ fi
 nodeliver=0
 if [ "$1" = --json ]; then
   [ $# -ge 2 ] || usage
-  [ -f "$2" ] || { echo "wt-ask: no such file: $2" >&2; exit 2; }
-  body=$(cat "$2")
+  if [ "$2" = - ]; then body=$(cat); else  # '-' reads stdin (the WP-206 mod pipes the question in)
+    [ -f "$2" ] || { echo "wt-ask: no such file: $2" >&2; exit 2; }
+    body=$(cat "$2")
+  fi
   shift 2
 else
   question=$1; shift
