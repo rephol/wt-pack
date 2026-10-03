@@ -38,16 +38,18 @@ export const routingHooks = (st: State, skills: SkillsDir): Hooks => ({
   },
 
   // WP-159's outcomes, per turn, deliberately thin: a routed turn that answered is 'ok', one the model refused is
-  // 'returned' (the tier could not do it). An interruption or an API error says nothing about the pick, and a
-  // shadow/off pick applied nothing, so those record none. An answer is a weak signal next to WP-159's "ticket
+  // 'returned' (the tier could not do it). An interruption or an API error says nothing about the pick. A shadow
+  // pick applied nothing, so it records 'shadow-ok'/'shadow-returned' with the model that actually ran (WP-215):
+  // the eval reads those apart from real outcomes, never as a verdict on the pick. An answer is a weak signal next to WP-159's "ticket
   // reached Done"; the per-turn log is for the tuning's volume, not a verdict.
   'turn.complete': async (ctx, e, next) => {
     const t = st.turn
     if (t && !e.agentId && t.id === e.turnId) {
       st.turn = undefined
       const pick = t.pick
-      if (pick?.apply && pick.ref && (e.reason === 'answer' || e.reason === 'refusal')) {
-        await ctx.run(['node', `${skills(ctx.root)}/${ROUTE}`, 'outcome', pick.ref, e.reason === 'answer' ? 'ok' : 'returned', `turn ${e.reason}`], { timeoutMs: 8000 }).catch(() => null)
+      if (pick?.ref && !pick.source.startsWith('jev-failopen') && (e.reason === 'answer' || e.reason === 'refusal')) {
+        const what = (pick.apply ? '' : 'shadow-') + (e.reason === 'answer' ? 'ok' : 'returned')
+        await ctx.run(['node', `${skills(ctx.root)}/${ROUTE}`, 'outcome', pick.ref, what, `turn ${e.reason}${pick.apply ? '' : ` on ${t.from ?? '?'}`}`], { timeoutMs: 8000 }).catch(() => null)
       }
     }
     return next(e)
@@ -66,6 +68,7 @@ export const registerRouting = (on: Parameters<Register>[0], st: State, skills: 
     }
     const turn = st.turn
     const pick = turn?.id === e.turnId ? turn.pick : null
+    if (turn && pick) turn.from ??= e.model // the model that ran: a shadow outcome names it
     // Nothing to apply: off/shadow, a failed pick, an unrouted turn — or Jev being down (fail-open lands on
     // sonnet, which would silently downgrade a session that is on opus).
     if (!turn || !pick?.apply || pick.source.startsWith('jev-failopen')) return yield* next(e)
