@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# WP-213: run the mods' tests (`claude plugin test .` from the repo root = the one wt-pack plugin) and fail only on a
+# failure that is not a dashboard web test. That runner picks up every *.test.ts in the tree, including
+# skills/wt-dashboard/web (node:test, run by `npm test` there), which it cannot load: they fail it for ever.
+set -u
+root=$(cd "$(dirname "$0")/../../.." && pwd -P)
+out=$(cd "$root" && claude plugin test . 2>&1)
+real=$(printf '%s\n' "$out" | grep '^(fail)' | grep -v 'the file did not load')
+unloaded=$(printf '%s\n' "$out" | grep -A1 'the file did not load' | grep '^  ' | grep -v '^  skills/wt-dashboard/')
+if [ -n "$real$unloaded" ]; then printf '%s\n' "$out"; echo "mods: failing tests (see above)"; exit 1; fi
+echo "mods ok: $(printf '%s\n' "$out" | grep -c '^(pass)') passed; dashboard web tests are not run here (cd skills/wt-dashboard && npm test)"

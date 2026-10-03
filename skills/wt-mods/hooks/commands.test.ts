@@ -37,7 +37,7 @@ function rig(on: any) {
 
 test('/wt ticket show WP-1 runs the sibling script and returns its output', async ($, on) => {
   const ran = rig(on)
-  const r: any = await $.command.run({ command: 'wt', args: 'ticket show WP-1' })
+  const r: any = await $.command.run({ command: 'wt', args: 'ticket show WP-1' } as never)
   expect(ran).toHaveLength(1)
   expect(ran[0].at(-3)).toMatch(/\/wt-ticket\/scripts\/wt-ticket$/)
   expect(ran[0].slice(-2)).toEqual(['show', 'WP-1'])
@@ -46,14 +46,14 @@ test('/wt ticket show WP-1 runs the sibling script and returns its output', asyn
 
 test('/wt dnd acts on the resolved current pane', async ($, on) => {
   const ran = rig(on)
-  await $.command.run({ command: 'wt', args: 'dnd on' })
+  await $.command.run({ command: 'wt', args: 'dnd on' } as never)
   expect(ran[0]).toEqual(['herdr', 'pane', 'get', 'w1:p2'])
   expect(ran[1].slice(-3)).toEqual(['dnd', 'w1:p2', 'on'])
 })
 
 test('/wt with no or an unknown sub prints the usage and runs nothing', async ($, on) => {
   const ran = rig(on)
-  expect(((await $.command.run({ command: 'wt', args: '' })) as any).text).toBe(usage)
-  expect(((await $.command.run({ command: 'wt', args: 'bogus' })) as any).text).toBe(usage)
+  expect(((await $.command.run({ command: 'wt', args: '' } as never)) as any).text).toBe(usage)
+  expect(((await $.command.run({ command: 'wt', args: 'bogus' } as never)) as any).text).toBe(usage)
   expect(ran).toEqual([])
 })

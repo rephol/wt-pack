@@ -2,6 +2,7 @@
 // no Claude turn, and `immediate` so they also run while the agent is mid-turn. No logic of their own: argv in,
 // stdout out. One namespaced command (not /room, /ticket, …) so it cannot clash with another plugin's commands.
 import type { Register } from 'claude-code'
+import type { Hooks } from './compose'
 
 type Ctx = Parameters<Parameters<Parameters<Register>[0]>[2]>[0]
 // Where the skills dir is, from the plugin root: the repo's root plugin keeps it at `<root>/skills`, the wt-mods
@@ -51,11 +52,14 @@ async function run($: Ctx, skills: SkillsDir, name: string, args: string) {
   return { text: (text || `/${name}: no output`) + (r.exitCode ? `\n(exit ${r.exitCode})` : '') }
 }
 
-export const registerCommands = (on: Parameters<Register>[0], skills: SkillsDir) => {
-  on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'wt', description: 'wt-pack: room | ticket | dnd | herd | watch (runs the script, no model turn)', argumentHint: '<room|ticket|dnd|herd|watch> …', immediate: true })
+export const commandsHooks = (): Hooks => ({
+  'session.start': async (ctx, e, next) => {
+    await ctx.registerCommand({ name: 'wt', description: 'wt-pack: room | ticket | dnd | herd | watch (runs the script, no model turn)', argumentHint: '<room|ticket|dnd|herd|watch> …', immediate: true }).catch(() => null) // one mod failing must not skip the others' session.start
     return next(e)
-  })
+  },
+})
+
+export const registerCommands = (on: Parameters<Register>[0], skills: SkillsDir) => {
   on('command.run', { command: 'wt' }, ($, e) => {
     const [name, rest] = subOf(e.args)
     return name ? run($, skills, name, rest) : { text: usage }

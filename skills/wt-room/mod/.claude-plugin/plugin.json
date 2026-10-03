@@ -1,4 +1,0 @@
-{
-  "name": "wt-deliver-mod",
-  "description": "Delivers wt-message / room traffic to a herdr agent as a plugin-origin prompt pulled from wt-dashboard's queue instead of pasted keystrokes; the dashboard pastes as before when this mod is not loaded."
-}
