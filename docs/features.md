@@ -313,6 +313,8 @@ Chat rooms shared by you and agents.
   pane, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).
   A session picks the mod up on `/reload-plugins` or at its next start (mods reload without a respawn); until then it
   keeps the native picker, which the pane-scrape mirror above still serves. `wt-ask --wait <id>`, `--ping` and `--no-deliver` are the mod's building blocks.
+  An ask the mod never got to close (the agent was killed mid-wait, or the dashboard blipped during `--resolve`) is
+  closed by a server sweep every minute once its pane is gone or it is over 24 h old (WP-209).
 
 ## Inbox
 
