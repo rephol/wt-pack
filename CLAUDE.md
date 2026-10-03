@@ -144,3 +144,8 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   applied *after* the strip. Fixed by slicing to 4×cap before any regex (`load()`), and dropping the leading ` *`.
   The same helper's 500 ms `git rev-parse` was right for the hook but made `wt-roles` fail "not in a git repo" under
   load, so `mainCheckout(cwd, timeout)` takes the budget from its caller (`skills/wt-shared/scripts/roles.mjs`).
+- A marketplace plugin is *copied* into the plugin cache from its `source` dir alone, so a mod/hook there cannot reach a
+  sibling skill's script by `../`. WP-206's AskUserQuestion mod needs `skills/wt-ask/scripts/wt-ask`; the plan put the
+  plugin at `skills/wt-ask/mod`, where the cache copy would have lost the script. The plugin root is `skills/wt-ask`
+  itself (`.claude-plugin/` + `hooks/` beside `scripts/`), reached as `$.plugin.root/scripts/wt-ask`. Mods have no Node
+  and no env access: gate through the CLI (`wt-ask --ping`), never by reading `HERDR_PANE_ID` in the module.

@@ -14,6 +14,11 @@
       "name": "wt-memory",
       "source": "./skills/wt-memory/claude-plugin",
       "description": "wt-memory preferences injected into Claude Code sessions."
+    },
+    {
+      "name": "wt-ask-mod",
+      "source": "./skills/wt-ask",
+      "description": "Mod: a herdr agent's AskUserQuestion is answered in wt-dashboard (room chip + Inbox) instead of the native picker."
     }
   ]
 }

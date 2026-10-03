@@ -1,0 +1,12 @@
+{
+  "name": "wt-ask-mod",
+  "description": "Answers a herdr agent's AskUserQuestion through wt-dashboard (room chip + Inbox card) instead of the native picker; falls back to the native dialog.",
+  "userConfig": {
+    "timeoutMin": {
+      "type": "number",
+      "title": "Answer timeout (minutes)",
+      "description": "How long a captured question waits for an answer in wt-dashboard before the tool call is denied.",
+      "default": 30
+    }
+  }
+}
