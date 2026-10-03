@@ -301,7 +301,7 @@ Chat rooms shared by you and agents.
   Clicking a chip or an Inbox **question**/**ask** item opens the same popup in place. `wt-ask --resolve <id>`
   closes a card without an answer.
   **Native capture (WP-206):** the `wt-ask-mod@wt-pack` plugin (`./setup install` enables it; `./setup doctor`
-  reports it) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip and
+  reports it) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip (when the agent has a ticket) and
   Inbox card, the terminal shows "asked in wt-dashboard…" instead of the picker, and your answer returns as the tool
   result (no reply message). It falls back to the native picker when the dashboard is unreachable, outside a herdr
   pane, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).

@@ -13,9 +13,10 @@ the answer comes back to you as a `<wt-message kind="reply" from="user">` throug
 same as any other reply.
 
 **WP-206:** with `wt-ask-mod@wt-pack` enabled (`./setup install`), a herdr agent's native `AskUserQuestion` is
-already routed here — don't call `wt-ask` by hand for it. The mod uses `--wait <id> [--timeout S]` (print the answer
-JSON; exit 3 on resolved/timeout), `--ping` and `--no-deliver` (skip the reply message, the answer returns as the tool
-result); `--json -` reads the questions from stdin.
+already routed to the dashboard and blocks until it is answered — don't call `wt-ask` by hand for that. In a room,
+handoff or dispatch context where you must not block, `wt-ask` below is still the fire-and-forget way. The mod's own
+building blocks: `--wait <id> [--timeout S]` (print the answer JSON; exit 3 on resolved/timeout), `--ping`,
+`--no-deliver` (skip the reply message) and `--json -` (questions on stdin).
 
 **Which tool to use (WP-164 decision 4):** in your own chat session — the dashboard's agent chat page or the
 terminal, unmarked — use your native question tool (`AskUserQuestion` and similar). It already renders as a

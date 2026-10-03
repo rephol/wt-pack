@@ -23,27 +23,36 @@ export const register: Register = (on, options) => {
 
     const timeoutMin = Number(options.timeoutMin) > 0 ? Number(options.timeoutMin) : 30
     const deadline = (await $.clock.now()) + timeoutMin * 60_000
+    // Core's record: answers maps question -> label(s), `response` is freeform text typed instead of selecting.
+    const answered = (a: Answer) => ({
+      result: {
+        questions: e.questions,
+        answers: Object.fromEntries(qs.map((q, i) => [q.question, (a.selected[i] ?? []).join(', ') || (i === 0 && a.text ? a.text : '')])),
+        ...(a.text ? { response: a.text } : {}),
+      },
+    })
     $.ui.status('asked in wt-dashboard, waiting for the answer…')
     try {
       for (;;) {
         const left = Math.ceil((deadline - (await $.clock.now())) / 1000)
         if (left <= 0) break
+        if (next.signal.aborted) break // interrupted: stop polling, resolve the ask below
         const slice = Math.min(SLICE_S, left)
         const w = await run(['--wait', id, '--timeout', String(slice)], undefined, (slice + 15) * 1000)
         if (w?.exitCode === 0) {
-          const a = JSON.parse(w.stdout) as Answer
-          return {
-            result: {
-              questions: e.questions,
-              answers: Object.fromEntries(qs.map((q, i) => [q.question, (a.selected[i] ?? []).join(', ')])),
-              ...(a.text ? { annotations: { [qs[0].question]: { notes: a.text } } } : {}),
-            },
-          }
+          let a: Answer
+          try { a = JSON.parse(w.stdout) as Answer } catch { return next(e) }
+          return answered(a)
         }
         if (w?.exitCode === 3 && w.stderr.includes('resolved')) return { deny: 'The question was closed in wt-dashboard without an answer; continue without it or ask again.' }
         if (w?.exitCode !== 3) { await run(['--resolve', id]); return next(e) } // dashboard went away: ask natively
       }
-      await run(['--resolve', id])
+      if (next.signal.aborted) { await run(['--resolve', id]); return { deny: 'Interrupted while waiting for the dashboard answer.' } }
+      // --resolve is a 409 when the user answered in the last moment: take that answer rather than deny it.
+      if ((await run(['--resolve', id]))?.exitCode !== 0) {
+        const late = await run(['--wait', id, '--timeout', '1'], undefined, 20000)
+        if (late?.exitCode === 0) return answered(JSON.parse(late.stdout) as Answer)
+      }
       return { deny: `No answer from the user within ${timeoutMin} min (asked via wt-dashboard); continue without it or ask again.` }
     } finally {
       $.ui.status(undefined)

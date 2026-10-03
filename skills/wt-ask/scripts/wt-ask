@@ -12,7 +12,7 @@
 # Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
-usage() { sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 call() {
   local out code
   out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
@@ -25,7 +25,7 @@ call() {
 [ $# -ge 1 ] || usage
 if [ "$1" = --resolve ]; then
   [ $# -ge 2 ] || usage
-  out=$(call POST "/api/asks/$2/resolve" '{}')
+  out=$(call POST "/api/asks/$2/resolve" '{}') || exit 1
   echo "resolved $2"
   exit 0
 fi
@@ -101,5 +101,5 @@ body=$(node -e '
   console.log(JSON.stringify(b))
 ' "$body" "${ticket:-}" "${room:-}" "$nodeliver")
 
-out=$(call POST /api/asks "$body")
+out=$(call POST /api/asks "$body") || exit 1
 node -e 'console.log(JSON.parse(process.argv[1]).id)' "$out"

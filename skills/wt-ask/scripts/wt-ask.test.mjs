@@ -121,3 +121,28 @@ test('--wait: exits 3 on resolved and on timeout', async () => {
     await assert.rejects(run(['--wait', 'ask-6', '--timeout', '1'], { HERDR_DASH_URL: s.url, WAIT_POLL: '0.2' }), (e) => e.code === 3)
   } finally { s.close() }
 })
+
+test('--wait: an undeliverable ask still prints its saved answer', async () => {
+  const s = await stub((req, body, res) => res.writeHead(200).end(JSON.stringify({ status: 'undeliverable', answer: { selected: [['B']] } })))
+  try {
+    const { stdout } = await run(['--wait', 'ask-7'], { HERDR_DASH_URL: s.url, WAIT_POLL: '0.1' })
+    assert.deepEqual(JSON.parse(stdout), { selected: [['B']] })
+  } finally { s.close() }
+})
+
+test('--ping: exits 1 on a 403 (unknown pane); --json - reads stdin', async () => {
+  let seen
+  const s = await stub((req, body, res) => {
+    if (req.url === '/api/asks/ping') return res.writeHead(403).end(JSON.stringify({ error: 'unknown pane' }))
+    seen = body; res.writeHead(200).end(JSON.stringify({ id: 'ask-8' }))
+  })
+  try {
+    await assert.rejects(run(['--ping'], { HERDR_DASH_URL: s.url }), (e) => e.code === 1)
+    const child = execFile(BIN, ['--json', '-', '--no-deliver'], { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: 'w1:p2', HERDR_DASH_URL: s.url } })
+    const done = new Promise((r) => child.on('close', r))
+    child.stdin.end(JSON.stringify({ questions: [{ question: 'Q?', header: 'H', options: [{ label: 'x' }] }] }))
+    assert.equal(await done, 0)
+    assert.equal(seen.noDeliver, true)
+    assert.equal(seen.questions[0].question, 'Q?')
+  } finally { s.close() }
+})
