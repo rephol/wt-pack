@@ -17,7 +17,8 @@ wt-roles list                                        what is in effect here (kin
 wt-roles new <name> [--base <role>] [--from-default] write a starting file
 wt-roles check                                       validate every file (exit 1 on an error)
 ```
-All take `--cwd <dir>` (default: here). A worktree reads and writes its repo's **main checkout**.
+All take `--cwd <dir>` (default: here). The CLI is `scripts/wt-roles` in this skill's directory (it is not on
+`PATH`). A worktree reads and writes its repo's **main checkout**.
 
 ## Pick the right layer first
 
@@ -62,18 +63,22 @@ warning. Persona names: lowercase letters, digits and `-`, ≤ 24 chars, not a b
 - `wt-agents spawn frontend-worker` starts it in the `<repo>-workers` pool (it is still a worker: idle
   retirement, DND, pairing and Dispatch see it) with `persona=frontend-worker`, and the file's model, effort
   and MCP servers (explicit flags win).
-- Dispatch hands a Ready ticket to the first persona (filename order) whose `labels` meet the ticket's and
-  whose `base` matches the ticket's role. Matching is strict: a plain worker is never given a persona ticket,
+- Dispatch hands a Ready ticket to the first persona (filename order) with any `labels` entry equal to one of
+  the ticket's labels (case-insensitive) and whose `base` matches the ticket's role (Dispatch only ever picks
+  `worker` or `planner`; `--persona` by hand also takes `reviewer`). Matching is strict: a plain worker is never given a persona ticket,
   and a persona agent never gets a plain ticket. No match = today's behaviour.
-- `wt-handoff --persona <name>` does the same by hand.
+- `wt-handoff --persona <name>` does the same by hand. A spawn name with no valid file is just an ordinary new
+  role name with its own pool, so a typo does not warn: check `wt-roles list` first.
 
 ## Workflow
 
 1. `wt-roles new <name> --base <role>` (or `--from-default` to start from the pack's example for that base).
 2. Edit the body; keep it short.
 3. `wt-roles check` until it is clean.
-4. **Commit it** like code. The agents read the main checkout, so a role takes effect once it is merged
-   there; a file edited only in a worktree does not leak to other agents.
+4. **Commit it** like code. The CLI and the dashboard write into the repo's **main checkout** (not your
+   worktree), so commit from there (`git -C <main checkout> add .wt-pack/roles && git -C <main checkout> commit`).
+   Agents read the main checkout, so a role takes effect as soon as the file is saved there, and a file edited
+   only in a worktree never leaks to other agents.
 
 Skeleton: `template.md`. Worked examples: `examples/worker-override.md`, `examples/frontend-worker.md`.
 Example overrides per base role, which `--from-default` copies: `defaults/`. Nothing is copied into a repo by

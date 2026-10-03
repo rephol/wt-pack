@@ -17,7 +17,7 @@ for (let i = 0; i < rest.length; i++) {
   else o._.push(rest[i])
 }
 const die = (m, code = 1) => { console.error(`wt-roles: ${m}`); process.exit(code) }
-const checkout = mainCheckout(o.cwd || process.cwd())
+const checkout = mainCheckout(o.cwd || process.cwd(), 5000)
 if (!['list', 'new', 'check'].includes(cmd)) die('usage: wt-roles list | new <name> [--base <role>] [--from-default] | check  [--cwd D]', 2)
 if (!checkout) die('not in a git repo', 2)
 
