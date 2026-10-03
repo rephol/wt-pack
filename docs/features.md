@@ -314,6 +314,15 @@ Chat rooms shared by you and agents.
   A session picks the mod up on `/reload-plugins` or at its next start (mods reload without a respawn); until then it
   keeps the native picker, which the pane-scrape mirror above still serves. `wt-ask --wait <id>`, `--ping` and `--no-deliver` are the mod's building blocks.
 
+**Queued delivery (WP-210):** the `wt-deliver-mod@wt-pack` plugin (its own plugin, so it can be disabled alone;
+`./setup install` enables it, `./setup doctor` reports it) makes a herdr agent pull its `wt-message` replies, room
+mentions and routine prompts from a dashboard queue and submit each as a plugin-origin prompt, one at a time and
+only between turns — no pasted keystrokes. Each delivery is a `deliveries` row in `wt.db`: `queued` → `delivered`
+(the prompt entered the session) or `pasted` (the mod went quiet before it pulled; the dashboard pasted it). The mod
+says hello every 20 s; a pane without a fresh hello (mod off, crashed, session started before install, dashboard
+down) is pasted exactly as before. Slash-command traffic (`/goal …` handoffs, `/wt-… ` routines) always pastes: a
+command must be typed. A session loads the mod at its next start or `/reload-plugins`.
+
 ## Inbox
 
 - A drawer from the sidebar bell; Escape or going to another page closes it (WP-87).
