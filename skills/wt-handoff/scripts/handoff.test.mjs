@@ -236,3 +236,10 @@ test('WP-204: --persona lists/reuses only agents tagged with that persona; a pla
   assert.throws(() => run(['--persona', 'ghost', '--dry-run', repo], 'x'), (e) => e.status === 2)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
+
+test('WP-204: --persona alone resolves the base from its role file; a conflicting --role is exit 2', () => {
+  mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'qa-reviewer.md'), '---\nbase: reviewer\n---\nQA.')
+  assert.match(run(['--persona', 'qa-reviewer', '--no-goal', '--dry-run', repo], 'check it'), /would spawn a qa-reviewer reviewer in/)
+  assert.throws(() => run(['--persona', 'qa-reviewer', '--role', 'worker', '--dry-run', repo], 'x'), (e) => e.status === 2)
+})

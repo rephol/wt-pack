@@ -248,6 +248,9 @@ fi
 if [ -n "$persona" ] && [ -z "$role" ]; then
   role=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
   case "$role" in worker|planner|reviewer) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner or reviewer base" >&2; exit 2 ;; esac
+elif [ -n "$persona" ]; then
+  pbase=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
+  [ -z "$pbase" ] || [ "$pbase" = "$role" ] || { echo "--persona $persona is a $pbase, not a $role" >&2; exit 2; }
 fi
 # Worker or planner? Decided before the footer (Jev judges the request, not the routing) and before any reuse,
 # because reuse is restricted to the chosen role's pool.
