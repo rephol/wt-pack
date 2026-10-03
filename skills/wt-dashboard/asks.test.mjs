@@ -1,7 +1,7 @@
 // Run: node --test asks.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Asks, clean, ping, ASK_MAX_AGE_MS } from './asks.mjs'
@@ -140,8 +140,12 @@ test('server: unknown pane → 403 on GET /api/asks/ping and /api/asks/:id', asy
   const { spawn } = await import('node:child_process')
   const root = await mkdtemp(join(tmpdir(), 'asks-srv-'))
   const port = 20000 + Math.floor(Math.random() * 20000)
+  // Never the real herdr: no HERDR_* env, and a stub first on PATH that lists no agents and fails everything else.
+  const bin = join(root, 'bin'); await mkdir(bin)
+  await writeFile(join(bin, 'herdr'), '#!/bin/sh\n[ "$1 $2" = "agent list" ] && echo \'{"result":{"agents":[]}}\' && exit 0\nexit 1\n', { mode: 0o755 })
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('HERDR_')))
   const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
-    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+    env: { ...env, PATH: `${bin}:${process.env.PATH}`, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     await new Promise((res, rej) => {
       let out = '', err = ''

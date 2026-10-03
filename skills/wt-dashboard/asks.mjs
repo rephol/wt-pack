@@ -134,7 +134,8 @@ export class Asks {
   // never empty-because-herdr-failed: the caller skips the sweep then) or the ask is older than maxAgeMs.
   async expire(live, now = Date.now(), maxAgeMs = ASK_MAX_AGE_MS) {
     const stale = (await this.list(undefined, true)).filter((a) => a.noDeliver && (!live.has(a.pane) || now - Date.parse(a.created) > maxAgeMs))
-    for (const a of stale) await this.resolve(a.id, a.pane).catch((e) => this.log(`asks: expire ${a.id}: ${e.message}`)) // 409: answered meanwhile
-    return stale.length
+    let n = 0
+    for (const a of stale) await this.resolve(a.id, a.pane).then(() => n++, (e) => this.log(`asks: expire ${a.id}: ${e.message}`)) // 409: answered meanwhile
+    return n
   }
 }
