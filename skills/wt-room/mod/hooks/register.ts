@@ -9,6 +9,7 @@ const PULL_MS = 3_000
 export const register: Register = (on) => {
   let turnRunning = false
   let pulling = false
+  let lastSubmitted = ''
 
   on('session.start', async ($, e, next) => {
     const wt = `${$.plugin.root}/scripts/wt-deliver`
@@ -22,8 +23,12 @@ export const register: Register = (on) => {
         let item: { id?: string; text?: string }
         try { item = JSON.parse(r.stdout) } catch { return }
         if (!item.id || typeof item.text !== 'string') return // {} : nothing queued
-        await $.prompt.submit({ text: item.text }) // a failure leaves the row queued: retried next tick
-        await run(['ack', item.id, 'delivered'])
+        if (item.id !== lastSubmitted) { // a failed ack leaves the row queued: retry only the ack, never the submit
+          turnRunning = true // a submitted prompt starts a turn; do not wait for turn.start to say so
+          try { await $.prompt.submit({ text: item.text }) } catch (err) { turnRunning = false; throw err }
+          lastSubmitted = item.id
+        }
+        for (let i = 0; i < 3 && (await run(['ack', item.id, 'delivered']))?.exitCode !== 0; i++);
       } catch { /* retry next tick */ } finally { pulling = false }
     }
     pullNow = pull

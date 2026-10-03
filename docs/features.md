@@ -321,7 +321,8 @@ only between turns — no pasted keystrokes. Each delivery is a `deliveries` row
 (the prompt entered the session) or `pasted` (the mod went quiet before it pulled; the dashboard pasted it). The mod
 says hello every 20 s; a pane without a fresh hello (mod off, crashed, session started before install, dashboard
 down) is pasted exactly as before. Slash-command traffic (`/goal …` handoffs, `/wt-… ` routines) always pastes: a
-command must be typed. A session loads the mod at its next start or `/reload-plugins`.
+command must be typed. A delivery waits for the running turn to end (a pasted message used to sit in the TUI's own queue
+instead). A session loads the mod at its next start or `/reload-plugins`.
 
 ## Inbox
 
