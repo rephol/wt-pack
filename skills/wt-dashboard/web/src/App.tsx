@@ -24,7 +24,8 @@ import { dockReducer, load as loadDock, save as saveDock, unread as dockUnread, 
 import { SettingsHost, openSettings } from './settings'
 import { openProjectSettings } from './projects-settings'
 import { InboxButton, InboxHost } from './inbox'
-import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier } from './rooms'
+import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier, ReplyIcon } from './rooms'
+import { withReply } from './replyQuote'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
@@ -1092,7 +1093,7 @@ function setShowAllDetails(v: boolean) {
   try { localStorage.setItem('msg-details', v ? '1' : '0') } catch { /* private mode */ }
   detailSubs.forEach((f) => f())
 }
-function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extraAttachments?: number; copyText?: string }) {
+function MetaLine({ meta, extraAttachments = 0, copyText, onReply }: { meta?: Meta; extraAttachments?: number; copyText?: string; onReply?: () => void }) {
   const [abs, setAbs] = useState(false)
   const all = useSyncExternalStore(subDetails, () => showAllDetails)
   const [own, setOwn] = useState<boolean | null>(null) // per message; null follows the global toggle
@@ -1120,6 +1121,7 @@ function MetaLine({ meta, extraAttachments = 0, copyText }: { meta?: Meta; extra
         {when && <Text type="supporting" size="sm"><span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)}>{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</span></Text>}
         {stop && <Badge label={stop} variant="error" />}
         {parts.length > 0 && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOwn(!open)} /></span>}
+        {onReply && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Reply" icon={<ReplyIcon />} variant="ghost" size="sm" onClick={onReply} /></span>}
         {copyText && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" size="sm" />} variant="ghost" size="sm" onClick={copy} /></span>}
       </div>
       {open && parts.length > 0 && <Text type="supporting" size="sm">{parts.join(' · ')}</Text>}
@@ -1179,10 +1181,14 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     },
     onSelect: (item) => ({ value: `/${item.label}`, label: `/${item.label}`, variant: 'blue' as const }),
   }), [cmds.data])
+  // WP-217: ↩ on a message quotes it ahead of the next send, as in rooms.
+  const [replyTo, setReplyTo] = useState<{ name: string; text: string } | null>(null)
+  const startReply = (name: string, text: string) => { setReplyTo({ name, text }); inputRef.current?.focus() }
   const submit = (v: string) => {
     const paths = atts.filter((a) => a.path).map((a) => a.path!)
     if (!v.trim() && !paths.length) return
-    const text = [v.trim(), paths.join('\n')].filter(Boolean).join('\n\n')
+    const text = withReply(replyTo, [v.trim(), paths.join('\n')].filter(Boolean).join('\n\n'))
+    setReplyTo(null)
     // A status poll can lag right after a send, so a send within 30s of the last one counts as mid-turn too.
     // 'blocked' (waiting on a picker/question) is just as unable to take a message right now as 'working'.
     const busy = isBusy(agent.status) || Date.now() - lastSend.current < 30_000
@@ -1309,7 +1315,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                       <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} />}>
+                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} onReply={splitUploads(r.m.text).text ? () => startReply('you', splitUploads(r.m.text).text) : undefined} />}>
                       {r.room ? <RoomPrompt room={r.room} /> : (() => {
                         const u = splitUploads(r.m.text)
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
@@ -1323,7 +1329,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                       })()}
                     </ChatMessage>
                   ) : (
-                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} />}>
+                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} onReply={r.m.text ? () => startReply(agent.name, r.m.text) : undefined} />}>
                       <ChatMessageBubble variant="ghost" width="100%">
                         {r.m.text && (r.collapsed
                           ? <Collapsed lines={r.m.text.trim().split('\n').filter(Boolean).length}><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown><LinkPreviews text={r.m.text} /></Collapsed>
@@ -1362,11 +1368,16 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                   isDisabled={send.isPending || uploading}
                   input={<ChatComposerInput onKeyDown={(e: import('react').KeyboardEvent) => {
                     // Esc while the agent works = Stop. (A pending question replaces this composer, so its Esc stays Skip.)
+                    if (e.key === 'Escape' && replyTo) { e.preventDefault(); setReplyTo(null); return }
                     if (e.key === 'Escape' && agent.status === 'working' && !heldPicker) { e.preventDefault(); stop() }
                     composerEnter(e)
                   }} handleRef={inputRef} triggers={[slash]} onFiles={addFiles} placeholder={`Message ${agent.name}…`} isDisabled={send.isPending} />}
                   status={attErr ? { type: 'warning', message: attErr } : undefined}
-                  headerContext={ctx && (() => { const t = `${ctx.pct}% · ${ctx.text}`; return (
+                  headerContext={replyTo ? (
+                    <HStack gap={1} align="center" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', width: '100%', minWidth: 0 }}>
+                      <Text type="supporting" size="sm" maxLines={1}>{`↪ ${replyTo.name}: ${replyTo.text.trim().split('\n')[0]}`}</Text>
+                      <IconButton label="Cancel reply" icon={<Icon icon="close" size="sm" />} size="sm" variant="ghost" onClick={() => setReplyTo(null)} />
+                    </HStack>) : ctx && (() => { const t = `${ctx.pct}% · ${ctx.text}`; return (
                     <Tooltip content={`Context window: ${t}`}><div style={{ width: 96 }}>
                       <ProgressBar label={`Context window ${t}`} isLabelHidden value={ctx.pct} variant={ctx.pct >= 80 ? 'error' : ctx.pct >= 60 ? 'warning' : 'accent'} />
                     </div></Tooltip>) })()}

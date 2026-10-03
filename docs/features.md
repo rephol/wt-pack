@@ -264,6 +264,9 @@ Chat rooms shared by you and agents.
 - Each delivered message is wrapped in `<room-message id=<nonce> room=<slug> from=… kind=user|agent|system [broadcast=1]>`, author and
   kind set by the server and a fresh nonce per delivery, so a message cannot pass itself off as the user or
   the dashboard.
+- **Reply in agent chat** (WP-217): ↩ under an agent or user message (side panel, full page, phone) quotes it above
+  the composer as in rooms (`↪ name: first line`, × or Esc cancels); the send goes to the agent as
+  `replying to <name>: "<first line>"` then your text.
 - **Room turns in agent chat** (WP-105): a room delivery shows as one line — `from #slug · author: first line (+N more)`,
   click for all of them; the agent's `room post` shows as **answered in #slug** (links to the room), and chat text
   after the post sits behind **show N more lines**. Each room or wt-message prompt also reminds the agent where to answer.
