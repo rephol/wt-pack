@@ -175,7 +175,7 @@ export class Dispatch {
     const role = roleFor(next)
     // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy (idle/done, like candidates()).
     const buddy = role === 'worker' && !next.pair
-      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair)
+      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair && !a.paneTokens?.persona)
       : null
     const persona = personaFor(next, await this.deps.personasOf?.(repo).catch(() => []), role)
     try {

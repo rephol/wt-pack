@@ -549,3 +549,11 @@ test('dispatch passes --persona for a matching label, and nothing for a plain ti
   await s2.d.tick()
   assert.ok(!s2.calls[0].args.includes('--persona'))
 })
+
+test('WP-205: an idle persona reviewer is not picked as a buddy', async () => {
+  const persona = { name: 'wt-pack-qa-reviewer-01', id: 'wR:p3', local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: { persona: 'qa-reviewer' } }
+  const { tickets, d, calls } = await setup({ agents: [persona] })
+  await ready(tickets, 'a')
+  await d.tick()
+  assert.ok(!calls[0].args.includes('--buddy'))
+})

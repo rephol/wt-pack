@@ -264,3 +264,13 @@ test('routine sends name themselves (WP-104): prompt gets { routine }, spawn get
   await r.idle()
   assert.deepEqual(w.calls.spawn.at(-1).tag, { kind: 'routine', from: 'Audit' })
 })
+
+test('WP-205: a role-based routine pick skips a persona agent; naming it still works', async () => {
+  const { w, r } = setup()
+  w.list = [{ id: 'p1', name: 'fe-worker', pool: 'worker', project: 'wt-pack', status: 'idle', paneTokens: { persona: 'frontend-worker' } }]
+  const by = r.create({ name: 'p', schedule: 'every 1h', target: { kind: 'prompt', role: 'worker', project: 'wt-pack', text: 'x' } })
+  assert.equal((await r.runNow(by.id)).reason, 'no agent')
+  const named = r.create({ name: 'q', schedule: 'every 1h', target: { kind: 'prompt', agent: 'fe-worker', text: 'y' } })
+  await r.runNow(named.id); await r.idle()
+  assert.deepEqual(w.calls.prompt, [['fe-worker', 'y']])
+})
