@@ -13,7 +13,7 @@ import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteR
 import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { rolesState, writeRole } from './project-roles.mjs'
-import { Asks } from './asks.mjs'
+import { Asks, ping } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
@@ -2439,8 +2439,7 @@ async function asksApi(req, res, url, parts) {
     // A pane (wt-ask --wait, WP-206) may read only its own ask; the user's session reads any.
     const author = await roomAuthor(req)
     if (id === 'ping') { // wt-ask --ping (WP-206): dashboard up and this is a wt-pack agent pane (has a role token), not a bare herdr pane
-      if (author.kind === 'agent' && !(await agents()).find((a) => a.key === author.key)?.tags?.role) return send(res, 403, { error: 'pane has no role token' })
-      return send(res, 200, { ok: true, kind: author.kind })
+      return send(res, 200, ping(author, author.kind === 'agent' ? (await agents()).find((a) => a.key === author.key)?.tags?.role : undefined))
     }
     return send(res, 200, await asks.get(id, author.kind === 'agent' ? author.pane : undefined))
   }
@@ -3420,6 +3419,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     process.on('uncaughtException', crashed('uncaughtException'))
     process.on('unhandledRejection', crashed('unhandledRejection'))
     setInterval(roomsLoop, 4000)
+    setInterval(() => agents().then((ag) => { const live = new Set(ag.filter((a) => a.local).map((a) => a.id)); return live.size && asks.expire(live) }).catch((e) => console.error('asks expire:', e.message)), 60_000).unref() // WP-209
     setInterval(tick, 4000)
     setTimeout(tick, 500)
     if (selfBuild()) { const fw = () => freshenWeb().catch((e) => console.error('web:', e.message)); setTimeout(fw, 5000); setInterval(fw, 120_000) }
