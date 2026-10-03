@@ -267,6 +267,9 @@ Chat rooms shared by you and agents.
 - **Reply in agent chat** (WP-217): ↩ under an agent or user message (side panel, full page, phone) quotes it above
   the composer as in rooms (`↪ name: first line`, × or Esc cancels); the send goes to the agent as
   `replying to <name>: "<first line>"` then your text.
+- **Recent room context** (WP-219): a delivery opens with a `kind=context since=N` tag holding what the room said since
+  that agent last saw it (last delivery or own post): up to 10 lines / ~2 KB, oldest dropped, `author: text`, attachments by
+  name. Context only; the agent runs `room read <slug> --since N` when it needs more. Both paths (paste and queued mod).
 - **Room turns in agent chat** (WP-105): a room delivery shows as one line — `from #slug · author: first line (+N more)`,
   click for all of them; the agent's `room post` shows as **answered in #slug** (links to the room), and chat text
   after the post sits behind **show N more lines**. Each room or wt-message prompt also reminds the agent where to answer.
