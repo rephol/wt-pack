@@ -27,10 +27,10 @@ or, before anything is linked, the clone the user names.
 3. **Secrets are typed by the user**, never by you: ask them to run `! <repo>/setup secrets` for the
    TypeSafe key. The Linear key goes in the dashboard, Settings › Integrations (stored in the Keychain).
 4. **gh login** is the user's too: when doctor says gh is not logged in, ask them to run `! gh auth login`.
-5. **Uninstall** only when asked: `<repo>/setup uninstall` removes the service, the plugin and the skill
+5. **Uninstall** only when asked: `<repo>/setup uninstall` removes the service, the plugin entry and the skill
    links that point into that checkout, and keeps data, config, keys and logs. `--purge` also deletes the
    dashboard's data and config after a y/N; confirm with the user first, then pass `--yes`.
 
-`setup` never repoints an install that already belongs to another wt-pack checkout (skill links, the plugin
-marketplace, the launchd service): it reports them as kept. Run it from the checkout that should own the
+`setup` never repoints an install that already belongs to another wt-pack checkout (the plugin-dir entry in
+`~/.claude/settings.json`, skill links, the launchd service): it reports them as kept. Run it from the checkout that should own the
 install. Finish by showing the final doctor lines.
