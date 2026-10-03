@@ -32,3 +32,18 @@ test('path confinement: traversal, slashes, uppercase, dots and oversize are 400
 test('a non-repo is a 404', async () => {
   await assert.rejects(rolesState(tmpdir(), git), (e) => e.status === 404)
 })
+
+test('a symlinked role file or roles dir is never written through', async () => {
+  const { symlinkSync, mkdirSync: mk, writeFileSync: wf } = await import('node:fs')
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'proles-out-')))
+  wf(join(outside, 'x.md'), 'orig')
+  symlinkSync(join(outside, 'x.md'), join(repo, '.wt-pack/roles/linked.md'))
+  assert.throws(() => writeRole(repo, 'linked', 'pwn'), (e) => e.status === 400)
+  assert.equal(readFileSync(join(outside, 'x.md'), 'utf8'), 'orig')
+  const repo2 = realpathSync(mkdtempSync(join(tmpdir(), 'proles2-')))
+  execFileSync('git', ['init', '-q', repo2])
+  mk(join(repo2, '.wt-pack'))
+  symlinkSync(outside, join(repo2, '.wt-pack/roles'))
+  assert.throws(() => writeRole(repo2, 'y', 'pwn'), (e) => e.status === 400)
+  assert.ok(!existsSync(join(outside, 'y.md')))
+})
