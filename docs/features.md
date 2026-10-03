@@ -544,6 +544,14 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   effort parameter, so this is session-only. `pick --json` and `floor --role R --json` include
   `effort`/`applyEffort`; logged next to the tier (with Jev's raw pick and confidence) in the judge log and shown
   as an Effort column in Settings › Observability › Model routing.
+- **Per request** (WP-211, `wt-pack@wt-pack` only): the root plugin's `hooks/routing.ts` mod routes the first model
+  request of every main-loop turn (`pick --skill turn-step --session`, task = the submitted prompt) and the turn's
+  later requests reuse that pick through `turn.step`. Same gate as everywhere: in `shadow` it only logs, in `off` it
+  does nothing, only `live` rewrites the request's model and effort — over a `/model` the user chose, so
+  `WT_MODEL_ROUTING=off` (or a repo/project override) is the switch. `sessionFloor` holds (never haiku for the main
+  session); subagents are left to their Agent call. An applied pick's outcome is recorded when the turn ends:
+  `ok` on an answer, `returned` on a refusal or API error, nothing on an interrupt. A session picks the mod up on
+  `/reload-plugins` or at its next start.
 - **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
   pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
   hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a

@@ -1,6 +1,7 @@
 // WP-207 — instant slash commands: wrappers that run existing wt-pack scripts directly, with no Claude turn,
 // and `immediate` so they also run while the agent is mid-turn. No logic of their own: argv in, stdout out.
 import type { Register } from 'claude-code'
+import { registerRouting } from './routing'
 
 type Ctx = Parameters<Parameters<Parameters<Register>[0]>[2]>[0]
 
@@ -39,7 +40,8 @@ async function run($: Ctx, name: string, args: string) {
   return { text: (text || `/${name}: no output`) + (r.exitCode ? `\n(exit ${r.exitCode})` : '') }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  registerRouting(on, options) // WP-211 per-request model routing (turn.step)
   on('session.start', async ($, e, next) => {
     for (const [name, c] of Object.entries(COMMANDS)) {
       await $.command.register({ name, description: c.description, argumentHint: c.hint, immediate: true })
