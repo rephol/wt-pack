@@ -138,6 +138,9 @@ spawn|mcp-args|mcp-file)
     fi ;;
   esac
   lrole=${persona:-$role}
+  # WP-205: `frontend-worker` with no valid role file would silently become a brand-new role and pool.
+  if [ -z "$persona" ] && [ "$cmd" = spawn ]; then case "$role" in orchestrator|planner|worker|auditor|reviewer) ;;
+    *-orchestrator|*-planner|*-worker|*-auditor|*-reviewer) echo "warning: no valid .wt-pack/roles/$role.md (wt-roles check); spawning \"$role\" as a plain role with its own pool" >&2 ;; esac; fi
   case "$model" in ''|haiku|sonnet|opus) ;; *) echo "--model: haiku, sonnet or opus" >&2; exit 2 ;; esac
   case "$effort" in ''|low|medium|high|xhigh|max) ;; *) echo "--effort: low, medium, high, xhigh or max" >&2; exit 2 ;; esac
   # Check --mcp names before anything is created.

@@ -175,7 +175,7 @@ export class Dispatch {
     const role = roleFor(next)
     // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy (idle/done, like candidates()).
     const buddy = role === 'worker' && !next.pair
-      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair)
+      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair && !a.paneTokens?.persona)
       : null
     const persona = personaFor(next, await this.deps.personasOf?.(repo).catch(() => []), role)
     try {
@@ -282,7 +282,7 @@ export class Dispatch {
     const p = cur.pair?.[role]
     if (!p) return
     const wantPool = role === 'worker' ? 'worker' : (p.role || 'reviewer')
-    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair)
+    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair && !x.paneTokens?.persona)
     const repl = i < 0 ? null : local[i]
     if (repl) local.splice(i, 1)
     const pair = { ...cur.pair, [role]: repl ? { name: repl.name, pane: repl.id, ...(role === 'buddy' ? { role: wantPool } : {}) } : null }

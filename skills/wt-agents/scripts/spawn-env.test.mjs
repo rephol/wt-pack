@@ -2,7 +2,7 @@
 // spawned pane as GH_TOKEN (herdr tab create --env), and gh's global active account is never switched.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -183,4 +183,12 @@ test('WP-204: a persona spawns into its base pool with role=<base> persona=<name
   assert.ok(s.calls.some((l) => /^herdr agent start .*--mcp-config /.test(l)))
   // an unknown name with no file is still just a role name
   assert.match(spawn(['spawn', 'nofile', repo]).out, /^demo-nofile-01 /)
+})
+
+test('WP-205: a *-worker name with no valid role file warns that it spawns a plain role', () => {
+  const r = spawnSync(join(here, 'agents.sh'), ['spawn', 'ghost-worker', repo], { cwd: repo, encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
+  assert.equal(r.status, 0)
+  assert.match(r.stdout, /^demo-ghost-worker-01 /)
+  assert.match(r.stderr, /warning: no valid \.wt-pack\/roles\/ghost-worker\.md/)
 })
