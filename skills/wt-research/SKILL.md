@@ -48,9 +48,11 @@ re-processes a growing context — so these two rules outrank any prose below th
 
 ## Sizing
 
-**Model per shard (WP-128).** Pipe each shard's brief to `node ../wt-shared/scripts/model-route.mjs pick --skill
-<shard name> --role researcher`; when it prints a tier (live routing), pass it as that Agent call's `model`. When it
-prints nothing (shadow or off, the default), leave `model` unset. A hook cannot set it, so this is the only place it gets set.
+**Model per shard (WP-128).** Pipe each shard's brief to `node ../wt-shared/scripts/model-route.mjs pick --json --skill
+<shard name> --role researcher`; when its `apply` is a tier (live routing), pass it as that Agent call's `model`. When
+`apply` is null (shadow or off, the default), leave `model` unset. A hook cannot set it, so this is the only place it gets set. Keep its `ref` (`--json` prints it even in shadow) and,
+once you have judged that agent's output, record it (WP-215): `node ../wt-shared/scripts/model-route.mjs outcome <ref> ok`
+when you accept it as returned, `… outcome <ref> send-back "<why>"` when you re-dispatch it or redo its work yourself.
 
 Shard by **question type, never by file**. Two shards must never read the same file — that rule is what makes
 parallelism cheaper rather than merely faster.
