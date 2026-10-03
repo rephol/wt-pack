@@ -3,7 +3,7 @@
 #
 #   agents.sh list [role] [--json]         # name, pane, status, cwd, dnd (+until), pair (--json adds tokens,
 #                                            plus structured dnd:{on,until} and pair)
-#   agents.sh spawn <role> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
+#   agents.sh spawn <role|persona> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
 #                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
 #                                            --model starts claude on that tier (WP-128), pinned to its explicit
 #                                            model id (WP-158) rather than the bare alias; --effort sets its
@@ -27,7 +27,8 @@
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
 # A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
-# created on demand; $WT_AGENTS_WORKSPACE overrides the label. Any role name works
+# created on demand; $WT_AGENTS_WORKSPACE overrides the label. A persona (WP-204: a name with a project-role
+# file .wt-pack/roles/<name>.md) spawns into its BASE role's pool, tagged role=<base> persona=<name>. Any role name works
 # ([a-z][a-z0-9-]*); workers are spawned in <cwd> (a worktree, usually), every other
 # role in the main checkout unless a cwd is given (a planner's first job is to MAKE a
 # worktree). Each new agent gets herdr pane tokens (source "wt-dashboard", display-
@@ -120,6 +121,23 @@ spawn|mcp-args|mcp-file)
     else set -- "$@" "$a"; fi
   done
   role=${1:?role required, e.g. worker|planner}
+  # WP-204: a name that is not a base role but has a project-role file (.wt-pack/roles/<name>.md) is a PERSONA: it
+  # spawns into its BASE role's pool with role=<base> and a persona token, so retire, DND/pair gates and Dispatch
+  # still see it. Its model/effort/mcp are defaults (explicit flags win; model is floored below like any spawn).
+  persona=
+  case "$role" in orchestrator|planner|worker|auditor|reviewer) ;; *)
+    if pj=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$role" --cwd "$(cd "${2:-$PWD}" 2>/dev/null && pwd)" 2>/dev/null); then
+      persona=$role; role=$(printf '%s' "$pj" | jq -r .base)
+      [ -n "$model" ] || model=$(printf '%s' "$pj" | jq -r '.model // empty')
+      [ -n "$effort" ] || effort=$(printf '%s' "$pj" | jq -r '.effort // empty')
+      pm=$(printf '%s' "$pj" | jq -r '.mcp | join(",")')
+      if [ -n "$pm" ]; then
+        # a persona's servers are added to --mcp picks, de-duplicated
+        extra=$(printf '%s,%s' "$extra" "$pm" | tr ',' '\n' | sed '/^$/d' | awk '!s[$0]++' | paste -sd, -)
+      fi
+    fi ;;
+  esac
+  lrole=${persona:-$role}
   case "$model" in ''|haiku|sonnet|opus) ;; *) echo "--model: haiku, sonnet or opus" >&2; exit 2 ;; esac
   case "$effort" in ''|low|medium|high|xhigh|max) ;; *) echo "--effort: low, medium, high, xhigh or max" >&2; exit 2 ;; esac
   # Check --mcp names before anything is created.
@@ -150,6 +168,8 @@ spawn|mcp-args|mcp-file)
   # so two repos numbering from 1 collide on the second pool with
   # agent_name_taken and the agent never starts.
   slug=$(repo_slug "$main")
+  # herdr names are <= 32: a persona's longer role part shortens the repo part ("-" + role + "-NN").
+  [ -z "$persona" ] || slug=$(printf '%s' "$slug" | cut -c1-$((28 - ${#persona})))
   # WP-120: plus the names of exited agents the watchdog remembers — herdr drops them from its list, and
   # reusing one blocks that agent's Resume ("already running in pane …"). A deliberate `rm` (or the WP-143
   # idle retirement, which also runs `rm`) drops its own name from watchdog.json below, so only a crash-gone
@@ -158,9 +178,9 @@ spawn|mcp-args|mcp-file)
   wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
   used=$({ herdr agent list | jq -r '.result.agents[].name // empty'
     [ -r "$wd" ] && jq -r '.lastSeen // {} | .[] | select(.goneAt) | .name // empty' "$wd" 2>/dev/null; } \
-    | sed -n "s/^$slug-$role-0*\([0-9][0-9]*\)$/\1/p" | sort -nu)
+    | sed -n "s/^$slug-$lrole-0*\([0-9][0-9]*\)$/\1/p" | sort -nu)
   num=$(printf '%s\n' "$used" | awk 'BEGIN{n=1} NF{if ($1==n) n++} END{print n}')
-  label=$(printf '%s-%s-%02d' "$slug" "$role" "$num")
+  label=$(printf '%s-%s-%02d' "$slug" "$lrole" "$num")
   [ -z "$fixed" ] || label=$fixed
   }
   [ "$cmd" = mcp-args ] && label=args-$$
@@ -240,7 +260,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # role token from this pane, and a tag set after start arrives too late for it.
   # (Best effort: an older herdr has no report-metadata.)
   herdr pane report-metadata "$pane" --source wt-dashboard --token "role=$role" --token "project=$repo" \
-    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" >/dev/null 2>&1 || true
+    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" ${persona:+--token "persona=$persona"} >/dev/null 2>&1 || true
 
   # A fresh pane is not at its shell prompt the instant `tab create` returns.
   n=0
@@ -348,7 +368,7 @@ respawn)
     row=$(herdr agent list | jq -c --arg t "$1" '[.result.agents[] | select(.name == $t or .pane_id == $t)][0] // empty')
     [ -n "$row" ] || { echo "no such agent: $1" >&2; return 1; }
     name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
-    r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
+    r=$(printf '%s' "$row" | jq -r '.tokens.persona // .tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
     sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')
     m=$(printf '%s' "$row" | jq -r '.tokens.model // empty'); e=$(printf '%s' "$row" | jq -r '.tokens.effort // empty')
     [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role token and a cwd to respawn" >&2; return 1; }
@@ -365,7 +385,7 @@ respawn)
     out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
     new=${out#* }
     # Spawn writes its own role/project/spawned_by/created/model/effort; carry the rest (task, ticket, task_state …) over.
-    printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .project, .spawned_by, .created, .model, .effort) | to_entries[] | "\(.key)=\(.value)"' \
+    printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .persona, .project, .spawned_by, .created, .model, .effort) | to_entries[] | "\(.key)=\(.value)"' \
     | while IFS= read -r kv; do
         herdr pane report-metadata "$new" --source wt-dashboard --token "$kv" >/dev/null 2>&1 || true
       done
