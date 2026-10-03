@@ -2282,7 +2282,8 @@ async function deliver(a, text, paste) { // a slash command (/goal arms, /wt-aud
 // A mod that died with rows queued: paste them (and say so in the row) rather than strand them.
 setInterval(async () => {
   for (const r of deliveries.stranded()) {
-    try { await herdr('agent', 'prompt', r.pane, r.body); deliveries.settle(r.id, 'pasted') } catch (e) { deliveries.settle(r.id, 'failed'); console.error('deliveries:', e.message) }
+    if (!deliveries.settle(r.id, 'pasted')) continue // the mod got there first
+    try { await herdr('agent', 'prompt', r.pane, r.body) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); console.error('deliveries:', e.message) }
   }
 }, 15_000).unref()
 const asks = new Asks({
@@ -2470,6 +2471,8 @@ async function deliveriesApi(req, res, url, parts) {
     const pane = await canonicalPane(String(b.pane ?? ''))
     if (!pane) return send(res, 404, { error: `unknown pane ${b.pane}` })
     if (!deliveries.live(pane) || String(b.text ?? '').startsWith('/')) return send(res, 200, { queued: false })
+    // Agent-supplied text must be pack traffic (the mod submits it verbatim as a prompt), never bare text.
+    if (!/^\s*<(wt|room)-message[ >]/.test(String(b.text ?? ''))) return send(res, 200, { queued: false })
     const row = deliveries.enqueue(pane, b.text)
     broadcastEvent('deliveries', { pane })
     return send(res, 200, { queued: true, id: row.id })

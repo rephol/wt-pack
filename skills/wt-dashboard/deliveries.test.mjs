@@ -47,11 +47,14 @@ test('stranded: queued rows whose mod went quiet, past the grace period', async 
   d.hello('w1:p1')
   const r = d.enqueue('w1:p1', msg)
   tick(LIVE_MS + 1)
+  assert.deepEqual(d.stranded(), []) // server just started: hellos not yet trustworthy
+  tick(10_000)
   assert.deepEqual(d.stranded().map((x) => x.id), [r.id])
   d.hello('w1:p1')
   assert.deepEqual(d.stranded(), []) // mod is back: it will pull it
   tick(LIVE_MS + 1)
-  d.settle(r.id, 'pasted')
+  assert.equal(d.settle(r.id, 'pasted'), true)
+  assert.equal(d.settle(r.id, 'pasted'), false) // already claimed
   assert.deepEqual(d.stranded(), [])
   assert.equal(d.list('w1:p1')[0].status, 'pasted')
 })

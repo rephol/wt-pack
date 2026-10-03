@@ -11,7 +11,7 @@ const STATUS = ['queued', 'delivered', 'pasted', 'failed']
 
 export class Deliveries {
   constructor({ dir, log = console.error, now = Date.now } = {}) {
-    Object.assign(this, { file: join(dir, 'wt.db'), log, now, hellos: new Map() })
+    Object.assign(this, { file: join(dir, 'wt.db'), log, now, hellos: new Map(), started: now() })
   }
   get db() { return open(this.file, { log: this.log }) }
   hello(pane) { this.hellos.set(pane, this.now()) }
@@ -36,13 +36,17 @@ export class Deliveries {
     return { id, status, delivered_at: at }
   }
   // Queued rows whose pane's mod went quiet: the caller pastes them and calls ack(…, 'pasted') / ('failed').
+  // Not before a full hello period after this server started: hellos live in memory, so right after a restart
+  // every pane looks quiet although its mod is fine.
   stranded(graceMs = LIVE_MS) {
+    if (this.now() - this.started < LIVE_MS + 5000) return []
     const cut = new Date(this.now() - graceMs).toISOString()
     return this.db.prepare("SELECT * FROM deliveries WHERE status = 'queued' AND created < ? ORDER BY seq").all(cut).filter((r) => !this.live(r.pane))
   }
-  // Server-side status flip (the paste path owns the row once the mod is gone).
-  settle(id, status) {
-    this.db.prepare("UPDATE deliveries SET status = ?, delivered_at = ? WHERE id = ? AND status = 'queued'").run(status, new Date(this.now()).toISOString(), id)
+  // Server-side status flip, true if this call won it (the paste path claims a row before pasting, so a mod that
+  // pulls it at the same moment cannot also deliver it: the loser's ack is a 409).
+  settle(id, status, from = 'queued') {
+    return this.db.prepare('UPDATE deliveries SET status = ?, delivered_at = ? WHERE id = ? AND status = ?').run(status, new Date(this.now()).toISOString(), id, from).changes > 0
   }
   list(pane, limit = 50) {
     return this.db.prepare(`SELECT id, pane, kind, status, created, delivered_at FROM deliveries ${pane ? 'WHERE pane = ?' : ''} ORDER BY seq DESC LIMIT ${Number(limit) | 0 || 50}`).all(...(pane ? [pane] : []))
