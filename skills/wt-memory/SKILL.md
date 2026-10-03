@@ -55,14 +55,14 @@ output `hookSpecificOutput.additionalContext`), so they reuse `claude-plugin/hoo
 Add to your own configs (not done automatically):
 
 - Codex (`hooks` feature is stable/on), `~/.codex/hooks.json`:
-  `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"node ~/.claude/skills/wt-memory/claude-plugin/hooks/inject.mjs","timeout":5}]}]}}`
-  and MCP: `codex mcp add wt-memory -- node ~/.claude/skills/wt-memory/mcp/server.mjs`
+  `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"node <wt-pack checkout>/skills/wt-memory/claude-plugin/hooks/inject.mjs","timeout":5}]}]}}`
+  and MCP: `codex mcp add wt-memory -- node <wt-pack checkout>/skills/wt-memory/mcp/server.mjs`
   (= `[mcp_servers.wt-memory]` `command = "node"`, `args = ["<abs path>/mcp/server.mjs"]` in `~/.codex/config.toml`).
 - Gemini, `~/.gemini/settings.json` (timeout in ms; use absolute paths):
-  `"hooks":{"SessionStart":[{"hooks":[{"name":"wt-memory","type":"command","command":"node $HOME/.claude/skills/wt-memory/claude-plugin/hooks/inject.mjs","timeout":5000}]}]}`,
-  `"mcpServers":{"wt-memory":{"command":"node","args":["/Users/<you>/.claude/skills/wt-memory/mcp/server.mjs"]}}`
+  `"hooks":{"SessionStart":[{"hooks":[{"name":"wt-memory","type":"command","command":"node <wt-pack checkout>/skills/wt-memory/claude-plugin/hooks/inject.mjs","timeout":5000}]}]}`,
+  `"mcpServers":{"wt-memory":{"command":"node","args":["<wt-pack checkout>/skills/wt-memory/mcp/server.mjs"]}}`
  .
 
-Install: `claude plugin marketplace add ~/wt-pack && claude plugin install wt-memory@wt-pack`.
-A change to the plugin needs `claude plugin marketplace update wt-pack && claude plugin update wt-memory@wt-pack`
-(installs are copies). Self-check: `node --test scripts/wt-memory.test.mjs`.
+Install: wt-memory's hooks and MCP server ship in the one wt-pack plugin (`./setup` loads the checkout as it;
+`claude plugin install wt-pack@wt-pack` is the plugin-only install, whose copy needs
+`claude plugin marketplace update wt-pack && claude plugin update wt-pack@wt-pack` after a change). Self-check: `node --test scripts/wt-memory.test.mjs`.

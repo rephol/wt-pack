@@ -5,6 +5,7 @@
 #   ./setup doctor [--no-service] [--fix]                     # one line per need; exit 1 if a required one fails
 #                                                              # --fix: apply doctor's own safe repairs (below)
 #   ./setup secrets                                           # optional keys (TypeSafe; Linear via the dashboard)
+#   ./setup plugin                                            # just the plugin step (WP-213): load this checkout as the one wt-pack plugin
 #   ./setup uninstall [--purge] [--yes]                       # links, plugin, service; keeps data unless --purge
 #
 # Never installs without asking: missing Homebrew packages are listed and installed after one y/N (--yes skips
@@ -27,7 +28,7 @@ OS=$(uname -s)
 cmd=install; yes=0; secrets=1; service=1; purge=0; fix=0
 for a in "$@"; do
   case "$a" in
-    install|doctor|uninstall|secrets) cmd=$a ;;
+    install|doctor|uninstall|secrets|plugin|plugin-check) cmd=$a ;;
     --yes|-y) yes=1 ;;
     --no-secrets) secrets=0 ;;
     --no-service) service=0 ;;
@@ -76,7 +77,6 @@ is_pack() { [ -f "$1/.claude-plugin/marketplace.json" ] && grep -q '"name": *"wt
 root_of() { d=$(dirname "$1"); if [ "$(basename "$d")" = skills ]; then dirname "$d"; else echo "$d"; fi; }
 # A checkout's dir for skill $2, in whichever layout it has.
 skill_dir() { if [ -d "$1/skills/$2" ]; then echo "$1/skills/$2"; else echo "$1/$2"; fi; }
-skills() { for d in "$SK"/wt-*/; do [ -f "$d/SKILL.md" ] || [ "$(basename "$d")" = wt-shared ] && basename "$d"; done; }
 node_ok() { has node && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)'; }
 service_root() { [ -f "$PLIST" ] && plutil -extract ProgramArguments.1 raw "$PLIST" 2>/dev/null | sed 's#/server.mjs$##'; }
 wpservice_root() {
@@ -90,7 +90,6 @@ wpservice_root() {
 have_systemd_user() { command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; }
 # JSON via node (required anyway), not jq: a missing jq must not read as a missing plugin.
 market_path() { claude plugin marketplace list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).find(x=>x.name==="wt-pack");if(m)console.log(m.path||m.installLocation||"")}catch{}})'; }
-# plugin_ok [enabled]: wt-memory@wt-pack is installed (and enabled).
 # plugin_ver <id>: that plugin id's installed version — with no version pinned in plugin.json (WP-156),
 # Claude Code computes it from the source's git commit, so this is a commit (prefix), not a semver string.
 # checkout_commit <dir>: that dir's current HEAD commit, to compare it against.
@@ -105,20 +104,12 @@ plugin_current() {
   case "$(checkout_commit "$d")" in "$iv"*) return 0;; esac
   git -C "$d" cat-file -e "$iv^{commit}" 2>/dev/null && git -C "$d" diff --quiet "$iv" HEAD -- "$@" 2>/dev/null
 }
-plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
-# WP-206/212: mods are plugins of function hooks that a full install loads straight from the skill links —
-# skills/wt-ask (AskUserQuestion → wt-dashboard) and skills/wt-mods (/wt, model routing) carry their own
-# .claude-plugin, so Claude Code lists them as <name>@skills-dir. plugin_on <id>: that plugin is listed and enabled.
-plugin_on() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1]&&p.enabled)?0:1)}catch{process.exit(1)}})' "$1"; }
+# plugin_listed <id>: that plugin id is installed/loaded (any state).
 plugin_listed() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1])?0:1)}catch{process.exit(1)}})' "$1"; }
-# WP-210: wt-deliver-mod@wt-pack (skills/wt-room/mod) — wt-message/room delivery as a plugin-origin prompt.
-mod_enabled() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1]+"@wt-pack"&&p.enabled)?0:1)}catch{process.exit(1)}})' "${1:-wt-ask-mod}"; }
 # Install hint for a missing package, for this OS.
 # sudo only when needed: root (a container) often has no sudo at all.
 SUDO=$([ "$(id -u)" -eq 0 ] && echo "" || echo "sudo ")
 pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; then echo "${SUDO}apt-get install -y $1"; elif has dnf; then echo "${SUDO}dnf install -y $1"; else echo "install $1 with your package manager"; fi; }
-# The OTHER wt-pack checkout the existing skill links point into ("" when none, or when it is this one).
-link_home() { for l in "$SKILLS"/wt-*; do t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P) || continue; h=$(root_of "$t"); [ "$h" != "$REPO" ] && is_pack "$h" && { echo "$h"; return; }; done; }
 # herdr: report, never install. $1 = bad|opt (how a missing herdr counts); $2 = 1 also runs `herdr config check`.
 herdr_check() {
   if ! has herdr; then
@@ -152,69 +143,9 @@ doctor() {
   herdr_check bad 1
   if has claude; then ok "claude"; else bad "claude (Claude Code) not on PATH"; fi
 
-  n=0; miss=""; other=""; home=$(link_home); later=""
-  for s in $(skills); do
-    l="$SKILLS/$s"
-    t=$([ -L "$l" ] && cd "$l" 2>/dev/null && pwd -P)
-    if [ "$t" = "$SK/$s" ]; then n=$((n + 1))
-    elif [ -n "$t" ] && [ "$(basename "$t")" = "$s" ] && is_pack "$(root_of "$t")"; then n=$((n + 1)); other=$(root_of "$t")
-    elif [ -z "$t" ] && [ -n "$home" ] && [ ! -d "$(skill_dir "$home" "$s")" ]; then later="$later $s"
-    else miss="$miss $s"; fi
-  done
-  [ -n "$later" ] && opt "not linked yet:$later (new here; $home has none yet — run ./setup there after merging)"
-  if [ -z "$miss" ]; then ok "skills linked in $SKILLS ($n)${other:+ — from $other}"; else bad "skills not linked:$miss — ./setup install"; fi
-
   grep -qs "$REPO/wt-shared/hooks/" "$HOME/.claude/settings.json" \
-    && opt "~/.claude/settings.json runs a hook from $REPO/wt-shared/hooks (pre-WP-69 path) — change it to ~/.claude/skills/wt-shared/hooks/"
-
-  mp=$(market_path)
-  # WP-122: a plugin-only install (wt-pack@wt-pack) has no wt-memory@wt-pack by design.
-  root_plugin=$(claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).some(p=>p.id==="wt-pack@wt-pack"&&p.enabled)?1:"")}catch{}})')
-  if [ -n "$root_plugin" ] && ! plugin_ok enabled; then
-    : # status printed below, alongside the root plugin's own version check
-  elif plugin_ok enabled; then
-    iv=$(plugin_ver wt-memory@wt-pack); sv=$(checkout_commit "${mp:-$REPO}")
-    # WP-118/WP-156: a stale install silently lacks newer hooks (the WP-109 pkill guard shipped in 0.4.4).
-    # No version is pinned in plugin.json, so $iv is the commit Claude Code installed from — compare it
-    # to the checkout's own HEAD rather than a manually maintained string.
-    if [ -n "$sv" ] && ! plugin_current "$iv" "${mp:-$REPO}" skills/wt-memory; then bad "plugin wt-memory@wt-pack $(printf '%.12s' "$iv") installed, checkout is at $(printf '%.12s' "$sv") — ./setup install (then restart agents)"
-    else ok "plugin wt-memory@wt-pack $iv${mp:+ (marketplace $mp)}"; fi
-    # WP-120: plugin hooks load at session start — sessions older than the installed version run without its guard.
-    ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json")
-    if [ -n "$ip" ] && [ -d "$ip" ]; then
-      g=$(stat -c %W "$ip" 2>/dev/null || stat -f %B "$ip" 2>/dev/null || true)
-      n=$(LC_ALL=C ps -axo lstart=,command= | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const g=+process.argv[1]*1000;console.log(s.split("\n").filter(l=>/^(\S*\/)?claude\s.*--name[ =]/.test(l.slice(25).trim())&&Date.parse(l.slice(4,24))<g).length)})' "${g:-0}")
-      [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — wt-agents respawn --stale (in each repo)"
-    fi
-  else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
-  # WP-206/212: the mods load from the skill links as <name>@skills-dir; /reload-plugins or a new session picks them up.
-  if [ -z "$root_plugin" ]; then
-    for m in wt-mods wt-ask-mod; do
-      if plugin_on "$m@skills-dir"; then ok "mod $m@skills-dir loaded"
-      else bad "mod $m@skills-dir not loaded (claude plugin list) — ./setup install links it; then /reload-plugins"; fi
-    done
-    if mod_enabled wt-deliver-mod; then
-      miv=$(plugin_ver wt-deliver-mod@wt-pack)
-      if [ -n "$(checkout_commit "${mp:-$REPO}")" ] && ! plugin_current "$miv" "${mp:-$REPO}" skills/wt-room/mod; then bad "plugin wt-deliver-mod@wt-pack $(printf '%.12s' "$miv") installed, checkout is newer — ./setup install (then restart agents)"
-      else ok "plugin wt-deliver-mod@wt-pack $miv enabled (wt-messages submitted as prompts; agents spawned after install)"; fi
-    else bad "plugin wt-deliver-mod@wt-pack not enabled — ./setup install"; fi
-  fi
-  # The pre-WP-212 marketplace copy of the AskUserQuestion mod: same name, so it shadows the skills-dir one.
-  plugin_listed wt-ask-mod@wt-pack && bad "plugin wt-ask-mod@wt-pack is installed and clashes with the skill-linked wt-ask-mod — claude plugin uninstall wt-ask-mod@wt-pack (./setup install does)"
-  # WP-122: the root wt-pack plugin is the plugin-only path; with the ./setup plugin too, hooks run twice. Installed
-  # from a local checkout it copies everything there (node_modules, .claude/worktrees = other tickets' code).
-  if [ -n "$root_plugin" ]; then
-    riv=$(plugin_ver wt-pack@wt-pack); rsv=$(checkout_commit "${mp:-$REPO}")
-    # WP-155/WP-156: every skill ships inside this plugin (WP-122), so any skill content change makes the
-    # cached copy stale. No version is pinned in plugin.json, so $riv is the commit it was installed from —
-    # compare it to the checkout's own HEAD rather than a manually maintained (and easily forgotten) string.
-    if [ -n "$rsv" ] && ! plugin_current "$riv" "${mp:-$REPO}" skills hooks .claude-plugin; then bad "plugin wt-pack@wt-pack $(printf '%.12s' "$riv") installed, checkout is at $(printf '%.12s' "$rsv") — ./setup install (then restart agents) or: claude plugin update wt-pack@wt-pack"
-    elif ! plugin_ok enabled; then ok "plugin wt-pack@wt-pack $riv (plugin-only install; wt-memory's hooks come with it)"
-    else ok "plugin wt-pack@wt-pack $riv"; fi
-    plugin_ok enabled && opt "both wt-pack@wt-pack (plugin-only install) and wt-memory@wt-pack (./setup) are enabled — hooks run twice; pick one: claude plugin disable wt-pack@wt-pack"
-    [ -n "$mp" ] && { [ -d "$mp/.claude/worktrees" ] || [ -d "$mp/node_modules" ] || [ -d "$mp/skills/wt-dashboard/node_modules" ]; } \
-      && opt "wt-pack@wt-pack was installed from the working checkout $mp — its worktrees and node_modules went into the plugin cache; install from GitHub (rephol/wt-pack) or a clean clone"
-  fi
+    && opt "~/.claude/settings.json runs a hook from $REPO/wt-shared/hooks (pre-WP-69 path) — change it to the plugin's hook path"
+  plugin_check
   # WP-120: the PATH shim layer (wt-agents/bin, set at spawn) does not depend on the plugin cache.
   nm=0; ns=0
   for pid in $(pgrep -f 'claude .*--name ' 2>/dev/null); do
@@ -345,28 +276,6 @@ deps() {
   if ask "Install with Homebrew:$want?"; then brew install $want && ok "installed:$want"; else bad "missing:$want — brew install$want"; return 1; fi
 }
 
-link_skills() {
-  step "skills → $SKILLS"
-  mkdir -p "$SKILLS"
-  made=0; kept=0; moved=0; elsewhere=""; home=$(link_home)
-  for s in $(skills); do
-    l="$SKILLS/$s"; want="$SK/$s"
-    if [ -L "$l" ]; then
-      t=$(cd "$l" 2>/dev/null && pwd -P)
-      if [ "$t" = "$want" ]; then kept=$((kept + 1))
-      # This checkout's pre-WP-69 path (<repo>/<s>, now dangling): re-point it.
-      elif [ "$(readlink "$l")" = "$REPO/$s" ]; then ln -sfn "$want" "$l" && moved=$((moved + 1))
-      elif [ -n "$t" ] && is_pack "$(root_of "$t")"; then elsewhere=$(root_of "$t"); kept=$((kept + 1))
-      else bad "not touching $l: it links to ${t:-a missing path}, not a wt-pack checkout"; fi
-    elif [ -e "$l" ]; then bad "not touching $l: it is a real file/directory, not a link"
-    elif [ -n "$home" ]; then opt "not linking $s: the other skills come from $home, which has no $s yet — re-run ./setup there after merging"
-    else ln -s "$want" "$l" && made=$((made + 1)); fi
-  done
-  [ -n "$elsewhere" ] && opt "kept links into $elsewhere (another wt-pack checkout)"
-  [ "$moved" -gt 0 ] && ok "migrated $moved link(s) to $SK"
-  if [ "$made" -eq 0 ] && [ "$moved" -eq 0 ]; then ok "already: $kept linked"; elif [ "$made" -gt 0 ]; then ok "linked $made new (${kept} already)"; fi
-}
-
 dirs() {
   step "config and data dirs"
   changed=""
@@ -389,30 +298,80 @@ dirs() {
   fi
 }
 
-plugin() {
-  step "plugin wt-memory"
+# WP-213: ONE wt-pack plugin. A full install loads this checkout as the plugin — CLAUDE_CODE_PLUGIN_DIRS in the `env`
+# block of ~/.claude/settings.json, each entry loaded as `--plugin-dir`, so its skills, hooks, MCP and mods are one
+# plugin and edits stay live — and the plugin-only install is wt-pack@wt-pack from the marketplace. Either way the
+# four older plugins (wt-memory, wt-deliver-mod, wt-ask-mod, wt-mods) and the skill links in $SKILLS are gone.
+SETTINGS="$HOME/.claude/settings.json"
+PENV="$SK/wt-shared/scripts/plugin-env.mjs"
+OLD_PLUGINS="wt-memory@wt-pack wt-deliver-mod@wt-pack wt-ask-mod@wt-pack"
+plugin_dir() {
+  step "plugin wt-pack (one plugin: this checkout)"
   if ! has claude; then bad "claude not on PATH — install Claude Code, then re-run"; return 1; fi
-  mp=$(market_path)
-  if [ -z "$mp" ]; then claude plugin marketplace add "$REPO" >/dev/null 2>&1 && ok "marketplace wt-pack added ($REPO)" || { bad "claude plugin marketplace add $REPO failed"; return 1; }
-  elif [ "$mp" != "$REPO" ] && is_pack "$mp"; then opt "kept marketplace wt-pack → $mp (another wt-pack checkout)"
-  elif [ "$mp" != "$REPO" ]; then bad "a marketplace named wt-pack points at $mp, which is not a wt-pack checkout"; return 1
+  # Another wt-pack checkout already owns the install (a plugin-dir entry, or the marketplace the plugin-only install
+  # came from): keep it, add nothing and uninstall nothing — setup never repoints a live install from a worktree.
+  other=""; have=0; mp=$(market_path)
+  entries=$(node "$PENV" list "$SETTINGS" 2>/dev/null)
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    if [ "$d" = "$REPO" ]; then have=1; elif is_pack "$d"; then other=$d; fi
+  done <<ENTRIES
+$entries
+ENTRIES
+  [ -z "$other" ] && [ -n "$mp" ] && [ "$mp" != "$REPO" ] && is_pack "$mp" && other=$mp
+  if [ -n "$other" ]; then opt "kept the wt-pack plugin install owned by $other (another wt-pack checkout): nothing added, nothing uninstalled"
+  else
+    if [ "$have" -eq 1 ]; then ok "already: $REPO in CLAUDE_CODE_PLUGIN_DIRS"
+    elif node "$PENV" add "$SETTINGS" "$REPO"; then ok "added $REPO to CLAUDE_CODE_PLUGIN_DIRS in $SETTINGS (agents started before this need a respawn: plugin hooks load at session start)"
+    else bad "could not edit $SETTINGS (is it valid JSON?)"; return 1; fi
+    for id in $OLD_PLUGINS wt-pack@wt-pack; do
+      plugin_listed "$id" || continue
+      if claude plugin uninstall "$id" >/dev/null 2>&1; then ok "removed $id (the one wt-pack plugin replaces it)"; else bad "claude plugin uninstall $id failed"; fi
+    done
   fi
-  if plugin_ok; then
-    iv=$(plugin_ver wt-memory@wt-pack); sv=$(checkout_commit "${mp:-$REPO}")
-    if [ -n "$sv" ] && ! plugin_current "$iv" "${mp:-$REPO}" skills/wt-memory; then
-      claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-memory@wt-pack >/dev/null 2>&1
-      iv2=$(plugin_ver wt-memory@wt-pack)
-      if plugin_current "$iv2" "${mp:-$REPO}" skills/wt-memory; then ok "updated wt-memory@wt-pack $iv → $iv2 (restart agents to load it)"; else bad "claude plugin update wt-memory@wt-pack left $iv2, checkout is at $(printf '%.12s' "$sv")"; fi
-    else ok "already: wt-memory@wt-pack $iv installed"; fi
-  else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
-  # WP-212: the mods load from the skill links (see plugin_on); the marketplace copy WP-206 installed would shadow it.
-  if plugin_listed wt-ask-mod@wt-pack; then claude plugin uninstall wt-ask-mod@wt-pack >/dev/null 2>&1 && ok "removed the old wt-ask-mod@wt-pack (the skill link loads the mod)" || bad "claude plugin uninstall wt-ask-mod@wt-pack failed"; fi
-  # WP-210: the delivery mod, its own plugin so it can be disabled alone (it injects prompts).
-  if mod_enabled wt-deliver-mod; then
-    miv=$(plugin_ver wt-deliver-mod@wt-pack)
-    if plugin_current "$miv" "${mp:-$REPO}" skills/wt-room/mod; then ok "already: wt-deliver-mod@wt-pack $miv installed"
-    else claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-deliver-mod@wt-pack >/dev/null 2>&1 && ok "updated wt-deliver-mod@wt-pack (restart agents to load it)" || bad "claude plugin update wt-deliver-mod@wt-pack failed"; fi
-  else claude plugin install wt-deliver-mod@wt-pack >/dev/null 2>&1 && ok "installed wt-deliver-mod@wt-pack (agents spawned from now on use it)" || bad "claude plugin install wt-deliver-mod@wt-pack failed"; fi
+  # The skill links are the old way in; the plugin carries every skill now. wt-dashboard stays linked: the desktop app
+  # launches $SKILLS/wt-dashboard (WT_DASHBOARD_HOME overrides it).
+  n=0; kept=""
+  for l in "$SKILLS"/*; do
+    [ -L "$l" ] || continue
+    case "$(cd "$l" 2>/dev/null && pwd -P)|$(readlink "$l")" in
+      "$REPO"/*|*"|$REPO"/*) [ "$(basename "$l")" = wt-dashboard ] || { rm "$l" && n=$((n + 1)); } ;;
+      "$SKILLS"/*) ;;
+      *"/skills/wt-"*|*"/wt-"*) t=$(cd "$l" 2>/dev/null && pwd -P); [ -n "$t" ] && is_pack "$(root_of "$t")" && kept=$(root_of "$t") ;;
+    esac
+  done
+  [ "$n" -gt 0 ] && ok "removed $n skill link(s) into $REPO (their skills now come from the plugin)"
+  [ -n "$kept" ] && opt "kept skill links into $kept (another wt-pack checkout)"
+  return 0
+}
+
+# plugin_check: exactly one wt-pack plugin is loaded, none of the old four (WP-213).
+plugin_check() {
+  has claude || return 0
+  ids=$(claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const p of JSON.parse(s))if(p.enabled)console.log(p.id)}catch{process.exit(3)}})') \
+    || { bad "could not read the plugin list (claude plugin list --json failed)"; return 0; }
+  wp=$(printf '%s\n' "$ids" | grep -c '^wt-pack@')
+  extras=""
+  for id in $OLD_PLUGINS wt-mods@skills-dir wt-ask-mod@skills-dir; do printf '%s\n' "$ids" | grep -qx "$id" && extras="$extras $id"; done
+  one=$(printf '%s\n' "$ids" | grep '^wt-pack@' | head -1)
+  if [ "$wp" -eq 1 ] && [ -z "$extras" ]; then ok "one wt-pack plugin: $one"
+  else
+    [ "$wp" -eq 0 ] && bad "no wt-pack plugin loaded — ./setup install (then /reload-plugins, or respawn agents)"
+    [ "$wp" -gt 1 ] && bad "$wp wt-pack plugins loaded ($(printf '%s' "$ids" | grep '^wt-pack@' | tr '\n' ' ')) — hooks and mods would run twice; keep one (./setup install uninstalls wt-pack@wt-pack)"
+    [ -n "$extras" ] && bad "older plugins still loaded:$extras — ./setup install removes them (the one wt-pack plugin replaces them)"
+  fi
+  # Plugin-only install (wt-pack@wt-pack from the marketplace): its cache copy is stale once the checkout moves on.
+  if printf '%s\n' "$ids" | grep -qx 'wt-pack@wt-pack'; then
+    mp=$(market_path); riv=$(plugin_ver wt-pack@wt-pack); rsv=$(checkout_commit "${mp:-$REPO}")
+    if [ -n "$rsv" ] && ! plugin_current "$riv" "${mp:-$REPO}" skills hooks .claude-plugin; then bad "plugin wt-pack@wt-pack $(printf '%.12s' "$riv") installed, checkout is at $(printf '%.12s' "$rsv") — claude plugin update wt-pack@wt-pack (then restart agents)"; fi
+    [ -n "$mp" ] && { [ -d "$mp/.claude/worktrees" ] || [ -d "$mp/node_modules" ] || [ -d "$mp/skills/wt-dashboard/node_modules" ]; } \
+      && opt "wt-pack@wt-pack was installed from the working checkout $mp — its worktrees and node_modules went into the plugin cache; install from GitHub (rephol/wt-pack) or a clean clone"
+  fi
+  # Leftover skill links (the old install): the plugin carries these skills now.
+  stale=""
+  for l in "$SKILLS"/wt-*; do [ -L "$l" ] && [ "$(basename "$l")" != wt-dashboard ] && stale="$stale $(basename "$l")"; done
+  [ -n "$stale" ] && opt "old skill links still in $SKILLS:$stale — ./setup install removes those into this checkout"
+  return 0
 }
 
 web() {
@@ -481,7 +440,7 @@ secrets_step() {
 
 install() {
   step "wt-pack install ($REPO)"
-  deps; link_skills; dirs; plugin; web; svc; wp_svc
+  deps; dirs; plugin_dir; web; svc; wp_svc
   if [ "$secrets" -eq 1 ] && [ -t 0 ]; then secrets_step; else step "optional keys"; opt "skipped (--no-secrets or not a terminal): ./setup secrets"; fi
   echo; doctor
 }
@@ -493,10 +452,15 @@ uninstall() {
   else opt "service: not installed from this checkout, left alone"; fi
   if [ "$(wpservice_root)" = "$WP" ]; then "$WP/scripts/watch-prs.sh" poller-uninstall >/dev/null && ok "watchprs poller removed"
   else opt "watchprs poller: not installed from this checkout, left alone"; fi
-  if has claude && [ "$(market_path)" = "$REPO" ]; then
-    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-ask-mod@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-deliver-mod@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
-    ok "plugins wt-memory@wt-pack, wt-deliver-mod@wt-pack and marketplace wt-pack removed"
-  else opt "plugin: not installed from this checkout, left alone"; fi
+  if has claude; then
+    mine=0; node "$PENV" list "$SETTINGS" 2>/dev/null | grep -qxF "$REPO" && mine=1
+    [ "$(market_path)" = "$REPO" ] && mine=1
+    if [ "$mine" -eq 1 ]; then
+      for id in $OLD_PLUGINS wt-pack@wt-pack; do plugin_listed "$id" && claude plugin uninstall "$id" >/dev/null 2>&1 && ok "uninstalled $id"; done
+      [ "$(market_path)" = "$REPO" ] && claude plugin marketplace remove wt-pack >/dev/null 2>&1 && ok "marketplace wt-pack removed"
+      if node "$PENV" remove "$SETTINGS" "$REPO"; then ok "plugin dir $REPO removed from $SETTINGS (if it was there)"; else bad "could not edit $SETTINGS (is it valid JSON?)"; fi
+    else opt "plugin: not installed from this checkout, left alone"; fi
+  else opt "claude not on PATH: plugin left alone"; fi
   n=0
   for l in "$SKILLS"/*; do
     [ -L "$l" ] || continue
@@ -514,5 +478,7 @@ case "$cmd" in
   doctor) doctor ;;
   install) install ;;
   secrets) secrets_step ;;
+  plugin) plugin_dir ;;
+  plugin-check) fails=0; plugin_check ;;
   uninstall) uninstall ;;
 esac

@@ -1,6 +1,6 @@
 {
   "description": "wt-pack (root plugin, WP-122) — wt-memory: standing preferences as additionalContext; pkill argument-order guard",
-  "modules": ["./commands.ts"],
+  "modules": ["./register.ts"],
   "hooks": {
     "SessionStart": [
       { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 5 }] }

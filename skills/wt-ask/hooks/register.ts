@@ -1,4 +1,5 @@
 import type { Register } from 'claude-code'
+import type { SkillsDir } from '../../wt-mods/hooks/commands'
 
 // WP-206: in a wt-pack herdr agent pane, answer AskUserQuestion through wt-dashboard (wt-ask posts the chip and
 // Inbox card, --wait blocks for the answer) and return it as the tool's result. Anything off the happy path
@@ -8,11 +9,11 @@ const SLICE_S = 300 // one --wait call; $.process.run caps a command at ten minu
 type Q = { question: string; header: string; options: { label: string; description?: string }[]; multiSelect: boolean; kind?: string }
 type Answer = { selected: string[][]; text?: string }
 
-export const register: Register = (on, options) => {
+export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Register>[1], skills: SkillsDir) => {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const qs = e.questions as Q[]
     if (qs.some((q) => q.kind && q.kind !== 'choice')) return next(e) // wt-ask only carries option questions
-    const wt = `${$.plugin.root}/scripts/wt-ask`
+    const wt = `${skills($.plugin.root)}/wt-ask/scripts/wt-ask`
     const run = (argv: string[], stdin?: string, timeoutMs = 15000) => $.process.run([wt, ...argv], { stdin, timeoutMs }).catch(() => null)
 
     if ((await run(['--ping']))?.exitCode !== 0) return next(e) // not a known agent pane, or dashboard down

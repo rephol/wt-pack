@@ -1,8 +1,0 @@
-{
-  "name": "wt-memory",
-  "description": "Injects wt-memory preferences (global, role, project) at session start, and again when they change; MCP tools remember/forget/list/context.",
-  "author": {
-    "name": "rephol",
-    "url": "https://github.com/rephol/wt-pack"
-  }
-}

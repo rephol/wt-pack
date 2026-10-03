@@ -18,7 +18,7 @@ git clone https://github.com/rephol/wt-pack.git ~/wt-pack
 
 ## Layout
 
-- `skills/wt-*` — one directory per skill, each linked as `~/.claude/skills/<name>`. A skill is its `SKILL.md`
+- `skills/wt-*` — one directory per skill, each a skill of the one wt-pack plugin (`./setup` loads the checkout as it). A skill is its `SKILL.md`
   plus `scripts/` (and `references/` where it has them).
 - `skills/wt-dashboard` — the dashboard: `server.mjs` and its modules (Node, no dependencies), the web UI in
   `web/src` (React 19, Vite, TanStack Query, Astryx UI), the Tauri 2 Mac app in `app/`.

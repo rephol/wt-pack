@@ -111,8 +111,8 @@ git clone https://github.com/rephol/wt-pack.git ~/wt-pack
 
 `setup` does four things:
 
-- links every `skills/wt-*` into `~/.claude/skills`;
-- installs the wt-memory plugin;
+- loads this checkout as the one wt-pack Claude Code plugin (every skill, wt-memory's hooks and MCP, and the mods),
+  through `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, and removes the older per-skill links and plugins;
 - builds the dashboard and runs it under launchd (macOS) at <http://127.0.0.1:7777>;
 - prints a doctor report.
 
@@ -122,7 +122,7 @@ an install that belongs to another checkout, and running it again changes nothin
 ```sh
 ./setup doctor       # what is missing, one line each; exit 1 while a required check fails
 ./setup secrets      # optional TypeSafe key (Linear: dashboard Settings › Integrations)
-./setup uninstall    # service, plugin, links; keeps data and keys (--purge deletes dashboard data/config)
+./setup uninstall    # service, plugin, settings entry, links; keeps data and keys (--purge deletes dashboard data/config)
 ```
 
 Inside Claude Code, "set up wt-pack" runs the `wt-setup` skill, which drives the same script.
@@ -142,7 +142,7 @@ npm --prefix ~/wt-pack/skills/wt-dashboard start  # the dashboard, instead of la
 
 ## Skills
 
-Each directory under `skills/` is one skill, linked as `~/.claude/skills/<name>`.
+Each directory under `skills/` is one skill, shipped in the one wt-pack plugin (a full `./setup` loads the checkout as that plugin).
 
 | Skill | What it does |
 |---|---|

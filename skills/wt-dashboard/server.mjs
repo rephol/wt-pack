@@ -1007,6 +1007,12 @@ export function memoryFile(scope, name) {
   return null
 }
 const MEMORY_KEY = 'wt-memory@wt-pack'
+// WP-213: the one wt-pack plugin. A full install loads the checkout through CLAUDE_CODE_PLUGIN_DIRS in settings.json's
+// `env`; the plugin-only install is wt-pack@wt-pack (installed_plugins.json). Either way it carries wt-memory's hooks.
+const packPluginDirs = async () => {
+  const env = JSON.parse((await readSafe(join(CLAUDE, 'settings.json'))) ?? '{}').env?.CLAUDE_CODE_PLUGIN_DIRS
+  return String(env ?? '').split(':').map((d) => d.trim()).filter((d) => d && existsSync(join(d, '.claude-plugin', 'marketplace.json')))
+}
 const WATCH_PRS = process.env.WT_WATCH_PRS_HOME || join(homedir(), '.local', 'share', 'wt-watch-prs') // wt-watch-prs state, read-only here
 // Agent-written entries and pending global proposals, via the CLI (the one parser of the trailer format).
 const memoryEntries = async () => (MEMORY_BIN ? JSON.parse(await run(process.execPath, [MEMORY_BIN, 'list', '--json'], undefined, 5000)) : [])
@@ -1046,8 +1052,13 @@ async function memoryApi(req, res, url, parts) {
     const roles = [...new Set([...roleStore.roles.map((r) => r.id), ...(await list('roles'))])]
     const projects = [...new Set([...(await projectRoots()).keys(), ...(await list('projects'))])]
     const texts = async (scope, names) => Object.fromEntries(await Promise.all(names.map(async (n) => [n, (await readSafe(memoryFile(scope, n))) ?? ''])))
-    const installed = JSON.parse((await readSafe(join(CLAUDE, 'plugins', 'installed_plugins.json'))) ?? '{}').plugins?.[MEMORY_KEY]
-    const enabled = JSON.parse((await readSafe(join(CLAUDE, 'settings.json'))) ?? '{}').enabledPlugins?.[MEMORY_KEY]
+    const plugins = JSON.parse((await readSafe(join(CLAUDE, 'plugins', 'installed_plugins.json'))) ?? '{}').plugins ?? {}
+    const enabledPlugins = JSON.parse((await readSafe(join(CLAUDE, 'settings.json'))) ?? '{}').enabledPlugins ?? {}
+    const dirs = await packPluginDirs()
+    // The checkout loaded as the plugin (full install) counts as installed + enabled; else the marketplace copies.
+    const key = [MEMORY_KEY, 'wt-pack@wt-pack'].find((k) => plugins[k])
+    const installed = dirs.length ? [{ version: null }] : key ? plugins[key] : undefined
+    const enabled = dirs.length ? true : key ? enabledPlugins[key] : undefined
     return send(res, 200, {
       dir: MEMORY, cli: MEMORY_BIN ?? null,
       plugin: { installed: !!installed, enabled: !!installed && enabled !== false, version: installed?.[0]?.version ?? null },
@@ -1903,6 +1914,8 @@ async function pluginCommands() {
   const settings = JSON.parse((await readSafe(join(CLAUDE, 'settings.json'))) ?? '{}')
   const installed = JSON.parse((await readSafe(join(CLAUDE, 'plugins', 'installed_plugins.json'))) ?? '{}').plugins ?? {}
   const out = []
+  // WP-213: the checkout loaded as the one wt-pack plugin (CLAUDE_CODE_PLUGIN_DIRS), skills namespaced wt-pack:<name>.
+  for (const d of await packPluginDirs()) out.push(...(await skillsIn(d, 'Plugins', 'wt-pack:')), ...(await commandsIn(d, 'Plugins', 'wt-pack:')))
   for (const [key, on] of Object.entries(settings.enabledPlugins ?? {})) {
     const path = on && installed[key]?.[0]?.installPath
     if (!path) continue
@@ -3283,11 +3296,14 @@ const packRoot = () => { try { return realpathSync(fileURLToPath(new URL('../..'
 async function staleHooks(ag) {
   if (!ag) return null
   const inst = await readFile(join(homedir(), '.claude', 'plugins', 'installed_plugins.json'), 'utf8').then(JSON.parse, () => null)
-  const p = inst?.plugins?.['wt-memory@wt-pack']?.[0]
-  const guardAt = p?.installPath ? await stat(p.installPath).then((x) => x.birthtimeMs, () => null) : null
+  const p = inst?.plugins?.['wt-memory@wt-pack']?.[0] ?? inst?.plugins?.['wt-pack@wt-pack']?.[0]
+  let guardAt = p?.installPath ? await stat(p.installPath).then((x) => x.birthtimeMs, () => null) : null
+  // WP-213: a checkout loaded as the plugin has no installPath; its hooks file's mtime is when its hooks last changed.
+  const dir = (await packPluginDirs())[0]
+  if (guardAt == null && dir) guardAt = await stat(join(dir, 'hooks', 'hooks.json')).then((x) => x.mtimeMs, () => null)
   if (guardAt == null) return null
   const ps = await new Promise((ok) => execFile('ps', ['-axo', 'pid=,lstart=,command='], { env: { ...process.env, LC_ALL: 'C' }, maxBuffer: 8 << 20 }, (e, out) => ok(e ? null : out)))
-  return ps == null ? null : { guardAt, version: p.version, agents: staleAgents(ag, psStarts(ps), guardAt) }
+  return ps == null ? null : { guardAt, version: p?.version ?? null, agents: staleAgents(ag, psStarts(ps), guardAt) }
 }
 async function watchdogSnapshot() {
   const ag = await agents().catch(() => null)
