@@ -32,8 +32,10 @@ chmodSync(join(bin, 'herdr'), 0o755)
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'route-repo-')))
 execFileSync('git', ['init', '-q', repo])
 const wt = join(repo, 'sub'); execFileSync('mkdir', ['-p', wt])
+// WP-215: a temp HOME too — handoff.sh's model-route pick logs its decision under HOME (~/.claude/wt-judge-log.jsonl).
+const home = mkdtempSync(join(tmpdir(), 'jev-route-home-'))
 const run = (args, prompt, env = {}) => execFileSync('sh', [join(here, 'handoff.sh'), '--dry-run', ...args, wt], {
-  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HERDR_PANE_ID: '', WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
+  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, HERDR_PANE_ID: '', WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
 
 test('handoff --dry-run: switch off → a worker in cwd, no route line (unchanged behaviour)', () => {
   const out = run([], 'build the thing', { WT_JEV_ROUTE: 'off' })
