@@ -1,18 +1,21 @@
 # wt-pack
 
 A pack of Claude Code skills for running herdr agents on a ticket pipeline, plus the wt-dashboard control
-room. Each `skills/<name>` dir is one skill, linked as `~/.claude/skills/<name>` by `./setup` (install, doctor,
-secrets, uninstall). Scripts refer to each other sibling-relatively (`../wt-shared/…`), so skills move together.
+room. Each `skills/<name>` dir is one skill of ONE plugin, `wt-pack` (WP-213): `./setup` (install, doctor,
+secrets, uninstall) loads the checkout as it via `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, and the
+plugin-only install is `wt-pack@wt-pack` from the marketplace. Scripts refer to each other sibling-relatively (`../wt-shared/…`), so skills move together.
 Branch `main`, remote `origin` = github.com/rephol/wt-pack; commits are authored as rephol via
 repo-local git config — **push after committing** (`git push`).
 User-facing feature reference: `docs/features.md` — a user-visible change updates it in the same merge.
 Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory, not here.
 
 ## Layout
-- `skills/wt-*` — the skills; `.claude-plugin/marketplace.json` — local marketplace `wt-pack` (serves
-  `skills/wt-memory/claude-plugin`; also setup's marker for a wt-pack checkout); `setup` — installer;
+- `skills/wt-*` — the skills; `.claude-plugin/marketplace.json` — local marketplace `wt-pack` (serves the root
+  plugin; also setup's marker for a wt-pack checkout); `setup` — installer;
   `docs/` — features, handoff, `plans/` (point-in-time, not rewritten). Root `.claude-plugin/plugin.json` +
-  `hooks/hooks.json` — the plugin-only install `wt-pack@wt-pack` (every skill + wt-memory hooks/MCP, WP-122); never
+  `hooks/hooks.json` + `hooks/register.ts` — THE plugin (every skill, wt-memory hooks/MCP, and the mods: `skills/wt-mods`
+  /wt + routing, `skills/wt-ask` ask capture, `skills/wt-room/mod` delivery; one module registers them all). No skill has
+  its own `.claude-plugin`. Never
   write `~/.claude/skills/…` in scripts, sent strings or SKILL prose (`wt-shared/scripts/paths.test.mjs`).
 
 ## Build and test
@@ -144,13 +147,17 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   applied *after* the strip. Fixed by slicing to 4×cap before any regex (`load()`), and dropping the leading ` *`.
   The same helper's 500 ms `git rev-parse` was right for the hook but made `wt-roles` fail "not in a git repo" under
   load, so `mainCheckout(cwd, timeout)` takes the budget from its caller (`skills/wt-shared/scripts/roles.mjs`).
-- A marketplace plugin is *copied* into the plugin cache from its `source` dir alone, so a mod/hook there cannot reach a
-  sibling skill's script by `../`. WP-206's AskUserQuestion mod needs `skills/wt-ask/scripts/wt-ask`; the plan put the
-  plugin at `skills/wt-ask/mod`, where the cache copy would have lost the script. The plugin root is `skills/wt-ask`
-  itself (`.claude-plugin/` + `hooks/` beside `scripts/`), reached as `$.plugin.root/scripts/wt-ask`. Mods have no Node
-  and no env access: gate through the CLI (`wt-ask --ping`), never by reading `HERDR_PANE_ID` in the module. The marketplace copy of that mod
-  (`wt-ask-mod@wt-pack`) also clashed by *name* with the skills-dir plugin Claude Code builds from the same
-  `~/.claude/skills/wt-ask` link (`wt-ask@skills-dir` "not loaded"). A skill dir carrying `.claude-plugin/` is already a
-  plugin on a full install, so mods ship that way (`skills/wt-ask`, `skills/wt-mods`) and `./setup` no longer installs
-  them from the marketplace (WP-212). `hooks.json` `modules` takes ONE entry, and the validator rejects `$.plugin` used
-  other than as `.name`/`.root`.
+- One plugin, one hooks module, and a loader that reads the source statically (WP-206/212/213). `hooks.json`
+  `modules` takes ONE entry; the engine refuses a second hook on the same event without a matcher, so mods share
+  `session.start`/`turn.start`/`turn.complete`/`prompt.submit` through `hooks/register.ts`, which registers each once
+  as the chain of every mod's handler (`skills/wt-mods/hooks/compose.ts`). `$` is followed only into functions declared
+  in the same file (never across an import, never as a value), `on` is only passed to plain functions, and the hook must
+  be a function literal — so shared-event handlers in a mod's file get a narrow `ctx` built in `register.ts` from literal
+  `$.noun.event(...)` calls. A mod's non-shared hooks (`on('tool.call', {tool}, …)`, `turn.step`) stay in its own file as
+  `registerX(on, …)`. Mods have no Node and no env access: gate through a CLI (`wt-ask --ping`), never by reading
+  `HERDR_PANE_ID` in the module. They reach other skills as `<root>/skills/<name>/…` (the plugin root is the repo).
+  `claude plugin test .` also picks up every `*.test.ts` under the tree, including the dashboard's `node:test` web
+  tests, which it cannot load — use `skills/wt-mods/scripts/test`, which fails only on the mods' own tests.
+  Earlier shapes that failed: a marketplace copy of a skill-dir mod loses its sibling scripts (cache copy = its
+  `source` dir only) and clashes by name with the `<name>@skills-dir` plugin Claude Code builds from a skill dir that
+  carries `.claude-plugin/` — hence no skill carries one.
