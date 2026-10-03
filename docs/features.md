@@ -136,8 +136,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   server, and the mods (`/wt`, model routing, AskUserQuestion capture, queued delivery) from one hooks module. A full
   `./setup` loads the checkout as that plugin through `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of
   `~/.claude/settings.json` (a live checkout: edits reload), instead of linking skills into `~/.claude/skills`, and
-  uninstalls the four older plugins (`wt-memory`, `wt-deliver-mod`, `wt-ask-mod` from the marketplace; `wt-mods`
-  `wt-ask-mod` from skill dirs) and the skill links (`wt-dashboard` stays linked: the desktop app launches it). It keeps
+  uninstalls the older plugins (`wt-memory`, `wt-deliver-mod`, `wt-ask-mod` from the marketplace; `wt-mods` and
+  `wt-ask-mod` were skill-dir plugins) and the skill links (`wt-dashboard` stays linked: the desktop app launches it). It keeps
   another wt-pack checkout's entry and links. `./setup doctor` checks that exactly one `wt-pack@…` plugin is loaded and
   none of the old four. Agents started before the migration need a respawn (plugin hooks load at session start);
   `/reload-plugins` picks the new plugin up in a running session. `./setup plugin` runs just this step.
@@ -619,11 +619,11 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 
 ## ./setup and doctor
 
-- `./setup` (install, default): Homebrew deps (asks once; `--yes`), links `wt-*` skills into
-  `~/.claude/skills`, config dirs, the wt-memory plugin (updated when the checkout's version is newer), web build, launchd service, secrets, then doctor.
+- `./setup` (install, default): Homebrew deps (asks once; `--yes`), loads the checkout as the one wt-pack
+  plugin (`CLAUDE_CODE_PLUGIN_DIRS`; removes the older plugins and skill links, see Install as a plugin), config dirs, web build, launchd service, secrets, then doctor.
   Never repoints an install owned by another checkout. Flags: `--yes`, `--no-secrets`, `--no-service`.
 - `./setup doctor [--fix]`: one line per check (node ≥ 22.13 with `node:sqlite`, git/curl/jq, gh auth, claude, herdr,
-  links, plugin (installed version = checkout's), build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
+  one wt-pack plugin loaded and none of the old four, build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
   cargo); per project with a GitHub account: gh has its token, the token logs in as it, and it reaches the
   repo; exit 1 while a required check fails. Report-only by default: if `~/.claude/.env` and the Keychain hold
   different TypeSafe keys, it names the mismatch but leaves both alone (the file copy could be the newer key).
