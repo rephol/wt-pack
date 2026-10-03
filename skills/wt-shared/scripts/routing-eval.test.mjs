@@ -51,7 +51,7 @@ test('load joins outcomes by run; report groups skill×tier', () => {
   writeFileSync(paths().outcomes, JSON.stringify({ run: 'r1', i: 0, outcome: 'send-back' }) + '\n')
   const ds = load()
   assert.equal(ds.length, 2)
-  assert.deepEqual(report(ds), [{ skill: 'wt-work', tier: 'haiku', effort: null, picks: 2, applied: 1, sendBack: 1, returned: 0, escalated: 0, ok: 0 }])
+  assert.deepEqual(report(ds), [{ skill: 'wt-work', tier: 'haiku', effort: null, picks: 2, applied: 1, sendBack: 1, returned: 0, escalated: 0, ok: 0, shadowOk: 0, shadowReturned: 0 }])
 })
 
 test('estimateSavings: applied non-default picks compare to the sonnet average; shadow and sonnet picks do not count', () => {
@@ -73,4 +73,26 @@ test('estimateSavings: no sonnet baseline or an unpriced applied tier yields no/
   assert.deepEqual(estimateSavings([d({ tier: 'haiku', mode: 'live' }, [])], {}), { tokens: 0, cost: 0, priced: false, n: 0 })
   const partial = estimateSavings([d({ tier: 'haiku', mode: 'live' }, [])], { sonnet: { tokens: 100, cost: 1 } })
   assert.equal(partial.priced, false); assert.equal(partial.n, 0)
+})
+
+test('WP-215: shadow outcomes are reported apart and never tune; ad-hoc and floor-overruled rows are skipped', async () => {
+  const { outcome } = await import('./model-route.mjs')
+  const p = paths(); mkdirSync(join(tmp, '.claude'), { recursive: true })
+  const ts = new Date().toISOString()
+  const row = (run, item) => JSON.stringify({ run, i: 0, ts, cmd: 'routing', item: { mode: 'shadow', tier: 'haiku', choice: 'haiku', source: 'jev', ...item }, state: {} })
+  writeFileSync(p.log, [
+    row('s1', { skill: 'turn-step' }),
+    row('n1', { skill: '', role: '' }), // ad-hoc pick: no skill, no role
+    row('f1', { skill: 'wt-handoff', role: 'planner', tier: 'opus', choice: 'sonnet', source: 'jev+floor' }), // floor overruled
+    row('f2', { skill: 'wt-handoff', role: 'planner', tier: 'opus', choice: 'opus', source: 'jev+floor' }), // floor agreed: kept
+  ].join('\n') + '\n')
+  outcome('s1#0', 'shadow-ok', 'turn answer on claude-opus-5-5')
+  assert.throws(() => outcome('s1#0', 'bogus'))
+  const ds = load({ sinceDays: 1 })
+  assert.deepEqual(ds.map((x) => x.run), ['s1', 'f2'])
+  const s1 = ds.find((x) => x.run === 's1')
+  assert.deepEqual(s1.outcomes, []); assert.deepEqual(s1.shadow, ['ok'])
+  const r = report(ds).find((x) => x.skill === 'turn-step')
+  assert.equal(r.shadowOk, 1); assert.equal(r.ok, 0)
+  assert.equal(tune(Array.from({ length: 12 }, () => ({ ...s1, source: 'jev', mode: 'live' })), DEFAULTS).changes.length, 0) // no real outcomes
 })

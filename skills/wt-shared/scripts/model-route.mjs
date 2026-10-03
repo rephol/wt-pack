@@ -19,7 +19,8 @@
 //       withhold it; only a task-routed `pick` stays live-gated. --model computes the printed effort for that
 //       tier instead of the role's floor tier (e.g. the caller already picked one some other way) without
 //       changing the printed/`tier` floor itself. --json adds `source` (role-floor | session-floor).
-//   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input)
+//   model-route.mjs outcome <run#i> ok|send-back|returned|escalated ["why"]   record what happened (tuning input);
+//       shadow-ok|shadow-returned: the turn's result on the model that ran under a shadow pick (reported, not tuned)
 //   model-route.mjs usage [--days N]   tokens/notional cost by model, split session vs subagent (WP-130; dashboard-
 //       free equivalent of Settings › Usage; N defaults to 7)
 //   model-route.mjs model-id <haiku|sonnet|opus> [--cwd DIR]   the explicit model id `claude --model` should get
@@ -326,15 +327,17 @@ export async function route({ skill = '', role = '', lens = '', model = '', reus
   return { ...out, apply: mode === 'live' ? out.tier : null, applyEffort: mode === 'live' ? out.effort : null }
 }
 
-const MARK = { ok: 'yes', 'send-back': 'no', returned: 'no', escalated: 'no' }
+// shadow-*: what the turn did on the model that ran while a shadow pick applied nothing (WP-215) — kept apart by
+// routing-eval and never marked in wt-judge (it says nothing about whether the pick was right).
+const MARK = { ok: 'yes', 'send-back': 'no', returned: 'no', escalated: 'no', 'shadow-ok': null, 'shadow-returned': null }
 // Outcome for a logged decision: the reason goes to routing-outcomes.jsonl; the label to wt-judge mark.
 export function outcome(runi, what, why = '') {
-  if (!/^[a-z0-9]+#\d+$/.test(runi) || !MARK[what]) throw new Error('usage: outcome <run#i> ok|send-back|returned|escalated ["why"]')
+  if (!/^[a-z0-9]+#\d+$/.test(runi) || !(what in MARK)) throw new Error('usage: outcome <run#i> ok|send-back|returned|escalated|shadow-ok|shadow-returned ["why"]')
   const [run, i] = runi.split('#')
   const p = paths().outcomes
   mkdirSync(dirname(p), { recursive: true })
   appendFileSync(p, JSON.stringify({ run, i: Number(i), ts: new Date().toISOString(), outcome: what, why: String(why).slice(0, 200) }) + '\n')
-  try { execFileSync(process.execPath, [fileURLToPath(new URL('./wt-judge.mjs', import.meta.url)), 'mark', runi, MARK[what]], { stdio: 'ignore', timeout: 5000 }) } catch {}
+  if (MARK[what]) try { execFileSync(process.execPath, [fileURLToPath(new URL('./wt-judge.mjs', import.meta.url)), 'mark', runi, MARK[what]], { stdio: 'ignore', timeout: 5000 }) } catch {}
 }
 
 // Tokens/notional cost by model, split session vs subagent — the dashboard-free equivalent of Settings › Usage.

@@ -205,9 +205,11 @@ handed 12 files and making 3 tool calls did not read them. Read the count from t
 notice. On a thin pass, re-dispatch that agent once with the same file list; if it is still thin, report the
 gap as partial coverage rather than silently accepting a skim as done.
 
-**Model per lens agent (WP-128).** Pipe each lens agent's brief to `node ../wt-shared/scripts/model-route.mjs pick --skill
-<lens agent name> --role reviewer`; when it prints a tier (live routing), pass it as that Agent call's `model`. When it
-prints nothing (shadow or off, the default), leave `model` unset. A hook cannot set it, so this is the only place it gets set.
+**Model per lens agent (WP-128).** Pipe each lens agent's brief to `node ../wt-shared/scripts/model-route.mjs pick --json --skill
+<lens agent name> --role reviewer`; when its `apply` is a tier (live routing), pass it as that Agent call's `model`. When
+`apply` is null (shadow or off, the default), leave `model` unset. A hook cannot set it, so this is the only place it gets set. Keep its `ref` (`--json` prints it even in shadow) and,
+once you have judged that agent's output, record it (WP-215): `node ../wt-shared/scripts/model-route.mjs outcome <ref> ok`
+when you accept it as returned, `… outcome <ref> send-back "<why>"` when you re-dispatch it or redo its work yourself.
 
 **Send-back marker (WP-128).** In diff mode on a local board ticket, when a confirmed finding sends the work back to
 its author, record it so routing can learn: take the last `ref` from the ticket's `routing: … ref <run#i>` comment and

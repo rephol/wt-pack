@@ -113,10 +113,18 @@ test('outcomes: ok on an answer, returned on a refusal, none on an interrupt or 
   expect(r.outcomes()).toEqual([['outcome', 'r1#0', 'returned', 'turn refusal'], ['outcome', 'r1#0', 'ok', 'turn answer']])
 })
 
-test('shadow picks record no outcome', async ($, on) => {
+test('WP-215: a shadow pick records shadow-ok with the model that ran', async ($, on) => {
   const r = rig(on, { pick: shadow })
   await say($, 'redesign the auth flow')
   await step($, 't10', 0)
   await complete($, 't10', 'answer')
-  expect(r.outcomes()).toEqual([])
+  expect(r.outcomes()).toEqual([['outcome', 'r2#0', 'shadow-ok', 'turn answer on claude-sonnet-5-5']])
+})
+
+test('a fail-open pick records no outcome', async ($, on) => {
+  const f = rig(on, { pick: failopen })
+  await say($, 'redesign the auth flow')
+  await step($, 't11', 0)
+  await complete($, 't11', 'answer')
+  expect(f.outcomes()).toEqual([])
 })

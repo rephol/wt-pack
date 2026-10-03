@@ -543,8 +543,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   `tickets.mjs`'s `onDone`/`onReopen` hooks, so every path that moves a card counts — the dashboard UI,
   `wt-ticket move`, and dispatch's own merge-detection alike — not just the one dispatch already covered. Once
   per ref (a `routing-outcome: … (ref …)` ticket comment guards against a repeat).
+- **Outcomes the eval could not see** (WP-215): a per-request (`turn-step`) pick in shadow records the turn's
+  result on the model that actually ran as `shadow-ok`/`shadow-returned` (report columns `shadow-ok`,
+  `shadow-ret`; never used for tuning or wt-judge marks). wt-review lens agents and wt-research shards record
+  `ok` when their output is accepted and `send-back` when it is redone. The report skips rows with no skill or
+  role (ad-hoc picks) and rows where a floor overruled the pick (a main session's spawn floor).
 - **CLI**: `model-route.mjs explain` (the whole decision as JSON), `pick [--json]` (the tier, live only),
-  `outcome <run#i> ok|send-back|returned|escalated`, `model-id <tier>` (its explicit model id, configurable
+  `outcome <run#i> ok|send-back|returned|escalated|shadow-ok|shadow-returned`, `model-id <tier>` (its explicit model id, configurable
   via `modelIds` in the same JSON files, default `opus` → `claude-opus-5-5`, `sonnet` → `claude-sonnet-5-5`,
   `haiku` → `claude-haiku-4-5-20251001`).
 - **Tuning**: `jev-eval.mjs routing --report [--since 7d] [--apply]` reports per skill × tier from the judge log;
