@@ -7,7 +7,7 @@
 // which needs `base:` in its frontmatter). Frontmatter is flat `key: value` lines plus `[a, b]` lists, no YAML.
 // Pure and synchronous: wt-memory's hook imports it (dynamically) under a 2 s timeout.
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -94,6 +94,14 @@ export function sections(checkout, role, persona) {
   return out
 }
 
+// MCP server names the pack's catalog offers (wt-agents/mcp/catalog.json), or undefined when it is not there.
+export function catalog() {
+  try {
+    const f = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'wt-agents', 'mcp', 'catalog.json')
+    return Object.keys(JSON.parse(readFileSync(f, 'utf8')).mcpServers ?? {})
+  } catch { return undefined }
+}
+
 // Findings for every role file. `catalog` = the MCP server names the pack knows (omit to skip that check);
 // `settingsRoles` = the dashboard's Settings role ids (omit to skip the collision check).
 export function check(checkout, { catalog, settingsRoles } = {}) {
@@ -130,10 +138,7 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
     if (!r) process.exit(1)
     out(r)
   } else if (cmd === 'check') {
-    let catalog
-    const cat = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'wt-agents', 'mcp', 'catalog.json')
-    if (existsSync(cat)) try { const c = JSON.parse(readFileSync(cat, 'utf8')); catalog = Object.keys(c.mcpServers ?? {}) } catch {}
-    const f = check(checkout, { catalog })
+    const f = check(checkout, { catalog: catalog() })
     out(f)
     if (f.some((x) => x.level === 'error')) process.exit(1)
   } else { console.error('usage: roles.mjs list|resolve <name>|check [--cwd D]'); process.exit(2) }
