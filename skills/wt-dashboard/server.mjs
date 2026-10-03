@@ -2407,7 +2407,7 @@ async function asksApi(req, res, url, parts) {
     const project = (await agents()).find((a) => a.key === author.key)?.project ?? null
     const b = await json()
     // WP-206: a mod-captured question (noDeliver) carries no ticket; use the agent's own so it gets a room chip, not just an Inbox card.
-    const tk = (await agents()).find((a) => a.key === author.key)?.tokens?.ticket
+    const tk = tagTicket((await agents()).find((a) => a.key === author.key) ?? {})
     if (b.noDeliver === true && !b.ticket && !b.room && typeof tk === 'string' && /^[\w-]{1,20}$/.test(tk)) Object.assign(b, { ticket: tk, room: tk.toLowerCase() })
     return send(res, 200, await asks.create(b, { ...author, project }))
   }
@@ -2416,7 +2416,7 @@ async function asksApi(req, res, url, parts) {
     // A pane (wt-ask --wait, WP-206) may read only its own ask; the user's session reads any.
     const author = await roomAuthor(req)
     if (id === 'ping') { // wt-ask --ping (WP-206): dashboard up and this is a wt-pack agent pane (has a role token), not a bare herdr pane
-      if (author.kind === 'agent' && !(await agents()).find((a) => a.key === author.key)?.tokens?.role) return send(res, 403, { error: 'pane has no role token' })
+      if (author.kind === 'agent' && !(await agents()).find((a) => a.key === author.key)?.tags?.role) return send(res, 403, { error: 'pane has no role token' })
       return send(res, 200, { ok: true, kind: author.kind })
     }
     return send(res, 200, await asks.get(id, author.kind === 'agent' ? author.pane : undefined))
