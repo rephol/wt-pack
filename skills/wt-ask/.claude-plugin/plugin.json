@@ -1,6 +1,5 @@
 {
   "name": "wt-ask-mod",
-  "version": "0.1.0",
   "description": "Answers a herdr agent's AskUserQuestion through wt-dashboard (room chip + Inbox card) instead of the native picker; falls back to the native dialog.",
   "userConfig": {
     "timeoutMin": {
