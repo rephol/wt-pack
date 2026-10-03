@@ -45,6 +45,17 @@ function cleanAnswer(a, questions) {
   return { selected, ...(a.text ? { text: a.text } : {}) }
 }
 
+// GET /api/asks/ping (WP-206's wt-ask --ping): dashboard up, and the caller is the user or a wt-pack agent pane (one
+// with a role token), not a bare herdr pane. `role` is the pane's role token. Returns the 200 body or throws a 403.
+export function ping(author, role) {
+  if (author.kind === 'agent' && !role) throw err(403, 'pane has no role token')
+  return { ok: true, kind: author.kind }
+}
+
+// A noDeliver ask (WP-206) is closed by its own mod's `--resolve`; that call never happens when the agent is killed
+// mid-wait or the dashboard blips during it. Past this age the sweep closes it anyway (the mod waits 30 min by default).
+export const ASK_MAX_AGE_MS = 24 * 3600_000
+
 export class Asks {
   // notify(draft): posts an Inbox item, returns it (or null if deduped) — wired to inbox.add.
   // resolveNotify(key): resolves the Inbox item with this key, if any and still open — wired to inbox.
@@ -118,5 +129,12 @@ export class Asks {
     await this.resolveNotify(`ask:${id}`)
     this.broadcast('asks', { id, action: 'resolved' })
     return next
+  }
+  // Close open noDeliver asks nobody can answer to any more: the asking pane is gone (`live` = the panes that exist,
+  // never empty-because-herdr-failed: the caller skips the sweep then) or the ask is older than maxAgeMs.
+  async expire(live, now = Date.now(), maxAgeMs = ASK_MAX_AGE_MS) {
+    const stale = (await this.list(undefined, true)).filter((a) => a.noDeliver && (!live.has(a.pane) || now - Date.parse(a.created) > maxAgeMs))
+    for (const a of stale) await this.resolve(a.id, a.pane).catch((e) => this.log(`asks: expire ${a.id}: ${e.message}`)) // 409: answered meanwhile
+    return stale.length
   }
 }

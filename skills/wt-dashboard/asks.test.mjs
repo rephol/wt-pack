@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Asks, clean } from './asks.mjs'
+import { Asks, clean, ping, ASK_MAX_AGE_MS } from './asks.mjs'
 
 const tmp = () => mkdtemp(join(tmpdir(), 'asks-'))
 const author = { pane: 'w1:p2', name: 'wt-pack-worker-01' }
@@ -97,4 +97,62 @@ test('get by another pane → 403; by the asking pane → the ask', async () => 
   const created = await a.create(q(), author)
   await assert.rejects(a.get(created.id, 'w9:p9'), (e) => e.status === 403)
   assert.equal((await a.get(created.id, author.pane)).id, created.id)
+})
+
+// WP-209: GET /api/asks/:id passes the session (pane undefined) through to any ask, scopes an agent to its own,
+// and 404s an unknown id — all of which `Asks.get` decides, as server.mjs's route calls it.
+test('get: session (no pane) reads any ask; foreign pane 403; unknown id 404', async () => {
+  const a = new Asks({ dir: await tmp(), notify: async (d) => ({ id: 'n1', ...d }) })
+  const created = await a.create(q(), author)
+  assert.equal((await a.get(created.id, undefined)).pane, author.pane)
+  await assert.rejects(a.get(created.id, 'w9:p9'), (e) => e.status === 403)
+  await assert.rejects(a.get('nope', author.pane), (e) => e.status === 404)
+})
+
+test('ping: the user and a role-tagged agent pane pass; a bare agent pane → 403', () => {
+  assert.deepEqual(ping({ kind: 'user' }), { ok: true, kind: 'user' })
+  assert.deepEqual(ping({ kind: 'agent' }, 'worker'), { ok: true, kind: 'agent' })
+  assert.throws(() => ping({ kind: 'agent' }, undefined), (e) => e.status === 403 && /role token/.test(e.message))
+})
+
+// WP-209: an ask whose mod never got to --resolve (agent killed mid-wait, dashboard blip) is closed by the sweep.
+test('expire: closes open noDeliver asks of a gone pane or past the age cap; leaves the rest', async () => {
+  const resolved = [], events = []
+  const a = new Asks({ dir: await tmp(), notify: async (d) => ({ id: 'n1', ...d }), resolveNotify: async (k) => { resolved.push(k) }, broadcast: (e, d) => events.push(d.action) })
+  const gone = await a.create(q({ noDeliver: true }), { ...author, pane: 'w1:p9' })
+  const live = await a.create(q({ noDeliver: true }), author)
+  const plain = await a.create(q(), { ...author, pane: 'w1:p8' }) // delivered by wt-message: never swept
+  const done = await a.create(q({ noDeliver: true }), { ...author, pane: 'w1:p7' })
+  await a.answer(done.id, { selected: [['A']] }, { name: 'Rep' })
+  assert.equal(await a.expire(new Set([author.pane])), 1)
+  assert.equal((await a.get(gone.id)).status, 'resolved')
+  assert.deepEqual([live, plain].map((x) => a.row(x.id).status), ['open', 'open'])
+  assert.equal(a.row(done.id).status, 'answered')
+  assert.ok(resolved.includes(`ask:${gone.id}`) && events.includes('resolved'))
+  assert.equal(await a.expire(new Set([author.pane]), Date.now() + ASK_MAX_AGE_MS + 1000), 1) // live pane, but too old
+  assert.equal(a.row(live.id).status, 'resolved')
+  assert.equal(a.row(plain.id).status, 'open')
+})
+
+// WP-209: the ask routes verify the pane before anything else. Session-cookie paths are covered on `Asks`/`ping`
+// directly (the cookie is minted per server process).
+test('server: unknown pane → 403 on GET /api/asks/ping and /api/asks/:id', async () => {
+  const { spawn } = await import('node:child_process')
+  const root = await mkdtemp(join(tmpdir(), 'asks-srv-'))
+  const port = 20000 + Math.floor(Math.random() * 20000)
+  const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
+    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+  try {
+    await new Promise((res, rej) => {
+      let out = '', err = ''
+      srv.stdout.on('data', (d) => { out += d; if (out.includes('api →')) res() })
+      srv.stderr.on('data', (d) => { err += d })
+      srv.on('exit', (c) => rej(new Error(`server exited (${c}) before listening: ${err.slice(-400)}`)))
+      setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
+    })
+    const get = (path, headers) => fetch(`http://127.0.0.1:${port}${path}`, { headers })
+    assert.equal((await get('/api/asks/ping', { 'x-herdr-pane': 'w999:p999' })).status, 403)
+    assert.equal((await get('/api/asks/some-id', { 'x-herdr-pane': 'w999:p999' })).status, 403)
+    assert.equal((await get('/api/asks/ping', {})).status, 403) // neither a session nor a pane
+  } finally { srv.kill() }
 })
