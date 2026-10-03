@@ -12,6 +12,11 @@ Posts a question to the user as a room chip and Inbox card (WP-164's 'A'). The u
 the answer comes back to you as a `<wt-message kind="reply" from="user">` through `handoff.sh --reply`, the
 same as any other reply.
 
+**WP-206:** with `wt-ask-mod@wt-pack` enabled (`./setup install`), a herdr agent's native `AskUserQuestion` is
+already routed here — don't call `wt-ask` by hand for it. The mod uses `--wait <id> [--timeout S]` (print the answer
+JSON; exit 3 on resolved/timeout), `--ping` and `--no-deliver` (skip the reply message, the answer returns as the tool
+result); `--json -` reads the questions from stdin.
+
 **Which tool to use (WP-164 decision 4):** in your own chat session — the dashboard's agent chat page or the
 terminal, unmarked — use your native question tool (`AskUserQuestion` and similar). It already renders as a
 mirrored picker card there ('B'). Use `wt-ask` only from a room, handoff or dispatch context, where there is
