@@ -14,6 +14,7 @@ import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } f
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { rolesState, writeRole } from './project-roles.mjs'
 import { Asks } from './asks.mjs'
+import { Deliveries } from './deliveries.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
@@ -2197,6 +2198,7 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/ack)?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
   return true
 }
 
@@ -2269,6 +2271,20 @@ const tickets = new Tickets({
 })
 // WP-164 wt-ask: deliver reuses handoff.sh --reply verbatim, so it inherits whatever that already does on a
 // busy pane — no separate handling needed here.
+// WP-210: one funnel for text sent into a local pane. A pane whose wt-deliver-mod is live gets it queued (the mod
+// submits it as a prompt and acks); any other pane gets today's keystroke paste. Remote machines always paste.
+const deliveries = new Deliveries({ dir: DATA })
+async function deliver(a, text, paste) { // a slash command (/goal arms, /wt-audit …) must be typed: it always pastes
+  if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' }
+  await paste()
+  return 'pasted'
+}
+// A mod that died with rows queued: paste them (and say so in the row) rather than strand them.
+setInterval(async () => {
+  for (const r of deliveries.stranded()) {
+    try { await herdr('agent', 'prompt', r.pane, r.body); deliveries.settle(r.id, 'pasted') } catch (e) { deliveries.settle(r.id, 'failed'); console.error('deliveries:', e.message) }
+  }
+}, 15_000).unref()
 const asks = new Asks({
   dir: DATA,
   notify: (draft) => inbox.add(draft),
@@ -2278,7 +2294,13 @@ const asks = new Asks({
     if (it) await inbox.resolve([it.id])
   },
   broadcast: broadcastEvent,
-  deliver: (pane, text) => runHandoff(execFile, HANDOFF_SH)(['--reply', pane, '--from', 'user'], text, process.cwd()),
+  deliver: async (pane, text) => {
+    const paste = () => runHandoff(execFile, HANDOFF_SH)(['--reply', pane, '--from', 'user'], text, process.cwd())
+    if (!deliveries.live(pane)) return paste()
+    // Wrap exactly as handoff.sh --reply does, so the mod submits the same kind=reply message.
+    const msg = await runHandoff(execFile, HANDOFF_SH)(['--reply', pane, '--from', 'user', '--dry-run'], text, process.cwd()).then((o) => o.split('\nsend: ')[1]?.trim())
+    return msg ? deliver({ id: pane }, msg, paste) : paste()
+  },
 })
 // boardKeys also refreshes on every overview(); this covers startup and a board's first ticket.
 const refreshKeys = () => tickets.keys().then((k) => { boardKeys = Object.values(k) }, (e) => console.error('tickets:', e.message))
@@ -2434,6 +2456,27 @@ async function asksApi(req, res, url, parts) {
   send(res, 404, { error: 'not found' })
 }
 
+// WP-210 deliveries: POST /api/deliveries {pane, text} (handoff.sh / user) → { queued } (false: pane's mod not live, paste),
+// POST /hello, GET /next, POST /:id/ack (the pane's own mod), GET ?pane= (the user).
+async function deliveriesApi(req, res, url, parts) {
+  const author = await roomAuthor(req)
+  const mine = () => { if (author.kind !== 'agent') throw Object.assign(new Error('the pane\'s own mod calls this (x-herdr-pane)'), { status: 403 }); return author.pane }
+  if (req.method === 'GET' && parts[2] === 'next') { const r = deliveries.next(mine()); return send(res, 200, r ? { id: r.id, kind: r.kind, text: r.body } : {}) }
+  if (req.method === 'GET' && parts.length === 2) { if (author.kind !== 'user') return send(res, 403, { error: 'user only' }); return send(res, 200, deliveries.list(url.searchParams.get('pane') || undefined)) }
+  const b = JSON.parse((await body(req)) || '{}')
+  if (req.method === 'POST' && parts[2] === 'hello') { deliveries.hello(mine()); return send(res, 200, { ok: true }) }
+  if (req.method === 'POST' && parts[3] === 'ack') return send(res, 200, deliveries.ack(parts[2], mine(), b.status))
+  if (req.method === 'POST' && parts.length === 2) {
+    const pane = await canonicalPane(String(b.pane ?? ''))
+    if (!pane) return send(res, 404, { error: `unknown pane ${b.pane}` })
+    if (!deliveries.live(pane) || String(b.text ?? '').startsWith('/')) return send(res, 200, { queued: false })
+    const row = deliveries.enqueue(pane, b.text)
+    broadcastEvent('deliveries', { pane })
+    return send(res, 200, { queued: true, id: row.id })
+  }
+  send(res, 404, { error: 'not found' })
+}
+
 // ---- rooms ----
 // Jev switches are read through cfg (Settings writes the env file; the app's launch-time env copy would hide that).
 const triage = async (project, t, empty) => triageTicket(project, t, empty, { tickets, ...(await tickets.settings(project).catch(() => ({ auto: false }))), min: minFor('ticket_triage', 0.6), routeMin: minFor('route', 0.75),
@@ -2453,7 +2496,7 @@ const rooms = new Rooms({
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
     if (!m) throw new Error(`machine ${a.machine} unavailable`)
-    await herdrOn(m, 'agent', 'prompt', a.id, text)
+    await deliver(a, text, () => herdrOn(m, 'agent', 'prompt', a.id, text))
     store.delete('agents:local')
   },
 })
@@ -2901,6 +2944,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'deliveries') return await deliveriesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'asks') return await asksApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
@@ -3106,7 +3150,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      await herdrOn(m, 'agent', 'prompt', a.id, routineText(text, o))
+      await deliver(a, routineText(text, o), () => herdrOn(m, 'agent', 'prompt', a.id, routineText(text, o)))
       store.delete('agents:local')
     },
     spawn: (b) => spawnAgent(b),
