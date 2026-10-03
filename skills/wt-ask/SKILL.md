@@ -12,7 +12,7 @@ Posts a question to the user as a room chip and Inbox card (WP-164's 'A'). The u
 the answer comes back to you as a `<wt-message kind="reply" from="user">` through `handoff.sh --reply`, the
 same as any other reply.
 
-**WP-206:** with the `wt-ask-mod` mod loaded (the skill link, `./setup install`), a herdr agent's native `AskUserQuestion` is
+**WP-206:** with the wt-pack plugin loaded (`./setup install`), a herdr agent's native `AskUserQuestion` is
 already routed to the dashboard and blocks until it is answered — don't call `wt-ask` by hand for that. In a room,
 handoff or dispatch context where you must not block, `wt-ask` below is still the fire-and-forget way. The mod's own
 building blocks: `--wait <id> [--timeout S]` (print the answer JSON; exit 3 on resolved/timeout), `--ping`,
