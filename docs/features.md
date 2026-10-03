@@ -140,7 +140,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     `/herd` (`wt-agents list`; `/agents` is built in) and `/watch status` run the existing scripts directly, with no
     Claude turn, and `immediate` so they also work while the agent is mid-turn. Wrappers only: arguments are split
     like a shell would and passed as argv, output is shown as the command's row. `/dnd` acts on the current pane.
-    They need a Claude Code build with mods; elsewhere the plugin loads as before without them.
+    They need a Claude Code build with mods (the hooks file carries a `modules` key, which is the mod format).
+    Its test (`hooks/commands.test.ts`) runs under `claude plugin test .` (that scans every `*.test.ts` in the repo, so read only its own line).
   - Scripts and the strings sent to agents name sibling skills by resolved path, not `~/.claude/skills`. A path
     guard test (`wt-shared/scripts/paths.test.mjs`) keeps it that way.
   - `./setup doctor` warns when this plugin and `./setup`'s wt-memory plugin are both enabled, or when this plugin
