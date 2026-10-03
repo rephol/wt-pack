@@ -106,8 +106,11 @@ plugin_current() {
   git -C "$d" cat-file -e "$iv^{commit}" 2>/dev/null && git -C "$d" diff --quiet "$iv" HEAD -- "$@" 2>/dev/null
 }
 plugin_ok() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-memory@wt-pack"&&(!process.argv[1]||p.enabled))?0:1)}catch{process.exit(1)}})' "${1:-}"; }
-# WP-206: wt-ask-mod@wt-pack (skills/wt-ask is the plugin root) — captures AskUserQuestion into wt-dashboard.
-mod_enabled() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id==="wt-ask-mod@wt-pack"&&p.enabled)?0:1)}catch{process.exit(1)}})'; }
+# WP-206/212: mods are plugins of function hooks that a full install loads straight from the skill links —
+# skills/wt-ask (AskUserQuestion → wt-dashboard) and skills/wt-mods (/wt, model routing) carry their own
+# .claude-plugin, so Claude Code lists them as <name>@skills-dir. plugin_on <id>: that plugin is listed and enabled.
+plugin_on() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1]&&p.enabled)?0:1)}catch{process.exit(1)}})' "$1"; }
+plugin_listed() { claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(p=>p.id===process.argv[1])?0:1)}catch{process.exit(1)}})' "$1"; }
 # Install hint for a missing package, for this OS.
 # sudo only when needed: root (a container) often has no sudo at all.
 SUDO=$([ "$(id -u)" -eq 0 ] && echo "" || echo "sudo ")
@@ -182,14 +185,15 @@ doctor() {
       [ "${n:-0}" -gt 0 ] && opt "$n claude sessions predate the pkill guard (wt-memory $iv) — wt-agents respawn --stale (in each repo)"
     fi
   else bad "plugin wt-memory@wt-pack not installed — ./setup install"; fi
-  # WP-206: the AskUserQuestion capture mod; loads at session start, so running agents need a respawn.
+  # WP-206/212: the mods load from the skill links as <name>@skills-dir; /reload-plugins or a new session picks them up.
   if [ -z "$root_plugin" ]; then
-    if mod_enabled; then
-      miv=$(plugin_ver wt-ask-mod@wt-pack)
-      if [ -n "$(checkout_commit "${mp:-$REPO}")" ] && ! plugin_current "$miv" "${mp:-$REPO}" skills/wt-ask; then bad "plugin wt-ask-mod@wt-pack $(printf '%.12s' "$miv") installed, checkout is newer — ./setup install (then restart agents)"
-      else ok "plugin wt-ask-mod@wt-pack $miv (AskUserQuestion → wt-dashboard; agents spawned after install)"; fi
-    else bad "plugin wt-ask-mod@wt-pack not enabled — ./setup install"; fi
+    for m in wt-mods wt-ask-mod; do
+      if plugin_on "$m@skills-dir"; then ok "mod $m@skills-dir loaded"
+      else bad "mod $m@skills-dir not loaded (claude plugin list) — ./setup install links it; then /reload-plugins"; fi
+    done
   fi
+  # The pre-WP-212 marketplace copy of the AskUserQuestion mod: same name, so it shadows the skills-dir one.
+  plugin_listed wt-ask-mod@wt-pack && bad "plugin wt-ask-mod@wt-pack is installed and clashes with the skill-linked wt-ask-mod — claude plugin uninstall wt-ask-mod@wt-pack (./setup install does)"
   # WP-122: the root wt-pack plugin is the plugin-only path; with the ./setup plugin too, hooks run twice. Installed
   # from a local checkout it copies everything there (node_modules, .claude/worktrees = other tickets' code).
   if [ -n "$root_plugin" ]; then
@@ -394,12 +398,8 @@ plugin() {
       if plugin_current "$iv2" "${mp:-$REPO}" skills/wt-memory; then ok "updated wt-memory@wt-pack $iv → $iv2 (restart agents to load it)"; else bad "claude plugin update wt-memory@wt-pack left $iv2, checkout is at $(printf '%.12s' "$sv")"; fi
     else ok "already: wt-memory@wt-pack $iv installed"; fi
   else claude plugin install wt-memory@wt-pack >/dev/null 2>&1 && ok "installed wt-memory@wt-pack" || bad "claude plugin install wt-memory@wt-pack failed"; fi
-  # WP-206: the AskUserQuestion capture mod, its own plugin so a broken mod cannot take wt-memory's hooks down.
-  if mod_enabled; then
-    miv=$(plugin_ver wt-ask-mod@wt-pack)
-    if plugin_current "$miv" "${mp:-$REPO}" skills/wt-ask; then ok "already: wt-ask-mod@wt-pack $miv installed"
-    else claude plugin marketplace update wt-pack >/dev/null 2>&1; claude plugin update wt-ask-mod@wt-pack >/dev/null 2>&1 && ok "updated wt-ask-mod@wt-pack (restart agents to load it)" || bad "claude plugin update wt-ask-mod@wt-pack failed"; fi
-  else claude plugin install wt-ask-mod@wt-pack >/dev/null 2>&1 && ok "installed wt-ask-mod@wt-pack (agents spawned from now on use it)" || bad "claude plugin install wt-ask-mod@wt-pack failed"; fi
+  # WP-212: the mods load from the skill links (see plugin_on); the marketplace copy WP-206 installed would shadow it.
+  if plugin_listed wt-ask-mod@wt-pack; then claude plugin uninstall wt-ask-mod@wt-pack >/dev/null 2>&1 && ok "removed the old wt-ask-mod@wt-pack (the skill link loads the mod)" || bad "claude plugin uninstall wt-ask-mod@wt-pack failed"; fi
 }
 
 web() {
@@ -481,8 +481,8 @@ uninstall() {
   if [ "$(wpservice_root)" = "$WP" ]; then "$WP/scripts/watch-prs.sh" poller-uninstall >/dev/null && ok "watchprs poller removed"
   else opt "watchprs poller: not installed from this checkout, left alone"; fi
   if has claude && [ "$(market_path)" = "$REPO" ]; then
-    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin uninstall wt-ask-mod@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
-    ok "plugins wt-memory@wt-pack, wt-ask-mod@wt-pack and marketplace wt-pack removed"
+    claude plugin uninstall wt-memory@wt-pack >/dev/null 2>&1; claude plugin marketplace remove wt-pack >/dev/null 2>&1
+    ok "plugin wt-memory@wt-pack and marketplace wt-pack removed"
   else opt "plugin: not installed from this checkout, left alone"; fi
   n=0
   for l in "$SKILLS"/*; do

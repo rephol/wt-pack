@@ -1,0 +1,4 @@
+{
+  "name": "wt-mods",
+  "description": "wt-pack mods for Claude Code: the /wt command (room, ticket, dnd, herd, watch) and per-request model routing. Loaded from ~/.claude/skills by a full ./setup install; the plugin-only install (wt-pack@wt-pack) carries the same code."
+}
