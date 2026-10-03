@@ -405,6 +405,11 @@ respawn)
   me=; [ -z "${HERDR_PANE_ID:-}" ] || me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty')
   ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null || true)
   g=0; [ -n "$ip" ] && [ -d "$ip" ] && g=$(stat -c %W "$ip" 2>/dev/null || stat -f %B "$ip" 2>/dev/null || echo 0)
+  # WP-213: no installed plugin but the checkout loaded as the plugin (CLAUDE_CODE_PLUGIN_DIRS): its hooks file's mtime.
+  if [ "$g" = 0 ]; then
+    pd=$(node -e 'try{const e=require(process.argv[1]).env?.CLAUDE_CODE_PLUGIN_DIRS||"";console.log(e.split(":").filter(Boolean)[0]||"")}catch{}' "$HOME/.claude/settings.json" 2>/dev/null || true)
+    [ -n "$pd" ] && [ -f "$pd/hooks/hooks.json" ] && g=$(stat -c %Y "$pd/hooks/hooks.json" 2>/dev/null || stat -f %m "$pd/hooks/hooks.json" 2>/dev/null || echo 0)
+  fi
   wss=$(herdr workspace list | jq -c --arg p "$repo-" '[.result.workspaces[] | select(.label | startswith($p) and endswith("s")) | .workspace_id]')
   found=0
   for name in $(herdr agent list | jq -r --argjson w "$wss" --arg me "$me" \
