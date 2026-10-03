@@ -4,12 +4,15 @@
 #   wt-ask "<question>" --option A --option B [--recommend A] [--multi] [--header H] [--ticket WP-N] [--room slug]
 #   wt-ask --json <file> [--ticket WP-N] [--room slug]   (file: {"questions":[{question,header,options,multiSelect,recommended?},...]}, 1-4)
 #   wt-ask --resolve <id>
+#   wt-ask --ping                       exit 0 if the dashboard is up and this pane is known (WP-206)
+#   wt-ask --wait <id> [--timeout S]    poll until answered; print the answer JSON, exit 3 on resolved/timeout
+# post also takes --no-deliver: the answer is not sent back as a wt-message (the caller --waits for it).
 # --room defaults to the ticket's room (its id, lowercased — e.g. WP-164 -> wp-164) when --ticket is given and
 # --room is not; otherwise the ask has no room and shows only in the Inbox.
 # Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
-usage() { sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 call() {
   local out code
   out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
@@ -27,6 +30,28 @@ if [ "$1" = --resolve ]; then
   exit 0
 fi
 
+if [ "$1" = --ping ]; then
+  call GET /api/asks/ping >/dev/null
+  exit 0
+fi
+if [ "$1" = --wait ]; then
+  [ $# -ge 2 ] || usage
+  id=$2; limit=1800
+  if [ "${3:-}" = --timeout ]; then [ $# -ge 4 ] || usage; limit=$4; fi
+  end=$((SECONDS + limit))
+  while :; do
+    out=$(call GET "/api/asks/$id") || exit 1
+    st=$(node -e 'console.log(JSON.parse(process.argv[1]).status)' "$out")
+    case "$st" in
+      answered|undeliverable) node -e 'console.log(JSON.stringify(JSON.parse(process.argv[1]).answer))' "$out"; exit 0 ;;
+      resolved) echo "wt-ask: $id was resolved without an answer" >&2; exit 3 ;;
+    esac
+    [ "$SECONDS" -lt "$end" ] || { echo "wt-ask: no answer to $id within ${limit}s" >&2; exit 3; }
+    sleep "${WAIT_POLL:-2}"
+  done
+fi
+
+nodeliver=0
 if [ "$1" = --json ]; then
   [ $# -ge 2 ] || usage
   [ -f "$2" ] || { echo "wt-ask: no such file: $2" >&2; exit 2; }
@@ -43,6 +68,7 @@ else
       --header) [ $# -ge 2 ] || usage; header=$2; shift 2 ;;
       --ticket) [ $# -ge 2 ] || usage; ticket=$2; shift 2 ;;
       --room) [ $# -ge 2 ] || usage; room=$2; shift 2 ;;
+      --no-deliver) nodeliver=1; shift ;;
       *) usage ;;
     esac
   done
@@ -59,17 +85,19 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --ticket) [ $# -ge 2 ] || usage; ticket=$2; shift 2 ;;
     --room) [ $# -ge 2 ] || usage; room=$2; shift 2 ;;
+    --no-deliver) nodeliver=1; shift ;;
     *) usage ;;
   esac
 done
 [ -n "${room:-}" ] || [ -z "${ticket:-}" ] || room=$(printf '%s' "$ticket" | tr '[:upper:]' '[:lower:]')
 body=$(node -e '
-  const [body, ticket, room] = process.argv.slice(1)
+  const [body, ticket, room, noDeliver] = process.argv.slice(1)
   const b = JSON.parse(body)
   if (ticket) b.ticket = ticket
   if (room) b.room = room
+  if (noDeliver === "1") b.noDeliver = true
   console.log(JSON.stringify(b))
-' "$body" "${ticket:-}" "${room:-}")
+' "$body" "${ticket:-}" "${room:-}" "$nodeliver")
 
 out=$(call POST /api/asks "$body")
 node -e 'console.log(JSON.parse(process.argv[1]).id)' "$out"

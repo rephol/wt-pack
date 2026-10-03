@@ -87,3 +87,37 @@ test('server error: prints the body and exits 1', async () => {
     await assert.rejects(run(['Q?', '--option', 'A'], { HERDR_DASH_URL: s.url }), (e) => e.code === 1 && e.stderr.includes('questions: 1-4'))
   } finally { s.close() }
 })
+
+test('post --no-deliver sends noDeliver; --ping hits the ping route', async () => {
+  const seen = []
+  const s = await stub((req, body, res) => { seen.push({ url: req.url, body }); res.writeHead(200).end(JSON.stringify({ id: 'ask-4', ok: true })) })
+  try {
+    await run(['Q?', '--option', 'A', '--no-deliver'], { HERDR_DASH_URL: s.url })
+    assert.equal(seen[0].body.noDeliver, true)
+    await run(['--ping'], { HERDR_DASH_URL: s.url })
+    assert.equal(seen[1].url, '/api/asks/ping')
+  } finally { s.close() }
+})
+
+test('--wait: prints the answer JSON once answered', async () => {
+  let n = 0
+  const s = await stub((req, body, res) => {
+    n++
+    res.writeHead(200).end(JSON.stringify(n < 2 ? { status: 'open' } : { status: 'answered', answer: { selected: [['A']] } }))
+  })
+  try {
+    const { stdout } = await run(['--wait', 'ask-5'], { HERDR_DASH_URL: s.url, WAIT_POLL: '0.1' })
+    assert.deepEqual(JSON.parse(stdout), { selected: [['A']] })
+    assert.equal(n, 2)
+  } finally { s.close() }
+})
+
+test('--wait: exits 3 on resolved and on timeout', async () => {
+  let status = 'resolved'
+  const s = await stub((req, body, res) => res.writeHead(200).end(JSON.stringify({ status })))
+  try {
+    await assert.rejects(run(['--wait', 'ask-6'], { HERDR_DASH_URL: s.url, WAIT_POLL: '0.1' }), (e) => e.code === 3)
+    status = 'open'
+    await assert.rejects(run(['--wait', 'ask-6', '--timeout', '1'], { HERDR_DASH_URL: s.url, WAIT_POLL: '0.2' }), (e) => e.code === 3)
+  } finally { s.close() }
+})
