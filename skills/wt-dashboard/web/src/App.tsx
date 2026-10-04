@@ -793,12 +793,12 @@ const AGENT_COLS: AgentCol[] = [
   { id: 'task', label: 'Task' },
   { id: 'status', label: 'Status', width: 130, sort: 'attention' },
   { id: 'active', label: 'Active', width: 80, sort: 'activity' },
-  { id: 'machine', label: 'Machine', width: 120 },
-  { id: 'branch', label: 'Branch', width: 160 },
+  { id: 'machine', label: 'Machine', width: 120, hidden: true }, // one value on a single-machine install; makes room for Context/Model at 1440px
+  { id: 'branch', label: 'Branch', width: 140 },
   { id: 'project', label: 'Project', width: 120, hidden: true },
   { id: 'role', label: 'Role', width: 110, hidden: true },
-  { id: 'context', label: 'Context', width: 110, hidden: true },
-  { id: 'model', label: 'Model', width: 200, hidden: true },
+  { id: 'context', label: 'Context', width: 110 },
+  { id: 'model', label: 'Model', width: 170 },
 ]
 type ColConfig = { order: string[]; hidden: string[] }
 const DEFAULT_COLS: ColConfig = { order: AGENT_COLS.map((c) => c.id), hidden: AGENT_COLS.filter((c) => c.hidden).map((c) => c.id) }
@@ -811,7 +811,7 @@ const loadCols = (): ColConfig => {
       hidden: [...v.hidden, ...DEFAULT_COLS.hidden.filter((id) => !v.order.includes(id))] } // a column added later keeps its default visibility
   } catch { return DEFAULT_COLS }
 }
-const TASK_MIN = 260, AGENT_W = 220, ACT_W = 48
+const TASK_MIN = 220, AGENT_W = 220, ACT_W = 48
 const stickyEnd = { position: 'sticky', right: 0, zIndex: 1, width: ACT_W, minWidth: ACT_W, maxWidth: ACT_W, background: 'var(--color-background-surface, Canvas)' } as const
 
 function ColumnsControl({ cols, setCols }: { cols: ColConfig; setCols: (c: ColConfig) => void }) {
