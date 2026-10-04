@@ -610,6 +610,10 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   keeps its suffix; subagents are left to their Agent call. Outcomes (WP-159) are thin: an applied pick's turn that
   answered is `ok`, one the model refused is `returned`; an interruption or API error records nothing. A session
   picks the mod up on `/reload-plugins` or at its next start. Test: `skills/wt-mods/scripts/test`.
+- **Convention guards** (WP-208): the `wt-mods` mod's `hooks/guards.ts` refuses, with a one-line reason and fix, a Bash
+  call that runs `gh pr create --draft`, `git commit -a`/`--all`, a commit with an overriding identity (`--author`,
+  `-c user.*`, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`), or a handoff/room/herdr/ticket/ask command carrying a
+  `~/.claude/skills/…` path. The pkill/pgrep guard stays in wt-memory. Loose shell parsing: it stops accidents only.
 - **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
   pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
   hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a
