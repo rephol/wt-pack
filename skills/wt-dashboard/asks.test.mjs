@@ -40,6 +40,21 @@ test('answer: delivers, closes, and resolves the inbox item', async () => {
   assert.equal(resolvedKey, `ask:${created.id}`)
 })
 
+test('answer: chat needs no selection; other carries typed text (WP-233)', async () => {
+  const mk = async () => {
+    const a = new Asks({ dir: await tmp(), notify: async (d) => ({ id: 'n1', ...d }), resolveNotify: async () => {}, deliver: async () => {} })
+    return [a, await a.create(q(), author)]
+  }
+  const [a1, c1] = await mk()
+  const chat = await a1.answer(c1.id, { chat: true }, { name: 'Rep' })
+  assert.equal(chat.answer.chat, true)
+  const [a2, c2] = await mk()
+  const o = await a2.answer(c2.id, { selected: [[]], other: ['my own'] }, { name: 'Rep' })
+  assert.deepEqual(o.answer.other, ['my own'])
+  const [a3, c3] = await mk()
+  await assert.rejects(a3.answer(c3.id, { selected: [[]], other: [1] }, { name: 'Rep' }), (e) => e.status === 400)
+})
+
 test('answer on a closed ask → 409', async () => {
   const dir = await tmp()
   const a = new Asks({ dir, notify: async (d) => ({ id: 'n1', ...d }) })

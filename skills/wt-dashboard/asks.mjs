@@ -31,7 +31,10 @@ export function clean(b) {
 }
 
 // The answer shape POST /api/asks/:id/answer takes: { selected: [label,...] per question, text? }.
+// WP-233: `chat: true` = the native picker's 'Chat about this' (no answer, the user wants to talk); `other[i]` =
+// the free text typed for question i instead of an option.
 function cleanAnswer(a, questions) {
+  if (a?.chat === true) return { selected: questions.map(() => []), chat: true }
   if (!Array.isArray(a?.selected) || a.selected.length !== questions.length) throw err(400, `answer.selected: one entry per question (${questions.length})`)
   const selected = a.selected.map((sel, i) => {
     const q = questions[i]
@@ -42,7 +45,9 @@ function cleanAnswer(a, questions) {
     return arr
   })
   if (a.text !== undefined && a.text !== null && (typeof a.text !== 'string' || a.text.length > 4000)) throw err(400, 'answer.text: up to 4000 chars')
-  return { selected, ...(a.text ? { text: a.text } : {}) }
+  const other = a.other === undefined ? undefined : a.other
+  if (other !== undefined && (!Array.isArray(other) || other.length !== questions.length || !other.every((t) => typeof t === 'string' && t.length <= 4000))) throw err(400, `answer.other: one string (up to 4000 chars) per question (${questions.length})`)
+  return { selected, ...(other?.some(Boolean) ? { other } : {}), ...(a.text ? { text: a.text } : {}) }
 }
 
 // GET /api/asks/ping (WP-206's wt-ask --ping): dashboard up, and the caller is the user or a wt-pack agent pane (one
@@ -110,7 +115,8 @@ export class Asks {
   async answer(id, body, author) {
     const a = this.row(id)
     const ans = cleanAnswer(body, a.questions)
-    const text = a.questions.map((q, i) => `${q.header}: ${ans.selected[i].join(', ')}`).join('\n') + (ans.text ? `\n\n${ans.text}` : '')
+    const text = ans.chat ? 'The user wants to chat about this question instead of answering it.'
+      : a.questions.map((q, i) => `${q.header}: ${[...ans.selected[i], ans.other?.[i]].filter(Boolean).join(', ')}`).join('\n') + (ans.text ? `\n\n${ans.text}` : '')
     const at = new Date().toISOString()
     const claimed = { ...a, status: 'answered', answer: { ...ans, by: author.name, at }, closed: at }
     const changes = this.db.prepare("UPDATE asks SET json = ? WHERE id = ? AND json_extract(json, '$.status') = 'open'").run(JSON.stringify(claimed), id).changes
