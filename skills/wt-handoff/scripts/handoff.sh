@@ -234,6 +234,9 @@ candidates() {
         # `herdr agent start <name>` has an empty name, and most do.
         [ -n "$id" ] && [ -n "$acwd" ] || continue
         [ -d "$acwd" ] || continue
+        # WP-221: herdr can still say idle/done after claude exits; the shell back in the foreground means a dead pane.
+        herdr pane process-info --pane "$id" 2>/dev/null \
+          | jq -e '.result.process_info | .shell_pid != null and .foreground_process_group_id == .shell_pid' >/dev/null && continue
         top=$(git -C "$acwd" rev-parse --show-toplevel 2>/dev/null) || continue
         [ "$top" = "$main_checkout" ] || continue
         tlabel=$(herdr tab get "$tid" 2>/dev/null | jq -r '.result.tab.label // "?"')
