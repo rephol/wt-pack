@@ -32,12 +32,19 @@ export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Reg
         ...(a.text ? { response: a.text } : {}),
       },
     })
-    $.ui.status('asked in wt-dashboard, waiting for the answer…')
+    // WP-231: the pane shows what is asked (a status line alone left a phone terminal blank). Esc interrupts the
+    // whole turn (live-checked: Claude records 'User declined', no picker), so it is not an answer path: it closes
+    // the dashboard ask at once ($.process.run takes no signal; the --wait slice would hold it open up to 5 min).
+    const ESC = { deny: 'The user pressed Esc to answer in the terminal: ask the same question again as plain text with numbered options and wait for their reply.' }
+    next.signal.addEventListener('abort', () => { void run(['--resolve', id]) })
+    $.ui.log('Asked in wt-dashboard (answer there; Esc cancels):')
+    for (const q of qs) $.ui.log(`${q.question} — ${q.options.map((o) => o.label).join(' / ')}`)
+    $.ui.status('asked in wt-dashboard — answer there; Esc cancels')
     try {
       for (;;) {
         const left = Math.ceil((deadline - (await $.clock.now())) / 1000)
         if (left <= 0) break
-        if (next.signal.aborted) break // interrupted: stop polling, resolve the ask below
+        if (next.signal.aborted) return ESC
         const slice = Math.min(SLICE_S, left)
         const w = await run(['--wait', id, '--timeout', String(slice)], undefined, (slice + 15) * 1000)
         if (w?.exitCode === 0) {
@@ -48,7 +55,7 @@ export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Reg
         if (w?.exitCode === 3 && w.stderr.includes('resolved')) return { deny: 'The question was closed in wt-dashboard without an answer; continue without it or ask again.' }
         if (w?.exitCode !== 3) { await run(['--resolve', id]); return next(e) } // dashboard went away: ask natively
       }
-      if (next.signal.aborted) { await run(['--resolve', id]); return { deny: 'Interrupted while waiting for the dashboard answer.' } }
+      if (next.signal.aborted) return ESC
       // --resolve is a 409 when the user answered in the last moment: take that answer rather than deny it.
       if ((await run(['--resolve', id]))?.exitCode !== 0) {
         const late = await run(['--wait', id, '--timeout', '1'], undefined, 20000)

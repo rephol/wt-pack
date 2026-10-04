@@ -53,6 +53,20 @@ export function InboxButton({ collapsed }: { collapsed: boolean }) {
 export function InboxHost({ onOpenAgent }: { onOpenAgent: (key: string) => void }) {
   const [filter, setFilter] = useState<'all' | Kind | null>(null)
   const [popupTarget, setPopupTarget] = useState<PopupTarget | null>(null)
+  // WP-231: an open ask pops up by itself on every page and project (the Inbox is not project-scoped, but a
+  // phone in the terminal view never saw the badge). Once per ask per tab: closing it leaves the Inbox card.
+  const shown = useRef(new Set<string>())
+  const inbox = useInbox()
+  const nextAsk = inbox.open.find((it) => it.kind === 'ask' && it.target.ask && !shown.current.has(it.target.ask))?.target.ask
+  useEffect(() => {
+    if (!nextAsk || popupTarget) return
+    shown.current.add(nextAsk)
+    api<Ask>(`/api/asks/${encodeURIComponent(nextAsk)}`).then((ask) => { if (ask.status === 'open') setPopupTarget((t) => t ?? { kind: 'ask', ask }) }, () => {})
+  }, [nextAsk, popupTarget])
+  // An ask closed elsewhere (answered in a room, or the agent's Esc resolved it) takes its popup with it.
+  const openAskId = popupTarget?.kind === 'ask' ? popupTarget.ask.id : null
+  const stillOpen = !openAskId || !inbox.loaded || inbox.open.some((it) => it.target.ask === openAskId)
+  useEffect(() => { if (!stillOpen) setPopupTarget(null) }, [stillOpen])
   useEffect(() => {
     const on = (e: Event) => setFilter((e as CustomEvent<'all' | Kind>).detail)
     addEventListener('open-inbox', on)
