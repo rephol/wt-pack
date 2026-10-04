@@ -449,7 +449,7 @@ Projects, Terminals, Usage, Observability, Server, About.
   - **Lean MCP for new agents** (`WT_AGENTS_MCP`, default **full**): lean gives new agents only their role's
     MCP servers plus Jev's picks at handoff.
   - The Jev switches, see [Jev](#jev-features).
-- **Usage**: plan limits (5-hour, weekly) and token spend from `~/.claude/projects`, by Today / 7 days / 30 days,
+- **Usage**: plan limits (5-hour, weekly), a **Current block** card from `ccusage blocks --active --json --offline` (WP-227: tokens, $, burn rate, projection — labelled an estimate, its window is ccusage's own; local-only, no API call; run via `ccusage` on PATH or npx, cached 60 s, hidden when missing; also one line on the Overview bars), and token spend from `~/.claude/projects`, by Today / 7 days / 30 days,
   grouped by agent, project or model (model rows split session vs subagent transcripts). Dollar figures are
   notional list prices. CLI equivalent for installs without the dashboard: `model-route.mjs usage [--days N]`
   (default 7) prints the same by-model/kind breakdown.

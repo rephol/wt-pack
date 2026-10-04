@@ -21,7 +21,8 @@ interface Limits {
 interface Summary { tokens: number; cost: number; priced: boolean; groups: { key: string; tokens: number; cost: number }[] }
 type By = 'agent' | 'project' | 'model'
 type Range = 'today' | 'week' | 'month'
-interface Usage { limits: Limits | null; today: Record<By, Summary>; week: Record<By, Summary>; month: Record<By, Summary> }
+interface Block { startTime: string | null; endTime: string | null; tokens: number | null; costUSD: number | null; tokensPerMinute: number | null; costPerHour: number | null; projTokens: number | null; projCost: number | null; remainingMinutes: number | null }
+interface Usage { limits: Limits | null; block: Block | null; today: Record<By, Summary>; week: Record<By, Summary>; month: Record<By, Summary> }
 
 export const fmtTok = (n: number) => `${n < 0 ? '-' : ''}${Math.abs(n) >= 1e9 ? `${(Math.abs(n) / 1e9).toFixed(2)}B` : Math.abs(n) >= 1e6 ? `${(Math.abs(n) / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${Math.round(Math.abs(n) / 1e3)}k` : String(Math.abs(n))}`
 export const fmtUsd = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n) >= 100 ? Math.round(Math.abs(n)).toLocaleString() : Math.abs(n).toFixed(2)}`
@@ -54,6 +55,11 @@ const useUsage = () => useQuery({ queryKey: ['usage'], queryFn: () => api<Usage>
 // the first transcript scan takes ~1.6s
 const Loading = ({ h }: { h: number }) => <Delayed><VStack gap={2}><Skeleton width={120} height={16} radius={1} /><Skeleton width="100%" height={h} radius={2} /></VStack></Delayed>
 
+// WP-227: ccusage's live block. Its window is an estimate (ccusage's own, not the plan's reset), so it is labelled so.
+const BlockLine = ({ b }: { b: Block | null }) => b && b.tokens != null && b.costUSD != null
+  ? <Text size="sm" type="supporting">{`Block (est.): ${fmtTok(b.tokens)} · ${fmtUsd(b.costUSD)}${b.tokensPerMinute != null ? ` · ${fmtTok(Math.round(b.tokensPerMinute))}/min` : ''}`}</Text>
+  : null
+
 // Overview: just the 5-hour and weekly bars.
 export function UsageBars() {
   const q = useUsage()
@@ -73,6 +79,7 @@ export function UsageBars() {
         </VStack>
       ))}
       {l.stale && <Badge variant="warning" label={`stale — updated ${ago(l.ageSec)}`} />}
+      <BlockLine b={q.data.block} />
     </VStack>
   )
 }
@@ -99,6 +106,22 @@ export function UsageBreakdown() {
         {l && <Gauge label="5-hour" pct={l.session} resetAt={l.sessionResetAt} />}
         {l && <Gauge label="Weekly" pct={l.weekly} resetAt={l.weeklyResetAt} />}
       </Grid>
+      {q.data.block && (
+        <Card padding={3}>
+          <VStack gap={1}>
+            <HStack gap={2} align="center" wrap="wrap">
+              <Text weight="semibold">Current block</Text>
+              <Badge label="ccusage estimate" />
+            </HStack>
+            <BlockLine b={q.data.block} />
+            {q.data.block.costPerHour != null && <Text size="sm" type="supporting">{`Burn ${fmtUsd(q.data.block.costPerHour)}/h`}</Text>}
+            {q.data.block.projTokens != null && q.data.block.projCost != null && (
+              <Text size="sm" type="supporting">{`Projected by block end: ${fmtTok(q.data.block.projTokens)} · ${fmtUsd(q.data.block.projCost)}${q.data.block.remainingMinutes != null ? ` (${q.data.block.remainingMinutes} min left)` : ''}`}</Text>
+            )}
+            <Text size="sm" type="supporting">The block window is ccusage's own estimate and can differ from the plan's real reset above.</Text>
+          </VStack>
+        </Card>
+      )}
       <Card padding={3}>
           <VStack gap={2}>
             <HStack justify="between" align="center" wrap="wrap" gap={2}>

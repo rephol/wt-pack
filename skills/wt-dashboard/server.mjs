@@ -21,6 +21,7 @@ import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispat
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds, watchPrsUnwatched, watchPrsStale } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
+import { ccBlock } from './ccusage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { ProjectSettings, PKEYS } from './project-settings.mjs'
@@ -1776,6 +1777,7 @@ async function usageApi() {
   const range = (from) => Object.fromEntries(Object.entries(by).map(([k, f]) => [k, usageAgg.summary(from, f)]))
   return {
     limits: await readLimits(USAGE_FILE),
+    block: await ccBlock(), // WP-227
     today: range(midnight.getTime()),
     week: range(Date.now() - 7 * 86400_000),
     month: range(Date.now() - 30 * 86400_000),
