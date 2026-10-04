@@ -176,7 +176,10 @@ export function rememberAgents(lastSeen = {}, agents, panes, ticketOf = () => nu
 }
 // WP-221: `herdr pane process-info` → true when the pane's shell is back in the foreground, i.e. claude has exited
 // (herdr may still report the agent idle/done). handoff.sh candidates() runs the same jq test.
+// The shell itself must be what runs: `exec claude` keeps the shell's pid, so the process name decides too.
+export const SHELL_RE = /^-?(zsh|bash|fish|sh|dash|ksh|tcsh)$/
 export const shellForeground = (info) => info?.shell_pid != null && info.foreground_process_group_id === info.shell_pid
+  && (info.foreground_processes ?? []).every((p) => SHELL_RE.test(p.name ?? p.argv0 ?? ''))
 // Remembered panes that still exist with no agent in them → the `exited` check's input.
 export const exitedAgents = (lastSeen = {}, panes) => (panes
   ? Object.entries(lastSeen).filter(([pane, r]) => r.goneAt && panes.includes(pane)).map(([pane, r]) => ({ pane, name: r.name, session: r.session, since: r.goneAt }))
@@ -186,6 +189,7 @@ export const exitedAgents = (lastSeen = {}, panes) => (panes
 // to a fresh agent under the SAME name, so the assignee is compared by pane (WP-108).
 export function resumeBlock(pane, r, agents, tickets = []) {
   if (!r?.session) return 'no session id recorded for this pane'
+  agents = agents.filter((a) => a.status !== 'exited') // WP-221: herdr may still list the dead agent
   if (agents.some((a) => a.local && a.id === pane)) return 'the pane is running an agent again'
   const other = agents.find((a) => a.local && a.name === r.name)
   if (other) return `${r.name} is already running in pane ${other.id}`
