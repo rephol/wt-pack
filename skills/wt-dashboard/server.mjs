@@ -13,7 +13,7 @@ import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
-import { rolesState, writeRole } from './project-roles.mjs'
+import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
@@ -2814,6 +2814,12 @@ async function projectRolesApi(req, res, project, name) {
 async function projectSettingsApi(req, res, parts) {
   const [, , project, sub, key] = parts
   if (sub === 'roles') return projectRolesApi(req, res, project, key)
+  if (sub === 'location' && req.method === 'POST') { // WP-234: { where: 'repo' | 'user' }
+    const root = (await projectRoots()).get(project)
+    if (!root) return send(res, 404, { error: `no checkout for ${project}` })
+    setLocation(root, JSON.parse((await body(req)) || '{}').where)
+    return send(res, 200, await rolesState(root, git))
+  }
   if (sub !== 'settings') return send(res, 404, { error: 'not found' })
   const state = () => ({ project, items: psettings.list(project) })
   if (req.method === 'GET' && !key) return send(res, 200, state())

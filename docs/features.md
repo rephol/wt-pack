@@ -30,6 +30,16 @@ A queue of work across PRs, agents and the local board, with a **Mine / Everyone
 - An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)).
 - Skills: wt-plan, wt-work, wt-babysit, wt-finish, wt-handoff.
 
+## Project settings location (WP-234)
+
+A project's pack files (`roles/*.md`, `model-routing.json`) live either in the repo (`<repo>/.wt-pack/`, committed
+like code) or at user level (`~/.config/wt-pack/projects/<repo folder name>/`, never committed; `WT_PACK_USER_DIR`
+overrides the base). The repo folder wins when both exist; with neither, the repo is the default. Settings ›
+Projects › Roles has a **Settings location** select that moves the files across (it refuses, losing nothing, when
+a file would be overwritten); the repo side is left as uncommitted changes. `wt-roles new <name> --user` writes
+straight to the user folder (refused while the repo has a `.wt-pack/`). Agents, `wt-roles`, Dispatch and model
+routing all read through the same lookup (`wt-shared/scripts/roles.mjs`).
+
 ## Board
 
 A local kanban per project (`WP-N` style keys), stored in `wt.db`. The board has its own project picker in its

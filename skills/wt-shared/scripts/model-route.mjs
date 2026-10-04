@@ -41,6 +41,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { judge, choice, runId } from './typesafe.mjs'
+import { settingsRoot } from './roles.mjs'
 
 export const TIERS = ['haiku', 'sonnet', 'opus']
 const rank = (t) => TIERS.indexOf(t)
@@ -143,7 +144,7 @@ export function loadConfig({ cwd = process.cwd(), env = process.env } = {}) {
   if (MODES.includes(pm)) { cfg = { ...cfg, mode: pm }; from = 'project' }
   const pe = projectSetting(cwd, 'WT_EFFORT')
   if (isEffort(pe)) { cfg = { ...cfg, effort: pe }; effortFrom = 'project' }
-  const repo = root && readJson(join(root, '.wt-pack', 'model-routing.json'))
+  const repo = root && readJson(join(settingsRoot(root), 'model-routing.json'))
   if (repo) { cfg = merge(cfg, repo); if (repo.mode) from = 'repo'; if (repo.effort) effortFrom = 'repo' }
   const e = env.WT_MODEL_ROUTING
   if (MODES.includes(e)) { cfg = { ...cfg, mode: e }; from = 'env' }

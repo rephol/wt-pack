@@ -7,7 +7,8 @@
 // which needs `base:` in its frontmatter). Frontmatter is flat `key: value` lines plus `[a, b]` lists, no YAML.
 // Pure and synchronous: wt-memory's hook imports it (dynamically) under a 2 s timeout.
 import { execFileSync } from 'node:child_process'
-import { readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,7 +25,25 @@ export function mainCheckout(cwd = process.cwd(), timeout = 500) {
     return basename(common) === '.git' ? dirname(common) : common.replace(/\.git$/, '')
   } catch { return null }
 }
-export const rolesDir = (checkout) => join(checkout, '.wt-pack', 'roles')
+// WP-234: a project's settings live in the repo (<checkout>/.wt-pack) or at user level
+// (~/.config/wt-pack/projects/<repo dir name>). The repo folder wins when both exist; with neither, the repo is
+// the default. Switching is moveSettings(), so only one of the two exists in practice.
+export const userRoot = (checkout) => join(process.env.WT_PACK_USER_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'wt-pack', 'projects'), basename(checkout))
+export const settingsWhere = (checkout) => (!existsSync(join(checkout, '.wt-pack')) && existsSync(userRoot(checkout)) ? 'user' : 'repo')
+export const settingsRoot = (checkout, where = settingsWhere(checkout)) => (where === 'user' ? userRoot(checkout) : join(checkout, '.wt-pack'))
+export const rolesDir = (checkout, where) => join(settingsRoot(checkout, where), 'roles')
+
+// Move every settings file to `to` ('repo' | 'user'); refuses when a file would be overwritten. Returns the files moved.
+export function moveSettings(checkout, to) {
+  const [src, dst] = to === 'user' ? [join(checkout, '.wt-pack'), userRoot(checkout)] : [userRoot(checkout), join(checkout, '.wt-pack')]
+  const files = existsSync(src) ? readdirSync(src, { recursive: true, withFileTypes: true }).filter((d) => d.isFile()).map((d) => join(d.parentPath, d.name).slice(src.length + 1)) : []
+  const clash = files.filter((f) => existsSync(join(dst, f)))
+  if (clash.length) throw Object.assign(new Error(`already in ${dst}: ${clash.join(', ')}`), { status: 409 })
+  mkdirSync(dst, { recursive: true }) // an empty user folder is how "user level" is chosen
+  if (files.length) cpSync(src, dst, { recursive: true, errorOnExist: true, force: false })
+  if (existsSync(src)) rmSync(src, { recursive: true, force: true })
+  return files
+}
 
 const val = (s) => {
   s = s.replace(/\s+#.*$/, '').trim() // a trailing `# comment`, as in the SKILL.md example
@@ -47,8 +66,9 @@ function load(checkout, name) {
   const file = join(rolesDir(checkout), `${name}.md`)
   let text
   try {
-    // a symlink out of the checkout (file or .wt-pack/roles itself) is not a role file
-    if (!realpathSync(file).startsWith(realpathSync(checkout) + sep)) return null
+    // a symlink out of the checkout (file or .wt-pack/roles itself) is not a role file; the user folder bounds itself
+    const bound = settingsWhere(checkout) === 'user' ? userRoot(checkout) : checkout
+    if (!realpathSync(file).startsWith(realpathSync(bound) + sep)) return null
     text = readFileSync(file, 'utf8').slice(0, 4 * CAP) // bounded: a hostile file must not stall the 2 s hook
   } catch { return null }
   const { meta, body } = parse(text)
@@ -94,7 +114,7 @@ export function sections(checkout, role, persona) {
     }
     const skills = [].concat(r.meta.skills ?? [])
     if (skills.length) text += `\n\nSuggested skills: ${skills.join(', ')}`
-    if (text) out.push([`Project role (${name}, .wt-pack/roles/${name}.md)`, text])
+    if (text) out.push([`Project role (${name}, ${settingsWhere(checkout) === 'user' ? 'user-level' : '.wt-pack'}/roles/${name}.md)`, text])
   }
   return out
 }

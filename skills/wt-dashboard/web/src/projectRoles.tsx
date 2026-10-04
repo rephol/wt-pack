@@ -17,7 +17,7 @@ import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
 type Finding = { name: string; level: 'warn' | 'error'; msg: string }
 type RoleFile = { name: string; kind: 'override' | 'persona'; base: string | null; bytes: number; text: string; findings: Finding[] }
-type State = { dir: string; bases: string[]; files: RoleFile[]; git: string }
+type State = { dir: string; where: 'repo' | 'user'; userDir: string; bases: string[]; files: RoleFile[]; git: string }
 const NAME = /^[a-z][a-z0-9-]{0,23}$/
 
 export function RolesCard({ project }: { project: string }) {
@@ -33,6 +33,11 @@ export function RolesCard({ project }: { project: string }) {
     onSuccess: (s) => { qc.setQueryData(['project-roles', project], s); setEditing(null); toast({ body: 'Saved. Commit it like code: agents read the main checkout.' }) },
     onError: (e) => toast({ body: `Could not save: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
+  const move = useMutation({
+    mutationFn: (where: 'repo' | 'user') => api<State>(`/api/projects/${encodeURIComponent(project)}/location`, { method: 'POST', body: JSON.stringify({ where }) }),
+    onSuccess: (st) => { qc.setQueryData(['project-roles', project], st); toast({ body: st.where === 'user' ? 'Settings now live in your user folder; the repo copy is deleted (commit that).' : 'Settings are back in the repo: commit .wt-pack/.' }) },
+    onError: (e) => toast({ body: `Could not move: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   if (!q.data) return q.isError ? <LoadError what="roles" error={q.error} retry={() => q.refetch()} /> : <Delayed><FieldsSkeleton n={2} /></Delayed>
   const s = q.data
   const taken = s.files.some((f) => f.name === name)
@@ -44,6 +49,10 @@ export function RolesCard({ project }: { project: string }) {
         Per-repo instructions injected into matching agents: a file named after a base role overrides it; any other name is a persona
         (its own model, MCP servers and Dispatch labels). Format and advice: the wt-roles skill. Files live in <code>{s.dir}</code>.
       </Text>
+      <SettingsRow title="Settings location"
+        description={s.where === 'user' ? `Your user folder (${s.userDir}), not committed. A .wt-pack/ folder in the repo would win over it.` : 'The repo (.wt-pack/), committed like code. Move it to keep the project free of the folder.'}
+        control={<Selector label="Settings location" isLabelHidden width={200} value={s.where} isDisabled={move.isPending} onChange={(v: string) => move.mutate(v as 'repo' | 'user')}
+          options={[{ value: 'repo', label: 'In the repo' }, { value: 'user', label: 'User level' }]} />} />
       {s.files.map((f) => (
         <SettingsRow key={f.name} title={f.name}
           description={`${f.kind}${f.kind === 'persona' ? ` of ${f.base ?? '?'}` : ''} · ${f.bytes} B`}
