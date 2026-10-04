@@ -351,9 +351,15 @@ export default function App() {
     // WP-166: a project window (p-*) must not overwrite the saved default; only main and a browser tab do.
     if (isPrimaryWindow()) try { localStorage.setItem('project', p) } catch { /* private mode */ }
   }
+  // WP-229: the Board has its own project, remembered per viewer; null (never chosen) follows the global one.
+  const [boardProject, setBoardProjectState] = useState<string | null>(() => { try { return localStorage.getItem('board-project') } catch { return null } })
+  const setBoardProject = (p: string) => {
+    setBoardProjectState(p)
+    if (isPrimaryWindow()) try { localStorage.setItem('board-project', p) } catch { /* private mode */ }
+  }
   // A ticket chip in a room or chat (WP-93): switch to its project, then #board/<ID> opens it.
   useEffect(() => {
-    const on = (e: Event) => { const { project: p, id } = (e as CustomEvent<{ project: string; id: string }>).detail; setProject(p); location.hash = `board/${encodeURIComponent(id)}` }
+    const on = (e: Event) => { const { project: p, id } = (e as CustomEvent<{ project: string; id: string }>).detail; setProject(p); setBoardProject(p); location.hash = `board/${encodeURIComponent(id)}` }
     addEventListener('wt:open-ticket', on)
     return () => removeEventListener('wt:open-ticket', on)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -520,7 +526,7 @@ export default function App() {
         {!fullKey && page === 'overview' && <InstallHint phone={phone} />}
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} onOpen={open} />}
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
-        {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setProject} />}
+        {!fullKey && page === 'board' && <Board project={boardProject ?? project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setBoardProject} />}
         {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={all?.agents ?? []} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={openInPanel} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
@@ -584,7 +590,7 @@ export default function App() {
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => open(`room:${sl}`)} unread={narrow && Object.keys(dockMarks).length > 0}
-        onOpenTicket={(p, id) => { setProject(p); location.hash = `board/${encodeURIComponent(id)}` }} />
+        onOpenTicket={(p, id) => { setProject(p); setBoardProject(p); location.hash = `board/${encodeURIComponent(id)}` }} />
     </AppShell>
   )
 }
