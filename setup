@@ -59,10 +59,15 @@ gh_accounts() {
     login=$(GH_TOKEN=$tok gh api user -q .login 2>/dev/null)
     [ "$login" = "$acct" ] || { bad "$proj: the token stored for $acct logs in as '${login:-nothing}'"; continue; }
     dir=
-    for d in "$REPO" $(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?WT_DASHBOARD_(REPO|PROJECTS)=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tr -d "\"'" | tr ':' ' '); do
+    # one path per line, not word-split: a checkout path may hold spaces (WP-214)
+    dirs=$(printf '%s\n' "$REPO"; sed -nE 's/^[[:space:]]*(export[[:space:]]+)?WT_DASHBOARD_(REPO|PROJECTS)=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tr -d "\"'" | tr ':' '\n')
+    while IFS= read -r d; do
+      [ -n "$d" ] || continue
       top=$(dirname "$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null)
       [ "$(basename "$top")" = "$proj" ] && { dir=$top; break; }
-    done
+    done <<DIRS
+$dirs
+DIRS
     if [ -z "$dir" ]; then ok "$proj: gh account $acct (repo not checked: checkout unknown)"
     elif (cd "$dir" && GH_TOKEN=$tok gh repo view --json name >/dev/null 2>&1); then ok "$proj: gh account $acct reaches its repo"
     else bad "$proj: $acct cannot reach the repo of $dir"; fi

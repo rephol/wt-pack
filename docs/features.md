@@ -141,6 +141,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   another wt-pack checkout's entry and links. `./setup doctor` checks that exactly one `wt-pack@…` plugin is loaded and
   none of the old four. Agents started before the migration need a respawn (plugin hooks load at session start);
   `/reload-plugins` picks the new plugin up in a running session. `./setup plugin` runs just this step.
+  Load cost (WP-214): the checkout loads as is, `node_modules` included, and costs nothing measurable (`claude plugin list`
+  ≈0.7 s with or without the 269 MB dashboard `node_modules`). A checkout path with spaces works in `./setup` and `doctor`.
+  A typed bare `/wt-plan` is not verified in every client; `/wt-pack:wt-plan` always is.
 - **Plugin-only install** (WP-122): `/plugin marketplace add rephol/wt-pack`, then `/plugin install wt-pack@wt-pack`.
   This gives the same plugin from a marketplace copy: every `wt-*` skill (namespaced: `/wt-pack:wt-plan`), wt-memory's
   hooks and its MCP server, with no
