@@ -25,7 +25,7 @@ invokes one name instead of four.
 
 **Local board ticket** (the branch starts with a `<KEY>-N` from `../wt-ticket/scripts/wt-ticket keys`, not a Linear team key): once the PR is open,
 `../wt-ticket/scripts/wt-ticket move <ID> review || true` and `../wt-ticket/scripts/wt-ticket comment <ID> "PR <url>" || true`. A merge-direct project (wt-pack: no PR)
-moves it straight to `done` on the merge to main, with the merge commit as the comment.
+moves it straight to `done` on the merge to main, with the merge commit as the comment. A worker never merges or pushes (role rule): it moves the card to `review` and reports the branch and tip, and the orchestrator merges.
 
 Each is its own skill and owns its own rules; this one owns **the order, the shared diff read, and the
 stop conditions between steps.** Never collapse it into "review before opening a PR" — that phrasing drops
