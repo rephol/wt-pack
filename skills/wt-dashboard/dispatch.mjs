@@ -54,8 +54,8 @@ export function dispatchPrompt(t, role, report = null) {
   return `Implement ${t.id} — ${t.title} (\`wt-ticket show ${t.id}\`).\n\n` +
     `First move the card: \`wt-ticket move ${t.id} building\`. ` +
     `Create a worktree on a new branch ${branch} from main, use wt-work, then wt-ship (review). ` +
-    `Merge to main (no draft PR; merge commit "Merge branch '${branch}'") and push. ` +
-    `Rebase on main and resolve conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`.\n` + line
+    `Commit on the branch and rebase on main, resolving conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`. ` +
+    `Do not merge or push: the orchestrator merges and pushes after QA. Move the card to review (\`wt-ticket move ${t.id} review\`) and report the branch and its tip commit; that report is the goal.\n` + line
 }
 
 // WP-128 model routing on a ticket's history: handoff.sh comments "routing: <tier> (<mode>, <source>, ref <run#i>)",
