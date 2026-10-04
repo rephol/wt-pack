@@ -442,11 +442,11 @@ function BoardColumn({ c, count, contentRef, children }: { c: Column; count: num
 const opts = (xs: readonly string[]) => [{ value: '', label: '—' }, ...xs.map((x) => ({ value: x, label: x }))]
 const priorityOptions = PRIORITY.map((l, i) => ({ value: String(i), label: l }))
 
-function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCreated }: {
-  phone: boolean; project: string; ticket: Ticket | null; isNew: boolean; blockAsk: boolean; onClose: () => void; onCreated: (id: string) => void
+export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabel = '← Board', onClose, onCreated }: {
+  phone: boolean; project: string; ticket: Ticket | null; isNew: boolean; blockAsk: boolean; backLabel?: string; onClose: () => void; onCreated: (id: string) => void
 }) {
   const qc = useQueryClient()
-  const done = () => qc.invalidateQueries({ queryKey: ['tickets', project] })
+  const done = () => { qc.invalidateQueries({ queryKey: ['tickets', project] }); qc.invalidateQueries({ queryKey: ['ticket'] }) }
   const [editing, setEditing] = useState(isNew)
   const [draft, setDraft] = useState({ title: ticket?.title ?? '', body: ticket?.body ?? '', type: '', size: '', priority: '0' })
   const [blockTo, setBlockTo] = useState(blockAsk) // Status set to Blocked: waiting for the reason
@@ -491,7 +491,7 @@ function TicketDetail({ phone, project, ticket, isNew, blockAsk, onClose, onCrea
         <HStack gap={4} vAlign="start" hAlign="between">
           <VStack gap={2}>
             <HStack gap={4} vAlign="center" wrap="wrap">
-              <Link href="#board" type="supporting" color="secondary" onClick={(e: React.MouseEvent) => { e.preventDefault(); onClose() }}>← Board</Link>
+              <Link href="#board" type="supporting" color="secondary" onClick={(e: React.MouseEvent) => { e.preventDefault(); onClose() }}>{backLabel}</Link>
               <Divider orientation="vertical" className="hd-kb-rule" />
               <Text type="supporting" color="secondary">{label}</Text>
               <Divider orientation="vertical" className="hd-kb-rule" />
