@@ -231,7 +231,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   instead of a flat `1`, cleared by the 4s server tick once it's past.
 - `wt-agents list` (plain and `--json`) shows DND (with its expiry, when set) and `pair` per agent — `--json`
   adds structured `dnd:{on,until}` and `pair` fields alongside the existing raw pane `tokens` map.
-- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller).
+- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). `rm` of an agent whose claude exited (herdr no longer lists it) closes the bare-shell tab left under its name, and `spawn`/`respawn` close one before opening the new tab, so no shell-only tab named after an agent sits beside it (WP-222).
 - Skills: wt-agents, wt-handoff.
 
 ## Rooms
