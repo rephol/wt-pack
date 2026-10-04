@@ -352,7 +352,7 @@ export class Dispatch {
       target: { ticket: t.id, project } })
   }
 
-  // Merge commits on origin/<baseBranch> since the last scan (7 days on the first); fetch at most every 5 min per repo.
+  // Merge commits on origin/<baseBranch> (the local base when there is no origin) since the last scan (7 days on the first); fetch at most every 5 min per repo.
   // Two strikes (returns or review send-backs) → the next handoff of this ticket runs on opus. Live routing only.
   async #escalate(project, cards) {
     const due = cards.filter((t) => t.column !== 'done' && strikes(t) >= 2 && !escalated(t))

@@ -20,7 +20,7 @@ async function setup({ agents = [], pressure = 'normal', max = 4, handoff, merge
     deps: {
       agents: async () => agents, host: async () => ({ pressure }), maxWorking: () => max, pending: () => pending,
       repoOf: async () => '/repo', reportOf: async (p) => (p === 'wt-pack' ? report : null), ticketOf: tagTicket, triageOn: () => triageOn,
-      git: async (repo, ...a) => a[0] === 'log' ? merges : a[0] === 'rev-parse' ? 'abc123\n' : '',
+      git: async (repo, ...a) => a[0] === 'log' ? merges : a[0] === 'rev-parse' ? 'abc123\n' : a[0] === 'remote' ? 'origin\n' : '',
       handoff: async (args, prompt, cwd) => {
         calls.push({ args, prompt, cwd })
         return handoff ? handoff(args) : 'created wt-pack-worker-09 w9:p1\ntarget wt-pack-worker-09 w9:p1 — x\nreach: …\n'
@@ -167,12 +167,24 @@ test('reconcile: no origin remote scans the local base branch, no fetch (WP-224)
   const { tickets, d } = await setup({ merges: `abcdef1234\t${Math.floor(Date.now() / 1000) + 60}\tMerge branch 'wp-1-x'\n` })
   const seen = []
   const git = d.deps.git
-  d.deps.git = async (repo, ...a) => (seen.push(a.join(' ')), git(repo, ...a))
+  d.deps.git = async (repo, ...a) => (seen.push(a.join(' ')), a[0] === 'remote' ? '' : git(repo, ...a))
   await tickets.setSettings('wt-pack', { dispatch: false })
   const r = await tickets.create('wt-pack', { title: 'rev', column: 'review' }, user)
   await d.tick()
   assert.equal((await tickets.get(r.id)).column, 'done')
   assert.ok(!seen.some((c) => c.startsWith('fetch') || c.includes('origin/')), seen.join('|'))
+})
+
+test('reconcile: origin without origin/<base> falls back to the local base (WP-224)', async () => {
+  const { tickets, d } = await setup({ merges: `abcdef1234\t${Math.floor(Date.now() / 1000) + 60}\tMerge branch 'wp-1-x'\n` })
+  const seen = []
+  const git = d.deps.git
+  d.deps.git = async (repo, ...a) => (seen.push(a.join(' ')), a[1] === '--verify' ? Promise.reject(new Error('no ref')) : git(repo, ...a))
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const r = await tickets.create('wt-pack', { title: 'rev', column: 'review' }, user)
+  await d.tick()
+  assert.equal((await tickets.get(r.id)).column, 'done')
+  assert.ok(seen.includes('log --merges --first-parent --since=7.days --format=%H%x09%ct%x09%s main'), seen.join('|'))
 })
 
 test('reconcile: gone twice → Ready with assignee null; gone once, herdr down or a user claim → untouched', async () => {
