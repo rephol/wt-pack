@@ -32,12 +32,21 @@ export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Reg
         ...(a.text ? { response: a.text } : {}),
       },
     })
-    $.ui.status('asked in wt-dashboard, waiting for the answer…')
+    // WP-231: the pane must show what is being asked (a status line alone left a phone terminal blank), and Esc must
+    // lead to the native picker rather than 'declined'.
+    // ponytail: the native picker is not raced against the dashboard (the docs do not say a tool.call hook can settle
+    // a pending next()); Esc closes the dashboard ask and asks natively, and if the engine refuses that, denies.
+    const native = async () => {
+      await run(['--resolve', id])
+      try { return await next(e) } catch { return { deny: 'Interrupted while waiting for the dashboard answer.' } }
+    }
+    $.ui.log(['Asked in wt-dashboard (answer there, or press Esc to answer here):', ...qs.map((q) => `• ${q.question} — ${q.options.map((o) => o.label).join(' / ')}`)].join('\n'))
+    $.ui.status('asked in wt-dashboard — answer there, or Esc to answer here')
     try {
       for (;;) {
         const left = Math.ceil((deadline - (await $.clock.now())) / 1000)
         if (left <= 0) break
-        if (next.signal.aborted) break // interrupted: stop polling, resolve the ask below
+        if (next.signal.aborted) return native() // Esc: close the dashboard ask and show the native picker
         const slice = Math.min(SLICE_S, left)
         const w = await run(['--wait', id, '--timeout', String(slice)], undefined, (slice + 15) * 1000)
         if (w?.exitCode === 0) {
@@ -48,7 +57,7 @@ export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Reg
         if (w?.exitCode === 3 && w.stderr.includes('resolved')) return { deny: 'The question was closed in wt-dashboard without an answer; continue without it or ask again.' }
         if (w?.exitCode !== 3) { await run(['--resolve', id]); return next(e) } // dashboard went away: ask natively
       }
-      if (next.signal.aborted) { await run(['--resolve', id]); return { deny: 'Interrupted while waiting for the dashboard answer.' } }
+      if (next.signal.aborted) return native()
       // --resolve is a 409 when the user answered in the last moment: take that answer rather than deny it.
       if ((await run(['--resolve', id]))?.exitCode !== 0) {
         const late = await run(['--wait', id, '--timeout', '1'], undefined, 20000)

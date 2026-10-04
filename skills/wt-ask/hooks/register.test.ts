@@ -101,3 +101,12 @@ test('the dashboard dying mid-wait resolves the ask and falls back to native', a
   expect(r.result.answers).toEqual({ native: 'yes' })
   expect(calls).toEqual(['--ping', '--json', '--wait', '--resolve'])
 })
+
+test('the question is shown in the pane while waiting', async ($, on) => {
+  mock.clock(on)
+  const logs: string[] = []
+  on('ui.log', (_$: unknown, e: { text: string }) => { logs.push(e.text); return { value: undefined } })
+  stubWtAsk(on, (flag) => (flag === '--json' ? out(0, 'ask-6') : flag === '--wait' ? out(0, JSON.stringify({ selected: [['prod'], ['a']] })) : out(0)))
+  await $.tool.call(Q)
+  expect(logs.join('\n')).toContain('Which env? — staging / prod')
+})
