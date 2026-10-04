@@ -16,6 +16,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { api } from './rooms'
 import { isBabysitting, sections, type QTask } from './taskQueue'
+import { openTicket } from './ticketParam'
 
 const post = (url: string, body: object) => api(url, { method: 'POST', body: JSON.stringify(body) })
 // Agent keys are `<machine>/<pane>`.
@@ -107,7 +108,7 @@ function Row({ t, section, onOpen, showProject, suggested }: { t: QTask; section
     <div className="hd-tq-row">
       <div className="hd-tq-main">
         <div className="hd-tq-title">
-          {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : t.local ? <Link href={`#board/${encodeURIComponent(t.id)}`}><Badge label={t.id} variant="info" /></Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
+          {t.url ? <Link href={t.url} target="_blank">{t.id}</Link> : t.local ? <Link href={`?ticket=${encodeURIComponent(t.id)}`} onClick={(e: React.MouseEvent) => { e.preventDefault(); openTicket(t.id) }}><Badge label={t.id} variant="info" /></Link> : !t.id.includes(':') && <Text type="supporting">{t.id}</Text>}
           <Text weight="semibold" maxLines={2}>{t.title}</Text>
         </div>
         {meta.length > 0 && <div className="hd-tq-meta">{meta.flatMap((m, i) => (i ? [<span key={`d${i}`}>{dot}</span>, m] : [m]))}</div>}

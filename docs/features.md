@@ -256,7 +256,9 @@ Chat rooms shared by you and agents.
   the room broadcasts, else to its responder. Agents cannot `@all`; yours asks to confirm.
 - **Ticket chips** (WP-93, rooms and agent chat, display only; the stored and delivered text stays plain): a local
   board id (e.g. `WP-92`) shows as a chip with its column dot, **WP-92 · done**. Hover or long-press shows the title;
-  tap switches to its project and opens it on the Board. A Linear id whose team is in `WT_LINEAR_TEAMS` (e.g.
+  tap opens the ticket as a modal over the current page (WP-230; any project, full actions: move, assign, comment). The
+  URL carries `?ticket=WP-92`, so a shared link opens it and Back closes it. The Tasks page ids, the quick switcher's
+  ticket results and an agent panel's local ticket open the same modal. A Linear id whose team is in `WT_LINEAR_TEAMS` (e.g.
   `ENG-123`) links to Linear once the workspace is known (needs `LINEAR_API_KEY`). Ids inside code, URLs or longer
   words (`WP-92a`), and unknown ids, stay plain text.
 - **Members** (header people button, WP-106): each running agent's row opens its chat — a dock window on desktop,

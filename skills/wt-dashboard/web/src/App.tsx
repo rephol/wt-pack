@@ -42,6 +42,8 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { ChatMarkdown } from './links'
 import { useTicketPlugins } from './ticketChip'
+import { TicketModal } from './ticketModal'
+import { openTicket } from './ticketParam'
 import { useChatDensity } from './density'
 import { LinkPreviews } from './previews'
 import { useRoles, plural, RoleBadge, TagsDialog, OTHER } from './roles'
@@ -357,12 +359,6 @@ export default function App() {
     setBoardProjectState(p)
     if (isPrimaryWindow()) try { localStorage.setItem('board-project', p) } catch { /* private mode */ }
   }
-  // A ticket chip in a room or chat (WP-93): switch to its project, then #board/<ID> opens it.
-  useEffect(() => {
-    const on = (e: Event) => { const { project: p, id } = (e as CustomEvent<{ project: string; id: string }>).detail; setProject(p); setBoardProject(p); location.hash = `board/${encodeURIComponent(id)}` }
-    addEventListener('wt:open-ticket', on)
-    return () => removeEventListener('wt:open-ticket', on)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const data = useMemo(() => (all ? scopeToProject(all, project) : undefined), [all, project])
   // Sidebar badges count AGENTS (same list and project field as the Agents page); tasks are not counted.
   const counts = useMemo(() => projectCounts(all?.agents ?? [], [...new Set(activeTasks(all?.tasks ?? []).map((t) => t.project).filter((p): p is string => Boolean(p)))]), [all])
@@ -590,7 +586,8 @@ export default function App() {
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => open(`room:${sl}`)} unread={narrow && Object.keys(dockMarks).length > 0}
-        onOpenTicket={(p, id) => { setProject(p); setBoardProject(p); location.hash = `board/${encodeURIComponent(id)}` }} />
+        onOpenTicket={(_p, id) => openTicket(id)} />
+      <TicketModal phone={phone} />
     </AppShell>
   )
 }
@@ -642,7 +639,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
       <VStack gap={2}>
         {ticket ? (
           <HStack gap={2} align="center" wrap="wrap">
-            {task?.url ? <Link href={task.url} target="_blank"><Text weight="semibold">{ticket}</Text></Link> : <Text weight="semibold">{ticket}</Text>}
+            {task?.url ? <Link href={task.url} target="_blank"><Text weight="semibold">{ticket}</Text></Link> : task?.local ? <Link href={`?ticket=${encodeURIComponent(ticket)}`} onClick={(e: React.MouseEvent) => { e.preventDefault(); openTicket(ticket) }}><Text weight="semibold">{ticket}</Text></Link> : <Text weight="semibold">{ticket}</Text>}
             {task?.linearState && <Badge label={task.linearState} />}
           </HStack>
         ) : <Text weight="semibold">Ad-hoc work</Text>}

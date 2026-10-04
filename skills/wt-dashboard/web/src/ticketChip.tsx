@@ -1,6 +1,6 @@
 // WP-93: ticket id chips in rooms and agent chat (rendered view only; the stored text stays plain). A board id is
-// fetched lazily and cached per id; unknown or still loading stays plain text. Tap opens it on the Board (App
-// listens for wt:open-ticket, which switches the project); hover or long-press shows the title.
+// fetched lazily and cached per id; unknown or still loading stays plain text. Tap opens it as a modal over the current
+// page (WP-230: TicketModal listens for wt:open-ticket, ?ticket=<ID>); hover or long-press shows the title.
 import { useMemo, type MouseEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
