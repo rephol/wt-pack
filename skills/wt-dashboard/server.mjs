@@ -11,10 +11,10 @@ import { join, extname, normalize, basename, dirname, relative, isAbsolute } fro
 import { fileURLToPath } from 'node:url'
 import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
-import { Rooms, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
+import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { rolesState, writeRole } from './project-roles.mjs'
-import { Asks, ping } from './asks.mjs'
+import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
@@ -2480,9 +2480,8 @@ async function asksApi(req, res, url, parts) {
     if (author.kind !== 'agent') return send(res, 403, { error: 'wt-ask posts from an agent pane (x-herdr-pane)' })
     const project = (await agents()).find((a) => a.key === author.key)?.project ?? null
     const b = await json()
-    // WP-206: a mod-captured question (noDeliver) carries no ticket; use the agent's own so it gets a room chip, not just an Inbox card.
-    const tk = tagTicket((await agents()).find((a) => a.key === author.key) ?? {})
-    if (b.noDeliver === true && !b.ticket && !b.room && typeof tk === 'string' && /^[\w-]{1,20}$/.test(tk)) Object.assign(b, { ticket: tk, room: tk.toLowerCase() })
+    // WP-206/232: a mod-captured question (noDeliver) carries no ticket or room; give it the agent's ticket room or its project room, so it is a chip, not just an Inbox card.
+    await placeAsk(b, { ticket: tagTicket((await agents()).find((a) => a.key === author.key) ?? {}), project }, async (p) => (await rooms.create({ title: p, project: p, slug: slugify(p) })).slug)
     return send(res, 200, await asks.create(b, { ...author, project }))
   }
   const id = parts[2]
