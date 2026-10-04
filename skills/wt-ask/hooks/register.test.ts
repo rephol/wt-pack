@@ -108,5 +108,5 @@ test('the question is shown in the pane while waiting', async ($, on) => {
   on('ui.log', (_$: unknown, e: { text: string }) => { logs.push(e.text); return { value: undefined } })
   stubWtAsk(on, (flag) => (flag === '--json' ? out(0, 'ask-6') : flag === '--wait' ? out(0, JSON.stringify({ selected: [['prod'], ['a']] })) : out(0)))
   await $.tool.call(Q)
-  expect(logs.join('\n')).toContain('Which env? — staging / prod')
+  expect(logs).toContain('Which env? — staging / prod')
 })
