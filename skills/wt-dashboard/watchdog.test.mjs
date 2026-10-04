@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, goalLoop, INFRA_RE, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const min = (n) => new Date(now - n * 60_000).toISOString()
@@ -214,4 +214,37 @@ test('WP-221 review: exec claude (shell pid reused) is alive; Resume ignores the
   const r = { name: 'w', session: 's', ticket: null }
   assert.equal(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'w', status: 'exited' }]), null)
   assert.equal(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'w', status: 'idle' }]), 'the pane is running an agent again')
+})
+
+// WP-220: goalLoop — a /goal agent repeating one infra error.
+const goalSet = { type: 'attachment', attachment: { type: 'goal_status', met: false, condition: 'ship WP-1' } }
+const toolErr = (min, text) => ({ type: 'user', timestamp: new Date(now - (30 - min) * 60_000).toISOString(), message: { content: [{ type: 'tool_result', is_error: true, content: text }] } })
+const authErr = (min, i = 1) => toolErr(min, `Exit code 128\nremote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/x/y' (try ${i})`)
+const jl = (...xs) => xs.map((x) => JSON.stringify(x)).join('\n')
+const authRun = (step = 3) => [0, 1, 2, 3, 4, 5].map((i) => authErr(10 + i * step, i + 100))
+
+test('goalLoop: six auth errors under an active goal trip it; evaluate opens one severe finding', () => {
+  const g = goalLoop(jl(goalSet, ...authRun()), { now })
+  assert.equal(g.count, 5)
+  assert.match(g.signature, /^remote: Invalid username or token\.$/)
+  const f = evaluate({ goalLoops: [{ pane: 'p1', name: 'worker-04', ticket: 'WP-9', ...g }] }, {}, now)
+  assert.deepEqual(f.map((x) => [x.key, x.severity]), [['goal-loop|p1', 'severe']])
+  assert.deepEqual(evaluate({ goalLoops: [{ pane: 'p1', name: 'w', ...g }] }, { 'goal-loop': { on: false } }, now), [])
+})
+
+test('goalLoop: varied or non-infra errors, no goal, a short span, a cleared goal never trip', () => {
+  const varied = authRun().map((e, i) => (i % 2 ? toolErr(10 + i * 3, 'Exit code 1\nFAIL src/a.test.ts expected 1 got 2') : e))
+  assert.equal(goalLoop(jl(goalSet, ...varied), { now }), null)
+  assert.equal(goalLoop(jl(...authRun()), { now }), null)
+  assert.equal(goalLoop(jl(goalSet, ...authRun(0.5)), { now }), null)
+  const cleared = { type: 'user', message: { content: '<command-name>/goal</command-name>\n<command-args>clear</command-args>' } }
+  assert.equal(goalLoop(jl(goalSet, ...authRun(), cleared), { now }), null)
+  assert.equal(goalLoop('garbage\n' + jl(goalSet, ...authRun()), { now, n: 5 })?.count, 5) // a cut first line is skipped
+  assert.ok(INFRA_RE.test('Could not resolve host: github.com'))
+  assert.ok(!INFRA_RE.test('AssertionError: expected 4 to equal 5'))
+})
+
+test('inboxOps: a goal-loop card is not auto-resolved', () => {
+  const f = { check: 'goal-loop', key: 'goal-loop|p1', severity: 'severe', since: 'x' }
+  assert.deepEqual(inboxOps({ opened: [], resolved: [f, { ...f, check: 'disk', key: 'disk|low' }] }).resolveKeys, ['disk|low'])
 })

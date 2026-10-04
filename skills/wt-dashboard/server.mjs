@@ -32,7 +32,7 @@ import { load as routeDecisions, report as routeReport, estimateSavings as route
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
-import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, goalLoop, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -3343,6 +3343,26 @@ async function staleHooks(ag) {
   const ps = await new Promise((ok) => execFile('ps', ['-axo', 'pid=,lstart=,command='], { env: { ...process.env, LC_ALL: 'C' }, maxBuffer: 8 << 20 }, (e, out) => ok(e ? null : out)))
   return ps == null ? null : { guardAt, version: p?.version ?? null, agents: staleAgents(ag, psStarts(ps), guardAt) }
 }
+// WP-220: local pool agents whose transcript tail shows a /goal looping on one infra error (watchdog goalLoop).
+async function goalLoops(ag, threshold) {
+  const out = []
+  for (const a of ag ?? []) {
+    if (!a.local || !a.pool || a.pool === 'other' || !a.session || a.status === 'exited') continue
+    const f = await findTranscript(a.session).catch(() => null)
+    if (!f) continue
+    const h = await fopen(f, 'r').catch(() => null)
+    if (!h) continue
+    try {
+      const size = (await h.stat()).size
+      const len = Math.min(size, 512 << 10)
+      const buf = Buffer.alloc(len)
+      await h.read(buf, 0, len, size - len)
+      const hit = goalLoop(buf.toString('utf8'), { n: threshold })
+      if (hit) out.push({ pane: a.id, name: a.name, ticket: a.tags?.task ?? null, project: a.project, ...hit })
+    } finally { await h.close() }
+  }
+  return out
+}
 async function watchdogSnapshot() {
   const ag = await agents().catch(() => null)
   const nameOf = new Map((ag ?? []).map((a) => [a.key, a.name]))
@@ -3363,6 +3383,7 @@ async function watchdogSnapshot() {
     dbBytes: await stat(join(DATA, 'wt.db')).then((x) => x.size, () => null),
     errors: serverErrors,
     jev: await readCalls().catch(() => null),
+    goalLoops: wd.settings['goal-loop']?.on === false ? [] : await goalLoops(ag, wd.settings['goal-loop']?.threshold ?? 5).catch(() => []),
   }
 }
 // WP-150: agents.sh's `rm` edits watchdog.json's lastSeen directly on disk (drops the removed agent's name)
@@ -3371,6 +3392,16 @@ async function watchdogSnapshot() {
 async function mergeLastSeen(ag, panes) {
   const diskLastSeen = await readFile(WD_FILE, 'utf8').then((t) => JSON.parse(t).lastSeen ?? wd.lastSeen, () => wd.lastSeen)
   return rememberAgents(diskLastSeen, ag, panes, (c) => ticketOf(c ?? ''))
+}
+async function clearLoopedGoal(g, snap) {
+  let note = ''
+  try {
+    await herdr('agent', 'send-keys', g.pane, 'esc')
+    await herdr('agent', 'prompt', g.pane, '/goal clear', '--wait', '--until', 'idle', '--until', 'done', '--timeout', '8000')
+  } catch { note = ' (goal clear unverified)' }
+  const rs = (await rooms.list()).filter((r) => !r.archived && r.project === g.project)
+  const room = rs.find((r) => r.slug === g.project) ?? rs[0]
+  if (room) rooms.system(room.slug, `${g.name} was looping on an infra error under /goal (${g.count}× ${g.signature}); goal cleared, see the Inbox.${note}`)
 }
 let wdRunning = null // the 60s timer and Run now share one run, so a finding never opens twice
 function runWatchdog() { return (wdRunning ??= runWatchdogOnce().finally(() => { wdRunning = null })) }
@@ -3383,6 +3414,11 @@ async function runWatchdogOnce() {
   if (ops.resolveKeys.length) {
     await inbox.load()
     await inbox.resolve(inbox.items.filter((it) => it.kind === 'watchdog' && !it.resolvedAt && ops.resolveKeys.includes(it.target?.watchdog)).map((it) => it.id))
+  }
+  // WP-220: clear the goal of an agent that just opened a goal-loop finding (not --cancel: the ticket stays put).
+  for (const f of d.opened.filter((x) => x.check === 'goal-loop')) {
+    const g = snap.goalLoops.find((x) => x.pane === f.key.split('|')[1])
+    if (g) await clearLoopedGoal(g, snap)
   }
   // WP-150: re-merge right before the write — watchdogSnapshot()'s merge is minutes^Wseconds stale by now
   // (staleHooks' ps exec and the inbox I/O above ran in between), wide enough for agents.sh's rm to land its

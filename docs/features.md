@@ -473,7 +473,7 @@ Projects, Terminals, Usage, Observability, Server, About.
   unreachable (**2** min), free disk (**5** GB), wt.db size (**200** MB), server errors in 10 min (**20**), Jev
   failure rate over the last hour (**30**%, at least 5 calls), pool agent's Claude session exited while its pane
   stays open (**1** min), pool agent whose Claude session started before the installed wt-memory version (so it runs
-  without the pkill guard — plugin hooks load at session start; restart it; **0** min, WP-120). A finding opens once per condition as a
+  without the pkill guard — plugin hooks load at session start; restart it; **0** min, WP-120), and a `/goal` agent whose last **5** error tool results are the same auth/network error over ≥ 10 min (WP-220: the watchdog presses esc and sends `/goal clear`, posts in the project room and raises a severe Inbox card that stays until dismissed; the ticket is left as is). A finding opens once per condition as a
   `watchdog` Inbox item (native notification only for restarts, herdr and disk) and resolves itself when the
   condition clears. **Investigate** hands a finding to a worker (or **Ask auditor**) through wt-handoff, framed as
   data, to diagnose and file a ticket — only when clicked. For an exited session, **Resume** (on the finding and

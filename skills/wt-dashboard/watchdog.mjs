@@ -16,6 +16,7 @@ export const CHECKS = [
   { id: 'jev', label: 'Jev failure rate over the last hour', unit: '%', threshold: 30 },
   { id: 'exited', label: "Pool agent's Claude session exited for", unit: 'min', threshold: 1 },
   { id: 'stale-hooks', label: 'Pool agent started before the installed wt-memory guard by', unit: 'min', threshold: 0 },
+  { id: 'goal-loop', label: 'Goal-driven agent repeating the same infra error', unit: 'errors', threshold: 5, severe: true },
 ]
 const BY_ID = new Map(CHECKS.map((c) => [c.id, c]))
 
@@ -110,7 +111,53 @@ export function evaluate(snap, settings, now = Date.now()) {
         `Its Claude session started ${new Date(a.startedAt).toISOString()}, before wt-memory ${snap.stale.version ?? ''} was installed; plugin hooks load at session start. Restart to load the pkill guard (WP-120).`)
     }
   }
+  if (on('goal-loop')) {
+    for (const g of snap.goalLoops ?? [])
+      add('goal-loop', g.pane, `${g.name} is looping on a goal blocked by infra`,
+        `${g.count}× since ${new Date(g.first).toISOString()}: ${g.signature}${g.ticket ? ` (${g.ticket})` : ''}. Goal cleared; fix the cause, then re-dispatch.`)
+  }
   return out
+}
+
+// WP-220: /goal re-prompts after every turn until its condition holds, so an infra failure outside the ticket (broken
+// git auth, no network) loops forever. Only auth/network-class errors count; a repeating failing test is the agent's work.
+export const INFRA_RE = /authentication failed|permission denied \(publickey\)|could not read username|bad credentials|\b40[13]\b|could not resolve host|network is unreachable|connection (refused|reset|timed out)|operation timed out|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENOTFOUND|rate limit|gh auth login|Authorization header is badly formatted/i
+const GOAL_CLEAR_RE = /<command-name>\/goal<\/command-name>[\s\S]*<command-args>\s*clear\s*<\/command-args>/
+const errText = (c) => (typeof c === 'string' ? c : (c ?? []).map((x) => x.text ?? '').join('\n'))
+// Same error, different run: numbers, hashes and temp paths are replaced.
+const signature = (t) => {
+  const lines = String(t).split('\n').map((l) => l.trim())
+  const i = lines.findIndex((l) => /^Exit code \d+/.test(l))
+  const line = lines.slice(i + 1).find(Boolean) ?? lines.find(Boolean) ?? ''
+  return line.replace(/\/(?:tmp|var\/folders)\/\S*/g, '/tmp').replace(/\b[0-9a-f]{7,}\b/gi, '#').replace(/\d+/g, '#').slice(0, 160)
+}
+// jsonl: a transcript tail (the first line may be cut). → null | { signature, count, first, last, condition } when the
+// goal in force has its last `n` error tool results all the same infra error, spanning ≥ 10 min and ending ≤ 15 min ago.
+export function goalLoop(jsonl, { n = 5, now = Date.now() } = {}) {
+  let goal = null // condition of the active goal
+  let errs = []
+  for (const line of String(jsonl).split('\n')) {
+    let o
+    try { o = JSON.parse(line) } catch { continue }
+    const a = o?.attachment
+    if (o?.type === 'attachment' && a?.type === 'goal_status') {
+      if (a.met) { goal = null; errs = [] } else if (goal !== a.condition) { goal = a.condition; errs = [] }
+    } else if (o?.type === 'user') {
+      const c = o.message?.content
+      if (GOAL_CLEAR_RE.test(typeof c === 'string' ? c : JSON.stringify(c))) { goal = null; errs = [] }
+      for (const r of Array.isArray(c) ? c : []) {
+        if (r?.type !== 'tool_result' || !r.is_error) continue
+        const text = errText(r.content)
+        errs.push({ at: Date.parse(o.timestamp), sig: signature(text), infra: INFRA_RE.test(text) })
+      }
+    }
+  }
+  if (goal === null || errs.length < n) return null
+  const last = errs.slice(-n)
+  const { sig, at: first } = last[0]
+  const end = last[n - 1].at
+  if (!last.every((e) => e.infra && e.sig === sig && e.at > 0) || end - first < 10 * MIN || now - end > 15 * MIN) return null
+  return { signature: sig, count: n, first, last: end, condition: goal }
 }
 
 // WP-120: `LC_ALL=C ps -axo pid=,lstart=,command=` → Map claude --name → process start (ms; the latest when a name
@@ -153,7 +200,8 @@ export function keepStarts(starts, now = Date.now()) {
 export function inboxOps({ opened, resolved }) {
   return {
     add: opened.map((f) => ({ kind: 'watchdog', key: `watchdog|${f.key}|${f.since}`, title: f.title, body: f.body, target: { watchdog: f.key, check: f.check }, quiet: f.severity !== 'severe' })),
-    resolveKeys: resolved.map((f) => f.key),
+    // WP-220: a goal-loop card stays until the user dismisses it (clearing the goal is what makes the finding go away).
+    resolveKeys: resolved.filter((f) => f.check !== 'goal-loop').map((f) => f.key),
   }
 }
 
