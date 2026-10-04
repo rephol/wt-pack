@@ -23,6 +23,7 @@ import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { ProjectSettings, PKEYS } from './project-settings.mjs'
+import { createProject, hideProject } from './projects.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt-shared/scripts/model-route.mjs'
@@ -1203,7 +1204,7 @@ async function retireIdleWorkers(project) {
   store.delete('agents:local')
 }
 // Project name → main checkout: the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
-// and every repo a local agent is working in.
+// and every repo a local agent is working in, minus $WT_DASHBOARD_HIDDEN_PROJECTS (names).
 async function projectRoots() {
   return cached('projectRoots', 30_000, async () => {
     const dirs = [...(REPO_OK ? [REPO] : []), ...cfg.list('WT_DASHBOARD_PROJECTS'), ...(await agents()).filter((a) => a.local && a.cwd).map((a) => a.cwd)]
@@ -1212,6 +1213,7 @@ async function projectRoots() {
       const c = await git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
       if (c) { const root = dirname(c.trim()); map.set(basename(root), root) }
     }
+    for (const h of cfg.list('WT_DASHBOARD_HIDDEN_PROJECTS')) map.delete(h) // WP-223: Hide project
     return map
   })
 }
@@ -1232,6 +1234,23 @@ async function projectsApi() {
 // WP-104: a spawn's first prompt — a routine's is tagged <wt-message kind=routine>; the spawn dialog's is the user's
 // own words, sent untagged (but unable to carry a forged tag).
 export const spawnText = (b) => (b.tag ? wrap(b.tag, b.prompt.trim()) : unTag(b.prompt.trim()))
+// WP-223: dashboard "New project" / "Hide project" (projects.mjs). The orchestrator role has `spawn: null`, so it is
+// started through agents.sh directly (which applies the role's model floor itself).
+const projectDeps = () => ({
+  home: homedir(), cfg, rooms, roots: projectRoots, repoRoot, run,
+  spawnOrchestrator: async (root) => {
+    const out = await run(AGENTS_SH, ['spawn', 'orchestrator', root], root, 120_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
+    const [name, pane] = out.trim().split('\n').pop().split(' ')
+    if (!name || !PANE.test(pane ?? '')) throw new Error(`unexpected agents.sh output: ${out.trim().slice(0, 200)}`)
+    return { name, pane }
+  },
+})
+async function projectMutation(req, res, fn) {
+  if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
+  const [code, out] = await fn().then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
+  store.delete('projectRoots'); store.delete('agents:local'); store.delete('overview')
+  return send(res, code, out)
+}
 async function spawnAgent(b) {
   const role = roleStore.roles.find((r) => r.id === b.kind && r.spawn)
   if (!role) throw Object.assign(new Error('unknown role, or it cannot be spawned (Settings › Roles)'), { status: 400 })
@@ -2986,6 +3005,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/observability' || url.pathname === '/api/logs/server') return await observabilityApi(req, res, url)
+      if (parts[0] === 'api' && parts[1] === 'projects' && parts.length === 3 && req.method === 'DELETE') return projectMutation(req, res, () => hideProject(projectDeps(), decodeURIComponent(parts[2])))
       if (parts[0] === 'api' && parts[1] === 'projects' && parts[2]) return await projectSettingsApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
@@ -3010,6 +3030,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === '/api/usage' && req.method === 'GET') return send(res, 200, await usageApi())
       if (url.pathname === '/api/projects' && req.method === 'GET') return send(res, 200, await projectsApi())
+      if (url.pathname === '/api/projects' && req.method === 'POST') return projectMutation(req, res, async () => createProject(projectDeps(), JSON.parse((await body(req)) || '{}')))
       if (url.pathname === '/api/agents/spawn' && req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
         const [code, out] = await spawnAgent(JSON.parse((await body(req)) || '{}')).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])

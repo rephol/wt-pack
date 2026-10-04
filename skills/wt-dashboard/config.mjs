@@ -13,6 +13,7 @@ export const KEYS = {
   LINEAR_API_KEY: { secret: true, label: 'Linear API key' },
   TYPESAFE_API_KEY: { secret: true, label: 'TypeSafe (Jev) API key' },
   WT_DASHBOARD_PROJECTS: { list: ':', legacy: 'HERDR_DASH_PROJECTS', label: 'Extra projects' },
+  WT_DASHBOARD_HIDDEN_PROJECTS: { list: ':', label: 'Hidden projects' }, // project names (WP-223)
   WT_DASHBOARD_ALLOWED_HOSTS: { list: ',', legacy: 'HERDR_DASH_ALLOWED_HOSTS', label: 'Allowed hosts', loopbackOnly: true },
   WT_DASHBOARD_REPO: { legacy: 'UMKMALL_REPO', label: 'Default repo', restart: true },
   // Linear teams whose tickets the dashboard shows and recognises: KEY=project (project defaults to the key, lower-cased).
@@ -158,6 +159,9 @@ export class Config {
         const bad = items.filter((t) => !/^[A-Za-z][A-Za-z0-9]*(=[\w.-]+)?$/.test(t.replace(/\s*=\s*/, '=')))
         if (bad.length) throw Object.assign(new Error(`KEY or KEY=project (letters/digits; project: letters, digits, . _ -): ${bad.join(', ')}`), { status: 400 })
         s = items.map((t) => t.replace(/\s*=\s*/, '=')).join(',')
+      } else if (k === 'WT_DASHBOARD_HIDDEN_PROJECTS') {
+        if (items.some((n) => !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(n))) throw Object.assign(new Error('project names only'), { status: 400 })
+        s = items.join(':')
       } else {
         if (items.some((p) => !p.startsWith('/') || p.includes(':') || /[\n"]/.test(p))) throw Object.assign(new Error('absolute paths only'), { status: 400 })
         s = items.join(':')
