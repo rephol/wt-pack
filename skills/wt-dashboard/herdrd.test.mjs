@@ -14,3 +14,8 @@ test('ensureHerdr: starts a detached headless server only when none is running',
   assert.deepEqual(calls, [['herdr', 'server', true]])
   assert.match(logs[0], /started it \(pid 42\)/)
 })
+
+test('the watchdog probe job keeps the herdr it starts (AbandonProcessGroup, WP-218)', async () => {
+  const { probePlist } = await import('./scripts/service.mjs')
+  assert.match(probePlist({ root: '/r', log: '/l' }), /<key>AbandonProcessGroup<\/key><true\/>/)
+})

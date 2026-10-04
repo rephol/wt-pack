@@ -55,7 +55,9 @@ ${Object.entries(env).map(([k, v]) => `    <key>${k}</key><string>${esc(v)}</str
 `
 }
 
-// No KeepAlive: launchd runs the probe every StartInterval seconds and it exits.
+// No KeepAlive: launchd runs the probe every StartInterval seconds and it exits. AbandonProcessGroup (WP-218): the
+// probe may start herdr's server (`nohup herdr server &`); without it launchd kills that herdr — and every agent —
+// as soon as the probe exits (verified with a throwaway job; the dashboard's own detached spawn survives without it).
 export function probePlist({ root, log }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -65,6 +67,7 @@ export function probePlist({ root, log }) {
   <key>ProgramArguments</key><array><string>/bin/sh</string><string>${esc(join(root, 'scripts', 'watchdog-probe.sh'))}</string></array>
   <key>StartInterval</key><integer>120</integer>
   <key>RunAtLoad</key><true/>
+  <key>AbandonProcessGroup</key><true/>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>${esc(log)}</string>
   <key>StandardErrorPath</key><string>${esc(log)}</string>
