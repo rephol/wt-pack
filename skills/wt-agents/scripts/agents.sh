@@ -50,6 +50,14 @@ repo_root() {
   dirname "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null
 }
 
+# WP-222: a tab named after an agent whose claude is gone (herdr drops it from `agent list`) is a bare shell
+# (one pane, agent_status unknown) — close it, so rm/respawn/spawn never leave one beside the live agent.
+close_bare_tabs() {  # <label> [workspace-id]
+  herdr tab list ${2:+--workspace "$2"} 2>/dev/null | jq -r --arg l "$1" \
+    '.result.tabs[] | select(.label == $l and .pane_count == 1 and .agent_status == "unknown") | .tab_id' \
+  | while IFS= read -r t; do herdr tab close "$t" >/dev/null 2>&1 || true; done
+}
+
 pool_ws() {  # <label> <cwd-for-new-workspace>
   id=$(herdr workspace list | jq -r --arg l "$1" \
     '.result.workspaces[] | select(.label == $l) | .workspace_id' | head -1)
@@ -260,6 +268,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   set -- "$@" --env "PATH=$shim:$PATH" --env "WT_KILL_SHIM_DIR=$shim" --env "CLAUDE_ENV_FILE=$envf"
   # WP-122: mcp/<role>.json run ${WT_MEMORY_MCP:-~/.claude/skills/…}; a plugin-only install has no such link.
   set -- "$@" --env "WT_MEMORY_MCP=$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs"
+  close_bare_tabs "$label" "$ws"
   pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@" \
     | jq -r .result.root_pane.pane_id)
   # Close that default tab once the agent's tab exists — only while it is still an idle shell (no agent in it).
@@ -345,7 +354,12 @@ rm)
   target=${1:?name or pane required}; force=${2:-}
   pane=$(herdr agent list | jq -r --arg t "$target" \
     '.result.agents[] | select(.name == $t or .pane_id == $t) | .pane_id' | head -1)
-  [ -n "$pane" ] || { echo "no such agent: $target" >&2; exit 1; }
+  if [ -z "$pane" ]; then
+    # WP-222: its claude exited, so herdr no longer lists it — still close the bare tab left under its name.
+    [ -n "$(herdr tab list | jq -r --arg l "$target" '.result.tabs[] | select(.label == $l and .pane_count == 1 and .agent_status == "unknown") | .tab_id')" ] \
+      || { echo "no such agent: $target" >&2; exit 1; }
+    close_bare_tabs "$target"; echo "removed $target (bare shell tab)"; exit 0
+  fi
   status=$(herdr agent get "$pane" | jq -r '.result.agent.agent_status')
   # Closing a working agent discards a turn in flight, and its work is only in
   # that pane until it commits. Refuse unless the caller says otherwise.

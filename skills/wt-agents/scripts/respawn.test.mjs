@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 const here = import.meta.dirname
 const tmp = mkdtempSync(join(tmpdir(), 'wt-respawn-'))
-const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'demo'), agents = join(tmp, 'agents.json')
+const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'demo'), agents = join(tmp, 'agents.json'), tabs = join(tmp, 'tabs.json')
 mkdirSync(bin); mkdirSync(repo); mkdirSync(join(tmp, '.claude', 'projects', 'x'), { recursive: true })
 writeFileSync(join(tmp, '.claude', 'projects', 'x', 's-old.jsonl'), '{}\n')
 writeFileSync(join(tmp, '.claude', 'projects', 'x', 's-ok.jsonl'), '{}\n')
@@ -19,6 +19,7 @@ stub('herdr', `case "$1 $2" in
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-workers","workspace_id":"w1"},{"label":"other-workers","workspace_id":"w2"}]}}' ;;
   "agent list") printf '{"result":{"agents":%s}}' "$(cat ${agents})" ;;
   "agent get") jq -c --arg p "$3" '{result:{agent:(.[] | select(.pane_id == $p))}}' ${agents} ;;
+  "tab list") cat ${tabs} 2>/dev/null || echo '{"result":{"tabs":[]}}' ;;
   "tab create") echo '{"result":{"root_pane":{"pane_id":"w1:p9"}}}' ;;
 esac`)
 // Fake process table: old agent has no shim env, ok agent has it.
@@ -103,4 +104,22 @@ test('respawn --stale: nothing stale; working agent is skipped and reported', ()
   assert.equal(run(['respawn', '--stale']).stdout.trim(), 'no stale agents')
   setAgents([row(1, 'working', 's-old')])
   assert.match(run(['respawn', '--stale']).stdout, /^skipped demo-worker-01: .*is working/m)
+})
+
+test('WP-222: spawn closes a bare-shell tab named after the agent; rm of an exited agent closes its tab', () => {
+  const tab = (id, label, status) => ({ tab_id: id, label, pane_count: 1, agent_status: status, workspace_id: 'w1' })
+  writeFileSync(tabs, JSON.stringify({ result: { tabs: [tab('w1:t7', 'demo-worker-01', 'unknown'), tab('w1:t8', 'demo-worker-02', 'idle'), tab('w1:t9', 'other', 'unknown')] } }))
+  setAgents([row(1, 'idle', 's-old')])
+  let r = run(['respawn', 'demo-worker-01'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(idx(r.calls, /^herdr tab close w1:t7/) < idx(r.calls, /^herdr tab create/))
+  assert.ok(!r.calls.some((l) => /tab close w1:t(8|9)/.test(l)))
+  setAgents([])
+  r = run(['rm', 'demo-worker-01'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(r.calls.includes('herdr tab close w1:t7'))
+  r = run(['rm', 'demo-worker-02'])
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /no such agent/)
+  rmSync(tabs)
 })
