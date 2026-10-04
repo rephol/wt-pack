@@ -225,6 +225,9 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const dragged = drag ? tickets.find((t) => t.id === drag.id) : undefined
   const opened = openId && openId !== 'new' ? tickets.find((t) => t.id === openId) ?? null : null
   const shown = phone ? [col] : COLUMNS
+  // WP-229: the board's own project picker; keeps the current value selectable if it has no agents.
+  const picker = <Selector label="Board project" isLabelHidden hasSearch width={phone ? '100%' : 200} value={project} onChange={(v: string) => onProject?.(v)}
+    options={[...new Set([project, ...projects])].map((p) => ({ value: p, label: p }))} />
   const automation = <AutomationButton phone={phone} board={q.data} busy={setBoard.isPending} onSet={(b) => setBoard.mutate(b)} runNow={runNow} />
 
   return (
@@ -236,6 +239,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
             {phone ? (
               // WP-64: two rows on phones — column picker, then automation status + New ticket.
               <VStack gap={2}>
+                {picker}
                 <Selector label="Column" isLabelHidden width="100%" value={col} onChange={(v: string) => setCol(v as Column)}
                   options={COLUMNS.map((c) => ({ ...statusOptions.find((o) => o.value === c)!, label: `${columnLabel(c)} (${cols[c].length})` }))} />
                 <HStack gap={2} vAlign="center" justify="between">
@@ -250,7 +254,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
               </VStack>
             ) : (
               <Toolbar label="Board actions" gap={2} className="hd-kb-toolbar"
-                startContent={<><Heading level={3}>{project}</Heading><Badge label={String(tickets.length)} variant="neutral" /></>}
+                startContent={<>{picker}<Badge label={String(tickets.length)} variant="neutral" /></>}
                 endContent={<HStack gap={2} vAlign="center">{search}{automation}<Button label="New ticket" variant="primary" onClick={() => setOpenId('new')} /></HStack>} />
             )}
           </LayoutHeader>

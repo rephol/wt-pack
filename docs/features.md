@@ -32,7 +32,8 @@ A queue of work across PRs, agents and the local board, with a **Mine / Everyone
 
 ## Board
 
-A local kanban per project (`WP-N` style keys), stored in `wt.db`.
+A local kanban per project (`WP-N` style keys), stored in `wt.db`. The board has its own project picker in its
+header, remembered per viewer and defaulting to the global project; picking there leaves the sidebar project alone.
 
 - Columns: Backlog, Ready, Planning, Building, Review, Done, Blocked. Moving to Blocked asks why (a note is
   required). Moving to Backlog clears the assignee.
