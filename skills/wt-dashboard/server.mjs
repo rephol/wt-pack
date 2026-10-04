@@ -1777,7 +1777,7 @@ async function usageApi() {
   const range = (from) => Object.fromEntries(Object.entries(by).map(([k, f]) => [k, usageAgg.summary(from, f)]))
   return {
     limits: await readLimits(USAGE_FILE),
-    block: await ccBlock(), // WP-227
+    block: ccBlock(), // WP-227: cached, refreshed in the background
     today: range(midnight.getTime()),
     week: range(Date.now() - 7 * 86400_000),
     month: range(Date.now() - 30 * 86400_000),
