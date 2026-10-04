@@ -222,6 +222,11 @@ candidates() {
   tab=$(printf '\t')
   ws=$(worker_ws)
   panes=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')
+  # WP-225: an agent already holding an open card (its assignee, or its task/ticket token names one) is never
+  # a candidate. Best-effort: no board (server down, Linear key) → [] and nobody is excluded, as before.
+  held=$(cd "$main_checkout" && "$(dirname "$0")/../../wt-ticket/scripts/wt-ticket" list --json 2>/dev/null \
+    | jq -c '[.tickets[]? | select(.column != "done") | {id, a: (.assignee.name // "")}]' 2>/dev/null) || held=
+  [ -n "$held" ] || held='[]'
   herdr agent list \
     | jq -r --arg ws "$ws" --arg persona "$persona" --argjson panes "$panes" \
       '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws)
@@ -234,6 +239,10 @@ candidates() {
         # `herdr agent start <name>` has an empty name, and most do.
         [ -n "$id" ] && [ -n "$acwd" ] || continue
         [ -d "$acwd" ] || continue
+        tk=$(printf '%s' "$panes" | jq -r --arg p "$id" '(.[$p].task // .[$p].ticket // "") | split(" ")[0]')
+        nm=$(name_of "$id")
+        printf '%s' "$held" | jq -e --arg tk "$tk" --arg nm "$nm" \
+          'any(.[]; ($tk != "" and .id == $tk) or ($nm != "" and .a == $nm))' >/dev/null && continue
         # WP-221: herdr can still say idle/done after claude exits; the shell back in the foreground means a dead pane.
         herdr pane process-info --pane "$id" 2>/dev/null \
           | jq -e '.result.process_info | .shell_pid != null and .foreground_process_group_id == .shell_pid

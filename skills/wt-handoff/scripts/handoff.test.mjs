@@ -289,3 +289,27 @@ test('WP-210: --reply queues through the dashboard when the target mod is live, 
   ;[out, calls] = reply()
   assert.match(calls, /agent prompt wW:p7 /)
 })
+
+test('WP-225: an agent whose task token names an open card, or that is the assignee of one, is not a free candidate', () => {
+  const curlBin = join(tmp, 'curlbin225')
+  mkdirSync(curlBin, { recursive: true })
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+for a in "$@"; do url=$a; done
+case "$url" in
+  *"/api/tickets/keys"*) printf 'WP\\n200' ;;
+  *"/api/tickets"*) printf '%s\\n200' '{"tickets":[{"id":"WP-1","column":"building","assignee":{"name":"demo-worker-02"}},{"id":"WP-2","column":"done","assignee":{"name":"demo-worker-03"}}]}' ;;
+  *) printf '{}\\n404' ;;
+esac
+`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const agent = (n, p) => ({ name: n, pane_id: p, tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo })
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [agent('demo-worker-01', 'wW:p1'), agent('demo-worker-02', 'wW:p2'), agent('demo-worker-03', 'wW:p3'), agent('demo-worker-04', 'wW:p4')] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
+    { pane_id: 'wW:p1', tokens: { task: 'WP-1 still on it' } }, { pane_id: 'wW:p3', tokens: { task: 'WP-2 finished' } }, { pane_id: 'wW:p4', tokens: {} }] } }))
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_HANDOFF_JEV: 'off' }
+  const list = execFileSync(join(here, 'handoff.sh'), ['--list', repo], { input: '', encoding: 'utf8', env })
+  assert.ok(!list.includes('wW:p1') && !list.includes('wW:p2'), list) // token names open WP-1; assignee of WP-1
+  assert.ok(list.includes('wW:p3') && list.includes('wW:p4'), list) // WP-2 is done; no token, no card
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
