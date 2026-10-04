@@ -78,7 +78,7 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 - Per-board switch in the Automation sheet, **default off**.
 - Every 30s (first tick 15s after start), per board, the most urgent unassigned Ready card is handed to a
   free agent via `wt-handoff --role`: size **L** or label **`needs-plan` → planner** (wt-plan), anything else **→ worker** (wt-work →
-  wt-ship → merge to main → push). Dispatch only **assigns** the card (and tags its dispatch state); the agent
+  wt-ship → commit and report the branch; the orchestrator merges and pushes, WP-226). Dispatch only **assigns** the card (and tags its dispatch state); the agent
   moves its own card (wt-plan → Planning, the worker's prompt → Building). One card per board per tick.
 - An agent already **holding a ticket** is never picked (worker reuse, buddy, pair replacement): it is the
   assignee of an open card, or its `task`/`ticket` pane token names one. A card moved to **Ready** (by the user

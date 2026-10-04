@@ -374,6 +374,14 @@ test('Jev triage pending: skipped for up to 60s, dispatched once triaged; nothin
   assert.equal(off.calls.length, 1)
 })
 
+test('dispatchPrompt: a worker commits and reports the branch, never merges or pushes (WP-226)', () => {
+  const w = dispatchPrompt({ id: 'WP-9', title: 'x' }, 'worker')
+  assert.match(w, /Do not merge or push/)
+  assert.match(w, /report the branch and its tip commit/)
+  assert.match(w, /move WP-9 blocked/)
+  assert.doesNotMatch(w, /Merge to main|and push\. /)
+})
+
 test('dispatchPrompt: report line in four shapes, both roles; no "reply to the sender" (WP-75)', () => {
   const t = { id: 'WP-9', title: 'x' }
   const orch = { name: 'o', pane: 'w1:p2' }
