@@ -511,7 +511,7 @@ const fg = new Map() // pane → { seq, at, exited }
 async function claudeExited(m, a) {
   const c = fg.get(a.pane_id)
   if (c && c.seq === a.state_change_seq && Date.now() - c.at < 15_000) return c.exited
-  const exited = await herdrOn(m, 'pane', 'process-info', '--pane', a.pane_id)
+  const exited = await run('herdr', ['pane', 'process-info', '--pane', a.pane_id], undefined, 2_000) // a hung herdr must not stall the tick
     .then((t) => shellForeground(JSON.parse(t).result?.process_info), () => false) // unknown → trust herdr
   fg.set(a.pane_id, { seq: a.state_change_seq, at: Date.now(), exited })
   return exited
@@ -522,6 +522,7 @@ async function listAgents(m) {
   const meta = await paneMeta(m).catch(() => ({ ws: new Map(), tokens: new Map() }))
   const readEvery = m.local ? 15_000 : 30_000
   const out = []
+  if (m.local) for (const p of fg.keys()) if (!result.agents.some((a) => a.pane_id === p)) fg.delete(p)
   for (const a of result.agents) {
     if (m.local && (a.agent_status === 'idle' || a.agent_status === 'done') && await claudeExited(m, a)) a.agent_status = 'exited'
     const k = `${m.label}|${a.pane_id}`
@@ -1190,8 +1191,12 @@ async function retireIdleWorkers(project) {
   const ws = JSON.parse(w).result.workspaces.find((x) => x.label === label)?.workspace_id
   if (!ws) return
   const tokensOf = new Map(JSON.parse(p).result.panes.map((x) => [x.pane_id, x.tokens ?? {}]))
-  const agentsInPool = JSON.parse(a).result.agents.filter((x) => x.workspace_id === ws)
-    .map((x) => ({ pane_id: x.pane_id, agent_status: x.agent_status, tokens: tokensOf.get(x.pane_id) ?? {} }))
+  const agentsInPool = []
+  for (const x of JSON.parse(a).result.agents.filter((x) => x.workspace_id === ws)) {
+    // WP-221: an exited pane takes no keep slot (and stays for the watchdog's Resume).
+    if ((x.agent_status === 'idle' || x.agent_status === 'done') && await claudeExited({ local: true }, x)) continue
+    agentsInPool.push({ pane_id: x.pane_id, agent_status: x.agent_status, tokens: tokensOf.get(x.pane_id) ?? {} })
+  }
   for (const pane of retireIdle(agentsInPool, n)) {
     await run(AGENTS_SH, ['rm', pane], homedir(), 30_000).catch((e) => console.error(`retire ${pane}:`, e.message))
   }

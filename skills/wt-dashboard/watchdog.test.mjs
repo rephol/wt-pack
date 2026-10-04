@@ -207,3 +207,11 @@ test('WP-221 shellForeground: shell in the foreground = claude exited; an exited
   const after = rememberAgents(seen, [{ ...a, status: 'exited' }], ['w1:p1'], () => null, now + 1000)
   assert.deepEqual(exitedAgents(after, ['w1:p1']).map((e) => e.pane), ['w1:p1'])
 })
+
+test('WP-221 review: exec claude (shell pid reused) is alive; Resume ignores the exited agent herdr still lists', () => {
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5, foreground_processes: [{ pid: 5, name: '2.1.289' }] }), false)
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5, foreground_processes: [{ pid: 5, name: 'zsh' }] }), true)
+  const r = { name: 'w', session: 's', ticket: null }
+  assert.equal(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'w', status: 'exited' }]), null)
+  assert.equal(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'w', status: 'idle' }]), 'the pane is running an agent again')
+})
