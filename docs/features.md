@@ -631,6 +631,10 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   `service:install` also installs the **watchdog probe** `id.local.wtdashboard.watchdog`: every 2 min it curls
   `/api/health` and shows a macOS notification when the server stops answering (and once when it is back).
   `node scripts/service.mjs probe` installs only the probe; `./setup` adds it to an existing service.
+- **herdr after a reboot** (WP-218): when the dashboard server starts, and on every watchdog probe, it checks
+  `herdr status server` and starts herdr's headless server (`herdr server`, detached) if none is running — never a
+  second one, never blocking startup; logged to `server.log`. Agents and panes from before the reboot do not come
+  back on their own (respawn them).
 - **PWA**: in a browser on a secure origin, **Install app** (iOS: Share → Add to Home Screen); an update banner
   shows when a new build lands. The service worker never caches `/api`.
 - **Tailscale**: the server listens on loopback only; expose it with `tailscale serve` and add the hostname to

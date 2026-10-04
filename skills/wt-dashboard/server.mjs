@@ -1,5 +1,6 @@
 // Agent control room: herdr panes + git worktrees + PRs + Linear, joined into tasks.
 // ponytail: no deps, polling instead of websockets; switch to SSE if refresh feels laggy.
+import { ensureHerdr } from './herdrd.mjs'
 import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, statfs, mkdir, writeFile, appendFile } from 'node:fs/promises'
@@ -3471,6 +3472,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
     process.on('uncaughtException', crashed('uncaughtException'))
     process.on('unhandledRejection', crashed('unhandledRejection'))
+    ensureHerdr().catch((e) => console.error('herdr:', e.message)) // WP-218: after a reboot nobody has opened herdr yet
     setInterval(roomsLoop, 4000)
     setInterval(() => agents().then((ag) => { const live = new Set(ag.filter((a) => a.local).map((a) => a.id)); return live.size && asks.expire(live) }).catch((e) => console.error('asks expire:', e.message)), 60_000).unref() // WP-209
     setInterval(tick, 4000)

@@ -391,7 +391,8 @@ svc() {
   running=$(node "$DASH/scripts/service.mjs" status 2>/dev/null | grep -c ': running')
   if [ "$root" = "$DASH" ] && [ "$running" -eq 1 ]; then ok "already: running from $DASH"
     # WP-70: a service installed before the watchdog probe existed gets the probe here (install does both).
-    if [ ! -f "$HOME/Library/LaunchAgents/id.local.wtdashboard.watchdog.plist" ]; then node "$DASH/scripts/service.mjs" probe >/dev/null && ok "installed the watchdog probe" || bad "watchdog probe install failed — node $DASH/scripts/service.mjs probe"; fi
+    # WP-218: a probe from before AbandonProcessGroup would kill the herdr server it starts; rewrite it.
+    if ! grep -q AbandonProcessGroup "$HOME/Library/LaunchAgents/id.local.wtdashboard.watchdog.plist" 2>/dev/null; then node "$DASH/scripts/service.mjs" probe >/dev/null && ok "installed the watchdog probe" || bad "watchdog probe install failed — node $DASH/scripts/service.mjs probe"; fi
   # This checkout's pre-WP-69 path: service.mjs rewrites the plist from its own (new) location.
   elif [ "$root" = "$REPO/wt-dashboard" ]; then node "$DASH/scripts/service.mjs" install >/dev/null && ok "migrated service to $DASH" || bad "service migration failed — node $DASH/scripts/service.mjs install"
   elif [ -n "$root" ] && [ "$root" != "$DASH" ] && is_pack "$(root_of "$root")"; then opt "kept: the service runs $root (another wt-pack checkout)"
