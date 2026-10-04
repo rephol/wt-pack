@@ -421,6 +421,16 @@ Projects, Terminals, Usage, Observability, Server, About.
   [Model routing](#model-routing)); plus the board's Auto and Dispatch switches. Stored in `wt.db`
   (`project_settings`, not in the JSON rollback); shell scripts read it via
   `wt-shared/scripts/project-setting.mjs get <key> [--project P|--cwd DIR]`.
+- **New project / Hide project** (WP-223): Settings › Projects has **New project** with three sources: *New empty repo*
+  (`git init -b main` + an empty first commit, so worktrees have a base), *Git clone* (`https://`, `ssh://` or
+  `git@host:path` only; no `file:`/`ext::`, protocols locked, no prompts, 5-min limit, a failed clone is removed) and
+  *Existing folder* (must be a git repo). The project name is the folder name and must be lowercase letters, digits,
+  `-`/`_` (≤32); clone/init targets and existing repos must be inside your home folder, and a clone/init target must
+  not exist yet. It is appended to `WT_DASHBOARD_PROJECTS` (409 if that is set in the server's env), the project's room
+  is created (switch, default on) and an orchestrator can be started (switch, default off: it is an opus session).
+  **Hide project** (in-app confirm) removes it from the pickers via `WT_DASHBOARD_HIDDEN_PROJECTS` (names) and the
+  project list; folder, room and tickets are untouched, and adding the folder again unhides it. API:
+  `POST /api/projects {source, path|url+parent+name, room?, orchestrator?}`, `DELETE /api/projects/:name`.
 - **Integrations**: precedence is process env › Keychain (secrets) › `~/.config/wt-dashboard/env` › default;
   applies without restart except `WT_DASHBOARD_REPO` and `WT_LINEAR_TEAMS`.
   - `LINEAR_API_KEY` (Keychain, last 4 shown, Test connection), `TYPESAFE_API_KEY` (Keychain, powers Jev).

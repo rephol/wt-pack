@@ -17,6 +17,7 @@ import { openSettings } from './settings'
 import { SettingsCard, SettingsRow, CONTROL_WIDTH } from './settingsRows'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 import { RolesCard } from './projectRoles'
+import { NewProjectButton, HideProject } from './newProject'
 
 type Source = 'env' | 'project' | 'global' | 'default'
 type Item = { key: string; label: string; scope: 'project' | 'overridable'; value: string | null; source: Source; project: string | null; inherited: { value: string | null; source: Source } }
@@ -43,11 +44,15 @@ export function ProjectsSection() {
   const setProject = (p: string) => { wanted = p; setP(p) } // survives the dialog remounting (desktop ⇄ phone shell)
   const current = project ?? names[0] ?? null
   if (!projects.data) return projects.isError ? <LoadError what="projects" error={projects.error} retry={() => projects.refetch()} /> : <Delayed><FieldsSkeleton n={5} /></Delayed>
-  if (!current) return <Text type="supporting">No projects yet: add a repo under Settings › Integrations.</Text>
+  if (!current) return <VStack gap={3} align="start"><Text type="supporting">No projects yet.</Text><NewProjectButton /></VStack>
   return (
     <VStack gap={5}>
-      <Selector label="Project" width={CONTROL_WIDTH} value={current} onChange={setProject}
-        options={[...new Set([current, ...names])].map((n) => ({ value: n, label: n }))} />
+      <HStack gap={3} align="end" wrap="wrap">
+        <Selector label="Project" width={CONTROL_WIDTH} value={current} onChange={setProject}
+          options={[...new Set([current, ...names])].map((n) => ({ value: n, label: n }))} />
+        <NewProjectButton />
+        <HideProject project={current} onHidden={() => { wanted = null; setP(null) }} />
+      </HStack>
       <Text type="supporting" size="sm">Order: server env var › this project › global (Settings) › default. Reset returns a key to what it inherits.</Text>
       <ProjectKeys project={current} />
       <BoardAutomation project={current} />
