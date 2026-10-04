@@ -240,6 +240,7 @@ test('goalLoop: varied or non-infra errors, no goal, a short span, a cleared goa
   const cleared = { type: 'user', message: { content: '<command-name>/goal</command-name>\n<command-args>clear</command-args>' } }
   assert.equal(goalLoop(jl(goalSet, ...authRun(), cleared), { now }), null)
   assert.equal(goalLoop('garbage\n' + jl(goalSet, ...authRun()), { now, n: 5 })?.count, 5) // a cut first line is skipped
+  assert.equal(goalLoop(jl(goalSet, ...authRun()), { now, n: 0 })?.count, 5) // bad threshold falls back, never throws
   assert.ok(INFRA_RE.test('Could not resolve host: github.com'))
   assert.ok(!INFRA_RE.test('AssertionError: expected 4 to equal 5'))
 })

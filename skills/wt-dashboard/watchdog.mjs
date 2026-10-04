@@ -134,6 +134,7 @@ const signature = (t) => {
 // jsonl: a transcript tail (the first line may be cut). → null | { signature, count, first, last, condition } when the
 // goal in force has its last `n` error tool results all the same infra error, spanning ≥ 10 min and ending ≤ 15 min ago.
 export function goalLoop(jsonl, { n = 5, now = Date.now() } = {}) {
+  n = Math.max(2, Math.floor(n) || 5) // a 0 threshold would make slice(-0) take every error
   let goal = null // condition of the active goal
   let errs = []
   for (const line of String(jsonl).split('\n')) {
