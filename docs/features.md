@@ -175,7 +175,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 ## Agents, roles and spawn
 
 - Agents are herdr panes. The Agents page is a table grouped by role (agent, task, status, activity,
-  machine, branch), one card per machine (local and remote herdr hosts), with filters All / Busy / Free /
+  branch, context %, model; **Columns** also offers machine, project and role, and a saved layout is kept), one card per machine (local and remote herdr hosts), with filters All / Busy / Free /
   Needs you / Attention and sorting; open an agent to read and type into its conversation. **Stop** sends Esc (only while working and no question is pending).
 - **Chat dock** (WP-112, windows 900px and wider): opening an agent or room chat — task queue, ⌘K switcher, room
   members and @mentions, Inbox, notifications, Overview's room cards — puts it in a dock at the bottom right
