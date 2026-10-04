@@ -20,6 +20,7 @@ import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds, watchPrsUnwatched, watchPrsStale } from './inbox.mjs'
+import { listBuiltin, readPins, writePin, overlay, isUuid } from './sessions.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { ccBlock } from './ccusage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
@@ -2997,6 +2998,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'sessions') return await sessionsApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'deliveries') return await deliveriesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'asks') return await asksApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
@@ -3430,6 +3432,58 @@ async function runWatchdogOnce() {
   wd = { ...wd, open: d.open, resolved: [...d.resolved.map((f) => ({ ...f, resolvedAt: at })), ...wd.resolved].slice(0, 20), lastRun: at }
   await writeFile(WD_FILE, JSON.stringify(wd, null, 2))
   return wd
+}
+// ---- Sessions page (WP-228): ccsessions --json (~5.6 s) when installed, else a built-in transcript reader; one cached list ----
+const PINS = join(homedir(), '.claude', 'ccsessions-frozen.json')
+const CCSESSIONS = [join(homedir(), '.local', 'bin', 'ccsessions'), 'ccsessions'].find((c) => !c.includes('/') || existsSync(c))
+let sessionList = null // { at, source, rows }
+let sessionRefresh = null
+function refreshSessions() {
+  return (sessionRefresh ??= (async () => {
+    let source = 'builtin', rows
+    try { // only --json: bare `ccsessions` / --help wait on an interactive prompt
+      rows = JSON.parse(await new Promise((ok, no) => execFile(CCSESSIONS, ['-n', '500', '--json'], { timeout: 30_000, maxBuffer: 16 << 20 }, (e, out) => (e ? no(e) : ok(out)))))
+      if (!Array.isArray(rows)) throw new Error('not an array')
+      rows = rows.map(({ id, cwd, proj, tldr, doing, mtime, live, started, agent, ago, frozen, closed }) => ({ id, cwd, proj, tldr: String(tldr ?? '').slice(0, 300), doing: String(doing ?? '').slice(0, 300), mtime, live, started, agent, ago, frozen, closed })) // ccsessions rows carry far more than the page uses
+      source = 'ccsessions'
+    } catch { rows = await listBuiltin(PROJECTS) }
+    sessionList = { at: Date.now(), source, rows }
+  })().finally(() => (sessionRefresh = null)))
+}
+async function sessionRows() {
+  if (!sessionList) await refreshSessions()
+  else if (Date.now() - sessionList.at > 60_000) refreshSessions().catch(() => {}) // stale-while-revalidate
+  const live = new Set((await agents()).map((a) => a.session).filter(Boolean))
+  return { source: sessionList.source, rows: overlay(sessionList.rows, await readPins(PINS), live) }
+}
+async function sessionsApi(req, res, parts) {
+  const json = async () => JSON.parse((await body(req)) || '{}')
+  if (parts.length === 2 && req.method === 'GET') return send(res, 200, await sessionRows())
+  const id = parts[2]
+  if (!isUuid(id ?? '') || parts.length !== 4) return send(res, 404, { error: 'not found' })
+  const row = (await sessionRows()).rows.find((r) => r.id === id)
+  if (!row) return send(res, 404, { error: 'unknown session' })
+  if (parts[3] === 'pin' && req.method === 'POST') {
+    const b = await json()
+    await writePin(PINS, id, { note: typeof b.note === 'string' ? b.note.slice(0, 200) : '', proj: row.proj })
+    return send(res, 200, { ok: true })
+  }
+  if (parts[3] === 'pin' && req.method === 'DELETE') { await writePin(PINS, id, null); return send(res, 200, { ok: true }) }
+  if (parts[3] === 'resume' && req.method === 'POST') {
+    const { role } = await json()
+    if (typeof role !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(role)) return send(res, 400, { error: 'role: lowercase name' })
+    if (row.live) return send(res, 409, { error: 'already running' })
+    if (!row.cwd || !existsSync(row.cwd)) return send(res, 409, { error: 'the session\'s directory no longer exists' })
+    if (!(await findTranscript(id))) return send(res, 409, { error: 'no transcript to resume' })
+    const taken = new Set((await agents()).map((a) => a.name))
+    const label = /^[a-z0-9_-]{1,32}$/.test(row.agent ?? '') && !taken.has(row.agent) ? ['--label', row.agent] : []
+    const out = await run(AGENTS_SH, ['spawn', role, row.cwd, ...label, '--resume', id], row.cwd, 120_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
+    const [name, pane] = out.trim().split('\n').pop().split(' ')
+    if (!name || !PANE.test(pane ?? '')) throw new Error(`unexpected agents.sh output: ${out.trim().slice(0, 200)}`)
+    store.delete('agents:local'); store.delete('overview')
+    return send(res, 200, { name, pane })
+  }
+  return send(res, 405, { error: 'method not allowed' })
 }
 async function watchdogApi(req, res, sub) {
   await wdLoaded
