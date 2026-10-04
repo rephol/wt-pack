@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Asks, clean, ping, ASK_MAX_AGE_MS } from './asks.mjs'
+import { Asks, placeAsk, clean, ping, ASK_MAX_AGE_MS } from './asks.mjs'
 
 const tmp = () => mkdtemp(join(tmpdir(), 'asks-'))
 const author = { pane: 'w1:p2', name: 'wt-pack-worker-01' }
@@ -159,4 +159,13 @@ test('server: unknown pane → 403 on GET /api/asks/ping and /api/asks/:id', asy
     assert.equal((await get('/api/asks/some-id', { 'x-herdr-pane': 'w999:p999' })).status, 403)
     assert.equal((await get('/api/asks/ping', {})).status, 403) // neither a session nor a pane
   } finally { srv.kill() }
+})
+
+test('placeAsk (WP-232): ticket room, else project room, else none; only for noDeliver asks that name no room', async () => {
+  const ensure = async (p) => `room-${p}`
+  assert.equal((await placeAsk({ noDeliver: true }, { ticket: 'WP-9', project: 'x' }, ensure)).room, 'wp-9')
+  assert.equal((await placeAsk({ noDeliver: true }, { ticket: undefined, project: 'hackdog' }, ensure)).room, 'room-hackdog')
+  assert.equal((await placeAsk({ noDeliver: true }, { project: null }, ensure)).room, undefined)
+  assert.equal((await placeAsk({}, { project: 'x' }, ensure)).room, undefined)
+  assert.equal((await placeAsk({ noDeliver: true, room: 'mine' }, { project: 'x' }, ensure)).room, 'mine')
 })

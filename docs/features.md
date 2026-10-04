@@ -335,7 +335,7 @@ Chat rooms shared by you and agents.
   session's native question tool in your own chat — it already shows there; `wt-ask` is for everywhere else.
   Clicking a chip or an Inbox **question**/**ask** item opens the same popup in place. `wt-ask --resolve <id>`
   closes a card without an answer.
-  **Native capture (WP-206):** the `skills/wt-ask` mod (part of the one wt-pack plugin) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip (when the agent has a ticket) and
+  **Native capture (WP-206):** the `skills/wt-ask` mod (part of the one wt-pack plugin) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip (in the agent's ticket room, else in the room named after its project, created if missing — WP-232) and
   Inbox card, the terminal prints the question and its options ("answer there; Esc cancels" — Esc interrupts the turn, which Claude Code records as declined, and closes the dashboard ask at once), the dashboard pops the question up by itself on any page and whatever project is selected, phone included (once per ask per tab; it closes when the ask is answered or cancelled elsewhere; WP-231), and your answer returns as the tool
   result (no reply message). It falls back to the native picker when the dashboard is unreachable, outside a herdr
   pane, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).

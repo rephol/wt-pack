@@ -52,6 +52,16 @@ export function ping(author, role) {
   return { ok: true, kind: author.kind }
 }
 
+// WP-232: where a mod-captured question (noDeliver) gets its chip when the caller named none: the agent's ticket room
+// (WP-206), else the room named after its project (created if missing; Dispatch's 'project room'), else none.
+// ensureRoom(project) → slug. Mutates and returns `b`.
+export async function placeAsk(b, { ticket, project }, ensureRoom) {
+  if (b.noDeliver !== true || b.ticket || b.room) return b
+  if (typeof ticket === 'string' && /^[\w-]{1,20}$/.test(ticket)) return Object.assign(b, { ticket, room: ticket.toLowerCase() })
+  if (project) return Object.assign(b, { room: await ensureRoom(project) })
+  return b
+}
+
 // A noDeliver ask (WP-206) is closed by its own mod's `--resolve`; that call never happens when the agent is killed
 // mid-wait or the dashboard blips during it. Past this age the sweep closes it anyway (the mod waits 30 min by default).
 export const ASK_MAX_AGE_MS = 24 * 3600_000
