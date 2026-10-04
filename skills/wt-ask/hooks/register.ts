@@ -7,7 +7,7 @@ import type { SkillsDir } from '../../wt-mods/hooks/commands'
 const SLICE_S = 300 // one --wait call; $.process.run caps a command at ten minutes
 
 type Q = { question: string; header: string; options: { label: string; description?: string }[]; multiSelect: boolean; kind?: string }
-type Answer = { selected: string[][]; text?: string }
+type Answer = { selected: string[][]; other?: string[]; text?: string; chat?: boolean }
 
 export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Register>[1], skills: SkillsDir) => {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
@@ -25,10 +25,12 @@ export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Reg
     const timeoutMin = Number(options.timeoutMin) > 0 ? Number(options.timeoutMin) : 30
     const deadline = (await $.clock.now()) + timeoutMin * 60_000
     // Core's record: answers maps question -> label(s), `response` is freeform text typed instead of selecting.
-    const answered = (a: Answer) => ({
+    // WP-233: 'Chat about this' drops the question like the native picker does; `other[i]` is the typed answer.
+    const CHAT = { deny: 'The user chose "Chat about this" instead of answering: stop, and discuss the question with them in chat (or the room) before continuing.' }
+    const answered = (a: Answer) => a.chat ? CHAT : ({
       result: {
         questions: e.questions,
-        answers: Object.fromEntries(qs.map((q, i) => [q.question, (a.selected[i] ?? []).join(', ') || (i === 0 && a.text ? a.text : '')])),
+        answers: Object.fromEntries(qs.map((q, i) => [q.question, (a.selected[i] ?? []).join(', ') || a.other?.[i] || (i === 0 && a.text ? a.text : '')])),
         ...(a.text ? { response: a.text } : {}),
       },
     })

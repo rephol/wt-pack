@@ -75,6 +75,20 @@ test('free text comes back as the `response` field, and answers an unselected fi
   expect(r.result.answers['Which flags?']).toBe('a')
 })
 
+test('Other text answers its question; Chat about this denies so the agent talks to the user', async ($, on) => {
+  mock.clock(on)
+  stubWtAsk(on, (flag) => (flag === '--json' ? out(0, 'ask-5') : flag === '--wait' ? out(0, JSON.stringify({ selected: [['prod'], []], other: ['', 'my own'] })) : out(0)))
+  const r: any = await $.tool.call(Q)
+  expect(r.result.answers['Which flags?']).toBe('my own')
+})
+
+test('Chat about this is a deny', async ($, on) => {
+  mock.clock(on)
+  stubWtAsk(on, (flag) => (flag === '--json' ? out(0, 'ask-6') : flag === '--wait' ? out(0, JSON.stringify({ selected: [[], []], chat: true })) : out(0)))
+  const r: any = await $.tool.call(Q)
+  expect(r.deny).toContain('Chat about this')
+})
+
 test('a text/number question is never captured', async ($, on) => {
   mock.clock(on)
   const calls = stubWtAsk(on, () => out(0))

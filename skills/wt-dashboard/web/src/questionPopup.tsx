@@ -43,10 +43,14 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
   // picker (B), which only ever pre-checks an option the terminal itself already marked answered.
   const [selected, setSelected] = useState<string[][]>(() => ask.questions.map(() => []))
   const [text, setText] = useState('')
+  // WP-233: 'Other' is a selectable choice per question (like the native picker), its text kept per question.
+  const [other, setOther] = useState<string[]>(() => ask.questions.map(() => ''))
+  const [otherOn, setOtherOn] = useState<boolean[]>(() => ask.questions.map(() => false))
   const qc = useQueryClient()
   const answer = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/asks/${ask.id}/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ selected, ...(text.trim() ? { text: text.trim() } : {}) }) })
+    mutationFn: async (chat?: boolean) => {
+      const body = chat ? { chat: true } : { selected, other: other.map((t, i) => (otherOn[i] ? t.trim() : '')), ...(text.trim() ? { text: text.trim() } : {}) }
+      const r = await fetch(`/api/asks/${ask.id}/answer`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       if (r.status === 409) throw new Error('Already answered — this ask closed before your answer went through.')
       if (!r.ok) throw new Error((await r.json()).error ?? r.status)
     },
@@ -56,11 +60,19 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
   })
   const q = ask.questions[step]
   const sorted = [...q.options].sort((a, b) => Number(b.label === q.recommended) - Number(a.label === q.recommended))
-  const set = (labels: string[]) => setSelected((s) => s.map((v, i) => (i === step ? labels : v)))
-  const canNext = selected[step].length > 0
+  const OTHER = '\u0000other' // not a real label: RadioList/CheckboxList values are strings
+  const set = (labels: string[]) => {
+    const on = labels.includes(OTHER)
+    setOtherOn((o) => o.map((v, i) => (i === step ? on : v)))
+    setSelected((s) => s.map((v, i) => (i === step ? labels.filter((l) => l !== OTHER) : v)))
+  }
+  const done = (i: number) => selected[i].length > 0 || (otherOn[i] && other[i].trim() !== '')
+  const canNext = done(step)
   const last = step === ask.questions.length - 1
-  // The Stepper allows jumping ahead (like PickerCard's own tabs); Answer still needs every question picked.
-  const canAnswer = last && selected.every((s) => s.length > 0)
+  // The Stepper allows jumping ahead (like PickerCard's own tabs); Answer still needs every question answered.
+  const canAnswer = last && ask.questions.every((_, i) => done(i))
+  const otherItem = { label: 'Other', description: undefined }
+  const otherInput = otherOn[step] && <TextInput label="Your answer" value={other[step]} onChange={(v) => setOther((o) => o.map((t, i) => (i === step ? v : t)))} isDisabled={answer.isPending} placeholder="Type your answer" />
   return (
     <VStack gap={3}>
       <HStack gap={2} align="center">
@@ -70,31 +82,35 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
       {ask.questions.length > 1 && (
         <Stepper activeStep={step} density="compact" label="Questions" onStepClick={setStep}
           horizontalOptions={{ minimumStepWidth: 64, collapsedVariant: 'withLabel' }}>
-          {ask.questions.map((qq, i) => <Step key={qq.header + i} step={i} label={qq.header} indicator={i !== step && selected[i].length > 0 ? '✓' : 'auto'} />)}
+          {ask.questions.map((qq, i) => <Step key={qq.header + i} step={i} label={qq.header} indicator={i !== step && done(i) ? '✓' : 'auto'} />)}
         </Stepper>
       )}
       {answer.isError && <Banner status="error" title="Could not send the answer" description={String(answer.error)} />}
       <ChatMarkdown>{q.question}</ChatMarkdown>
       {q.multiSelect ? (
-        <CheckboxList label="Choose any" isLabelHidden value={selected[step]} onChange={set}>
+        <CheckboxList label="Choose any" isLabelHidden value={otherOn[step] ? [...selected[step], OTHER] : selected[step]} onChange={set}>
           {sorted.map((o) => (
             <CheckboxListItem key={o.label} value={o.label} label={recommendedLabel(o, q.recommended)}
               description={o.description ? <Text type="supporting">{o.description}</Text> : undefined} isDisabled={answer.isPending} />
           ))}
+          <CheckboxListItem value={OTHER} label={otherItem.label} isDisabled={answer.isPending} />
         </CheckboxList>
       ) : (
-        <RadioList label="Choose one" isLabelHidden value={selected[step][0] ?? ''} onChange={(v) => set([v])}>
+        <RadioList label="Choose one" isLabelHidden value={otherOn[step] ? OTHER : selected[step][0] ?? ''} onChange={(v) => set([v])}>
           {sorted.map((o) => (
             <RadioListItem key={o.label} value={o.label} label={recommendedLabel(o, q.recommended)}
               description={o.description ? <Text type="supporting">{o.description}</Text> : undefined} isDisabled={answer.isPending} />
           ))}
+          <RadioListItem value={OTHER} label={otherItem.label} isDisabled={answer.isPending} />
         </RadioList>
       )}
+      {otherInput}
       {last && <TextInput label="Anything else? (optional)" value={text} onChange={setText} isDisabled={answer.isPending} placeholder="Type something" />}
       <HStack gap={2} justify="end">
+        <Button label="Chat about this" size="sm" variant="ghost" isDisabled={answer.isPending} onClick={() => answer.mutate(true)} />
         {step > 0 && <Button label="Back" size="sm" variant="ghost" isDisabled={answer.isPending} onClick={() => setStep((s) => s - 1)} />}
         {last
-          ? <Button label="Answer" variant="primary" isLoading={answer.isPending} isDisabled={!canAnswer} onClick={() => answer.mutate()} />
+          ? <Button label="Answer" variant="primary" isLoading={answer.isPending} isDisabled={!canAnswer} onClick={() => answer.mutate(false)} />
           : <Button label="Next" variant="primary" isDisabled={!canNext} onClick={() => setStep((s) => s + 1)} />}
       </HStack>
     </VStack>
