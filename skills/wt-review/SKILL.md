@@ -145,8 +145,8 @@ guard that cannot fail just as easily as code can — earlier, and more cheaply.
 **Learnings is the read side of `wt-compound`.** A store nothing consults on the way in does not compound, it
 accumulates. Where a repo has one, this lens is what makes every earlier entry pay.
 
-**Floor 1 agent. Ceiling 3 at ≤200 changed lines, 5 for a per-lens diff review past that (see next section).**
-No trigger fires → one agent carrying the mandatory pair. Everything fires, ≤200 lines → three agents with
+**Floor 1 agent. Ceiling 4 at ≤200 changed lines, 5 for a per-lens diff review past that (see next section).**
+No trigger fires → one agent carrying the mandatory pair. Everything fires, ≤200 lines → four agents with
 lenses bundled, never nine.
 
 Bundle by reading surface:
@@ -155,7 +155,8 @@ Bundle by reading surface:
 |---|---|---|
 | 1 | mandatory pair + standards + agent-native | the target against the code and the repo's own rules |
 | 2 | testing + learnings | the guards, and what the repo already knows |
-| 3 | security · data · scope · adversarial · reliability · performance | the risk surface and the target's own premise |
+| 3 | security · data · scope · adversarial | the risk surface and the target's own premise |
+| 4 | reliability · performance | how the code behaves under failure and load |
 
 Collapse upward when few triggers fire — two lenses do not need two agents. Never split a bundle to give a
 lens its own agent.
@@ -167,17 +168,17 @@ agents*. Read the changed-line count (`git diff <base>...HEAD --shortstat`, or `
 assigning agents:
 
 - **≤ 200 changed lines** — the lens-bundle agent count and table above stand: bundle by reading surface,
-  floor 1, ceiling 3, each agent reads the whole diff.
+  floor 1, ceiling 4, each agent reads the whole diff.
 - **> 200 changed lines** — **one agent per fired lens**, capped at **5**. Each of those agents reads **every**
   changed file in full — the lens is its filter, not a slice of the file list — so give each agent the
   complete `git diff --name-only` list, not a disjoint subset. This replaces file-slicing: past 200 lines, the
   split is by lens, not by file. **The mandatory pair (correctness + regression, or coherence + feasibility in
   plan mode) always shares one agent, exactly as it does at ≤200 lines** — it never counts as two toward the
   5-agent cap and is never split by this rule.
-  - When more than 5 lenses fire (counting the mandatory pair as one), merge whole rows of the 3-row bundle
-    table, starting with row 3 (security · data · scope · adversarial · reliability · performance — merge its
-    fired members into one agent first, since it is the largest row and yields the biggest single reduction),
-    then row 2 (testing + learnings) if still over 5, then absorb standards and agent-native into the
+  - When more than 5 lenses fire (counting the mandatory pair as one), merge whole rows of the 4-row bundle
+    table, starting with rows 3 and 4 (security · data · scope · adversarial · reliability · performance —
+    merge their fired members into one agent first, since they are the largest rows and yield the biggest
+    single reduction), then row 2 (testing + learnings) if still over 5, then absorb standards and agent-native into the
     mandatory-pair agent (row 1) last. Stop merging as soon as the agent count is ≤5 — do not merge further
     than the cap requires.
   - `[unsourced]`: whether a per-lens agent can read a diff past ~800 lines in full within its ~40-call tool
