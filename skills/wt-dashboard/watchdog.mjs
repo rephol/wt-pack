@@ -164,7 +164,8 @@ export function rememberAgents(lastSeen = {}, agents, panes, ticketOf = () => nu
   if (!agents) return lastSeen
   const at = new Date(now).toISOString()
   const next = {}
-  const live = new Map(agents.filter((a) => a.local).map((a) => [a.id, a]))
+  // WP-221: herdr can keep a pane's agent (idle/done, session id and all) after claude exits; status 'exited' is gone too.
+  const live = new Map(agents.filter((a) => a.local && a.status !== 'exited').map((a) => [a.id, a]))
   for (const [pane, { goneAt, ...r }] of Object.entries(lastSeen))
     if (!panes || panes.includes(pane)) next[pane] = live.has(pane) ? r : { ...r, goneAt: goneAt ?? at }
   for (const a of live.values()) {
@@ -173,6 +174,9 @@ export function rememberAgents(lastSeen = {}, agents, panes, ticketOf = () => nu
   }
   return next
 }
+// WP-221: `herdr pane process-info` → true when the pane's shell is back in the foreground, i.e. claude has exited
+// (herdr may still report the agent idle/done). handoff.sh candidates() runs the same jq test.
+export const shellForeground = (info) => info?.shell_pid != null && info.foreground_process_group_id === info.shell_pid
 // Remembered panes that still exist with no agent in them → the `exited` check's input.
 export const exitedAgents = (lastSeen = {}, panes) => (panes
   ? Object.entries(lastSeen).filter(([pane, r]) => r.goneAt && panes.includes(pane)).map(([pane, r]) => ({ pane, name: r.name, session: r.session, since: r.goneAt }))

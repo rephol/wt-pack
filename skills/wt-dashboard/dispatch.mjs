@@ -221,7 +221,8 @@ export class Dispatch {
       // WP-140: any open card an agent (not a human — those assignees have no pane) still holds when it's
       // gone unassigns; Planning/Building also return to Ready since nobody is working them and Dispatch
       // skips assigned cards (a Ready/Review/Blocked card just loses its stale assignee).
-      if (!a && t.assignee.pane) {
+      // WP-221: a pane whose claude exited (status 'exited') is as gone as a closed one.
+      if ((!a || a.status === 'exited') && t.assignee.pane) {
         if (!this.#debounceGone(g)) continue // one miss may be a herdr blip
         // WP-147: a paired ticket is replaced in place (or flagged), never just returned to Ready.
         if (t.pair) { await this.#pairReplace(project, t, 'worker', local, now).catch((e) => this.log(`pair replace ${t.id}: ${e.message}`)); continue }

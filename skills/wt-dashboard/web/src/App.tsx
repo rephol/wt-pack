@@ -76,7 +76,7 @@ import { Board } from './board'
 import { RoutinesPage } from './routines'
 
 // ---------- types (mirror server.mjs) ----------
-type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown'
+type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
 // WP-181: an agent waiting on something (a picker, a question) is 'blocked', not 'working' — but it is just as
 // unable to take a message right now. A message sent while blocked was labelled 'sending' (only 'working' counted
 // as busy) and then never confirmed, since nothing delivers a queued message until the agent goes idle.
@@ -191,7 +191,7 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
   shipped: { label: 'Shipped', dot: 'success', group: 'done' },
   done: { label: 'Done', dot: 'neutral', group: 'done' },
 }
-const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'accent', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral' }
+const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'accent', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error' }
 
 const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>

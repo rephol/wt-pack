@@ -30,7 +30,7 @@ import { load as routeDecisions, report as routeReport, estimateSavings as route
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
-import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -506,6 +506,16 @@ export function paneStale(status, seen, seq, now, readEvery) {
   if ((status === 'working' || status === 'idle' || status === 'blocked') && now - seen.at > readEvery) return true
   return Boolean(seen.p?.picker) // a picker itself can also advance without a status change
 }
+// WP-221: has claude exited from this idle/done pane? Cached per pane until its state_change_seq moves or 15s pass.
+const fg = new Map() // pane → { seq, at, exited }
+async function claudeExited(m, a) {
+  const c = fg.get(a.pane_id)
+  if (c && c.seq === a.state_change_seq && Date.now() - c.at < 15_000) return c.exited
+  const exited = await herdrOn(m, 'pane', 'process-info', '--pane', a.pane_id)
+    .then((t) => shellForeground(JSON.parse(t).result?.process_info), () => false) // unknown → trust herdr
+  fg.set(a.pane_id, { seq: a.state_change_seq, at: Date.now(), exited })
+  return exited
+}
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
 async function listAgents(m) {
   const { result } = JSON.parse(await herdrOn(m, 'agent', 'list'))
@@ -513,6 +523,7 @@ async function listAgents(m) {
   const readEvery = m.local ? 15_000 : 30_000
   const out = []
   for (const a of result.agents) {
+    if (m.local && (a.agent_status === 'idle' || a.agent_status === 'done') && await claudeExited(m, a)) a.agent_status = 'exited'
     const k = `${m.label}|${a.pane_id}`
     const prev = since.get(k)
     if (!prev || prev.status !== a.agent_status) since.set(k, { status: a.agent_status, at: Date.now() })

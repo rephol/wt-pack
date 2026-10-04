@@ -5,7 +5,7 @@ import { fuzzy } from './commands.ts'
 
 export interface SwAgent {
   key: string; name: string; pool: string; machine: string; local: boolean
-  status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown'; asks: boolean
+  status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown' | 'exited'; asks: boolean
   statusSince: number; lastActivity?: number; recap: string | null; question: string | null; task: string | null
   project?: string | null
   tags?: Record<string, string> // tags.task: the handoff label, "ENG-1192 Tailwind v4…"
