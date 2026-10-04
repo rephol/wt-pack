@@ -370,14 +370,18 @@ export class Dispatch {
     if (!cards.some((t) => t.column === 'building' || t.column === 'review')) return
     const repo = await this.deps.repoOf(project)
     if (!repo) return
-    if (now - (this.fetched.get(repo) ?? 0) > FETCH_MS) {
+    // WP-224: a repo with no origin remote (agents merge locally) is scanned on its local base branch, silently.
+    const remotes = (await this.deps.git(repo, 'remote').catch(() => '')).split('\n')
+    if (remotes.includes('origin') && now - (this.fetched.get(repo) ?? 0) > FETCH_MS) {
       this.fetched.set(repo, now)
       await this.deps.git(repo, 'fetch', '-q', 'origin').catch((e) => this.log(`reconcile fetch ${project}: ${e.message}`))
     }
     const k = `reconcile:${project}`
     const last = this.db.prepare('SELECT v FROM routine_settings WHERE k = ?').get(k)?.v
     const log = (range) => this.deps.git(repo, 'log', '--merges', '--first-parent', '--since=7.days', '--format=%H%x09%ct%x09%s', range)
-    const base = `origin/${this.deps.baseBranch?.(project) ?? 'main'}`
+    const branch = this.deps.baseBranch?.(project) ?? 'main'
+    const base = remotes.includes('origin') && await this.deps.git(repo, 'rev-parse', '--verify', '-q', `origin/${branch}`).then(() => true, () => false)
+      ? `origin/${branch}` : branch
     const out = await (last ? log(`${last}..${base}`).catch(() => log(base)) : log(base))
     const lines = out.split('\n').filter(Boolean).map((l) => l.split('\t'))
     const head = (await this.deps.git(repo, 'rev-parse', base)).trim()

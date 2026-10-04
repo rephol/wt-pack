@@ -163,6 +163,18 @@ test('reconcile: a merged card in review goes to done; ready with a matching mer
   assert.equal(Q.column, 'ready')
 })
 
+test('reconcile: no origin remote scans the local base branch, no fetch (WP-224)', async () => {
+  const { tickets, d } = await setup({ merges: `abcdef1234\t${Math.floor(Date.now() / 1000) + 60}\tMerge branch 'wp-1-x'\n` })
+  const seen = []
+  const git = d.deps.git
+  d.deps.git = async (repo, ...a) => (seen.push(a.join(' ')), git(repo, ...a))
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const r = await tickets.create('wt-pack', { title: 'rev', column: 'review' }, user)
+  await d.tick()
+  assert.equal((await tickets.get(r.id)).column, 'done')
+  assert.ok(!seen.some((c) => c.startsWith('fetch') || c.includes('origin/')), seen.join('|'))
+})
+
 test('reconcile: gone twice → Ready with assignee null; gone once, herdr down or a user claim → untouched', async () => {
   const other = { name: 'someone-else', local: true, status: 'working' }
   const { tickets, d } = await setup({ agents: [other] })
@@ -394,7 +406,7 @@ test('project settings (WP-107): maxWorking and baseBranch are asked per project
   const asked = [], git = []
   d.deps.maxWorking = (p) => (asked.push(p), 1)
   d.deps.baseBranch = (p) => (asked.push(p), 'develop')
-  d.deps.git = async (repo, ...a) => (git.push(a), a[0] === 'rev-parse' ? 'abc123\n' : '')
+  d.deps.git = async (repo, ...a) => (git.push(a), a[0] === 'rev-parse' ? 'abc123\n' : a[0] === 'remote' ? 'origin\n' : '')
   await ready(tickets, 'a')
   await tickets.create('wt-pack', { title: 'rev', column: 'review' }, user)
   await d.tick()
@@ -402,7 +414,7 @@ test('project settings (WP-107): maxWorking and baseBranch are asked per project
   assert.match(d.status('wt-pack').waiting, /^cap: 1 working ≥ 1/)
   assert.deepEqual([...new Set(asked)], ['wt-pack'])
   assert.ok(git.some((a) => a[0] === 'log' && a.at(-1) === 'origin/develop'))
-  assert.ok(git.some((a) => a[0] === 'rev-parse' && a[1] === 'origin/develop'))
+  assert.ok(git.some((a) => a[0] === 'rev-parse' && a.at(-1) === 'origin/develop'))
   assert.ok(!git.flat().includes('origin/main'))
 })
 
