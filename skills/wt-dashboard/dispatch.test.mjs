@@ -569,3 +569,15 @@ test('WP-205: a gone paired buddy is not replaced by an idle persona reviewer', 
   await d.tick(); await d.tick()
   assert.notEqual((await tickets.get(t.id)).pair?.buddy?.name, 'wt-pack-qa-reviewer-01')
 })
+
+test('WP-221 reconcile: an assignee whose claude exited (status exited) counts as gone → Ready', async () => {
+  const dead = { name: 'wt-pack-worker-07', local: true, status: 'exited', id: 'w7:p1' }
+  const { tickets, d } = await setup({ agents: [dead] })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t.id, {}, user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await d.tick()
+  await d.tick()
+  const T = await tickets.get(t.id)
+  assert.deepEqual([T.column, T.assignee], ['ready', null])
+})

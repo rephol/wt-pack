@@ -468,6 +468,10 @@ Projects, Terminals, Usage, Observability, Server, About.
   remembers each live pool agent's session, since herdr forgets it on exit); it refuses when the pane runs an
   agent again, the name is live elsewhere, or the agent's ticket was re-dispatched to another pane. Never
   automatic.
+- **Exited panes** (WP-221): herdr can keep reporting an agent idle/done after its claude process exits. A local
+  idle/done pane whose shell is back in the foreground (`herdr pane process-info`) shows as **exited** in the agent
+  list, is never picked by Dispatch, a buddy pick or wt-handoff, counts as gone for reconcile (its ticket returns
+  to Ready), and feeds the watchdog's exited-session finding (with **Resume**).
 - **Server**: state, pid, uptime, build time, per-source status; **Restart server** (or **Install as
   service** when not managed).
 - **Web build stays current** (WP-81): a server running from a checkout rebuilds `web/dist` itself when

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const min = (n) => new Date(now - n * 60_000).toISOString()
@@ -196,4 +196,14 @@ test('watchdog tick: an external edit to watchdog.json between ticks survives th
     assert.equal((await run()).status, 200) // second tick must not resurrect it from a stale in-memory copy
     assert.deepEqual(JSON.parse(await readFile(wdFile, 'utf8')).lastSeen, {})
   } finally { srv.kill() }
+})
+
+test('WP-221 shellForeground: shell in the foreground = claude exited; an exited agent is remembered as gone', () => {
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5 }), true)
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 9 }), false)
+  assert.equal(shellForeground(undefined), false)
+  const a = { id: 'w1:p1', local: true, name: 'w', session: 's', pool: 'worker', status: 'idle' }
+  const seen = rememberAgents({}, [a], ['w1:p1'], () => null, now)
+  const after = rememberAgents(seen, [{ ...a, status: 'exited' }], ['w1:p1'], () => null, now + 1000)
+  assert.deepEqual(exitedAgents(after, ['w1:p1']).map((e) => e.pane), ['w1:p1'])
 })

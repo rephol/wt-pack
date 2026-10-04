@@ -1,10 +1,10 @@
 // Agents page ordering, applied within each pool group.
 export type AgentSort = 'attention' | 'activity' | 'name'
 export const SORTS: AgentSort[] = ['attention', 'activity', 'name']
-type A = { name: string; status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown'; asks: boolean; statusSince: number; lastActivity?: number }
+type A = { name: string; status: 'working' | 'idle' | 'blocked' | 'done' | 'unknown' | 'exited'; asks: boolean; statusSince: number; lastActivity?: number }
 
 const needsYou = (a: A) => a.asks && a.status !== 'working'
-export const rank = (a: A) => (needsYou(a) ? 0 : ({ working: 1, blocked: 2, idle: 3, unknown: 3, done: 4 } as const)[a.status])
+export const rank = (a: A) => (needsYou(a) ? 0 : ({ working: 1, blocked: 2, idle: 3, unknown: 3, done: 4, exited: 5 } as const)[a.status])
 const natural = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 export const activityOf = (a: A) => a.lastActivity || a.statusSince
 
