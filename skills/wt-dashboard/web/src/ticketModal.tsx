@@ -33,5 +33,5 @@ export function TicketModal({ phone }: { phone: boolean }) {
   if (!id) return null
   const project = refs.data?.boards[id.replace(/-\d+$/, '')] ?? ''
   if (!q.data && q.isLoading) return null
-  return <TicketDetail phone={phone} project={project} ticket={q.data?.id ? q.data : null} isNew={false} blockAsk={false} backLabel="Close" onClose={close} onCreated={() => {}} />
+  return <TicketDetail phone={phone} project={project} ticket={q.data?.id ? q.data : null} isNew={false} blockAsk={false} backLabel="← Back" onClose={close} onCreated={() => {}} />
 }
