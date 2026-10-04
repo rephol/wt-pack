@@ -189,6 +189,7 @@ export class Tickets {
       // Back to Backlog: nobody holds it any more, unless the same call names one (WP-49).
       if (f.column === 'backlog' && t.column !== 'backlog' && assignee === undefined) assignee = null
       const { column, note, pair, ...rest } = f
+      if (column === 'ready' && t.column !== 'ready' && assignee === undefined) assignee = null // WP-225: back in the queue, nobody holds it
       if (column && column !== t.column) {
         if (column === 'blocked' && !note?.trim()) throw err(400, 'moving to blocked needs a note (the reason)')
         t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: column, ...(note ? { text: note } : {}) })
@@ -293,16 +294,13 @@ export class Tickets {
     })
   }
   // Shared by leave() (agents.sh rm) and dispatch.mjs's reconcile (slower 'gone' debounce, WP-140): drops
-  // `name` as assignee of card `id` if it still holds it. Planning/Building return to Ready since nobody is
-  // working them and Dispatch skips assigned cards; Ready/Review/Blocked just lose the stale assignee.
+  // `name` as assignee of card `id` if it still holds it. Only unassigns (WP-225): the column is the agent's to
+  // move, so a Ready card is simply free again; `text` stays in the history as the routing "returned" strike.
   async dropAssignee(id, name, author, text) {
     return this.mutate(id, (t, at) => {
       if (t.assignee?.name !== name) return t
-      if (t.column === 'building' || t.column === 'planning') {
-        t.history.push({ at, author, kind: 'move', from: t.column, to: 'ready', text })
-        t.column = 'ready'; delete t.dispatch
-      }
-      t.history.push({ at, author, kind: 'assign', from: name, to: null })
+      delete t.dispatch
+      t.history.push({ at, author, kind: 'assign', from: name, to: null }, ...(text ? [{ at, author, kind: 'comment', text }] : []))
       t.assignee = null
       return t
     })

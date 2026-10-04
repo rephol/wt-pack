@@ -274,7 +274,7 @@ test('moving back to Backlog clears the assignee (WP-49)', async () => {
   assert.equal((await t.patch(a.id, { column: 'ready' }, user)).assignee, null)
 })
 
-test('leave: unassigns every open card across projects; Planning/Building return to Ready; Done and other agents untouched (WP-140)', async () => {
+test('leave: unassigns every open card across projects; the column is untouched; Done and other agents untouched (WP-140)', async () => {
   const t = new Tickets({ dir: await tmp() })
   const who = { name: 'wt-pack-worker-09', pane: 'w9:p1' }
   const building = await t.create('wt-pack', { title: 'b', column: 'building' }, user)
@@ -292,7 +292,7 @@ test('leave: unassigns every open card across projects; Planning/Building return
   await t.leave(who.name)
 
   const [B, R, X, D, O] = await Promise.all([t.get(building.id), t.get(ready.id), t.get(blocked.id), t.get(done.id), t.get(others.id)])
-  assert.deepEqual([B.column, B.assignee], ['ready', null])
+  assert.deepEqual([B.column, B.assignee], ['building', null])
   assert.deepEqual([R.column, R.assignee], ['ready', null])
   assert.deepEqual([X.column, X.assignee], ['blocked', null])
   assert.deepEqual([D.column, D.assignee], ['done', who]) // done cards keep their assignee
@@ -473,4 +473,16 @@ test('server: routing outcome recorded once on Done, once on reopen, via model-r
     assert.deepEqual(outcomes.map((o) => [o.run, o.outcome]), [['abc12', 'ok'], ['abc12', 'returned']])
     assert.equal(outcomes[0].why, 'merged in abcdef1') // the move's own note, not a generic "reached done"
   } finally { srv.kill() }
+})
+
+test('WP-225: moving a card to Ready clears its assignee and dispatch; naming one in the same call keeps it', async () => {
+  const t = new Tickets({ dir: await tmp() })
+  const a = await t.create('wt-pack', { title: 'a', column: 'planning' }, user)
+  await t.patch(a.id, {}, user, { name: 'planner-01', pane: 'w1:p1' })
+  await t.setDispatch(a.id, { state: 'sent', at: 'x', agent: 'planner-01' })
+  const A = await t.patch(a.id, { column: 'ready' }, user)
+  assert.deepEqual([A.column, A.assignee, A.dispatch], ['ready', null, undefined])
+  const b = await t.create('wt-pack', { title: 'b', column: 'planning' }, user)
+  const B = await t.patch(b.id, { column: 'ready' }, user, { name: 'w', pane: 'w2:p1' })
+  assert.equal(B.assignee.name, 'w')
 })
