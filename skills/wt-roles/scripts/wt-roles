@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // wt-roles — project role files (.wt-pack/roles/<name>.md in the repo's MAIN checkout). WP-204.
 //   wt-roles list  [--cwd D]
-//   wt-roles new <name> [--base <role>] [--from-default] [--cwd D]   (an override needs no --base; a persona does)
+//   wt-roles new <name> [--base <role>] [--from-default] [--user] [--cwd D]   (an override needs no --base; a persona does;
+//                                                       --user writes to ~/.config/wt-pack/projects/<repo>/ instead of .wt-pack/, WP-234)
 //   wt-roles check [--cwd D]                                         exit 1 on an error
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir } from '../../wt-shared/scripts/roles.mjs'
+import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir, settingsWhere } from '../../wt-shared/scripts/roles.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const [cmd, ...rest] = process.argv.slice(2)
@@ -14,11 +15,12 @@ const o = { _: [] }
 for (let i = 0; i < rest.length; i++) {
   if (rest[i] === '--cwd' || rest[i] === '--base') o[rest[i].slice(2)] = rest[++i]
   else if (rest[i] === '--from-default') o.fromDefault = true
+  else if (rest[i] === '--user') o.user = true
   else o._.push(rest[i])
 }
 const die = (m, code = 1) => { console.error(`wt-roles: ${m}`); process.exit(code) }
 const checkout = mainCheckout(o.cwd || process.cwd(), 5000)
-if (!['list', 'new', 'check'].includes(cmd)) die('usage: wt-roles list | new <name> [--base <role>] [--from-default] | check  [--cwd D]', 2)
+if (!['list', 'new', 'check'].includes(cmd)) die('usage: wt-roles list | new <name> [--base <role>] [--from-default] [--user] | check  [--cwd D]', 2)
 if (!checkout) die('not in a git repo', 2)
 
 if (cmd === 'list') {
@@ -41,7 +43,8 @@ if (cmd === 'list') {
   const override = BASES.includes(name)
   const base = override ? name : o.base
   if (!BASES.includes(base)) die(`a persona needs --base <${BASES.join('|')}>`, 2)
-  const file = join(rolesDir(checkout), `${name}.md`)
+  const file = join(rolesDir(checkout, o.user ? 'user' : undefined), `${name}.md`)
+  if (o.user && settingsWhere(checkout) === 'repo' && existsSync(join(checkout, '.wt-pack'))) die('this repo has a .wt-pack/ folder, which wins over the user-level one: move it in the dashboard (Settings › Projects) first')
   if (existsSync(file)) die(`${file} already exists`)
   const read = (...p) => readFileSync(join(here, '..', ...p), 'utf8')
   let text
@@ -49,5 +52,5 @@ if (cmd === 'list') {
   else text = read('template.md').replaceAll('{{name}}', name).replaceAll('{{base}}', base).replace(override ? /^---[\s\S]*?---\n/ : /(?!)/, '')
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, text)
-  console.log(`${file}\n${override ? `override for every ${base}` : `persona of ${base}`}; edit it, \`wt-roles check\`, then commit it (agents read the main checkout)`)
+  console.log(`${file}\n${override ? `override for every ${base}` : `persona of ${base}`}; edit it, \`wt-roles check\`, then ${o.user ? 'it is read from your user folder, no commit needed' : 'commit it (agents read the main checkout)'}`)
 }

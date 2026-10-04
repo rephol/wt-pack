@@ -34,3 +34,16 @@ test('check ok for the fresh files; errors exit 1; list shows kind and status', 
   assert.match(l, /frontend-worker\s+persona\s+base=worker\s+\d+ B\s+ERROR/)
   assert.match(l, /^worker\s+override/m)
 })
+
+test('new --user writes to the user folder (WP-234); refused while the repo has a .wt-pack/ folder', () => {
+  const r2 = realpathSync(mkdtempSync(join(tmpdir(), 'wt-roles-u-')))
+  execFileSync('git', ['init', '-q', r2])
+  const user = realpathSync(mkdtempSync(join(tmpdir(), 'wt-roles-home-')))
+  const go = (...a) => { try { return { out: execFileSync(BIN, [...a, '--cwd', r2], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WT_PACK_USER_DIR: user } }), code: 0 } } catch (e) { return { out: e.stdout + e.stderr, code: e.status } } }
+  assert.equal(go('new', 'worker', '--user', '--from-default').code, 0)
+  assert.ok(existsSync(join(user, r2.split('/').pop(), 'roles', 'worker.md')))
+  assert.ok(!existsSync(join(r2, '.wt-pack')))
+  assert.match(go('list').out, /worker\s+override/) // read back from the user folder
+  execFileSync('mkdir', ['-p', join(r2, '.wt-pack')])
+  assert.equal(go('new', 'auditor', '--user', '--from-default').code, 1)
+})
