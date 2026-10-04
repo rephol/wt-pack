@@ -78,8 +78,12 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
 - Per-board switch in the Automation sheet, **default off**.
 - Every 30s (first tick 15s after start), per board, the most urgent unassigned Ready card is handed to a
   free agent via `wt-handoff --role`: size **L** or label **`needs-plan` → planner** (wt-plan), anything else **→ worker** (wt-work →
-  wt-ship → merge to main → push). The card moves to Planning / Building and is assigned. One card per board
-  per tick.
+  wt-ship → merge to main → push). Dispatch only **assigns** the card (and tags its dispatch state); the agent
+  moves its own card (wt-plan → Planning, the worker's prompt → Building). One card per board per tick.
+- An agent already **holding a ticket** is never picked (worker reuse, buddy, pair replacement): it is the
+  assignee of an open card, or its `task`/`ticket` pane token names one. A card moved to **Ready** (by the user
+  or an agent) loses its assignee and dispatch state, so Dispatch can pick it up again; a gone assignee is only
+  unassigned, the column is left alone.
 - **Report to** (Automation sheet, while Dispatch is on): where a dispatched agent posts its one-line result —
   **Project room** (the room named after the project; default), **None**, or any room — plus **Also tell the
   orchestrator** (default on: the project's local orchestrator, named with its pane, since dispatched work has
@@ -92,7 +96,7 @@ A local kanban per project (`WP-N` style keys), stored in `wt.db`.
   held) or moving the card to Ready/Backlog clears it.
 - **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means herdr accepted the prompt, not
   that it reached the agent's pane (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
-  card going Building/Planning, its assignee must show working, done or blocked (it asked something); if not,
+  card being dispatched, its assignee must show working, done or blocked (it asked something); if not,
   the same prompt is resent once, targeting the same pane. Still unconfirmed ~60s after that resend: the card
   gets the **Stalled** badge and an Inbox item, instead of sitting silently assigned to an idle worker.
 - Badges: Dispatching…, Dispatch failed, Dispatch held, Stalled (idle too long, or delivery never confirmed).

@@ -52,6 +52,7 @@ export function dispatchPrompt(t, role, report = null) {
   if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.\n` + line
   const branch = `${t.id.toLowerCase()}-<short-slug>`
   return `Implement ${t.id} — ${t.title} (\`wt-ticket show ${t.id}\`).\n\n` +
+    `First move the card: \`wt-ticket move ${t.id} building\`. ` +
     `Create a worktree on a new branch ${branch} from main, use wt-work, then wt-ship (review). ` +
     `Merge to main (no draft PR; merge commit "Merge branch '${branch}'") and push. ` +
     `Rebase on main and resolve conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`.\n` + line
@@ -98,7 +99,8 @@ export class Dispatch {
   }
   status(project) { const s = this.st(project); return { last: s.last, waiting: s.waiting, inflight: this.inflight(project) } }
 
-  // Finish step 6 in one conditional write. handoff.sh's own wt-ticket move/assign fails from here (no pane: the
+  // Finish step 6 in one conditional write: Dispatch only assigns (WP-225) — the agent moves its own card
+  // (wt-plan → planning, the worker's prompt → building), so the column is never touched here. handoff.sh's own wt-ticket move/assign fails from here (no pane: the
   // server rejects an empty x-herdr-pane), so the card is still unassigned; if that auth ever changes, this no-ops.
   // Only a card still claimed by us and unassigned moves.
   // WP-147: `buddy` is the free reviewer dispatchOne picked (or null) — recorded on the ticket here (not by
@@ -108,10 +110,8 @@ export class Dispatch {
     const t = await this.tickets.mutate(id, (t, at) => {
       if (t.dispatch?.state !== 'dispatching' || t.assignee) return t
       moved = true
-      const to = role === 'planner' ? 'planning' : 'building'
-      t.history.push({ at, author: 'dispatch', kind: 'move', from: t.column, to, text: `dispatched to ${agent.name}` })
       t.history.push({ at, author: 'dispatch', kind: 'assign', from: null, to: agent.name })
-      Object.assign(t, { column: to, assignee: agent, dispatch: { state: 'sent', at, agent: agent.name } })
+      Object.assign(t, { assignee: agent, dispatch: { state: 'sent', at, agent: agent.name } })
       if (buddy && !t.pair) {
         t.pair = { worker: { name: agent.name, pane: agent.pane }, buddy: { name: buddy.name, pane: buddy.id, role: 'reviewer' } }
         t.history.push({ at, author: 'dispatch', kind: 'pair', from: null, to: t.pair })
@@ -153,6 +153,14 @@ export class Dispatch {
     } finally { this.ticking = false }
   }
 
+  // WP-225: an agent already holding a ticket is never picked again — it is the assignee of an open card, or its
+  // pane token `ticket`/`task` (wt-handoff's "<ID> <title>") names one. Returns a predicate over a listed agent.
+  busyAgents() {
+    const open = this.db.prepare('SELECT json FROM tickets').all().map((r) => JSON.parse(r.json)).filter((t) => t.column !== 'done')
+    const ids = new Set(open.map((t) => t.id)), names = new Set(open.map((t) => t.assignee?.name).filter(Boolean))
+    return (a) => names.has(a.name) || ['ticket', 'task'].some((k) => ids.has(String(a.paneTokens?.[k] ?? '').split(' ')[0]))
+  }
+
   // Steps 1–7 of the plan: at most one dispatch per board per tick, so the next tick's cap check sees it.
   async dispatchOne(project, ags, now = Date.now()) {
     const s = this.st(project)
@@ -174,8 +182,9 @@ export class Dispatch {
     if (!claimed) return
     const role = roleFor(next)
     // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy (idle/done, like candidates()).
+    const busy = this.busyAgents()
     const buddy = role === 'worker' && !next.pair
-      ? ags.find((a) => a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair && !a.paneTokens?.persona)
+      ? ags.find((a) => !busy(a) && a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair && !a.paneTokens?.persona)
       : null
     const persona = personaFor(next, await this.deps.personasOf?.(repo).catch(() => []), role)
     try {
@@ -234,8 +243,10 @@ export class Dispatch {
         continue
       }
       this.gone.delete(g)
-      if (!a || t.column !== 'building') continue
+      if (!a) continue
+      // The agent moves its own card (WP-225), so a 'sent' card may still be in Ready while delivery is checked.
       await this.#confirmDelivery(project, t, a, now).catch((e) => this.log(`confirm delivery ${t.id}: ${e.message}`))
+      if (t.column !== 'building') continue
       const idleMin = (now - Number(new Date(a.lastActivity ?? a.statusSince ?? now))) / 60_000
       const stalled = (a.status === 'idle' || a.status === 'done') && idleMin > stallMin
       if (stalled && !t.dispatch?.stalled) {
@@ -283,7 +294,8 @@ export class Dispatch {
     const p = cur.pair?.[role]
     if (!p) return
     const wantPool = role === 'worker' ? 'worker' : (p.role || 'reviewer')
-    const i = local.findIndex((x) => x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair && !x.paneTokens?.persona)
+    const busy = this.busyAgents()
+    const i = local.findIndex((x) => !busy(x) && x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair && !x.paneTokens?.persona)
     const repl = i < 0 ? null : local[i]
     if (repl) local.splice(i, 1)
     const pair = { ...cur.pair, [role]: repl ? { name: repl.name, pane: repl.id, ...(role === 'buddy' ? { role: wantPool } : {}) } : null }

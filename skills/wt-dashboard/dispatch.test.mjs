@@ -73,7 +73,7 @@ test('needs-plan label sends an M card to a planner', async () => {
   await d.tick()
   assert.deepEqual(calls[0].args.slice(0, 2), ['--role', 'planner'])
   assert.match(calls[0].prompt, /^Use wt-plan/)
-  assert.equal((await tickets.get(m.id)).column, 'planning')
+  assert.equal((await tickets.get(m.id)).column, 'ready') // WP-225: the planner moves its own card
 })
 
 test('L goes to a planner, M goes to a worker, both with --role; success → assigned with history', async () => {
@@ -86,10 +86,11 @@ test('L goes to a planner, M goes to a worker, both with --role; success → ass
   assert.match(calls[1].prompt, /wt-work.*wt-ship/s)
   assert.equal(calls[1].cwd, '/repo')
   const [L, M] = [await tickets.get(l.id), await tickets.get(m.id)]
-  assert.deepEqual([L.column, M.column], ['planning', 'building'])
+  assert.deepEqual([L.column, M.column], ['ready', 'ready']) // WP-225: Dispatch only assigns
   assert.deepEqual(M.assignee, { name: 'wt-pack-worker-09', pane: 'w9:p1' })
   assert.equal(M.dispatch.state, 'sent')
-  assert.ok(M.history.some((h) => h.kind === 'move' && h.to === 'building' && h.text === 'dispatched to wt-pack-worker-09'))
+  assert.ok(!M.history.some((h) => h.kind === 'move'))
+  assert.match(calls[1].prompt, /wt-ticket move WP-\d+ building/)
   assert.match(d.status('wt-pack').last.text, /→ wt-pack-worker-09/)
   assert.deepEqual(d.events().map((e) => e.kind), ['dispatch', 'dispatch'])
 })
@@ -136,7 +137,7 @@ test('recover(): a tagged agent finishes the dispatch; none clears the claim', a
   d.deps.agents = async () => [{ name: 'wt-pack-worker-02', id: 'w2:p1', local: true, tags: { ticket: a.id } }]
   await d.recover()
   const [A, B] = [await tickets.get(a.id), await tickets.get(b.id)]
-  assert.deepEqual([A.column, A.assignee?.name, A.dispatch.state], ['building', 'wt-pack-worker-02', 'sent'])
+  assert.deepEqual([A.column, A.assignee?.name, A.dispatch.state], ['ready', 'wt-pack-worker-02', 'sent'])
   assert.deepEqual([B.column, B.assignee, B.dispatch], ['ready', null, undefined])
 })
 
@@ -204,7 +205,7 @@ test('reconcile: gone twice → Ready with assignee null; gone once, herdr down 
   d.deps.agents = async () => [other]
   await d.tick()
   const T = await tickets.get(t.id)
-  assert.deepEqual([T.column, T.assignee, T.dispatch], ['ready', null, undefined])
+  assert.deepEqual([T.column, T.assignee, T.dispatch], ['building', null, undefined]) // WP-225: only unassigns
   assert.ok(T.history.some((h) => h.text === 'returned: wt-pack-worker-07 is gone'))
   assert.equal((await tickets.get(u.id)).column, 'building')
 })
@@ -298,7 +299,7 @@ test('WP-177: no confirmation within 60s resends once, to the same pane with the
   assert.equal(calls.length, 2)
 })
 
-test('WP-177: still unconfirmed 60s after the resend flags it — Inbox item, ticket comment, card left in Building', async () => {
+test('WP-177: still unconfirmed 60s after the resend flags it — Inbox item, ticket comment, card left where it was', async () => {
   const a = { name: 'wt-pack-worker-09', id: 'w9:p1', local: true, status: 'idle', lastActivity: Date.now() }
   const notified = []
   const { tickets, d, calls } = await setup({ agents: [a], extra: { notify: async (i) => notified.push(i) } })
@@ -311,7 +312,7 @@ test('WP-177: still unconfirmed 60s after the resend flags it — Inbox item, ti
   await d.tick(now + 61_000 + 61_000)
   assert.equal(calls.length, 2) // never a third resend
   const c = await tickets.get(t.id)
-  assert.equal(c.column, 'building')
+  assert.equal(c.column, 'ready')
   assert.equal(c.dispatch.undelivered, 'wt-pack-worker-09: handoff not confirmed even after a resend')
   assert.ok(c.history.some((h) => h.text === `stalled: ${c.dispatch.undelivered}`))
   assert.deepEqual(notified.map((n) => n.kind), ['dispatch-undelivered'])
@@ -603,5 +604,42 @@ test('WP-221 reconcile: an assignee whose claude exited (status exited) counts a
   await d.tick()
   await d.tick()
   const T = await tickets.get(t.id)
-  assert.deepEqual([T.column, T.assignee], ['ready', null])
+  assert.deepEqual([T.column, T.assignee], ['building', null])
+})
+
+test('WP-225: a gone assignee of a still-Ready card unassigns and clears dispatch, so it is picked up again', async () => {
+  const { tickets, d, calls } = await setup({ agents: [{ name: 'someone-else', local: true, status: 'working' }], max: 9 })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await ready(tickets, 'a')
+  await tickets.patch(t.id, {}, user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await tickets.setDispatch(t.id, { state: 'sent', at: 'x', agent: 'wt-pack-worker-07' })
+  await d.tick(); await d.tick()
+  const T = await tickets.get(t.id)
+  assert.deepEqual([T.column, T.assignee, T.dispatch], ['ready', null, undefined])
+  await tickets.setSettings('wt-pack', { dispatch: true })
+  await d.tick()
+  assert.equal(calls.length, 1)
+})
+
+test('WP-225: busyAgents — assignee of an open card, or a ticket/task token naming one; Done does not count', async () => {
+  const { tickets, d } = await setup()
+  const open = await ready(tickets, 'open'), done = await ready(tickets, 'done')
+  await tickets.patch(open.id, {}, user, { name: 'holder', pane: 'w1:p1' })
+  await tickets.patch(done.id, { column: 'done' }, user, { name: 'finished', pane: 'w2:p1' })
+  const busy = d.busyAgents()
+  assert.equal(busy({ name: 'holder' }), true)
+  assert.equal(busy({ name: 'x', paneTokens: { task: `${open.id} some title` } }), true)
+  assert.equal(busy({ name: 'x', paneTokens: { ticket: open.id } }), true)
+  assert.equal(busy({ name: 'finished', paneTokens: { task: `${done.id} t` } }), false)
+  assert.equal(busy({ name: 'free', paneTokens: {} }), false)
+})
+
+test('WP-225: a free reviewer is not picked as buddy while it holds an open card', async () => {
+  const rev = (name, id) => ({ name, id, local: true, pool: 'reviewer', project: 'wt-pack', status: 'idle', paneTokens: {} })
+  const { tickets, d, calls } = await setup({ agents: [rev('rev-1', 'w1:p1'), rev('rev-2', 'w2:p1')] })
+  const held = await ready(tickets, 'held')
+  await tickets.patch(held.id, {}, user, { name: 'rev-1', pane: 'w1:p1' })
+  await ready(tickets, 'next')
+  await d.tick()
+  assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--buddy'), calls[0].args.indexOf('--buddy') + 2), ['--buddy', 'w2:p1'])
 })

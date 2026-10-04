@@ -26,7 +26,7 @@ Pipeline integrations call it as `$T … || true`: a board failure never blocks 
 | Step | Move |
 |---|---|
 | wt-plan starts a `<KEY>-N` | `planning` + `claim` |
-| wt-handoff to a worker | `building` + `assign <worker>` |
+| wt-handoff to a worker | `building` + `assign <worker>` (a Dispatch handoff only assigns; the worker moves the card) |
 | wt-ship: PR opened | `review` (merge-direct projects like wt-pack: `done` on merge) |
 | wt-finish | `done` |
 | wt-work blocked | `blocked --note "<reason>"` |
