@@ -3440,7 +3440,7 @@ function refreshSessions() {
   return (sessionRefresh ??= (async () => {
     let source = 'builtin', rows
     try { // only --json: bare `ccsessions` / --help wait on an interactive prompt
-      rows = JSON.parse(await new Promise((ok, no) => execFile(CCSESSIONS, ['--json'], { timeout: 30_000, maxBuffer: 256 << 20 }, (e, out) => (e ? no(e) : ok(out)))))
+      rows = JSON.parse(await new Promise((ok, no) => execFile(CCSESSIONS, ['-n', '500', '--json'], { timeout: 30_000, maxBuffer: 16 << 20 }, (e, out) => (e ? no(e) : ok(out)))))
       if (!Array.isArray(rows)) throw new Error('not an array')
       rows = rows.map(({ id, cwd, proj, tldr, doing, mtime, live, started, agent, ago, frozen, closed }) => ({ id, cwd, proj, tldr: String(tldr ?? '').slice(0, 300), doing: String(doing ?? '').slice(0, 300), mtime, live, started, agent, ago, frozen, closed })) // ccsessions rows carry far more than the page uses
       source = 'ccsessions'

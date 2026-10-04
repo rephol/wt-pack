@@ -6,7 +6,7 @@ Written from the code; when you change a user-visible behaviour, update this fil
 
 Claude Code sessions on this Mac (Sessions page, `#sessions`).
 
-- **Source**: `ccsessions --json` when the CLI is installed (~6 s, so the server keeps one list and refreshes it
+- **Source**: `ccsessions -n 500 --json` when the CLI is installed (~5 s, so the server keeps one list and refreshes it
   in the background at most every 60 s); otherwise a built-in reader of the newest 500 transcripts in
   `~/.claude/projects`. The page header shows which one is in use.
 - **Search** over project, first prompt, current activity and id; the project switcher scopes it. Closed
