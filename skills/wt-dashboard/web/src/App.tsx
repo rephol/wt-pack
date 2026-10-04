@@ -74,7 +74,6 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { TaskQueue } from './tasks'
 import { Board } from './board'
 import { RoutinesPage } from './routines'
-import { SessionsPage } from './sessions'
 
 // ---------- types (mirror server.mjs) ----------
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
@@ -236,7 +235,7 @@ const idleFor = (a: Agent) => {
 }
 
 // ---------- app ----------
-type Page = 'overview' | 'tasks' | 'board' | 'agents' | 'rooms' | 'routines' | 'sessions' | 'terminals'
+type Page = 'overview' | 'tasks' | 'board' | 'agents' | 'rooms' | 'routines' | 'terminals'
 // Project scope: ?project= wins, then localStorage, else all.
 const initialProject = () => {
   const q = new URLSearchParams(location.search).get('project')
@@ -292,7 +291,6 @@ const NAV_PATHS: Record<string, import('react').ReactNode> = {
   tasks: <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth={3} /></>,
   rooms: <><path d="M4 5h16v10H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>,
   routines: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
-  sessions: <><path d="M4 5h16M4 12h16M4 19h10" /></>,
   terminals: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12 15h5" /></>,
   agents: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.9 2.6 2.7 3 5.2" /></>,
 }
@@ -315,7 +313,7 @@ const agentHash = (key: string) => { const i = key.indexOf('/'); return `agents/
 let fullBack = false
 const pageFromHash = (): Page => {
   const h = location.hash.slice(1)
-  return h.startsWith('board') || h === 'tasks/board' ? 'board' : h.startsWith('tasks') ? 'tasks' : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('routines') ? 'routines' : h.startsWith('sessions') ? 'sessions' : h.startsWith('terminals') ? 'terminals' : 'overview'
+  return h.startsWith('board') || h === 'tasks/board' ? 'board' : h.startsWith('tasks') ? 'tasks' : h.startsWith('agents') ? 'agents' : h.startsWith('rooms') ? 'rooms' : h.startsWith('routines') ? 'routines' : h.startsWith('terminals') ? 'terminals' : 'overview'
 }
 
 export default function App() {
@@ -460,7 +458,7 @@ export default function App() {
       header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr agent control room" />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
-      {(['overview', 'tasks', 'board', 'agents', 'rooms', 'routines', 'sessions', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
+      {(['overview', 'tasks', 'board', 'agents', 'rooms', 'routines', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
         const alert = p === 'overview' && data ? tileCounts(data.tasks).needsYou : 0
         return (
           <SideNavItem
@@ -523,7 +521,6 @@ export default function App() {
         {!fullKey && data && page === 'overview' && <OverviewPage data={data} onProject={setProject} onOpen={open} />}
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && page === 'board' && <Board project={project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setProject} />}
-        {!fullKey && page === 'sessions' && <SessionsPage phone={phone} project={project} />}
         {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={all?.agents ?? []} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={openInPanel} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
