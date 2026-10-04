@@ -30,7 +30,7 @@ export const registerAsk = (on: Parameters<Register>[0], options: Parameters<Reg
     const answered = (a: Answer) => a.chat ? CHAT : ({
       result: {
         questions: e.questions,
-        answers: Object.fromEntries(qs.map((q, i) => [q.question, (a.selected[i] ?? []).join(', ') || a.other?.[i] || (i === 0 && a.text ? a.text : '')])),
+        answers: Object.fromEntries(qs.map((q, i) => [q.question, [...(a.selected[i] ?? []), a.other?.[i]].filter(Boolean).join(', ') || (i === 0 && a.text ? a.text : '')])),
         ...(a.text ? { response: a.text } : {}),
       },
     })

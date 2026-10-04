@@ -116,7 +116,7 @@ export class Asks {
     const a = this.row(id)
     const ans = cleanAnswer(body, a.questions)
     const text = ans.chat ? 'The user wants to chat about this question instead of answering it.'
-      : a.questions.map((q, i) => `${q.header}: ${ans.selected[i].join(', ') || ans.other?.[i] || ''}`).join('\n') + (ans.text ? `\n\n${ans.text}` : '')
+      : a.questions.map((q, i) => `${q.header}: ${[...ans.selected[i], ans.other?.[i]].filter(Boolean).join(', ')}`).join('\n') + (ans.text ? `\n\n${ans.text}` : '')
     const at = new Date().toISOString()
     const claimed = { ...a, status: 'answered', answer: { ...ans, by: author.name, at }, closed: at }
     const changes = this.db.prepare("UPDATE asks SET json = ? WHERE id = ? AND json_extract(json, '$.status') = 'open'").run(JSON.stringify(claimed), id).changes

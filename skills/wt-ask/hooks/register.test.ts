@@ -82,6 +82,13 @@ test('Other text answers its question; Chat about this denies so the agent talks
   expect(r.result.answers['Which flags?']).toBe('my own')
 })
 
+test('multi-select keeps ticked options and the Other text', async ($, on) => {
+  mock.clock(on)
+  stubWtAsk(on, (flag) => (flag === '--json' ? out(0, 'ask-7') : flag === '--wait' ? out(0, JSON.stringify({ selected: [['prod'], ['a', 'b']], other: ['', 'mine'] })) : out(0)))
+  const r: any = await $.tool.call(Q)
+  expect(r.result.answers['Which flags?']).toBe('a, b, mine')
+})
+
 test('Chat about this is a deny', async ($, on) => {
   mock.clock(on)
   stubWtAsk(on, (flag) => (flag === '--json' ? out(0, 'ask-6') : flag === '--wait' ? out(0, JSON.stringify({ selected: [[], []], chat: true })) : out(0)))
