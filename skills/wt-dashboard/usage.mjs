@@ -52,10 +52,15 @@ export class UsageAgg {
   constructor({ keepMs = 30 * 86400_000 } = {}) {
     this.files = new Map() // path -> byte offset of the first unread complete line
     this.recs = new Map() // message id -> { ts, session, cwd, model, kind, in, out, cw, cr }
+    this.names = new Map() // session id -> the `--name` it ran under (the transcript's agent-name line), so ended agents stay attributed
     this.keepMs = keepMs
   }
   ingest(text, session, kind) {
     for (const l of text.split('\n')) {
+      if (l.startsWith('{"type":"agent-name"')) {
+        try { const e = JSON.parse(l); if (e.agentName) this.names.set(e.sessionId ?? session, e.agentName) } catch {}
+        continue
+      }
       if (!l.includes('"usage"') || !l.includes('"assistant"')) continue
       let e
       try { e = JSON.parse(l) } catch { continue }

@@ -1769,7 +1769,7 @@ async function usageApi() {
   const proj = new Map()
   for (const r of usageAgg.recs.values()) if (r.cwd && !proj.has(r.cwd)) proj.set(r.cwd, await projectOf(r.cwd))
   const by = {
-    agent: (r) => agentOf.get(r.session) ?? `other (${proj.get(r.cwd) ?? '?'})`,
+    agent: (r) => agentOf.get(r.session) ?? usageAgg.names.get(r.session) ?? `other (${proj.get(r.cwd) ?? '?'})`,
     project: (r) => proj.get(r.cwd) ?? 'unknown',
     model: (r) => `${r.model} · ${r.kind}`,
   }
