@@ -2483,6 +2483,13 @@ const messageSweep = async () => {
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
       body: `${row.attempts} sends, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
   })
+  // WP-261: acknowledged, then the agent went idle or vanished and the card never moved on and nothing was reported.
+  await messages.unreported({
+    moved: (row) => tickets.get(row.ticket).then((c) => movedOn(c, row), () => true),
+    busy: (row) => ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status)),
+    flag: (row) => inbox.add({ kind: 'server', key: `message-unreported|${row.id}`, title: `${row.ticket}: ${row.target} finished without reporting`,
+      body: `The ${row.kind} was acknowledged, but the agent is idle or gone and ${row.ticket} never moved on. Check the pane, or hand the card to someone else.`, target: { ticket: row.ticket } }),
+  })
 }
 setInterval(() => messageSweep().catch((e) => console.error('messages:', e.message)), 30_000).unref()
 const asks = new Asks({

@@ -126,6 +126,14 @@ header, remembered per viewer and defaulting to the global project; picking ther
   (same envelope id, up to 3 sends; a target working on the card counts as an ack, and so does a card that has moved on: done or blocked, or moved by anyone but Dispatch after delivery, WP-260, so a finished ticket is never resent), then flagged **No ack** on the card and
   in the Inbox. Recording the same `request_id` twice returns the first row. Board cards show the newest message's state
   (`Msg sent`, `Resent ×n`, `Acked`, `Answered`, `No ack`). `GET /api/messages?ticket=&target=` lists them.
+- **Finished without reporting** (WP-261): a handoff or dispatch with a ticket that the target acknowledged is flagged when,
+  10 minutes after the ack, the card has not moved on (done or blocked, or moved by anyone but Dispatch, which counts as the
+  worker's report) and the agent is gone from the agent list (exited or crashed) or not working. The message becomes
+  `expired` with "agent finished without reporting" (it shows as open on the card) and an Inbox item
+  `<ticket>: <agent> finished without reporting` opens the ticket, once. It is judged by the same 30 s sweep as the resend
+  above, so completion no longer depends on a reply. A worker that works past the 10 minutes and then idles briefly between
+  its own turns can be flagged early; ticketless messages are not judged. A SendMessage `notify_when_idle` notice reaches the
+  sender only after the sender's own turn ends (WP-259), so treat it as a hint, never as the completion signal.
 - **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means herdr accepted the prompt, not
   that it reached the agent's pane (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
   card being dispatched, its assignee must show working, done or blocked (it asked something); if not,
