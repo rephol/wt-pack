@@ -126,3 +126,31 @@ test('WP-260: a dispatch whose card moved on (done/blocked, or moved by another 
   assert.deepEqual(await m.sweep({ seen: () => movedOn(card('review', ['2026-10-05T16:31:00.000Z', 'w']), { ...m.get('ab75'), delivered_at: '2026-10-05T16:00:00.000Z' }), resend: async (r) => sent.push(r.id) }), [{ id: 'ab75', did: 'acknowledged' }])
   assert.deepEqual(sent, []); assert.equal(m.get('ab75').state, 'acknowledged')
 })
+
+test('WP-261: an acknowledged handoff whose agent went idle or vanished without moving the card is flagged once', async () => {
+  const { m, clock, draft } = await setup()
+  const flagged = []
+  const run = (o = {}) => m.unreported({ moved: () => false, busy: () => false, flag: (r) => flagged.push(r.id), ...o })
+  m.record(draft({ state: 'delivered' })); m.ack('a1', null)
+  assert.deepEqual(await run(), []) // not due yet: acked just now
+  clock.t += 9 * 60_000
+  assert.deepEqual(await run(), [])
+  clock.t += 2 * 60_000 // 11 min after the ack
+  assert.deepEqual(await run({ busy: () => true }), []) // the target is still working on it
+  assert.deepEqual(await run({ moved: () => true }), []) // the card moved on: it reported by moving it
+  assert.deepEqual(await run({ moved: () => Promise.reject(new Error('board down')) }), []) // an error never flags
+  assert.equal(m.get('a1').state, 'acknowledged')
+  assert.deepEqual(await run(), [{ id: 'a1', did: 'unreported' }]) // idle (or absent from the agent list) and not moved
+  assert.deepEqual(flagged, ['a1']); assert.equal(m.get('a1').state, 'expired'); assert.equal(m.get('a1').error, 'agent finished without reporting')
+  assert.deepEqual(await run(), []) // flagged once: it left `acknowledged`
+  assert.deepEqual(m.byTicket(['WP-1'])['WP-1'].open, 1) // the board badge still counts it as open
+})
+
+test('WP-261: ticketless, answered and non-ack kinds are never flagged as unreported', async () => {
+  const { m, clock, draft } = await setup()
+  m.record(draft({ id: 't1', ticket: null, state: 'delivered' })); m.ack('t1', null)
+  m.record(draft({ id: 'r1', kind: 'reply', state: 'delivered' })); m.ack('r1', null)
+  m.record(draft({ id: 'd1', state: 'delivered' })); m.ack('d1', null, 'answered')
+  clock.t += 60 * 60_000
+  assert.deepEqual(await m.unreported({ moved: () => false, busy: () => false, flag: () => assert.fail('flagged') }), [])
+})

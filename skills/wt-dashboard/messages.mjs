@@ -124,4 +124,25 @@ export class Messages {
     }
     return done
   }
+
+  // WP-261: a handoff/dispatch the target acknowledged but never reported on. For `quietMs` after its ack the card has
+  // not moved on (moved(row): done/blocked, or anyone but dispatch moved it, so a worker taking it to review counts as
+  // reporting) and the target is not working on it (busy(row): absent from the agent list = exited or crashed, or idle).
+  // Then the row becomes `expired` ("finished without reporting"), which is also the dedupe, and is flagged once.
+  // ponytail: ticketless rows are skipped (nothing to judge "reported" by). Ceiling: a worker that acks, works past
+  // quietMs, then idles briefly between its own turns can be flagged early; add a two-sweeps-in-a-row rule if it misfires.
+  async unreported({ moved, busy, flag }, { quietMs = 10 * 60_000 } = {}) {
+    const done = []
+    const cut = new Date(this.now() - quietMs).toISOString()
+    const rows = this.db.prepare("SELECT * FROM wt_messages WHERE state = 'acknowledged' AND ticket IS NOT NULL AND updated < ? ORDER BY created").all(cut)
+    for (const row of rows) {
+      if (!ACK_KINDS.has(row.kind)) continue
+      if (await Promise.resolve(moved?.(row)).catch(() => true)) continue // an error is "don't flag", like sweep's
+      if (await Promise.resolve(busy?.(row)).catch(() => true)) continue
+      this.move(row.id, 'expired', { error: 'agent finished without reporting' })
+      await Promise.resolve(flag?.(this.get(row.id))).catch((e) => this.log(`messages unreported ${row.id}: ${e.message}`))
+      done.push({ id: row.id, did: 'unreported' })
+    }
+    return done
+  }
 }
