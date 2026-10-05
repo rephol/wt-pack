@@ -468,6 +468,8 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
     .map((a) => ({ value: a.name, label: `${a.name} (${a.pool})` }))], [agentsForPair, project, ticket?.assignee?.name, ticket?.id])
   const setBuddyM = useMutation({ mutationFn: (buddy: string | null) => send<Ticket>(`${tUrl(ticket!.id)}/buddy`, 'POST', { buddy }), onSuccess: done })
   const setBuddy = (v: string) => setBuddyM.mutate(v || null)
+  // WP-239: the card's stage gates and what each is missing (none configured = no row). Same refresh as the ticket itself.
+  const gates = useQuery({ queryKey: ['ticket-gates', ticket?.id, ticket?.column], queryFn: () => api<{ enabled: string[]; gates: { stage: string; ok: boolean; why: string | null }[] }>(`${tUrl(ticket!.id)}/gates`), enabled: Boolean(ticket?.id) && !isNew, refetchInterval: 8000, retry: false })
   const undo = useMutation({ mutationFn: (field: string) => send<Ticket>(`${tUrl(ticket!.id)}/jev-undo`, 'POST', { field }), onSuccess: done })
   const create = useMutation({
     mutationFn: () => send<Ticket>('/api/tickets', 'POST', {
@@ -599,6 +601,9 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
         <MetadataListItem label="Assignee">
           {ticket.assignee ? <HStack gap={2} vAlign="center"><Avatar name={ticket.assignee.name} size="xsm" /><Text type="body">{ticket.assignee.name}</Text></HStack> : <Text type="body" color="secondary">None</Text>}
         </MetadataListItem>
+        {!!gates.data?.gates.length && <MetadataListItem label="Gates">
+          <VStack gap={1}>{gates.data.gates.map((g) => <Text key={g.stage} type="body" color={g.ok ? 'primary' : 'secondary'}>{g.ok ? '✓' : '✗'} {g.stage}{g.why ? ` — ${g.why}` : ''}</Text>)}</VStack>
+        </MetadataListItem>}
         <MetadataListItem label="Buddy">
           {ticket.assignee
             ? <Selector label="Buddy" isLabelHidden width={220} value={ticket.pair?.buddy?.name ?? ''} isDisabled={setBuddyM.isPending}

@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { Dispatch, mergeIds, dispatchPrompt, resolveReport, personaFor, roleFor, planned, pickTeam, capacity, stagePersona } from './dispatch.mjs'
+import { Dispatch, mergeIds, dispatchPrompt, gateLine, resolveReport, personaFor, roleFor, planned, pickTeam, capacity, stagePersona } from './dispatch.mjs'
 
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
@@ -729,4 +729,31 @@ test('WP-238: the buddy is the owning team\'s reviewer; other teams\' and teamle
   const r = await setup({ agents, extra: {} })
   await ready(r.tickets, 'b'); await r.d.tick()
   assert.equal(r.calls[0].args[r.calls[0].args.indexOf('--buddy') + 1], 'p-plain')
+})
+
+test('WP-239 dispatchPrompt: no gates = the old prompt; gates on name the evidence to leave, per gate', () => {
+  const t = { id: 'WP-9', title: 'x' }
+  assert.equal(dispatchPrompt(t, 'worker', null, []), dispatchPrompt(t, 'worker'))
+  assert.doesNotMatch(dispatchPrompt(t, 'worker'), /Stage gates/)
+  const all = dispatchPrompt(t, 'worker', null, ['plan', 'build', 'review', 'qa'])
+  for (const re of [/Stage gates are on for this card \(plan, build, review, qa\)/, /wt-ticket gates WP-9/, /docs\/plans\/wp-9-\*\.md/, /`tests: green <what ran>` and `tip: <sha>`/, /`verdict: Approve`/, /`live-check: /]) assert.match(all, re)
+  const build = gateLine(t, ['build'])
+  assert.match(build, /tests: green/)
+  assert.doesNotMatch(build, /verdict|live-check|docs\/plans/)
+})
+test('WP-239 Dispatch: the prompt carries the gates the repo has on; none on = no gate line', async () => {
+  const on = await setup({ extra: { gatesOf: async () => ['plan', 'build'], teamsOf: async () => [], personasOf: async () => [] } })
+  await ready(on.tickets, 'gated')
+  await on.d.tick()
+  assert.equal(on.calls.length, 1)
+  assert.match(on.calls[0].prompt, /Stage gates are on for this card \(plan, build\)/)
+  const off = await setup({ extra: { gatesOf: async () => [], teamsOf: async () => [], personasOf: async () => [] } })
+  await ready(off.tickets, 'plain')
+  await off.d.tick()
+  assert.equal(off.calls.length, 1)
+  assert.doesNotMatch(off.calls[0].prompt, /Stage gates/)
+  const missing = await setup() // no gatesOf dep at all
+  await ready(missing.tickets, 'old')
+  await missing.d.tick()
+  assert.doesNotMatch(missing.calls[0].prompt, /Stage gates/)
 })

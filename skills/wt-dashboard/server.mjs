@@ -15,6 +15,7 @@ import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkPr
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
 import { teamView } from './teamview.mjs'
+import { guardMove } from './gatemove.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
@@ -2445,12 +2446,38 @@ async function linearOrgKey() {
   } catch (e) { linearOrgFailed = Date.now(); console.error('linear org:', e.message) }
   return linearOrg
 }
+// WP-239 stage gates. The enabled gates for a card (its team's list, else the project's gates.md), evaluated against
+// the card's comments plus two repo facts (a plan file, a branch tip). wt-shared is imported dynamically (absent = no gates).
+async function gateState(t, stages) {
+  const g = await import('../wt-shared/scripts/gates.mjs').catch(() => null)
+  const project = await tickets.project(t.id)
+  const root = (await projectRoots()).get(project)
+  if (!g || !root) return { enabled: [], gates: [], crossed: () => [] }
+  const teams = await import('../wt-shared/scripts/teams.mjs')
+  const team = t.team ? teams.list(root).find((x) => x.name === t.team) : null
+  const enabled = g.gatesFor(team, g.projectGates(root))
+  const want = stages ? enabled.filter((x) => stages.includes(x)) : enabled
+  const facts = {}
+  const id = t.id.toLowerCase()
+  if (want.includes('plan')) {
+    const dirs = [root, ...(await linkedWorktrees(root).catch(() => [])).map((w) => w.path)]
+    for (const d of dirs) { const hit = (await readdir(join(d, 'docs', 'plans')).catch(() => [])).find((f) => f.startsWith(`${id}-`) && f.endsWith('.md')); if (hit) { facts.plan = join(d, 'docs', 'plans', hit); break } }
+  }
+  if (want.includes('build')) {
+    const base = (await git(root, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD').catch(() => 'main')).trim() || 'main'
+    for (const ref of (await git(root, 'for-each-ref', '--format=%(refname:short)', `refs/heads/${id}-*`).catch(() => '')).split('\n').filter(Boolean)) {
+      if (Number(await git(root, 'rev-list', '--count', `${base}..${ref}`).catch(() => '0')) > 0) { facts.tip = (await git(root, 'rev-parse', '--short', ref).catch(() => ref)).trim(); break }
+    }
+  }
+  return { enabled, gates: g.evaluate(t, want, facts), crossed: (to) => g.crossed(enabled, g.origin(t), to) }
+}
 async function ticketsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
   const text = url.searchParams.get('format') === 'text'
   if (req.method === 'GET') {
     if (parts[2] === 'refs') { const k = await tickets.keys(); return send(res, 200, { boards: Object.fromEntries(Object.entries(k).map(([p, key]) => [key, p])), linear: { keys: TEAM_KEYS, org: await linearOrgKey() } }) }
     if (parts[2] === 'keys') { const k = Object.values(await tickets.keys()); return text ? send(res, 200, k.join('\n') + (k.length ? '\n' : ''), 'text/plain') : send(res, 200, k) }
+    if (parts[2] && parts[3] === 'gates') { const st = await gateState(await tickets.get(parts[2])); return send(res, 200, { enabled: st.enabled, gates: st.gates }) }
     if (parts[2]) { const t = await tickets.get(parts[2]); return text ? send(res, 200, ticketText(t), 'text/plain') : send(res, 200, t) }
     const out = await tickets.list(url.searchParams.get('project'), url.searchParams.get('column') || undefined, url.searchParams.get('q') ?? '')
     if (out.key) out.dispatchStatus = dispatcher.status(url.searchParams.get('project'))
@@ -2502,7 +2529,12 @@ async function ticketsApi(req, res, url, parts) {
       if (!a) return send(res, 400, { error: `unknown agent ${b.assignee}` })
       assignee = { name: a.name, pane: a.id }
     }
-    return send(res, 200, await tickets.patch(id, b, author, assignee))
+    // WP-239: leaving a stage needs its gate (gatemove.mjs).
+    const gm = await guardMove({ tickets, state: gateState }, await tickets.get(id), b.column, b.force, author)
+    if (!gm.ok) return send(res, gm.status, gm.body)
+    const out = await tickets.patch(id, b, author, assignee)
+    await gm.afterMove?.()
+    return send(res, 200, out)
   }
   // WP-147: set/clear the ticket's buddy (worker follows the ticket's own assignee). Unlike the generic PATCH
   // above, this also tags/clears the `pair` pane token on both agents — the thing every free-agent picker
@@ -3310,6 +3342,8 @@ const dispatcher = new Dispatch({
     // WP-204: the repo's persona files (dynamic import: wt-shared may be absent).
     personasOf: async (repo) => { const r = await import('../wt-shared/scripts/roles.mjs'); const co = r.mainCheckout(repo, 3000); return co ? r.personas(co) : [] },
     // WP-238: the repo's team files (dynamic import, like roles).
+    // WP-239: the stage gates on for a card of this team in this repo (dispatchPrompt tells the agent to leave the evidence).
+    gatesOf: async (repo, team) => { const g = await import('../wt-shared/scripts/gates.mjs'); const co = (await import('../wt-shared/scripts/roles.mjs')).mainCheckout(repo, 3000); return co ? g.gatesFor(team, g.projectGates(co)) : [] },
     teamsOf: async (repo) => { const r = await import('../wt-shared/scripts/teams.mjs'); const co = (await import('../wt-shared/scripts/roles.mjs')).mainCheckout(repo, 3000); return co ? r.list(co) : [] },
     // The project's room is the one named after it (WP-74); archived rooms don't count.
     // WP-75: where the dispatched agent reports (dispatch.mjs resolveReport).

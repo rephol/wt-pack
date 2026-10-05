@@ -5,7 +5,8 @@
 #   wt-ticket list [--column c] [--mine] [--project p]
 #   wt-ticket search <text> [--column c] [--project p]  (id, title, body, labels, comments; all words must match)
 #   wt-ticket show <ID>
-#   wt-ticket move <ID> <column> [--note "…"]       (blocked needs --note)
+#   wt-ticket move <ID> <column> [--note "…"] [--force]  (blocked needs --note; a stage gate can refuse the move, --force overrides)
+#   wt-ticket gates <ID>                            (the card's stage gates and what each is missing)
 #   wt-ticket comment <ID> "text"
 #   wt-ticket claim <ID> [--force]
 #   wt-ticket assign <ID> <agent|me|none>
@@ -68,7 +69,9 @@ case "$cmd" in
   show) [ $# -eq 1 ] || usage; show "$1" ;;
   move)
     [ $# -ge 2 ] || usage; id=$1; kv=("column=$2"); shift 2
-    [ $# -eq 0 ] || { [ "$1" = --note ] && [ $# -eq 2 ] || usage; kv+=("note=$2"); }
+    while [ $# -gt 0 ]; do
+      case "$1" in --note) [ $# -ge 2 ] || usage; kv+=("note=$2"); shift ;; --force) kv+=("force:=true") ;; *) usage ;; esac; shift
+    done
     out=$(call PATCH "/api/tickets/$id" "$(obj "${kv[@]}")") || exit 1; row "$out" ;;
   comment) [ $# -eq 2 ] || usage; out=$(call POST "/api/tickets/$1/comments" "$(obj "text=$2")") || exit 1; row "$out" ;;
   claim)
@@ -86,6 +89,9 @@ case "$cmd" in
     rc=0
     for id in $ids; do out=$(MAXT=10 call POST "/api/tickets/$id/triage") && row "$out" || rc=1; done
     exit $rc ;;
+  gates) [ $# -eq 1 ] || usage
+    out=$(call GET "/api/tickets/$1/gates") || exit 1
+    if [ "$json" = 1 ]; then echo "$out"; else printf '%s' "$out" | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); if(!j.enabled.length) console.log("no gates on this card"); for(const g of j.gates) console.log((g.ok?"ok   ":"FAIL ")+g.stage+(g.why?": "+g.why:""))'; fi ;;
   keys) call GET "/api/tickets/keys?$(fmt)" ;;
   *) usage ;;
 esac

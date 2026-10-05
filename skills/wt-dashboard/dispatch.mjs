@@ -64,8 +64,16 @@ export function resolveReport(project, { reportRoom = null, reportOrch = true } 
   const o = reportOrch ? agents.find((x) => x.local && x.pool === 'orchestrator' && x.project === project) : null
   return { room: r && !r.archived ? r.slug : null, orch: o ? { name: o.name, pane: o.id } : null }
 }
-export function dispatchPrompt(t, role, report = null) {
-  const line = reportLine(report)
+// WP-239: when stage gates are on for the card, the agent must leave the evidence they read (see wt-ticket gates).
+export const gateLine = (t, gates = []) => !gates.length ? '' :
+  `\nStage gates are on for this card (${gates.join(', ')}): a move past a stage is refused until its evidence is on the card (\`wt-ticket gates ${t.id}\` shows what is missing). ` +
+  `Leave it as card comments with \`wt-ticket comment ${t.id} "…"\`: ${[
+    gates.includes('plan') && 'the plan as a file docs/plans/' + t.id.toLowerCase() + '-*.md',
+    gates.includes('build') && '`tests: green <what ran>` and `tip: <sha>` before moving to review',
+    gates.includes('review') && '`verdict: Approve` (or Approve with fixes) from the review',
+    gates.includes('qa') && '`live-check: <what you opened and saw>` after using the change live'].filter(Boolean).join('; ')}.\n`
+export function dispatchPrompt(t, role, report = null, gates = []) {
+  const line = gateLine(t, gates) + reportLine(report)
   if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.\n` + line
   const branch = `${t.id.toLowerCase()}-<short-slug>`
   return `Implement ${t.id} — ${t.title} (\`wt-ticket show ${t.id}\`).\n\n` +
@@ -225,7 +233,8 @@ export class Dispatch {
     const hrole = team ? persona?.base ?? tpersona : role
     try {
       const args = ['--role', hrole, ...(persona ? ['--persona', persona.name] : []), ...(team ? ['--team', team.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
-      const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
+      const gates = (await this.deps.gatesOf?.(repo, team).catch(() => [])) ?? []
+      const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null, gates), repo)
       const { name, pane } = parseHandoff(out)
       this.log(`dispatch ${next.id} → ${name} ${pane}`)
       try { await this.#sent(next.id, role, { name, pane }, now, buddy, team?.name) } catch (e) {
@@ -372,7 +381,8 @@ export class Dispatch {
     if (!repo || !t.assignee?.pane) return
     if (!d.redeliveredAt) {
       const args = ['--pane', t.assignee.pane, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.slice(0, 80), repo]
-      const prompt = dispatchPrompt(t, roleFor(t), (await this.deps.reportOf?.(project)) ?? null)
+      const team = t.team ? ((await this.deps.teamsOf?.(repo).catch(() => [])) ?? []).find((x) => x.name === t.team) : null
+      const prompt = dispatchPrompt(t, roleFor(t), (await this.deps.reportOf?.(project)) ?? null, (await this.deps.gatesOf?.(repo, team).catch(() => [])) ?? [])
       // A failed resend still counts as the one retry (never resend on a loop): report it and move straight
       // to the undelivered flag on the next check, same as a resend that landed but still isn't confirmed.
       const failed = await this.deps.handoff(args, prompt, repo).then(() => null, (e) => String(e?.message ?? e).split('\n')[0].slice(0, 160))

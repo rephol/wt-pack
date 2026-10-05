@@ -72,6 +72,18 @@ its replacement verification.
 results. If the worktree cannot exercise the change — missing service, credential or environment — say that
 plainly instead of implying a check happened.
 
+## Gate evidence
+
+A card whose team or project turns on stage gates (`../wt-ticket/scripts/wt-ticket gates <ID>` lists them; a dispatch
+prompt says so) is refused a move past a stage until its evidence is on the card. Leave it as card comments, `|| true`,
+and only what is true — the verification-honesty rule above applies to these lines too:
+
+- before moving to review: `wt-ticket comment <ID> "tests: green <what ran, e.g. 431/431>"` and `wt-ticket comment <ID> "tip: <sha of the branch tip>"`; a failing run is `tests: red <what failed>`, not silence
+- if you used the change live (browser, CLI, server): `wt-ticket comment <ID> "live-check: <what you opened and saw>"`
+- the plan is the committed `docs/plans/<id>-*.md` (wt-plan); the review verdict is wt-review's comment
+
+If the move is still refused, read the reasons, fix what is missing and move again; never `--force` on your own.
+
 ## Blockers
 
 Stop and report, rather than working around:

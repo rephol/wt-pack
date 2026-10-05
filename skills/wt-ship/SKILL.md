@@ -81,6 +81,12 @@ Invoke each skill in turn. What this skill adds is what happens *between* them:
 - **Into `wt-pr`** — the two paragraphs only this run can write, what research corrected and what review
   corrected, come from steps 2 and 3.
 
+## Gate evidence
+
+If the card has stage gates (`../wt-ticket/scripts/wt-ticket gates <ID>`), the card needs, before it moves to review: wt-work's
+`tests: green …` and `tip: <sha>` comments (re-post `tests:` if simplify or review fixes changed the code and you re-ran them) and
+wt-review's `verdict: …` comment. Check `gates` once before the final move and fill what is missing; never `--force` yourself.
+
 ## After the PR
 
 **Tell the planner.** If a planner handed you this work, move its label on (a no-op otherwise, or once the

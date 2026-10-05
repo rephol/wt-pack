@@ -433,6 +433,10 @@ defect** — say which one it is in the reply. A caller maps them differently: `
 Send back as a hold (`--request-changes`) but a coverage-only Send back as a plain comment naming the gap,
 because an unread file is neither a question nor a defect (see its §3).
 
+**Record the verdict (diff mode, local board ticket).** The review stage gate reads it from the card: post the verdict
+word once per review round, `../wt-ticket/scripts/wt-ticket comment <ID> "verdict: <Approve|Approve with fixes|Send back> — <one line why>" || true`.
+A re-review after fixes posts its own newer verdict; the newest one counts. No board ticket → skip.
+
 ## Coverage line in the verdict
 
 The verdict's last line is always: `Coverage: N/M files read in full · lenses: <fired lenses> · tests:
