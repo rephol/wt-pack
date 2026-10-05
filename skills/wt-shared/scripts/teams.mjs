@@ -27,6 +27,17 @@ export const TEMPLATES = {
 }
 export const templateText = (name, t) => `---\ndescription: ${t.description}\nmembers: [${t.members.join(', ')}]\nstages: [${t.stages.join(', ')}]\n---\nNotes for ${name} (free-form; not injected into agents).\n`
 
+// WP-241: the team file for structured input (the dashboard editor). Every value is validated before it reaches the
+// frontmatter, so a name or description can never inject a key or a line. `notes` is the free-form body.
+export function teamText({ description = '', members = [], stages = [] }, notes = '') {
+  const bad = (m) => Object.assign(new Error(m), { status: 400 })
+  if (/[\r\n]/.test(description) || description.length > 200) throw bad('description: one line, up to 200 characters')
+  if (!Array.isArray(members) || !Array.isArray(stages)) throw bad('members and stages must be lists')
+  for (const m of members) if (!NAME.test(m?.persona ?? '') || !Number.isInteger(m.count) || m.count < 1 || m.count > MAX_COUNT) throw bad(`member: a role/persona name and a count of 1-${MAX_COUNT}`)
+  for (const x of stages) if (!STAGES.includes(x?.stage) || !NAME.test(x.persona ?? '')) throw bad(`stage: one of ${STAGES.join(', ')} → a persona name`)
+  return `---\ndescription: ${description}\nmembers: [${members.map((m) => (m.count > 1 ? `${m.persona} x${m.count}` : m.persona)).join(', ')}]\nstages: [${stages.map((x) => `${x.stage}=${x.persona}`).join(', ')}]\n---\n${notes}`
+}
+
 const arr = (v) => (Array.isArray(v) ? v : v ? [v] : [])
 // "frontend-worker x2" | "frontend-worker" → {persona, count}. The count needs whitespace before the x, so a persona
 // named linux2 stays linux2; a bad shape keeps count NaN so check() can name it.
