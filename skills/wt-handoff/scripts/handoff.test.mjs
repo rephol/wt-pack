@@ -353,6 +353,42 @@ test('WP-238: --team picks only that team\'s agents (a plain handoff skips them)
   assert.throws(() => run(['--role', 'reviewer', '--team', 'web', '--dry-run', repo], 'x'), (e) => e.status === 2 && /team web has no reviewer member/.test(e.stderr))
 })
 
+test('WP-247: team workers do not count against the plain pool cap; --pane refuses a card of another team (and teamless vs team)', () => {
+  const agent = (n, st = 'working') => ({ name: `demo-worker-0${n}`, pane_id: `wW:p${n}`, tab_id: `t${n}`, agent_status: st, workspace_id: 'wW', cwd: repo })
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [agent(1), agent(2), agent(3)] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
+    { pane_id: 'wW:p1', tokens: {} }, { pane_id: 'wW:p2', tokens: { team: 'web', role: 'worker' } }, { pane_id: 'wW:p3', tokens: { team: 'web', role: 'worker' } }] } }))
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '2' }
+  const plain = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env })
+  assert.match(plain, /^dry-run: would spawn a worker/) // 1 teamless of 2, not 3 of 2
+  assert.match(execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env: { ...env, WT_WORKERS_MAX: '1' } }), /pool full: 1\/1 plain/) // p1 still counts
+
+  const curlBin = join(tmp, 'curlbin247')
+  mkdirSync(curlBin, { recursive: true })
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+for a in "$@"; do url=$a; done
+case "$url" in
+  *"/api/tickets/keys"*) printf 'WP\\n200' ;;
+  *"/api/tickets/WP-11"*) printf '%s\\n200' '{"id":"WP-11","team":"web"}' ;;
+  *"/api/tickets/WP-12"*) printf '%s\\n200' '{"id":"WP-12","team":"api"}' ;;
+  *"/api/tickets/WP-13"*) printf '%s\\n200' '{"id":"WP-13"}' ;;
+  *) printf '{}\\n404' ;;
+esac
+`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const tenv = { ...env, PATH: `${curlBin}:${bin}:${process.env.PATH}` }
+  writeFileSync(join(tmp, 'pane-wW_p2.json'), JSON.stringify({ result: { pane: { tokens: { team: 'web', role: 'worker' } } } }))
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), JSON.stringify({ result: { pane: { tokens: {} } } }))
+  const to = (pane, task, dry = false) => { try { return { code: 0, out: execFileSync(join(here, 'handoff.sh'), ['--no-goal', ...(dry ? ['--dry-run'] : []), '--pane', pane, '--task', `${task} go`, repo], { input: 'x', encoding: 'utf8', env: tenv }) } } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` } } }
+  assert.match(to('wW:p2', 'WP-11', true).out, /would hand to pane wW:p2/)                                   // own team's card
+  const other = to('wW:p2', 'WP-12'); assert.equal(other.code, 2); assert.match(to('wW:p2', 'WP-12', true).out, /^dry-run: demo-worker-02 is on team web/); assert.match(other.out, /demo-worker-02 is on team web; WP-12 is team api's/)
+  assert.match(to('wW:p2', 'WP-13').out, /demo-worker-02 is on team web; WP-13 is teamless/) // team agent, teamless card
+  assert.match(to('wW:p1', 'WP-11').out, /demo-worker-01 is not on a team; WP-11 is team web's/) // teamless agent, team card
+  assert.match(to('wW:p1', 'WP-13', true).out, /would hand to pane wW:p1/)                                   // teamless both
+  writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
+
 test('WP-249: a reused agent missing from agent list is renamed to its tab label before typing', () => {
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
   writeFileSync(join(tmp, 'pane-wW_p7.json'), JSON.stringify({ result: { pane: { pane_id: 'wW:p7', tab_id: 'wW:t7', tokens: {} } } }))

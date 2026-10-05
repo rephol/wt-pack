@@ -555,6 +555,24 @@ dry() {  # <what would happen>
 [ -z "$persona" ] || { route_tier=; route_effort=; }
 
 if [ "$mode" = pane ]; then
+  # WP-247: a card belongs to one team (or none); its work goes to that team's agents (or a teamless one). Same rule and
+  # wording as the dashboard's buddy route. No board reachable (server down, Linear key) → no check, as for the pair lookup.
+  if [ -n "$local_ticket" ] && [ -x "$T" ]; then
+    card_json=$("$T" show "$local_ticket" --json 2>/dev/null || true)
+    if printf '%s' "$card_json" | jq -e '.id' >/dev/null 2>&1; then
+      card_team=$(printf '%s' "$card_json" | jq -r '.team // empty')
+      agent_team=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.team // empty')
+      if [ "$card_team" != "$agent_team" ]; then
+        who=$(name_of "$pane_arg"); who=${who:-$pane_arg}
+        [ -n "$agent_team" ] && at="on team $agent_team" || at="not on a team"
+        [ -n "$card_team" ] && ct="team $card_team's" || ct="teamless"
+        cross="$who is $at; $local_ticket is $ct"
+        [ "$dry" -eq 1 ] && dry "$cross"
+        echo "$cross" >&2
+        exit 2
+      fi
+    fi
+  fi
   target_dnd=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.dnd // empty')
   [ -z "$target_dnd" ] || echo "warning: $(name_of "$pane_arg") is DND" >&2
   [ "$dry" -eq 1 ] && dry "would hand to pane $pane_arg"
@@ -587,10 +605,13 @@ if [ "$role" = worker ] && [ -z "$team" ]; then # a team is capped by its roster
   if [ -n "$cap" ]; then
     # WP-205: the cap counts the agents this handoff could otherwise have reused — the same persona token (none for
     # a plain handoff) — so idle persona agents never fill the cap against a plain ticket, nor the reverse.
+    # WP-247: team members do not count — a team is capped by its own roster, so its workers must not fill the plain pool.
     pt=$(herdr pane list 2>/dev/null | jq -c '[(.result.panes // [])[] | select(.pane_id != null) | {key: .pane_id, value: (.tokens.persona // "")}] | from_entries' 2>/dev/null) || pt=
     [ -n "$pt" ] || pt='{}'
-    n=$(herdr agent list | jq --arg ws "$(worker_ws)" --arg persona "$persona" --argjson pt "$pt" \
-      '[.result.agents[] | select(.workspace_id == $ws) | select(($pt[.pane_id // ""] // "") == $persona)] | length')
+    tm=$(herdr pane list 2>/dev/null | jq -c '[(.result.panes // [])[] | select(.pane_id != null and (.tokens.team // "") != "") | .pane_id]' 2>/dev/null) || tm=
+    [ -n "$tm" ] || tm='[]'
+    n=$(herdr agent list | jq --arg ws "$(worker_ws)" --arg persona "$persona" --argjson pt "$pt" --argjson tm "$tm" \
+      '[.result.agents[] | select(.workspace_id == $ws) | select(.pane_id as $p | $tm | index($p) | not) | select(($pt[.pane_id // ""] // "") == $persona)] | length')
     if [ "$n" -ge "$cap" ]; then
       full="pool full: $n/$cap ${persona:-plain} workers in $(basename "${main_checkout:-$cwd}")"
       [ "$dry" -eq 1 ] && dry "$full"
@@ -603,8 +624,7 @@ fi
 # WP-238: a team never grows past its roster — the spawn below would add a member beyond the team file's count for this persona.
 if [ -n "$team" ]; then
   want=${persona:-$role}
-  seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" list --cwd "${main_checkout:-$cwd}" 2>/dev/null \
-    | jq --arg t "$team" --arg p "$want" '[.[] | select(.name == $t) | .members[] | select(.persona == $p) | .count] | add // 0' 2>/dev/null) || seats=0
+  seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "${main_checkout:-$cwd}" 2>/dev/null) || seats=0
   [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
   have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
   if [ "${have:-0}" -ge "$seats" ]; then
