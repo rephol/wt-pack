@@ -157,7 +157,7 @@ function AdoptPick({ t, persona }: { t: Team; persona: string }) {
   const options = (t.adoptable ?? []).filter((a) => !BASE_ROLES.includes(persona) || a.role === persona)
   if (!options.length) return null
   return (
-    <Selector label="Add to team" width={220} value="" options={[{ value: '', label: 'Pick an agent…' }, ...options.map((a) => ({ value: a.name, label: a.name }))]}
+    <Selector label="Add to team" width="100%" value="" options={[{ value: '', label: 'Pick an agent…' }, ...options.map((a) => ({ value: a.name, label: a.name }))]}
       onChange={(agent) => agent && adopt(() => api(url(t.project, t.name, '/adopt'), { method: 'POST', body: JSON.stringify({ agent, persona }) }))} />
   )
 }
@@ -176,13 +176,16 @@ function TeamCard({ t, showProject }: { t: Team; showProject: boolean }) {
       {t.errors.length > 0 && <Banner status="warning" title="Team file has problems" description={`${t.errors.join('; ')} (wt-roles team check)`} />}
       <VStack gap={1}>
         {t.members.map((m) => (
-          <HStack key={m.persona} gap={2} wrap="wrap" align="start">
-            <Text weight="semibold" size="sm">{m.persona}{m.count > 1 ? ` ×${m.count}` : ''}</Text>
-            {m.agents.length === 0
-              ? <Text type="supporting" size="sm">not started</Text>
-              : <Text size="sm">{m.agents.map(agentLine).join(', ')}</Text>}
-            {m.agents.length < m.count && <AdoptPick t={t} persona={m.persona} />}
-          </HStack>
+          // WP-247: the picker always sits on its own line inside its member's row, never beside or between rows
+          <VStack key={m.persona} gap={1} style={{ minWidth: 0 }}>
+            <HStack gap={2} wrap="wrap" align="start">
+              <Text weight="semibold" size="sm">{m.persona}{m.count > 1 ? ` ×${m.count}` : ''}</Text>
+              {m.agents.length === 0
+                ? <Text type="supporting" size="sm">not started</Text>
+                : <Text size="sm">{m.agents.map(agentLine).join(', ')}</Text>}
+            </HStack>
+            {m.agents.length < m.count && <div style={{ maxWidth: 260 }}><AdoptPick t={t} persona={m.persona} /></div>}
+          </VStack>
         ))}
         {t.other.length > 0 && (
           <HStack gap={2} wrap="wrap" align="start">
