@@ -16,6 +16,14 @@ Routines · Terminals**, then **Inbox**, **Settings** and the server health dot 
 - Header: **New agent** and **Refresh**.
 - A source that fails (herdr not running, the repo not a git checkout) shows a warning banner with the fix
   and leaves its cards empty; the rest of the page still loads (also on Tasks and Agents).
+- **Live updates** (WP-253): the board, the inbox and the rooms list refresh from one change stream, `GET /api/changes` (SSE),
+  instead of fast polling. An event says what changed (`tickets` with its project, `inbox`, `rooms` with a slug, or the list
+  or settings); the page refetches that through its normal query. Each event has the id `<epoch>:<seq>`. A client that drops
+  its connection (a phone, a sleeping laptop) reconnects with its last id (the browser sends `Last-Event-ID`; `?since=` also
+  works) and receives only the events it missed (the last 1000 are kept in memory). After a server restart (new epoch) or a
+  gap past that window it receives `reset` and refetches all three. The page reopens a stream the browser killed in the
+  background (iOS Safari) when it becomes visible again. The old polls remain as a 60 s fallback. A room's own message stream
+  (`/api/rooms/:slug/stream`, which already resumed by message count) and `/api/events` (the app's tray and notifications) are unchanged.
 
 ## Tasks
 
