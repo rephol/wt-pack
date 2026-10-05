@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { Dispatch, mergeIds, dispatchPrompt, resolveReport, personaFor } from './dispatch.mjs'
+import { Dispatch, mergeIds, dispatchPrompt, resolveReport, personaFor, roleFor, planned, pickTeam, capacity, stagePersona } from './dispatch.mjs'
 
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
@@ -650,4 +650,83 @@ test('WP-225: a free reviewer is not picked as buddy while it holds an open card
   await ready(tickets, 'next')
   await d.tick()
   assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--buddy'), calls[0].args.indexOf('--buddy') + 2), ['--buddy', 'w2:p1'])
+})
+
+// ---- WP-238 teams ----
+const team = (name, members, stages) => ({ name, description: '', members: members.map(([persona, count]) => ({ persona, count })), stages: stages.map(([stage, persona]) => ({ stage, persona })) })
+const web = team('web', [['planner', 1], ['worker', 2], ['reviewer', 1]], [['plan', 'planner'], ['build', 'worker'], ['review', 'reviewer']])
+const api = team('api', [['worker', 1], ['reviewer', 1]], [['plan', 'worker'], ['build', 'worker'], ['review', 'reviewer']])
+
+test('WP-238: a card a planner already took through Planning is a worker card again (WP-236)', async () => {
+  const L = { size: 'L', labels: [], column: 'ready', history: [] }
+  assert.equal(roleFor(L), 'planner')
+  const back = { ...L, history: [{ kind: 'move', from: 'ready', to: 'planning' }, { kind: 'move', from: 'planning', to: 'ready' }] }
+  assert.equal(planned(back), true)
+  assert.equal(roleFor(back), 'worker')
+  assert.equal(roleFor({ ...back, column: 'planning' }), 'planner') // still being planned: a resend stays a plan prompt
+})
+
+test('WP-238: pickTeam = least-loaded team with room; capacity = members of the build persona', () => {
+  assert.equal(capacity(web), 2)
+  assert.equal(stagePersona(api, 'plan'), 'worker')
+  assert.equal(stagePersona(api, 'qa'), 'auditor') // unmapped: the stage's base role
+  const open = [{ team: 'web', column: 'building' }, { team: 'web', column: 'ready' }, { team: 'api', column: 'building' }, { team: 'api', column: 'done' }]
+  assert.equal(pickTeam([web, api], open), null) // web 2/2, api 1/1
+  assert.equal(pickTeam([web, api], open.slice(1))?.name, 'web') // web 1/2, api 1/1
+  assert.equal(pickTeam([web, api], [])?.name, 'api') // both 0: name order
+})
+
+test('WP-238: first assignment gives the card its team; the stage goes to that team\'s persona', async () => {
+  const { tickets, d, calls } = await setup({ extra: { teamsOf: async () => [web, api], personasOf: async () => [] } })
+  const t = await ready(tickets, 'a')
+  await d.tick()
+  assert.deepEqual(calls[0].args.slice(0, 4), ['--role', 'worker', '--team', 'api'])
+  assert.equal((await tickets.get(t.id)).team, 'api')
+  // a second card goes to the other team (api is full: 1/1); a planner-sized one to web's planner
+  const u = await ready(tickets, 'b', { size: 'L' })
+  await d.tick()
+  assert.deepEqual(calls[1].args.slice(0, 4), ['--role', 'planner', '--team', 'web'])
+  assert.equal((await tickets.get(u.id)).team, 'web')
+})
+
+test('WP-238: a later stage stays with the owning team, even when another team has room', async () => {
+  const { tickets, d, calls } = await setup({ extra: { teamsOf: async () => [web, api], personasOf: async () => [] } })
+  const t = await ready(tickets, 'a', { size: 'L' })
+  await tickets.patch(t.id, { team: 'web' }, user)
+  await d.tick()
+  assert.equal(calls[0].args[calls[0].args.indexOf('--team') + 1], 'web')
+  assert.match(calls[0].prompt, /Use wt-plan/)
+  // planned, back in Ready (a planner returns it): the build goes to web's worker, not to api
+  await tickets.patch(t.id, { column: 'planning' }, user); await tickets.patch(t.id, { column: 'ready' }, user)
+  await d.tick()
+  assert.deepEqual(calls[1].args.slice(0, 4), ['--role', 'worker', '--team', 'web'])
+  assert.match(calls[1].prompt, /Implement /)
+})
+
+test('WP-238: every team full, or a stage with no member, waits and claims nothing', async () => {
+  const noRev = team('solo', [['worker', 1]], [['build', 'worker']])
+  let { tickets, d, calls } = await setup({ extra: { teamsOf: async () => [noRev] } })
+  const p = await ready(tickets, 'p', { size: 'L' }); await tickets.patch(p.id, { team: 'solo' }, user)
+  await d.tick()
+  assert.equal(calls.length, 0)
+  assert.match(d.status('wt-pack').waiting, /team solo has no planner for plan/)
+  assert.equal((await tickets.get(p.id)).dispatch, undefined)
+  const q = await ready(tickets, 'q'); await tickets.patch(p.id, { column: 'backlog' }, user)
+  await tickets.patch(q.id, { team: 'ghost' }, user)
+  await d.tick()
+  assert.match(d.status('wt-pack').waiting, /team ghost not found/)
+})
+
+test('WP-238: the buddy is the owning team\'s reviewer; other teams\' and teamless reviewers are never picked', async () => {
+  const rv = (name, tokens) => ({ name, id: `p-${name}`, status: 'idle', local: true, pool: 'reviewer', project: 'wt-pack', paneTokens: tokens })
+  const agents = [rv('plain', {}), rv('api-rev', { team: 'api' }), rv('web-rev', { team: 'web' })]
+  const { tickets, d, calls } = await setup({ agents, extra: { teamsOf: async () => [web], personasOf: async () => [] } })
+  const t = await ready(tickets, 'a')
+  await d.tick()
+  assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--buddy'), calls[0].args.indexOf('--buddy') + 2), ['--buddy', 'p-web-rev'])
+  assert.equal((await tickets.get(t.id)).pair.buddy.name, 'web-rev')
+  // teamless board (no team files): a team member is not a free reviewer
+  const r = await setup({ agents, extra: {} })
+  await ready(r.tickets, 'b'); await r.d.tick()
+  assert.equal(r.calls[0].args[r.calls[0].args.indexOf('--buddy') + 1], 'p-plain')
 })

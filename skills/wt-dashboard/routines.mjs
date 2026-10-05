@@ -228,8 +228,9 @@ export class Routines {
       if (why) return skip(why)
       if (t.kind === 'prompt') {
         // WP-147: DND or paired agents are unavailable to a routine's free pick, same as wt-handoff's candidates().
+        // WP-238: nor a team member (a team's agents work its tickets only); a named agent is still fine.
         // WP-205: a role-based pick never takes a persona agent (handoff's candidates() skips them too); a named agent is still fine.
-        a = ags.find((x) => (t.agent ? x.name === t.agent : x.pool === t.role && x.project === t.project && !x.paneTokens?.persona) && !x.paneTokens?.dnd && !x.paneTokens?.pair)
+        a = ags.find((x) => (t.agent ? x.name === t.agent : x.pool === t.role && x.project === t.project && !x.paneTokens?.persona) && !x.paneTokens?.dnd && !x.paneTokens?.pair && !(x.paneTokens?.team && !t.agent))
         if (!a) return skip('no agent')
         if (a.status === 'working') return skip('agent busy')
         this.db.prepare('UPDATE routine_runs SET agent = ? WHERE id = ?').run(a.name, runId)

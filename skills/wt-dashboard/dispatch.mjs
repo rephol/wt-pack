@@ -8,8 +8,25 @@ import { guard } from './routines.mjs'
 // WP-122: the agent runs this pack's own handoff.sh, not a ~/.claude/skills link that a plugin install lacks.
 const HANDOFF = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import.meta.url))
 
-// Size L or the needs-plan label (set by hand or by Jev triage) → planner; anything else → worker.
-export const roleFor = (t) => (t.size === 'L' || t.labels?.includes('needs-plan') ? 'planner' : 'worker')
+// WP-238: a card a planner already took through Planning (its history moved it there) is planned: size L / needs-plan
+// still say "planner", so without this it came back from Ready to a planner a second time (WP-236).
+export const planned = (t) => t.column !== 'planning' && (t.history ?? []).some((h) => h.kind === 'move' && h.to === 'planning')
+// Size L or the needs-plan label (set by hand or by Jev triage) → planner, until it has been planned; anything else → worker.
+export const roleFor = (t) => (!planned(t) && (t.size === 'L' || t.labels?.includes('needs-plan')) ? 'planner' : 'worker')
+// WP-238 teams. The stage a Ready card is handed to (plan for a planner role, else build), the persona a team puts on a
+// stage (its stage map, else the base role of that stage), the team's capacity (members of its build persona), and the
+// rule every agent pick shares: an agent's team token must equal the ticket's team (none = none), so work never crosses teams.
+export const stageFor = (role) => (role === 'planner' ? 'plan' : 'build')
+const STAGE_BASE = { plan: 'planner', build: 'worker', review: 'reviewer', qa: 'auditor' }
+export const stagePersona = (team, stage) => team.stages.find((x) => x.stage === stage)?.persona || STAGE_BASE[stage]
+export const hasMember = (team, persona) => team.members.some((m) => m.persona === persona)
+export const capacity = (team) => team.members.find((m) => m.persona === stagePersona(team, 'build'))?.count ?? 0
+export const teamOk = (a, team) => (a.paneTokens?.team || null) === (team || null)
+// A teamless card goes to the least-loaded team with room (load = open cards it owns); null = every team is full.
+export const pickTeam = (teams, open) => {
+  const load = (t) => open.filter((x) => x.team === t.name && x.column !== 'done').length
+  return [...teams].filter((t) => load(t) < capacity(t)).sort((a, b) => load(a) - load(b) || (a.name < b.name ? -1 : 1))[0] ?? null
+}
 // WP-204: the first persona (filename order) whose base is the ticket's role and whose labels meet the ticket's.
 export const personaFor = (t, personas, role) => {
   const have = new Set((t.labels ?? []).map((l) => String(l).toLowerCase()))
@@ -105,13 +122,17 @@ export class Dispatch {
   // Only a card still claimed by us and unassigned moves.
   // WP-147: `buddy` is the free reviewer dispatchOne picked (or null) — recorded on the ticket here (not by
   // handoff.sh's own PATCH, which needs a real sender pane and silently no-ops from a server-side dispatch).
-  async #sent(id, role, agent, now = Date.now(), buddy = null) {
+  async #sent(id, role, agent, now = Date.now(), buddy = null, team = null) {
     let moved = false
     const t = await this.tickets.mutate(id, (t, at) => {
       if (t.dispatch?.state !== 'dispatching' || t.assignee) return t
       moved = true
       t.history.push({ at, author: 'dispatch', kind: 'assign', from: null, to: agent.name })
       Object.assign(t, { assignee: agent, dispatch: { state: 'sent', at, agent: agent.name } })
+      if (team && !t.team) { // WP-238: the first assignment gives the card its team for good
+        t.team = team
+        t.history.push({ at, author: 'dispatch', kind: 'edit', text: `team: ${team}` })
+      }
       if (buddy && !t.pair) {
         t.pair = { worker: { name: agent.name, pane: agent.pane }, buddy: { name: buddy.name, pane: buddy.id, role: 'reviewer' } }
         t.history.push({ at, author: 'dispatch', kind: 'pair', from: null, to: t.pair })
@@ -177,22 +198,37 @@ export class Dispatch {
     if (why) { s.waiting = why; return }
     const repo = await this.deps.repoOf(project)
     if (!repo) { s.waiting = `no checkout for ${project}`; return }
+    // WP-238: with team files, a card is owned by one team — its own, else the least-loaded with room — and this stage
+    // goes to that team's persona for it. No teams = today's behaviour.
+    const teams = (await this.deps.teamsOf?.(repo).catch(() => [])) ?? []
+    const stageRole = roleFor(next)
+    let team = null, tpersona = null
+    if (teams.length) {
+      team = next.team ? teams.find((x) => x.name === next.team) : pickTeam(teams, (await this.tickets.list(project)).tickets)
+      if (!team) { s.waiting = next.team ? `team ${next.team} not found` : 'all teams at capacity'; return }
+      tpersona = stagePersona(team, stageFor(stageRole))
+      if (!hasMember(team, tpersona)) { s.waiting = `team ${team.name} has no ${tpersona} for ${stageFor(stageRole)}`; return }
+    }
     s.waiting = null
     const claimed = await this.tickets.dispatchClaim(next.id, now)
     if (!claimed) return
-    const role = roleFor(next)
+    const role = stageRole
     // WP-147: a worker-role ticket with no pair yet gets a free reviewer as its buddy (idle/done, like candidates()).
     const busy = this.busyAgents()
     const buddy = role === 'worker' && !next.pair
-      ? ags.find((a) => !busy(a) && a.local && a.pool === 'reviewer' && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair && !a.paneTokens?.persona)
+      ? ags.find((a) => !busy(a) && a.local && a.project === project && (a.status === 'idle' || a.status === 'done') && !a.paneTokens?.dnd && !a.paneTokens?.pair
+        && teamOk(a, team?.name) && (team ? (a.paneTokens?.persona || a.pool) === stagePersona(team, 'review') : a.pool === 'reviewer' && !a.paneTokens?.persona))
       : null
-    const persona = personaFor(next, await this.deps.personasOf?.(repo).catch(() => []), role)
+    const personas = (await this.deps.personasOf?.(repo).catch(() => [])) ?? []
+    // A team's stage persona is a role file (--persona, its base the role) or a base role name (--role only).
+    const persona = team ? personas.find((p) => p.name === tpersona) ?? null : personaFor(next, personas, role)
+    const hrole = team ? persona?.base ?? tpersona : role
     try {
-      const args = ['--role', role, ...(persona ? ['--persona', persona.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
+      const args = ['--role', hrole, ...(persona ? ['--persona', persona.name] : []), ...(team ? ['--team', team.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
       const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null), repo)
       const { name, pane } = parseHandoff(out)
       this.log(`dispatch ${next.id} → ${name} ${pane}`)
-      try { await this.#sent(next.id, role, { name, pane }, now, buddy) } catch (e) {
+      try { await this.#sent(next.id, role, { name, pane }, now, buddy, team?.name) } catch (e) {
         // WP-131: the work was already sent; never re-dispatch it. Hold for a human.
         await this.tickets.mutate(next.id, (t, at) => {
           t.dispatch = { state: 'held', at, fails: 3, reason: `sent to ${name} but not recorded: ${String(e?.message ?? e).slice(0, 120)}` }
@@ -295,7 +331,7 @@ export class Dispatch {
     if (!p) return
     const wantPool = role === 'worker' ? 'worker' : (p.role || 'reviewer')
     const busy = this.busyAgents()
-    const i = local.findIndex((x) => !busy(x) && x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair && !x.paneTokens?.persona)
+    const i = local.findIndex((x) => !busy(x) && x.pool === wantPool && x.project === project && (x.status === 'idle' || x.status === 'done') && !x.paneTokens?.dnd && !x.paneTokens?.pair && teamOk(x, cur.team) && (cur.team || !x.paneTokens?.persona))
     const repl = i < 0 ? null : local[i]
     if (repl) local.splice(i, 1)
     const pair = { ...cur.pair, [role]: repl ? { name: repl.name, pane: repl.id, ...(role === 'buddy' ? { role: wantPool } : {}) } : null }
