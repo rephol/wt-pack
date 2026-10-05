@@ -85,7 +85,7 @@ export function check(checkout) {
 
 // Mermaid flowchart of a team's workflow: each stage → its persona (with member count) → a gate, review/qa looping
 // back to building. Ids are fixed words, labels come from validated names only, so nothing user-typed is a directive.
-export function flowchart(team) {
+export function flowchart(team, active = []) {
   const count = new Map(team.members.map((m) => [m.persona, m.count]))
   const stages = STAGES.map((s) => team.stages.find((x) => x.stage === s)).filter(Boolean)
   const lab = (s) => `${s.stage}\\n${s.persona}${count.get(s.persona) > 1 ? ` ×${count.get(s.persona)}` : ''}`
@@ -99,6 +99,8 @@ export function flowchart(team) {
   })
   const build = stages.find((s) => s.stage === 'build')
   if (build) for (const s of stages) if (s.stage === 'review' || s.stage === 'qa') L.push(`  ${s.stage}_gate -. changes requested .-> build`)
+  const on = stages.map((s) => s.stage).filter((s) => active.includes(s))
+  if (on.length) L.push('  classDef active fill:#3b82f6,stroke:#1d4ed8,color:#fff', `  class ${on.join(',')} active`)
   return L.join('\n')
 }
 
