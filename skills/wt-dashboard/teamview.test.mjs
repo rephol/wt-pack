@@ -9,7 +9,7 @@ const col = { 'WP-1': 'building', 'WP-2': 'review', 'WP-3': 'planning' }
 
 test('members are filled by team-tagged agents of the project; load and stages follow their tickets', () => {
   const v = teamView(team, 'demo', [ag('p1', 'planner', 'working', 'WP-3'), ag('w1', 'worker', 'working', 'WP-1'), ag('w2', 'worker', 'idle'),
-    ag('q1', 'auditor', 'working', 'WP-2'), ag('other', 'worker', 'working', 'WP-1', 'api'), ag('elsewhere', 'worker', 'working', 'WP-1', 'web', 'other-repo')], (id) => col[id])
+    ag('q1', 'auditor', 'working', 'WP-2'), ag('other', 'worker', 'working', 'WP-1', 'api'), ag('elsewhere', 'worker', 'working', 'WP-1', 'web', 'other-repo'), { name: 'untagged', status: 'idle', tags: { team: 'web', persona: 'worker' } }], (id) => col[id])
   assert.deepEqual(v.members.map((m) => [m.persona, m.agents.map((a) => a.name)]), [['planner', ['p1']], ['worker', ['w1', 'w2']], ['auditor', ['q1']]])
   assert.deepEqual(v.load, { agents: 4, of: 4, working: 3, tickets: 3 })
   assert.deepEqual(v.tickets, [{ id: 'WP-3', stage: 'plan' }, { id: 'WP-1', stage: 'build' }, { id: 'WP-2', stage: 'qa' }]) // review held by the qa persona = qa

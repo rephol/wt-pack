@@ -740,7 +740,8 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   worker does everything), **standard** (planner, 2 workers, reviewer), **full** SDLC (adds a QA auditor).
 - `agents.sh spawn --team <name> [cwd]` brings the whole team up, one agent per member × count (each spawned as that
   persona into its base pool); `agents.sh spawn <role|persona> --team <name>` adds one. Every member pane carries a
-  display-only `team=<name>` token (shown in the agent's tags). This ticket (WP-237) covers definitions and spawn;
+  display-only `team=<name>` token (shown in the agent's tags; like `pair` it lives on the pane, so a herdr restart clears it
+  until the agent is respawned). A failed member makes `spawn --team` exit 1 after the others have started; the whole-team form takes an absolute or `./` path. This ticket (WP-237) covers definitions and spawn;
   routing tickets to a team and stage gates are separate (WP-238, WP-239).
 - Dashboard: the **Teams** page (`#teams`, `GET /api/teams`) lists each project's teams with the agents filling every
   member, load (agents up of defined, working, tickets) and the team's workflow as a Mermaid flowchart generated from

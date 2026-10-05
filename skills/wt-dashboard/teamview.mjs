@@ -7,7 +7,7 @@ const STAGE_OF = { planning: 'plan', building: 'build', review: 'review' }
 // team: {name, members:[{persona,count}], stages:[{stage,persona}]}; agents: [{name, status, tags:{team,project,persona,role,ticket}}];
 // columnOf(ticketId) → card column | undefined.
 export function teamView(team, project, agents, columnOf) {
-  const mine = agents.filter((a) => a.tags?.team === team.name && (!a.tags.project || a.tags.project === project))
+  const mine = agents.filter((a) => a.tags?.team === team.name && a.tags.project === project)
   const qa = team.stages.find((s) => s.stage === 'qa')?.persona
   const tickets = []
   const members = team.members.map((m) => {
