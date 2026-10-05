@@ -764,7 +764,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   `live-check: <note>` comment. A forward move that crosses a failing gate (planning→building needs plan,
   building→review needs build, review→done needs review and qa, a skipped stage counts) is refused with 409 and the
   reasons, leaving a `gates` comment on the card; moves to Blocked or backwards are never gated, and a card leaving Backlog/Ready is free to land on Planning or Building but needs the build gate onward (a Blocked card is judged from the column it was blocked from). `wt-finish`'s `move done` is gated like any other, so a card missing its review or QA evidence stays in Review until it is left.
-  `wt-ticket move <ID> <col> --force` overrides and records who did. Gates guard against forgetting a step, not against a determined agent: evidence is a comment anyone on the board can post, and a gate that cannot be evaluated lets the move through. The ticket drawer's **Gates** row (`GET
+  `wt-ticket move <ID> <col> --force` overrides and records who did. Gates guard against forgetting a step, not against a determined agent: evidence is a comment anyone on the board can post, and a gate that cannot be evaluated lets the move through. Agents are told to leave the evidence: a Dispatch prompt for a gated card names it (only when gates are on), wt-work posts `tests:`/`tip:`/`live-check:`, wt-review posts `verdict:`. The ticket drawer's **Gates** row (`GET
   /api/tickets/<id>/gates`, `wt-ticket gates <ID>`) lists each gate and what it lacks; the Teams flowchart labels a
   stage's gate with its check.
 - Dashboard: the **Teams** page (`#teams`, `GET /api/teams`) lists each project's teams with the agents filling every

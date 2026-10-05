@@ -15,6 +15,7 @@ import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkPr
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
 import { teamView } from './teamview.mjs'
+import { guardMove } from './gatemove.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
@@ -2528,25 +2529,11 @@ async function ticketsApi(req, res, url, parts) {
       if (!a) return send(res, 400, { error: `unknown agent ${b.assignee}` })
       assignee = { name: a.name, pane: a.id }
     }
-    // WP-239: leaving a stage needs its gate. A refused move leaves a comment on the card; `force: true` overrides and says so.
-    let overridden = null
-    if (b.column) {
-      const cur = await tickets.get(id)
-      if (b.column !== cur.column) {
-        // a gate that cannot be evaluated (git trouble, a broken team file) fails OPEN: it must not freeze the board
-        const st = await gateState(cur).catch((e) => { console.error('gates:', e.message); return { gates: [], crossed: () => [] } })
-        const fails = st.gates.filter((x) => !x.ok && st.crossed(b.column).includes(x.stage))
-        if (fails.length && b.force !== true) {
-          const msg = fails.map((x) => `${x.stage}: ${x.why}`).join('; ')
-          const note = `gate blocked ${cur.column} → ${b.column}. ${msg}`
-          if (cur.history.at(-1)?.text !== note) await tickets.comment(id, note, { name: 'gates' }).catch(() => {}) // a retry does not pile up copies
-          return send(res, 409, { error: `gate blocked ${cur.column} → ${b.column}: ${msg} (--force overrides)`, gates: fails })
-        }
-        if (fails.length) overridden = fails.map((x) => x.stage).join(', ')
-      }
-    }
+    // WP-239: leaving a stage needs its gate (gatemove.mjs).
+    const gm = await guardMove({ tickets, state: gateState }, await tickets.get(id), b.column, b.force, author)
+    if (!gm.ok) return send(res, gm.status, gm.body)
     const out = await tickets.patch(id, b, author, assignee)
-    if (overridden) await tickets.comment(id, `gate overridden by ${author.name}: ${overridden}`, { name: 'gates' }).catch(() => {})
+    await gm.afterMove?.()
     return send(res, 200, out)
   }
   // WP-147: set/clear the ticket's buddy (worker follows the ticket's own assignee). Unlike the generic PATCH
@@ -3355,6 +3342,8 @@ const dispatcher = new Dispatch({
     // WP-204: the repo's persona files (dynamic import: wt-shared may be absent).
     personasOf: async (repo) => { const r = await import('../wt-shared/scripts/roles.mjs'); const co = r.mainCheckout(repo, 3000); return co ? r.personas(co) : [] },
     // WP-238: the repo's team files (dynamic import, like roles).
+    // WP-239: the stage gates on for a card of this team in this repo (dispatchPrompt tells the agent to leave the evidence).
+    gatesOf: async (repo, team) => { const g = await import('../wt-shared/scripts/gates.mjs'); const co = (await import('../wt-shared/scripts/roles.mjs')).mainCheckout(repo, 3000); return co ? g.gatesFor(team, g.projectGates(co)) : [] },
     teamsOf: async (repo) => { const r = await import('../wt-shared/scripts/teams.mjs'); const co = (await import('../wt-shared/scripts/roles.mjs')).mainCheckout(repo, 3000); return co ? r.list(co) : [] },
     // The project's room is the one named after it (WP-74); archived rooms don't count.
     // WP-75: where the dispatched agent reports (dispatch.mjs resolveReport).
