@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COLUMNS, dispatchBadge, dispatchLine, group, jevChip, moveTicket, ticketMatches, type Ticket } from './boardData.ts'
+import { COLUMNS, dispatchBadge, dispatchLine, messageBadge, group, jevChip, moveTicket, ticketMatches, type Ticket } from './boardData.ts'
 
 const t = (id: string, column: Ticket['column'], priority?: number): Ticket => ({ id, title: id, column, priority })
 
@@ -60,4 +60,13 @@ test('ticketMatches: the web copy agrees with tickets.mjs on every fixture (WP-9
     'search tickets', 'tickets search', 'ünïcode', 'mixed case', 'board nowhere']
   for (const t of tickets) for (const q of queries) assert.equal(ticketMatches(t, q), server(t, q), `${t.id} / ${JSON.stringify(q)}`)
   assert.equal(ticketMatches(tickets[1], 'WP-1'), true) // substring: WP-12 contains wp-1
+})
+
+test('WP-257: messageBadge — quiet states, a resend warns, an unacknowledged one is an error', () => {
+  const m = (state: string, attempts = 1) => ({ open: 1, last: { id: 'a', kind: 'handoff', state, attempts, target: 'w1:p1' } }) as never
+  assert.equal(messageBadge(null), null)
+  assert.deepEqual(messageBadge(m('delivered'))?.slice(0, 2), ['Msg sent', 'info'])
+  assert.deepEqual(messageBadge(m('delivered', 3))?.slice(0, 2), ['Resent ×2', 'warning'])
+  assert.deepEqual(messageBadge(m('acknowledged'))?.slice(0, 2), ['Acked', 'info'])
+  assert.deepEqual(messageBadge(m('expired', 3))?.slice(0, 2), ['No ack', 'error'])
 })

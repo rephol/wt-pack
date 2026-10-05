@@ -31,7 +31,7 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { api, useRoomsList } from './rooms'
-import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, group, jevChip, moveTicket, ticketMatches, type Board as BoardT, type Column, type Ticket } from './boardData'
+import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, messageBadge, group, jevChip, moveTicket, ticketMatches, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
 // Board 'Auto' threshold (WP-46): promote tickets at this priority or more urgent; 0 = any, unprioritised too.
@@ -362,6 +362,7 @@ function StallMinutes({ value, onSave }: { value: number; onSave: (n: number) =>
 // Shared by the column card and the floating drag clone so the two stay identical.
 function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Column) => void }) {
   const db = dispatchBadge(t.dispatch)
+  const mb = t.column === 'done' ? null : messageBadge(t.messages)
   return (
     <VStack gap={2}>
       <HStack hAlign="between" vAlign="start">
@@ -373,6 +374,7 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
           {jevChip(t) && <Badge label="Jev" variant="info" />}
           {t.labels?.includes('needs-plan') && <Badge label="needs plan" variant="warning" />}
           {db && <Tooltip content={db[2]}><Badge label={db[0]} variant={db[1]} /></Tooltip>}
+          {mb && <Tooltip content={mb[2]}><Badge label={mb[0]} variant={mb[1]} /></Tooltip>}
         </HStack>
         <MoreMenu label={`Actions for ${t.id}`} size="sm" alignment="end" presentation="adaptive"
           items={[...(t.dispatch?.state === 'held' || t.dispatch?.state === 'failed' || t.dispatch?.state === 'interrupted' ? [{ label: 'Retry dispatch', onClick: () => { send(`${tUrl(t.id)}/dispatch-retry`, 'POST', {}).catch(() => {}) } }] : []),

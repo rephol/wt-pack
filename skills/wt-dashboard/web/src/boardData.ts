@@ -24,6 +24,20 @@ export interface Ticket {
   history?: HistoryEntry[]
   jev?: TicketJev | null
   dispatch?: TicketDispatch | null
+  messages?: TicketMessages | null
+}
+// WP-257 (messages.mjs): the newest wt-pack message sent about this card, and how many are still unacknowledged.
+export interface TicketMessages { last: { id: string; kind: string; state: 'queued' | 'delivered' | 'acknowledged' | 'answered' | 'expired' | 'failed'; attempts: number; target: string }; open: number }
+// The card's message badge, if any: [label, variant, tooltip]. Answered/acknowledged stay quiet-blue, a lost one is an error.
+export function messageBadge(m?: TicketMessages | null): [string, 'info' | 'warning' | 'error', string] | null {
+  if (!m?.last) return null
+  const { kind, state, attempts, target } = m.last
+  const tip = `${kind} → ${target}${attempts > 1 ? `, sent ${attempts}×` : ''}`
+  if (state === 'expired') return ['No ack', 'error', `${tip}: never acknowledged`]
+  if (state === 'failed') return ['Msg failed', 'error', tip]
+  if (state === 'queued') return ['Msg queued', 'info', tip]
+  if (state === 'delivered') return [attempts > 1 ? `Resent ×${attempts - 1}` : 'Msg sent', attempts > 1 ? 'warning' : 'info', `${tip}: waiting for an ack`]
+  return [state === 'answered' ? 'Answered' : 'Acked', 'info', tip]
 }
 // Board Dispatch (WP-52, dispatch.mjs): claim state, failures, and reconcile's stall flag. `undelivered`
 // (WP-177) is distinct from `stalled`: a handoff that never reached the agent at all (resend already tried),
