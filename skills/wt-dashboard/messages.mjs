@@ -28,6 +28,16 @@ export function parseEnvelope(text) {
 const roomTag = (t) => { const m = String(t).match(/^<room-message id=([\w-]+) room=\S+ from="([^"]*)" kind=(\w+)/); return m && m[3] !== 'context' ? { id: m[1], kind: 'room', sender: m[2], ticket: null } : null }
 export const envelopeOf = (text) => parseEnvelope(text) ?? roomTag(text)
 
+// WP-260: has the card a handoff/dispatch was sent for moved on? Then the message did its job and is acknowledged:
+// the card is done or blocked, or someone other than dispatch moved it after the message went out (the target taking it
+// ready → building counts). Never resend a message for a finished ticket. `card` is the board card, null when unknown.
+export function movedOn(card, row) {
+  if (!card) return false
+  if (card.column === 'done' || card.column === 'blocked') return true
+  const since = row.delivered_at ?? row.created
+  return (card.history ?? []).some((h) => h.kind === 'move' && h.author !== 'dispatch' && h.at > since)
+}
+
 export class Messages {
   constructor({ dir, log = console.error, now = Date.now } = {}) {
     Object.assign(this, { file: join(dir, 'wt.db'), log, now })

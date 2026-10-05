@@ -74,10 +74,11 @@ export const gateLine = (t, gates = []) => !gates.length ? '' :
     gates.includes('qa') && '`live-check: <what you opened and saw>` after using the change live'].filter(Boolean).join('; ')}.\n`
 export function dispatchPrompt(t, role, report = null, gates = []) {
   const line = gateLine(t, gates) + reportLine(report)
-  if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.\n` + line
+  const ack = ` First, acknowledge this message: \`handoff.sh --ack <the id in the wt-message tag>\` (wt-handoff).`
+  if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.${ack}\n` + line
   const branch = `${t.id.toLowerCase()}-<short-slug>`
   return `Implement ${t.id} — ${t.title} (\`wt-ticket show ${t.id}\`).\n\n` +
-    `First move the card: \`wt-ticket move ${t.id} building\`. ` +
+    `First move the card: \`wt-ticket move ${t.id} building\`.${ack} ` +
     `Create a worktree on a new branch ${branch} from main, use wt-work, then wt-ship (review). ` +
     `Commit on the branch and rebase on main, resolving conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`. ` +
     `Do not merge or push: the orchestrator merges and pushes after QA. Move the card to review (\`wt-ticket move ${t.id} review\`) and report the branch and its tip commit; that report is the goal.\n` + line

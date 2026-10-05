@@ -20,7 +20,7 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
-import { Messages, envelopeOf } from './messages.mjs'
+import { Messages, envelopeOf, movedOn } from './messages.mjs'
 import { promptOn } from './promptOn.mjs'
 import * as receipts from '../wt-shared/scripts/receipts.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
@@ -2470,7 +2470,7 @@ const messageSweep = async () => {
   if (!ags) return
   await messages.sweep({
     pending: (row) => deliveries.live(row.target) && deliveries.queuedFor(row.target, row.id), // WP-258: queued behind a running turn, not lost
-    seen: (row) => ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
+    seen: async (row) => (await tickets.get(row.ticket).then((c) => movedOn(c, row), () => false)) || ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
     resend: async (row) => {
       if (!ags.some((a) => a.id === row.target && a.local !== false)) throw new Error(`${row.target} is gone`)
       const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message

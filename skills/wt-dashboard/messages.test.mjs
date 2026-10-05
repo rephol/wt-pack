@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Messages, parseEnvelope, envelopeOf, MAX_ATTEMPTS } from './messages.mjs'
+import { Messages, parseEnvelope, envelopeOf, movedOn, MAX_ATTEMPTS } from './messages.mjs'
 
 async function setup() {
   const clock = { t: Date.parse('2026-01-01T00:00:00Z') }
@@ -106,4 +106,23 @@ test('WP-258: a message still waiting in the target\'s queue is neither resent, 
   assert.deepEqual(sent, []); assert.equal(m.get('q1').attempts, at0); assert.equal(m.get('q1').state, 'queued')
   waiting = false // the queue was pasted away (mod went quiet): the normal expiry takes over
   assert.deepEqual(await m.sweep(deps), [{ id: 'q1', did: 'resent' }])
+})
+
+test('WP-260: a dispatch whose card moved on (done/blocked, or moved by another than dispatch after delivery) is acknowledged, never resent', async () => {
+  const row = { created: '2026-10-05T16:26:00.000Z', delivered_at: '2026-10-05T16:26:56.000Z' }
+  const card = (column, ...hist) => ({ column, history: hist.map(([at, author, kind = 'move']) => ({ at, author, kind })) })
+  assert.equal(movedOn(null, row), false)
+  assert.equal(movedOn(card('ready'), row), false) // still where it was sent
+  assert.equal(movedOn(card('done'), row), true); assert.equal(movedOn(card('blocked'), row), true)
+  assert.equal(movedOn(card('building', ['2026-10-05T16:33:29.000Z', 'wt-pack-worker-04']), row), true) // the target took it
+  assert.equal(movedOn(card('building', ['2026-10-05T16:26:10.000Z', 'dispatch']), row), false) // dispatch's own move does not count
+  assert.equal(movedOn(card('ready', ['2026-10-05T16:20:00.000Z', 'user']), row), false) // a move before delivery
+  assert.equal(movedOn(card('ready', ['2026-10-05T16:40:00.000Z', 'user', 'comment']), row), false) // a comment is not a move
+  // the live case: delivered, never acked, card went building → review → done; the sweep acknowledges instead of resending
+  const { m, clock, draft } = await setup()
+  m.record(draft({ id: 'ab75', state: 'delivered' }))
+  clock.t += 6 * 60_000
+  const sent = []
+  assert.deepEqual(await m.sweep({ seen: () => movedOn(card('review', ['2026-10-05T16:31:00.000Z', 'w']), { ...m.get('ab75'), delivered_at: '2026-10-05T16:00:00.000Z' }), resend: async (r) => sent.push(r.id) }), [{ id: 'ab75', did: 'acknowledged' }])
+  assert.deepEqual(sent, []); assert.equal(m.get('ab75').state, 'acknowledged')
 })
