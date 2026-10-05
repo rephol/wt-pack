@@ -111,6 +111,13 @@ header, remembered per viewer and defaulting to the global project; picking ther
 - **Idempotency** (WP-251): every Dispatch handoff and routine send carries a request id (`handoff.sh --request-id`; receipts in
   `~/.local/share/wt-dashboard/receipts/`, 7-day prune). A repeat of the same id returns the first result and sends nothing, so a
   retry after a lost Enter or a restart, or Dispatch re-evaluating a card, cannot double-send.
+- **Message record** (WP-257): every wt-pack message (handoff, dispatch, routine, reply, system, room, ask) also writes one row
+  to `wt_messages` in `wt.db`: sender, target, kind, ticket, `request_id`, body, state (`queued → delivered → acknowledged →
+  answered`; `expired`, `failed`), attempts, timestamps. The existing CLIs and the `<wt-message>` text are unchanged. An agent
+  acknowledges by id: `handoff.sh --ack <id> [--answered]`. A handoff or dispatch not acknowledged within 5 min is resent
+  (same envelope id, up to 3 sends; a target working on the card counts as an ack), then flagged **No ack** on the card and
+  in the Inbox. Recording the same `request_id` twice returns the first row. Board cards show the newest message's state
+  (`Msg sent`, `Resent ×n`, `Acked`, `Answered`, `No ack`). `GET /api/messages?ticket=&target=` lists them.
 - **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means herdr accepted the prompt, not
   that it reached the agent's pane (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
   card being dispatched, its assignee must show working, done or blocked (it asked something); if not,

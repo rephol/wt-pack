@@ -188,6 +188,13 @@ export const MIGRATIONS = [
           body TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL, delivered_at TEXT);
           CREATE INDEX deliveries_pane ON deliveries (pane, status);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-257 messages: one envelope record per wt-pack message, behind every delivery path (messages.mjs). Not exported.
+  { sql: `CREATE TABLE wt_messages (id TEXT PRIMARY KEY, sender TEXT NOT NULL, target TEXT NOT NULL, kind TEXT NOT NULL, ticket TEXT,
+          request_id TEXT UNIQUE, body TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 1,
+          created TEXT NOT NULL, updated TEXT NOT NULL, delivered_at TEXT, acked_at TEXT, answered_at TEXT, error TEXT);
+          CREATE INDEX wt_messages_ticket ON wt_messages (ticket, created);
+          CREATE INDEX wt_messages_open ON wt_messages (state, updated);`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

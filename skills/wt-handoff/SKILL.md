@@ -19,6 +19,7 @@ scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | scripts/handoff.sh \
   [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
 scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
+scripts/handoff.sh --ack <id> [--answered]   # WP-257: acknowledge a wt-message by its id (the id in its tag)
 scripts/handoff.sh --cancel <pane|name> ["why"]   # stop a /goal-driven agent for real
 ```
 

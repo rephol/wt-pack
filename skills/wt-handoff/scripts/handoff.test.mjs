@@ -380,3 +380,21 @@ test('WP-251: --request-id sends once; a repeat returns the first output, a diff
   go('req-2')
   assert.equal(sends(), 2)
 })
+
+test('WP-257: --reply records the envelope at /api/messages; --ack posts the state to /api/messages/<id>/ack', () => {
+  const curlBin = join(tmp, 'curlbin257')
+  const calls = join(tmp, 'curl257.log')
+  mkdirSync(curlBin, { recursive: true })
+  writeFileSync(calls, '')
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\necho "$@" >> ${calls}\ncat >> ${calls}\nprintf '%s' '{"queued":true,"id":"m1","state":"acknowledged"}'\n`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
+  execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', 'hi'], { encoding: 'utf8', env })
+  const log257 = readFileSync(calls, 'utf8')
+  assert.match(log257, /\/api\/messages/)
+  assert.match(log257, /"state": "queued"/)
+  const out = execFileSync(join(here, 'handoff.sh'), ['--ack', 'ab12', '--answered'], { encoding: 'utf8', env })
+  assert.match(out, /m1 acknowledged/)
+  assert.match(readFileSync(calls, "utf8"), /"state": "answered"[\s\S]*\/api\/messages\/ab12\/ack/)
+  assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--ack', 'a b'], { env, stdio: 'pipe' }), (e) => e.status === 2)
+})

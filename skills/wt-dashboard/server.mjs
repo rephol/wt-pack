@@ -20,6 +20,7 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
+import { Messages, envelopeOf } from './messages.mjs'
 import { promptOn } from './promptOn.mjs'
 import * as receipts from '../wt-shared/scripts/receipts.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
@@ -2311,7 +2312,8 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/ack)?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
-  if (headers['x-wt-server'] && method === 'POST' && path === '/api/deliveries') return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/messages(\/[^/]+\/ack)?$/.test(path)) return false // WP-257: handoff.sh records, the target acks by id (roomAuthor verifies the pane)
+  if (headers['x-wt-server'] && method === 'POST' && (path === '/api/deliveries' || path === '/api/messages')) return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
   return true
 }
 // WP-242: a per-process secret only the server's own handoff.sh children get (runHandoff env), so a Dispatch (no pane id)
@@ -2391,18 +2393,43 @@ const tickets = new Tickets({
 // WP-210: one funnel for text sent into a local pane. A pane whose wt-deliver-mod is live gets it queued (the mod
 // submits it as a prompt and acks); any other pane gets today's keystroke paste. Remote machines always paste.
 const deliveries = new Deliveries({ dir: DATA })
-async function deliver(a, text, paste) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
-  if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' }
-  await paste()
+// WP-257: the envelope record behind every send. Best effort: a record that cannot be written never blocks the send.
+const messages = new Messages({ dir: DATA })
+const msgSafe = (fn) => { try { return fn() } catch (e) { console.error('messages:', e.message) } }
+async function deliver(a, text, paste, o = {}) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
+  const env = envelopeOf(text)
+  const mid = env && msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text }))?.row.id
+  const mark = (to, extra) => mid && msgSafe(() => messages.move(mid, to, extra))
+  if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' } // 'delivered' once the mod acks
+  try { await paste() } catch (e) { mark('failed', { error: e.message.slice(0, 200) }); throw e }
+  mark('delivered')
   return 'pasted'
 }
 // A mod that died with rows queued: paste them (and say so in the row) rather than strand them.
 setInterval(async () => {
   for (const r of deliveries.stranded()) {
     if (!deliveries.settle(r.id, 'pasted')) continue // the mod got there first
-    try { await herdr('agent', 'prompt', r.pane, r.body) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); console.error('deliveries:', e.message) }
+    const env = envelopeOf(r.body)
+    try { await herdr('agent', 'prompt', r.pane, r.body); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
   }
 }, 15_000).unref()
+// WP-257 expiry: an unacknowledged handoff/dispatch is resent with the same envelope id, then flagged in the Inbox.
+// ponytail: "seen" = the target is working (on the card, when it has one); a ticketless message is only resent/flagged.
+const messageSweep = async () => {
+  const ags = await agents().catch(() => null)
+  if (!ags) return
+  await messages.sweep({
+    seen: (row) => ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
+    resend: async (row) => {
+      if (!ags.some((a) => a.id === row.target && a.local !== false)) throw new Error(`${row.target} is gone`)
+      const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message
+      await deliver({ id: row.target }, body, () => herdr('agent', 'prompt', row.target, body))
+    },
+    flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
+      body: `${row.attempts} sends, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
+  })
+}
+setInterval(() => messageSweep().catch((e) => console.error('messages:', e.message)), 30_000).unref()
 const asks = new Asks({
   dir: DATA,
   notify: (draft) => inbox.add(draft),
@@ -2483,6 +2510,7 @@ async function ticketsApi(req, res, url, parts) {
     if (parts[2]) { const t = await tickets.get(parts[2]); return text ? send(res, 200, ticketText(t), 'text/plain') : send(res, 200, t) }
     const out = await tickets.list(url.searchParams.get('project'), url.searchParams.get('column') || undefined, url.searchParams.get('q') ?? '')
     if (out.key) out.dispatchStatus = dispatcher.status(url.searchParams.get('project'))
+    if (out.key) { const bt = messages.byTicket(out.tickets.map((t) => t.id)); out.tickets = out.tickets.map((t) => (bt[t.id] ? { ...t, messages: bt[t.id] } : t)) } // WP-257
     if (url.searchParams.get('mine')) { const me = await roomAuthor(req); out.tickets = out.tickets.filter((t) => t.assignee?.name === me.name) }
     return text ? send(res, 200, out.tickets.map(ticketRow).join('\n') + (out.tickets.length ? '\n' : ''), 'text/plain') : send(res, 200, out)
   }
@@ -2615,7 +2643,12 @@ async function deliveriesApi(req, res, url, parts) {
   if (req.method === 'GET' && parts.length === 2) { if (author.kind !== 'user') return send(res, 403, { error: 'user only' }); return send(res, 200, deliveries.list(url.searchParams.get('pane') || undefined)) }
   const b = JSON.parse((await body(req)) || '{}')
   if (req.method === 'POST' && parts[2] === 'hello') { deliveries.hello(mine()); return send(res, 200, { ok: true }) }
-  if (req.method === 'POST' && parts[3] === 'ack') return send(res, 200, deliveries.ack(parts[2], mine(), b.status))
+  if (req.method === 'POST' && parts[3] === 'ack') {
+    const out = deliveries.ack(parts[2], mine(), b.status)
+    const env = envelopeOf(deliveries.db.prepare('SELECT body FROM deliveries WHERE id = ?').get(parts[2])?.body ?? '') // WP-257
+    if (env) msgSafe(() => messages.move(env.id, out.status === 'failed' ? 'failed' : 'delivered'))
+    return send(res, 200, out)
+  }
   if (req.method === 'POST' && parts.length === 2) {
     const pane = await canonicalPane(String(b.pane ?? ''))
     if (!pane) return send(res, 404, { error: `unknown pane ${b.pane}` })
@@ -2627,6 +2660,33 @@ async function deliveriesApi(req, res, url, parts) {
     return send(res, 200, { queued: true, id: row.id })
   }
   send(res, 404, { error: 'not found' })
+}
+
+// WP-257: GET /api/messages?ticket=&target= (the user), POST /api/messages (handoff.sh: the envelope it just sent),
+// POST /api/messages/:id/ack {state: acknowledged|answered} (the addressed pane).
+async function messagesApi(req, res, url, parts) {
+  const srv = req.method === 'POST' && parts.length === 2 && req.headers['x-wt-server'] !== undefined && serverTokenOk(req.headers['x-wt-server']) && /^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '')
+  const author = srv ? { kind: 'server' } : await roomAuthor(req)
+  if (req.method === 'GET') {
+    if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
+    return send(res, 200, messages.list({ ticket: url.searchParams.get('ticket') || undefined, target: url.searchParams.get('target') || undefined, limit: url.searchParams.get('limit') }))
+  }
+  if (req.method !== 'POST') return send(res, 404, { error: 'not found' })
+  const b = JSON.parse((await body(req)) || '{}')
+  if (parts[3] === 'ack') {
+    if (author.kind !== 'agent') return send(res, 403, { error: 'the addressed pane acks (x-herdr-pane)' })
+    const row = messages.get(parts[2])
+    if (!row) return send(res, 404, { error: `no message ${parts[2]}` })
+    const mine = (await canonicalPane(row.target).catch(() => null)) === (await canonicalPane(author.pane).catch(() => author.pane))
+    return send(res, 200, messages.ack(parts[2], mine ? row.target : author.pane, b.state ?? 'acknowledged'))
+  }
+  if (parts.length !== 2) return send(res, 404, { error: 'not found' })
+  const target = await canonicalPane(String(b.target ?? '')).catch(() => null)
+  if (!target) return send(res, 404, { error: `unknown pane ${b.target}` })
+  const env = envelopeOf(String(b.body ?? ''))
+  const r = messages.record({ id: env?.id ?? b.id, sender: env?.sender ?? b.sender, target, kind: env?.kind ?? b.kind, ticket: env?.ticket ?? b.ticket ?? null, requestId: b.requestId ?? null, body: String(b.body ?? ''), state: b.state === 'delivered' ? 'delivered' : 'queued' })
+  broadcastEvent('messages', { target })
+  return send(res, 200, { id: r.row.id, state: r.row.state, duplicate: r.duplicate })
 }
 
 // ---- rooms ----
@@ -3102,6 +3162,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
         return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'messages') return await messagesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'deliveries') return await deliveriesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'asks') return await asksApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
@@ -3311,7 +3372,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      const send = () => deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), { confirm: true }))
+      const send = () => deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), { confirm: true }), { requestId: o?.requestId })
       await (o?.requestId ? receipts.once(o.requestId, async () => (await send()) ?? '') : send()) // WP-251
       store.delete('agents:local')
     },
