@@ -24,7 +24,7 @@ import { promptOn } from './promptOn.mjs'
 import * as receipts from '../wt-shared/scripts/receipts.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { sweep as recoverySweep } from './recovery.mjs'
-import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
+import { Dispatch, runHandoff, recoveryRequestId, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds, watchPrsUnwatched, watchPrsStale } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
@@ -3643,10 +3643,10 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     })
     // Board dispatch + reconcile: finish or clear claims a restart orphaned, then every 30s beside routines.
     dispatcher.recover().then(() => recoverySweep({ tickets, deps: { agents: () => agents(), notify: (i) => inbox.add(i), event: (...a) => dispatcher.event(...a),
-      // WP-251 seam: pass `key` as the idempotency key once it lands. Until then the Ready claim (a row CAS) is what stops a double send.
-      redispatch: async (t, { key } = {}) => { // WP-251: the sweep's key makes a repeated re-dispatch of the same interruption a no-op
-        const drop = async () => { await tickets.dropAssignee(t.id, t.assignee.name, 'dispatch', `interrupted: dashboard restarted; ${t.assignee.name} is gone, re-dispatching`); return 'ok' }
-        await (key ? receipts.once(`recovery:${key}`, drop) : drop())
+      // WP-251: stamp the dispatch id on the card before releasing it, so the re-send carries it (dispatch.mjs) and a repeat is a no-op.
+      redispatch: async (t) => {
+        await tickets.mutate(t.id, (c) => ({ ...c, requestId: recoveryRequestId(c) }))
+        await tickets.dropAssignee(t.id, t.assignee.name, 'dispatch', `interrupted: dashboard restarted; ${t.assignee.name} is gone, re-dispatching`)
         return true
       } } }))
       .catch((e) => console.error('recovery:', e.message)).finally(() => {
