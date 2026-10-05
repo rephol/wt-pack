@@ -72,3 +72,12 @@ test('a symlinked team file pointing outside the settings root is ignored; the m
   assert.equal(cli('broken').code, 1)
   assert.equal(cli('missing').code, 1)
 })
+
+test('WP-241: teamText round-trips through the parser and refuses frontmatter injection', async () => {
+  const { teamText, member } = await import('./teams.mjs'); const { parse } = await import('./roles.mjs')
+  const t = teamText({ description: 'd', members: [{ persona: 'worker', count: 2 }, { persona: 'reviewer', count: 1 }], stages: [{ stage: 'build', persona: 'worker' }] }, 'notes\n')
+  const { meta, body } = parse(t)
+  assert.deepEqual(meta.members.map(member), [{ persona: 'worker', count: 2 }, { persona: 'reviewer', count: 1 }]); assert.equal(body.trim(), 'notes')
+  for (const bad of [{ description: 'a\nb' }, { members: [{ persona: 'x\ny', count: 1 }] }, { members: [{ persona: 'w', count: 9 }] }, { stages: [{ stage: 'nope', persona: 'w' }] }])
+    assert.throws(() => teamText(bad), (e) => e.status === 400)
+})
