@@ -63,3 +63,12 @@ test('enqueue rejects empty text', async () => {
   const [d] = await mk()
   assert.throws(() => d.enqueue('w1:p1', ' '), (e) => e.status === 400)
 })
+
+test('WP-258: queuedFor is true only while that envelope waits in that pane\'s queue', async () => {
+  const [d] = await mk()
+  const row = d.enqueue('w1:p1', msg)
+  assert.equal(d.queuedFor('w1:p1', 'a'), true)
+  assert.equal(d.queuedFor('w1:p2', 'a'), false); assert.equal(d.queuedFor('w1:p1', 'ab'), false)
+  d.ack(row.id, 'w1:p1')
+  assert.equal(d.queuedFor('w1:p1', 'a'), false)
+})
