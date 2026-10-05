@@ -6,7 +6,7 @@
 // Never blocks or errors a session: any failure → exit 0, no output.
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -76,4 +76,10 @@ try {
   mkdirSync(dir, { recursive: true })
   writeFileSync(state, hash)
   out(text)
+  // WP-236: the read log's session-start line (WP-235 writes the recall lines); best-effort, ids are not attributable here.
+  if (event === 'SessionStart') try {
+    const log = process.env.WT_MEMORY_READS || join(homedir(), '.local', 'share', 'wt-memory', 'reads.jsonl')
+    mkdirSync(dirname(log), { recursive: true })
+    appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), session: input.session_id ?? null, kind: 'inject', ids: [] }) + '\n')
+  } catch {}
 } catch {}

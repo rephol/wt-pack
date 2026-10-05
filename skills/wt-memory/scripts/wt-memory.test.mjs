@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -156,6 +156,16 @@ test('hook (WP-105): a room or wt-pack prompt gets a per-turn reminder of its ch
   assert.doesNotMatch(ctx('<room-message id=abc room=abc;rm -rf from="x" kind=user>hi</room-message>'), /answered in|room post/)
   // Without the wt-memory CLI the reminder still arrives.
   assert.match(ctx('<room-message id=abc room=ops from="x" kind=user>hi</room-message>', { ...env, WT_MEMORY_BIN: '/nope/missing', HOME: mkdtempSync(join(tmpdir(), 'nohome-')) }), /answered in #ops/)
+})
+
+test('hook (WP-236): SessionStart appends one kind:inject line to the read log; UserPromptSubmit none', () => {
+  const log = join(mkdtempSync(join(tmpdir(), 'reads-')), 'sub', 'reads.jsonl')
+  hook({ hook_event_name: 'UserPromptSubmit', session_id: 'q1', prompt: 'hello', cwd: '/' }, { WT_MEMORY_READS: log })
+  assert.equal(existsSync(log), false)
+  hook({ hook_event_name: 'SessionStart', session_id: 'q1', cwd: '/' }, { WT_MEMORY_READS: log })
+  const lines = readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.equal(lines.length, 1)
+  assert.deepEqual({ ...lines[0], at: typeof lines[0].at }, { at: 'string', session: 'q1', kind: 'inject', ids: [] })
 })
 
 // WP-204: project-role files from the repo's main checkout.

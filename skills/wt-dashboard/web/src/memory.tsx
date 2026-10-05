@@ -35,6 +35,7 @@ export function MemorySection() {
         ? <Text size="sm">Claude Code plugin: installed{m.plugin.version ? ` (v${m.plugin.version})` : ''}, enabled.</Text>
         : <Banner status="warning" title={m.plugin.installed ? 'The wt-memory Claude Code plugin is disabled' : 'The wt-memory Claude Code plugin is not installed'}
             description="claude plugin marketplace add <your wt-pack checkout> && claude plugin install wt-memory@wt-pack" />}
+      <MemoryStats />
       <Entries entries={m.entries ?? []} />
       <SegmentedControl label="Scope" value={tab} onChange={(v) => setTab(v as Tab)} size="sm">
         <SegmentedControlItem value="global" label="Global" />
@@ -45,6 +46,62 @@ export function MemorySection() {
       {tab === 'roles' && Object.entries(m.roles).map(([id, t]) => <Editor key={id} path={`roles/${id}`} label={`${byId(id).name} (${id})`} initial={t} />)}
       {tab === 'projects' && Object.entries(m.projects).map(([n, t]) => <Editor key={n} path={`projects/${n}`} label={n} initial={t} />)}
       <Preview />
+    </VStack>
+  )
+}
+
+type Stats = { days: { day: string; written: { global: number; role: number; project: number }; inject: number; recall: number }[]
+  byAgent: { by: string; count: number }[]; top: { id: string; text: string; scope: string; name: string | null; recalls: number }[]
+  never: { id: string; text: string; scope: string; name: string | null; by: string; at: string }[]; pending: number; logPresent: boolean }
+
+// WP-236: do memories pay off? Written per day, reaching sessions, most/never recalled (aggregated server-side).
+function MemoryStats() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const q = useQuery({ queryKey: ['memory-stats'], queryFn: () => api<Stats>('/api/memory/stats?days=14') })
+  const forget = useMutation({
+    mutationFn: (id: string) => api(`/api/memory/entries/${id}/forget`, { method: 'POST' }),
+    onSuccess: () => { for (const k of ['memory', 'memory-stats', 'inbox']) qc.invalidateQueries({ queryKey: [k] }) },
+    onError: (e) => toast({ body: `Memory: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
+  if (q.error) return <LoadError what="memory analytics" error={q.error} retry={() => q.refetch()} />
+  const s = q.data
+  if (!s) return <Delayed><FieldsSkeleton /></Delayed>
+  const where = (e: { scope: string; name: string | null }) => (e.name ? `${e.scope} ${e.name}` : e.scope)
+  const days = [...s.days].reverse().filter((d, i) => i < 7 || d.written.global + d.written.role + d.written.project + d.inject + d.recall > 0)
+  return (
+    <VStack gap={2}>
+      <Text weight="semibold" size="sm">Analytics (last 14 days)</Text>
+      <ScrollableArea label="Memory per day" style={{ maxHeight: 'min(260px, 35dvh)' }}>
+        <VStack gap={0}>
+          <Text type="supporting" size="sm">day · written global/role/project · session starts · recalls</Text>
+          {days.map((d) => <Text key={d.day} size="sm">{`${d.day} · ${d.written.global}/${d.written.role}/${d.written.project} · ${d.inject} · ${d.recall}`}</Text>)}
+        </VStack>
+      </ScrollableArea>
+      <Text type="supporting" size="sm">Written counts surviving entries only (a forgotten memory leaves no trace). {s.pending} global proposal{s.pending === 1 ? '' : 's'} waiting.</Text>
+      {!s.logPresent && <Text type="supporting" size="sm">No read log yet — session starts and recalls appear once an agent session starts.</Text>}
+      {s.byAgent.length > 0 && <>
+        <Text weight="semibold" size="sm">By agent</Text>
+        <Text size="sm">{s.byAgent.map((a) => `${a.by} ${a.count}`).join(' · ')}</Text>
+      </>}
+      {s.top.length > 0 && <>
+        <Text weight="semibold" size="sm">Most recalled</Text>
+        {s.top.map((e) => <Text key={e.id} size="sm">{`${e.recalls}× ${e.text} (${where(e)})`}</Text>)}
+      </>}
+      {s.never.length > 0 && <>
+        <Text weight="semibold" size="sm">Never recalled (a week or older)</Text>
+        <ScrollableArea label="Never recalled" style={{ maxHeight: 'min(260px, 35dvh)' }}>
+          <VStack gap={2}>{s.never.map((e) => (
+            <HStack key={e.id} justify="between" align="center" gap={2}>
+              <VStack gap={0}>
+                <Text size="sm">{e.text}</Text>
+                <Text type="supporting" size="sm">{`${where(e)} · ${e.by} · ${e.at}`}</Text>
+              </VStack>
+              <Button label="Forget" size="sm" variant="destructive" onClick={() => forget.mutate(e.id)} />
+            </HStack>
+          ))}</VStack>
+        </ScrollableArea>
+      </>}
     </VStack>
   )
 }

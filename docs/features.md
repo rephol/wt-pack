@@ -699,7 +699,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - CLI: `wt-memory context | remember "<note>" --scope role|project|global | forget | list | accept | reject`.
 - A **global** note is never written directly: it waits as a proposal for Accept in the Inbox or
   `wt-memory accept`.
-- Dashboard: Settings › Memory.
+- Dashboard: Settings › Memory. Its **Analytics** block (WP-236, `GET /api/memory/stats?days=14`, aggregated
+  server-side from files) shows per day the entries written (global/role/project), session starts and per-prompt
+  recalls, a by-agent list, the most-recalled memories, and the never-recalled ones (a week or older, with Forget),
+  plus the pending-proposal count. "Written" counts surviving entries only: a forgotten memory leaves no trace.
+- **Read log**: `~/.local/share/wt-memory/reads.jsonl` (`$WT_MEMORY_READS` overrides), one JSON object per line
+  `{"at": <ISO time>, "session": <id>, "kind": "inject" | "recall", "ids": [<6-hex entry id>]}`. The hook writes
+  `inject` (`ids: []`) at every SessionStart; `wt-memory recall` writes `recall` (WP-235). Unknown lines are ignored.
 
 ## Project roles and personas
 

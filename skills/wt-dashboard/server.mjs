@@ -13,6 +13,7 @@ import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
+import { memStats } from './memstats.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
@@ -1054,6 +1055,15 @@ async function memoryApi(req, res, url, parts) {
     await inbox.resolve(inbox.items.filter((it) => it.target?.memory === parts[3] && !it.resolvedAt).map((it) => it.id))
     broadcastEvent('inbox', { changed: true })
     return send(res, 200, { ok: true })
+  }
+  if (parts[2] === 'stats' && req.method === 'GET') {
+    // WP-236: last 5 MB of the read log is plenty for a day-window aggregate; null = no log yet.
+    const f = process.env.WT_MEMORY_READS || join(homedir(), '.local', 'share', 'wt-memory', 'reads.jsonl')
+    const text = await stat(f).then(async (s) => {
+      const h = await fopen(f, 'r')
+      try { const len = Math.min(s.size, 5_000_000); const buf = Buffer.alloc(len); await h.read(buf, 0, len, s.size - len); return buf.toString('utf8') } finally { await h.close() }
+    }).catch(() => null)
+    return send(res, 200, memStats(await memoryEntries().catch(() => []), text, { days: Number(url.searchParams.get('days')) || 30 }))
   }
   if (parts[2] === 'preview' && req.method === 'GET') {
     const args = ['context']
