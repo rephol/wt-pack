@@ -179,3 +179,18 @@ test('persona token from the pane is picked up', () => {
   writeFileSync(join(fakeBin, 'herdr'), `#!/bin/sh\necho '{"result":{"pane":{"cwd":"${repo}","tokens":{"role":"worker","project":"x","persona":"frontend-worker"}}}}'\n`)
   assert.match(run(['context'], { HERDR_PANE_ID: 'w1:p1', PATH: `${fakeBin}:${process.env.PATH}` }), /Project role \(frontend-worker/)
 })
+
+test('recall (WP-235): keyword match in own scopes, once per session, logged', async () => {
+  const { readFileSync } = await import('node:fs')
+  const rhome = mkdtempSync(join(tmpdir(), 'wt-recall-'))
+  mkdirSync(join(rhome, 'projects'), { recursive: true })
+  const env = { WT_MEMORY_HOME: rhome, WT_MEMORY_CACHE: join(rhome, 'cache'), WT_MEMORY_READS: join(rhome, 'reads.jsonl') }
+  writeFileSync(join(rhome, 'global.md'), '- Always run the linter before committing <!-- wtm:id=aaaa1111 by=x at=2026-01-01 -->\n- Prefer tabs <!-- wtm:id=bbbb2222 by=x at=2026-01-01 -->\n')
+  writeFileSync(join(rhome, 'projects', 'other.md'), '- Linter config lives elsewhere <!-- wtm:id=cccc3333 by=x at=2026-01-01 -->\n')
+  const rec = (p) => run(['recall', p, '--session', 's1', '--project', 'demo'], env)
+  assert.equal(rec('please run the linter now'), '- Always run the linter before committing') // not the other project's entry, not unrelated "tabs"
+  assert.equal(rec('run the linter again'), '') // already shown this session
+  assert.equal(run(['recall', 'run the linter', '--session', 's2', '--project', 'demo'], env), '- Always run the linter before committing')
+  const log = readFileSync(env.WT_MEMORY_READS, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.deepEqual(log.map((l) => [l.session, l.ids]), [['s1', ['aaaa1111']], ['s2', ['aaaa1111']]])
+})

@@ -423,6 +423,7 @@ Projects, Terminals, Usage, Observability, Server, About.
   Spacious), link previews (**on**).
 - **Notifications**: see [Inbox](#inbox).
 - **Rooms**, **Roles**: see above.
+- **Per-prompt recall** (WP-235): on every prompt the wt-memory hook also runs `wt-memory recall "<prompt>"` — keyword match (no LLM) of the prompt against the agent-kept memories of the agent's own global, role and project scope; up to 5 matches are added as "Memories that match this prompt", each id at most once per session (SessionStart, which also fires after a compaction, clears the list). Each recall is logged (session, ids) to `~/.local/share/wt-memory/reads.jsonl`. Same 2 s budget as the context read.
 - **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries (the list scrolls in its own box as it grows), Accept/Reject pending
   global proposals, **Preview for agent…** shows what an agent receives. Warns when the plugin is missing.
 - **Projects** (WP-107): per-project overrides, opened only from Settings › Projects or the gear next to the sidebar project picker (a project picked; phone top bar too —

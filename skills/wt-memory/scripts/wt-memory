@@ -5,13 +5,14 @@
 //   wt-memory hash    [same flags]                         # short content hash of that output
 //   wt-memory path    [global | role R | project P]        # the store dir, or one file's path
 //   wt-memory remember "<note>" [--scope role|project|global] [--role R] [--project P] [--strict]
+//   wt-memory recall "<prompt>" --session S [--limit 5]  # WP-235: ≤5 agent-kept memories of this scope sharing keywords with the prompt, not yet shown this session
 //   wt-memory forget <id> · accept <id> · reject <id> · list [--scope S] [--json]
 //
 // Store: $WT_MEMORY_HOME or ~/.config/wt-memory → global.md, roles/<role-id>.md, projects/<repo>.md.
 // Without flags the scope is inferred: $HERDR_PANE_ID → `herdr pane get` → tokens role/project and the pane's
 // cwd; project falls back to the git repo of the cwd (a worktree resolves to its MAIN repo, as the dashboard does).
 // Runs inside agent hooks, so `context`/`hash` never fail loudly: any error → exit 0 and empty output.
-import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { join, basename, dirname } from 'node:path'
@@ -65,7 +66,7 @@ function infer({ role, project, cwd, persona }) {
 function flags(argv) {
   const o = { _: [] }
   for (let i = 0; i < argv.length; i++) {
-    if (/^--(role|project|cwd|scope|persona)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
+    if (/^--(role|project|cwd|scope|persona|session|limit)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
     else if (argv[i] === '--json') o.json = true
     else if (argv[i] === '--strict') o.strict = true
     else o._.push(argv[i])
@@ -171,6 +172,28 @@ function accept(id) {
   console.log(`accepted ${id}: ${e.text}`)
 }
 
+// ---- WP-235: per-prompt recall (keywords only, no LLM) ----
+const STOP = new Set('about after again also because been before being could does doing done from have here into just like make more most much only other over please should some such than that their them then there these they this those very want what when where which while will with would your'.split(' '))
+const words = (t) => new Set(norm(t).split(' ').filter((w) => w.length >= 4 && !STOP.has(w)))
+// Entries of this agent's scopes (global, its role, its project) that share a word with the prompt, best first,
+// minus the ids already recalled in this session (state in ~/.cache/wt-memory, cleared by SessionStart's inject).
+function recall(prompt, o) {
+  const { role, project } = infer(o)
+  const seen = join(process.env.WT_MEMORY_CACHE || join(homedir(), '.cache', 'wt-memory'), `${String(o.session ?? 'none').replace(/[^\w-]/g, '_')}.recalled`)
+  const shown = new Set(read(seen).split('\n'))
+  const pw = words(prompt.slice(0, 4000))
+  const hits = entries().filter((e) => e.id && !shown.has(e.id) && (e.scope === 'global' || (e.scope === 'role' && e.name === role) || (e.scope === 'project' && e.name === project)))
+    .map((e) => ({ e, n: [...words(e.text)].filter((w) => pw.has(w)).length })).filter((x) => x.n > 0)
+    .sort((a, b) => b.n - a.n).slice(0, Math.min(Number(o.limit) || 5, 5)).map((x) => x.e)
+  if (!hits.length) return ''
+  mkdirSync(dirname(seen), { recursive: true })
+  appendFileSync(seen, hits.map((e) => e.id + '\n').join(''))
+  const log = process.env.WT_MEMORY_READS || join(homedir(), '.local', 'share', 'wt-memory', 'reads.jsonl')
+  mkdirSync(dirname(log), { recursive: true })
+  appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), session: o.session ?? null, ids: hits.map((e) => e.id) }) + '\n')
+  return hits.map((e) => `- ${e.text}`).join('\n')
+}
+
 {
   const [cmd, ...rest] = process.argv.slice(2)
   if (cmd === 'context' || cmd === 'hash') {
@@ -178,6 +201,8 @@ function accept(id) {
     try { out = await merge(infer(flags(rest))) } catch {}
     if (cmd === 'hash') console.log(createHash('sha256').update(out).digest('hex').slice(0, 16))
     else if (out) console.log(out)
+  } else if (cmd === 'recall') { // like context: never fails loudly
+    try { const o = flags(rest); const out = recall(o._.join(' '), o); if (out) console.log(out) } catch {}
   } else if (['remember', 'forget', 'accept', 'reject', 'list'].includes(cmd)) {
     try {
       const o = flags(rest)
