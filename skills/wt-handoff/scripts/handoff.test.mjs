@@ -321,9 +321,10 @@ test('WP-240: a /goal handoff is typed (send-text + Enter), not pasted via agent
   writeFileSync(log, '')
   run(['--role', 'worker', '--pane', 'wW:p9', repo], 'do the thing')
   let calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr pane send-text wW:p9 \/goal .*<wt-message/m)
+  assert.match(calls, /^herdr pane send-text wW:p9 \/goal finish the wt-message that follows/m)
+  assert.match(calls, /^herdr agent prompt wW:p9 <wt-message/m) // the message itself: a normal prompt (no mod queue in the test), never typed
   assert.match(calls, /^herdr pane send-keys wW:p9 enter/m)
-  assert.doesNotMatch(calls, /agent prompt wW:p9 \/goal/)
+  assert.doesNotMatch(calls, /agent prompt wW:p9 \/goal|send-text .*<wt-message/)
   writeFileSync(log, '')
   run(['--role', 'worker', '--pane', 'wW:p9', '--no-goal', repo], 'do the thing')
   calls = readFileSync(log, 'utf8')
