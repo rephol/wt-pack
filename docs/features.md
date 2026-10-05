@@ -360,9 +360,9 @@ only between turns — no pasted keystrokes. Each delivery is a `deliveries` row
 (the prompt entered the session) or `pasted` (the mod went quiet before it pulled; the dashboard pasted it). The mod
 says hello every 20 s; a pane without a fresh hello (mod off, crashed, session started before install, dashboard
 down) is pasted exactly as before. Slash-command traffic (`/goal …` handoffs, `/wt-… ` routines) is typed, never pasted (WP-240). Typed text of ~800+ characters
-counts as a paste too, so a long `/goal <wt-message …>` types only a short `/goal <ticket>: finish the wt-message that follows…`
-line and the message follows as a normal prompt through this queue (pasted if the pane has no live mod) (WP-242). A handoff run by the server itself (Dispatch, routines) has no pane id, so it
-queues with a per-process secret the server hands only to its own `handoff.sh` children (`x-wt-server`, loopback, `wt-message` text only). A delivery waits for the running turn to end (a pasted message used to sit in the TUI's own queue
+counts as a paste too, so a long `/goal <wt-message …>` writes the message to `~/.local/share/wt-dashboard/messages/<id>.md` (mode 600, pruned after 7 days)
+and types one short line, `/goal <ticket>: do the task in <path>; reporting what it asks for is the goal`. No queue and no ordering: a queue only drains between
+turns, and the goal keeps its turn open (WP-243; the WP-242 queue deadlocked). A file that cannot be written pastes the whole message. A queued delivery waits for the running turn to end (a pasted message used to sit in the TUI's own queue
 instead). A session loads the mod at its next start or `/reload-plugins`.
 
 ## Inbox
