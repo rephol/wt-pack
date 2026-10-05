@@ -420,6 +420,7 @@ test('dispatch: tick() puts the resolved room and orchestrator in the prompt (WP
   assert.match(calls[0].prompt, /room post wt-pack/)
   assert.match(calls[0].prompt, /handoff\.sh --reply w1:p2/)
   assert.deepEqual(calls[0].args.slice(2, 6), ['--kind', 'dispatch', '--from', 'wt-dashboard']) // WP-104
+  assert.deepEqual(calls[0].args.slice(6, 8), ['--request-id', 'dispatch:WP-1:worker:0']) // WP-251
 })
 
 test('project settings (WP-107): maxWorking and baseBranch are asked per project', async () => {
