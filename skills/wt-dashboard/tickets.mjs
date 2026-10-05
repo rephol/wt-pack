@@ -278,11 +278,11 @@ export class Tickets {
   async setDispatch(id, d) {
     return this.mutate(id, (t) => { if (d) t.dispatch = d; else delete t.dispatch; return t })
   }
-  // Retry dispatch: clears only a failure, a hold or a lone stall flag, never a claim in flight or a sent card.
+  // Retry dispatch: clears only a failure, a hold, a restart interruption (WP-252) or a lone stall flag, never a claim in flight or a sent card.
   async dispatchRetry(id) {
     return this.mutate(id, (t) => {
       const d = t.dispatch
-      if (d && !['failed', 'held'].includes(d.state) && d.state !== undefined) throw err(409, `${t.id} dispatch is ${d.state}`)
+      if (d && !['failed', 'held', 'interrupted'].includes(d.state) && d.state !== undefined) throw err(409, `${t.id} dispatch is ${d.state}`)
       delete t.dispatch
       return t
     })

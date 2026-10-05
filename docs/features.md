@@ -105,6 +105,9 @@ header, remembered per viewer and defaulting to the global project; picking ther
   project has no checkout. Handoff timeout 120s.
 - Failures retry after 2 min; the **3rd failure holds** the card. Card menu **Retry dispatch** (failed or
   held) or moving the card to Ready/Backlog clears it.
+- **Restart recovery** (WP-252): once at server start, a Planning/Building card whose pack agent is gone is marked
+  *interrupted* (reason in its history and an Inbox item) and returned to Ready for re-dispatch; a paired card
+  stays flagged **Interrupted** (card menu **Retry dispatch**). Agents outside the pack are never touched.
 - **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means herdr accepted the prompt, not
   that it reached the agent's pane (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
   card being dispatched, its assignee must show working, done or blocked (it asked something); if not,
