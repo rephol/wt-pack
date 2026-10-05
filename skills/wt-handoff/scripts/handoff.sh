@@ -302,6 +302,8 @@ has_picks() {
   jq -e --arg p "$mcp" '($p | split(",")) - (.mcpServers | keys) == []' "$f" >/dev/null 2>&1
 }
 
+# WP-242: taken once and unset, so the agents this script spawns never inherit it.
+deliver_token=${WT_DELIVER_TOKEN:-}; unset WT_DELIVER_TOKEN
 hand_to() {
   # /clear is the user's call, never a default: a reused agent's prior context
   # can be exactly what makes it the right one to continue in.
@@ -309,14 +311,26 @@ hand_to() {
     herdr agent prompt "$1" "/clear" >/dev/null || true
     sleep 2
   fi
-  # WP-240: herdr's prompt pastes (bracketed), which Claude Code hands the model as pasted content it will not act on.
-  # A /goal is one flat line, so type it (send-text + Enter) like a user would; fall back to the paste if that fails.
-  if [ "$goal" -eq 1 ] && herdr pane send-text "$1" "$send" >/dev/null 2>&1; then
+  # WP-240/242: herdr's prompt pastes, and so does any long burst of typed text, which Claude Code hands the model as
+  # pasted content it will not act on. So type only a SHORT /goal line, then send the full message as a normal prompt
+  # (the dashboard queue: the mod submits it as real input once the goal turn ends; else herdr's paste).
+  if [ "$goal" -eq 1 ] && herdr pane send-text "$1" "$goal_line" >/dev/null 2>&1; then
     sleep 0.4 # an Enter sent in the same instant as the text is dropped
     herdr pane send-keys "$1" enter >/dev/null
+    queue_prompt "$1" "$send" || herdr agent prompt "$1" "$send" >/dev/null
   else
-    herdr agent prompt "$1" "$send" >/dev/null
+    herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   fi
+}
+
+# WP-210 queue: true when the target's wt-deliver-mod is live and took the text (needs a pane-identified sender).
+queue_prompt() { # <pane> <text>
+  command -v curl >/dev/null || return 1
+  # A server-run handoff (Dispatch, routines) has no pane id: it proves itself with the dashboard's private token instead.
+  set -- "$1" "$2" -H "$( [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")"
+  [ -n "$deliver_token${HERDR_PANE_ID:-}" ] || return 1
+  [ "$(jq -n --arg p "$1" --arg t "$2" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST "$3" "$4" \
+    -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null)" = true ]
 }
 
 task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
@@ -406,7 +420,9 @@ if [ "$goal" -eq 1 ]; then
     echo "goal condition is over Claude Code's 4000-character cap" >&2
     exit 1
   fi
-  send="/goal $flat"
+  send=$prompt                # sent as a normal prompt after the short line (WP-242)
+  send_full="/goal $flat"     # fallback when the line cannot be typed
+  goal_line="/goal ${ticket:+$ticket: }finish the wt-message that follows; reporting what it asks for is the goal"
 else
   send=$prompt
 fi

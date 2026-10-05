@@ -451,8 +451,8 @@ export class Dispatch {
 
 // wt-handoff from the server: prompt on stdin, 120 s cap, and HERDR_PANE_ID blanked so a service started from a pane
 // does not pose as that pane (sender tokens, wt-ticket auth).
-export const runHandoff = (execFile, bin) => (args, prompt, cwd) => new Promise((resolve, reject) => {
-  const child = execFile(bin, args, { cwd, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '' } },
+export const runHandoff = (execFile, bin, env = {}) => (args, prompt, cwd) => new Promise((resolve, reject) => {
+  const child = execFile(bin, args, { cwd, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '', ...env } },
     (err, o, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(o))
   child.stdin.end(prompt)
 })
