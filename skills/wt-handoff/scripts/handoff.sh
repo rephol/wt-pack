@@ -309,6 +309,7 @@ hand_to() {
   # WP-240: herdr's prompt pastes (bracketed), which Claude Code hands the model as pasted content it will not act on.
   # A /goal is one flat line, so type it (send-text + Enter) like a user would; fall back to the paste if that fails.
   if [ "$goal" -eq 1 ] && herdr pane send-text "$1" "$send" >/dev/null 2>&1; then
+    sleep 0.4 # an Enter sent in the same instant as the text is dropped
     herdr pane send-keys "$1" enter >/dev/null
   else
     herdr agent prompt "$1" "$send" >/dev/null

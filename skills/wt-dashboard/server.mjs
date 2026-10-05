@@ -18,6 +18,7 @@ import { teamView } from './teamview.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
+import { promptOn } from './promptOn.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
@@ -2357,7 +2358,7 @@ const tickets = new Tickets({
 // WP-210: one funnel for text sent into a local pane. A pane whose wt-deliver-mod is live gets it queued (the mod
 // submits it as a prompt and acks); any other pane gets today's keystroke paste. Remote machines always paste.
 const deliveries = new Deliveries({ dir: DATA })
-async function deliver(a, text, paste) { // a slash command (/goal arms, /wt-audit …) must be typed: it always pastes
+async function deliver(a, text, paste) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
   if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' }
   await paste()
   return 'pasted'
@@ -2580,7 +2581,7 @@ const rooms = new Rooms({
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
     if (!m) throw new Error(`machine ${a.machine} unavailable`)
-    await deliver(a, text, () => herdrOn(m, 'agent', 'prompt', a.id, text))
+    await deliver(a, text, () => promptOn(herdrOn, m, a.id, text))
     store.delete('agents:local')
   },
 })
@@ -3243,7 +3244,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      await deliver(a, routineText(text, o), () => herdrOn(m, 'agent', 'prompt', a.id, routineText(text, o)))
+      await deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o)))
       store.delete('agents:local')
     },
     spawn: (b) => spawnAgent(b),
