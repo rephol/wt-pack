@@ -791,6 +791,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   **Spawn team** (`agents.sh spawn --team`, disabled while the file has errors). Writes need the dashboard session, go to the
   project's current settings location (repo `.wt-pack/teams` or the user folder), are confined to `<name>.md` there (no
   symlinks, name validated), keep a file's free-form notes on edit and are never committed.
+- Team boundaries (WP-247):
+  - **Roster is kept.** Idle-worker retirement never removes a team member. A team's workers do not count against the plain `WT_WORKERS_MAX` pool cap (only team-less agents do); a team is capped by its own roster.
+  - **Seats.** `agents.sh spawn <role|persona> --team <name>` refuses a role or persona the team file has no member for (exit 2) and a full seat (exit 3, `team full`), the same checks as `handoff.sh --team` (both read the count from `teams.mjs seats <team> <persona>`). `spawn --team <name>` fills only the seats not already taken, so re-running it is safe and prints nothing when the team is complete.
+  - **Refill.** A team with an open card (Ready, Planning, Building or Review) and fewer agents up than its roster is refilled by the dashboard (when a card reaches Done, and on a 60 s sweep), at most once per team per 10 minutes. A spawn that fails is not retried sooner.
+  - **Tickets stay in the team.** `handoff.sh --pane <agent> --task <ID>` is refused (exit 2) when the agent's team differs from the card's team (a team agent with a team-less card, or the reverse, included); move the card's `team` first. The Teams page marks an agent whose ticket belongs to another team (or none) with `⚠ off-team ticket`.
+  - **Add to team.** A member row with a free seat lists the project's agents that are on no team (a hand-started persona agent); picking one tags it `team=<name>` (and `persona=<name>` for a custom persona; a base-role seat needs an agent of that role). `POST /api/teams/<project>/<team>/adopt {agent, persona}`, session only. There is no auto-adopt.
+  - **Routines and room mentions.** A routine skips a team agent unless the routine names that agent. An `@mention` in a room to a team agent is allowed: it names one agent, so a person chose it, and a room turn is conversation, not ticket work.
 
 ## wt-ticket CLI
 

@@ -73,6 +73,14 @@ test('a symlinked team file pointing outside the settings root is ignored; the m
   assert.equal(cli('missing').code, 1)
 })
 
+test('WP-247: seats prints the roster count of a persona, 0 for a non-member or an unknown team', () => {
+  const r = repo()
+  team(r, 'pod', '---\nmembers: [planner, worker x2]\n---\n')
+  const seats = (...a) => execFileSync(process.execPath, [new URL('./teams.mjs', import.meta.url).pathname, 'seats', ...a, '--cwd', r], { encoding: 'utf8' }).trim()
+  assert.equal(seats('pod', 'worker'), '2'); assert.equal(seats('pod', 'planner'), '1')
+  assert.equal(seats('pod', 'reviewer'), '0'); assert.equal(seats('nope', 'worker'), '0')
+})
+
 test('WP-241: teamText round-trips through the parser and refuses frontmatter injection', async () => {
   const { teamText, member } = await import('./teams.mjs'); const { parse } = await import('./roles.mjs')
   const t = teamText({ description: 'd', members: [{ persona: 'worker', count: 2 }, { persona: 'reviewer', count: 1 }], stages: [{ stage: 'build', persona: 'worker' }] }, 'notes\n')

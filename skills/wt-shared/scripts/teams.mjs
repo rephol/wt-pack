@@ -9,6 +9,8 @@
 //   free-form notes
 //   teams.mjs list    [--cwd D]       JSON: [{name, description, members:[{persona,count}], stages:[{stage,persona}]}]
 //   teams.mjs members <name> [--cwd D] one persona per line, count-expanded (what `agents.sh spawn --team` spawns)
+//   teams.mjs seats <team> <persona> [--cwd D]  the roster count of that persona in the team (0 when not a member; WP-247:
+//                                     the one source for agents.sh spawn --team and handoff.sh --team)
 //   teams.mjs check   [--cwd D]       JSON findings; exit 1 on any error
 // Pure and synchronous; frontmatter is the same flat `key: value` / `[a, b]` dialect as roles.mjs.
 import { readFileSync, readdirSync, realpathSync } from 'node:fs'
@@ -137,9 +139,11 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
     const bad = check(checkout).filter((x) => x.name === t.name && x.level === 'error')
     if (bad.length) { console.error(bad.map((x) => x.msg).join('; ')); process.exit(1) }
     console.log(expand(t).join('\n'))
+  } else if (cmd === 'seats') {
+    console.log(get(checkout, rest[0])?.members.find((m) => m.persona === rest[1])?.count ?? 0)
   } else if (cmd === 'check') {
     const f = check(checkout)
     console.log(JSON.stringify(f))
     if (f.some((x) => x.level === 'error')) process.exit(1)
-  } else { console.error('usage: teams.mjs list|members <name>|check [--cwd D]'); process.exit(2) }
+  } else { console.error('usage: teams.mjs list|members <name>|seats <team> <persona>|check [--cwd D]'); process.exit(2) }
 }
