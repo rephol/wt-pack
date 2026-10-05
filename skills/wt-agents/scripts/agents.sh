@@ -133,17 +133,22 @@ spawn|mcp-args|mcp-file)
     elif [ "$a" = --team ]; then team=$1; shift; n=$((n - 1))
     else set -- "$@" "$a"; fi
   done
-  if [ -n "$team" ] && ! printf '%s' "$team" | grep -Eq '^[a-z][a-z0-9-]{0,22}$'; then
-    echo "--team: a team name ([a-z][a-z0-9-]*, <= 23 chars)" >&2; exit 2
+  if [ -n "$team" ] && { [ "${#team}" -gt 24 ] || case "$team" in [a-z]*) case "$team" in *[!a-z0-9-]*) true ;; *) false ;; esac ;; *) true ;; esac; }; then
+    echo "--team: a team name ([a-z][a-z0-9-]*, <= 24 chars)" >&2; exit 2
   fi
-  # WP-237: `spawn --team <name> [cwd]` (no role) spawns every member of the team file, one process per agent.
-  if [ -n "$team" ] && [ "$cmd" = spawn ] && { [ $# -eq 0 ] || [ -d "$1" ]; }; then
+  # WP-237: `spawn --team <name> [path]` (no role; a path is absolute, ./ or ../) spawns every member of the team file, one process per agent.
+  if [ -n "$team" ] && [ "$cmd" = spawn ] && { [ $# -eq 0 ] || case "$1" in /*|.|./*|../*|~*) [ -d "$1" ] ;; *) false ;; esac; }; then
     tcwd=$(cd "${1:-$PWD}" 2>/dev/null && pwd) || { echo "no such directory: ${1:-}" >&2; exit 1; }
     members=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" members "$team" --cwd "$tcwd") || { echo "team $team: not found or invalid (wt-roles team check)" >&2; exit 1; }
-    [ -z "$members" ] || printf '%s\n' "$members" | while IFS= read -r m; do
-      WT_AGENTS_SPAWNED_BY="${WT_AGENTS_SPAWNED_BY:-wt-agents}" "$0" spawn "$m" "$tcwd" --team "$team" ${model:+--model "$model"} ${effort:+--effort "$effort"} ${extra:+--mcp "$extra"} < /dev/null
-    done
-    exit 0
+    # a here-doc, not a pipe: the loop stays in this shell so a failed member fails the call (the rest still start)
+    fail=0
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      WT_AGENTS_SPAWNED_BY="${WT_AGENTS_SPAWNED_BY:-wt-agents}" "$0" spawn "$m" "$tcwd" --team "$team" ${model:+--model "$model"} ${effort:+--effort "$effort"} ${extra:+--mcp "$extra"} < /dev/null || { echo "team $team: spawning $m failed" >&2; fail=1; }
+    done <<TEAM_MEMBERS
+$members
+TEAM_MEMBERS
+    exit $fail
   fi
   role=${1:?role required, e.g. worker|planner}
   # WP-204: a name that is not a base role but has a project-role file (.wt-pack/roles/<name>.md) is a PERSONA: it

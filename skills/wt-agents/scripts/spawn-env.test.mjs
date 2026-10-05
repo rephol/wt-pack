@@ -197,7 +197,10 @@ test('WP-237: spawn --team spawns every member x count with the team token; --te
   assert.ok(one.calls.some((l) => /report-metadata .*--token role=worker .*--token team=web/.test(l)))
   const noTeam = spawn(['spawn', 'worker', repo])
   assert.ok(!noTeam.calls.some((l) => l.includes('team=')))
-  for (const args of [['spawn', '--team', 'nope', repo], ['spawn', 'worker', repo, '--team', 'Bad_Name']]) {
+  // a role named like a directory in the cwd still spawns ONE agent; a path-like first arg is the whole-team form
+  mkdirSync(join(repo, 'worker'), { recursive: true })
+  assert.equal(spawn(['spawn', 'worker', '--team', 'web']).out.trim().split('\n').length, 1)
+  for (const args of [['spawn', '--team', 'nope', repo], ['spawn', 'worker', repo, '--team', 'Bad_Name'], ['spawn', 'worker', repo, '--team', 'a\nb'], ['spawn', 'worker', repo, '--team', 'a'.repeat(25)]]) {
     const r = spawnSync(join(here, 'agents.sh'), args, { cwd: repo, encoding: 'utf8',
       env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
     assert.notEqual(r.status, 0, args.join(' '))
