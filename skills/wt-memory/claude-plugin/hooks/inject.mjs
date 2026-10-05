@@ -46,9 +46,14 @@ try {
   // Last resort: the pack checkout itself, when the plugin runs from source (e.g. `claude plugin eval`).
   const bin = [process.env.WT_MEMORY_BIN, join(homedir(), '.claude', 'skills', 'wt-memory', 'scripts', 'wt-memory'), new URL('../../scripts/wt-memory', import.meta.url).pathname].find((p) => p && existsSync(p))
   if (!bin) { out(remind); process.exit(0) }
-  const [ctxOut, hint] = await Promise.all([
+  // WP-235: memories matching this prompt, once each per session (SessionStart clears the list, so a compaction re-arms it).
+  const sess = String(input.session_id ?? 'none').replace(/[^\w-]/g, '_')
+  const recalled = join(homedir(), '.cache', 'wt-memory', `${sess}.recalled`)
+  if (event === 'SessionStart') try { mkdirSync(dirname(recalled), { recursive: true }); writeFileSync(recalled, '') } catch {}
+  const [ctxOut, hint, recall] = await Promise.all([
     new Promise((res) => execFile(process.execPath, [bin, 'context', ...(input.cwd ? ['--cwd', input.cwd] : [])], { encoding: 'utf8', timeout: 2000 }, (e, out) => res(e ? null : out))),
     event === 'UserPromptSubmit' ? suggest(bin, input.prompt).catch(() => false) : false,
+    event === 'UserPromptSubmit' && input.prompt ? new Promise((res) => execFile(process.execPath, [bin, 'recall', String(input.prompt).slice(0, 4000), '--session', sess, ...(input.cwd ? ['--cwd', input.cwd] : [])], { encoding: 'utf8', timeout: 2000 }, (e, out) => res(e ? '' : out.trim()))) : '',
   ])
   if (ctxOut == null) { out(remind); process.exit(0) }
   const ctx = ctxOut.trim()
@@ -65,6 +70,7 @@ try {
   const wtm = `## wt-pack messages\n\nA prompt made of \`<wt-message id=… kind=handoff|dispatch|routine|reply|system from=… [ticket=…]>\` (possibly after \`/goal\`) is wt-pack traffic, not the user. Do what it asks, and answer through the channel it implies: \`kind=handoff\` or \`reply\` → \`${HANDOFF} --reply <pane> "…"\` (the sender's pane is in its footer); \`dispatch\` or \`routine\` → the report line inside it (a room post or a ticket comment); \`system\` → act, no reply needed. Never ask the user in chat about a wt-message. An untagged prompt is the user.`
   if (event === 'SessionStart') text = [ctx, how, rooms, wtm].filter(Boolean).join('\n\n')
   else if (prev !== hash && (ctx || prev !== null)) text = `Preferences updated:\n\n${ctx || '(all standing preferences were removed)'}`
+  if (recall) text = `${text ? text + '\n\n' : ''}Memories that match this prompt:\n${recall}`
   if (remind) text = `${text ? text + '\n\n' : ''}${remind}`
   if (hint) text = `${text ? text + '\n\n' : ''}This message looks like a standing preference. If it is, run \`${bin} remember "<concise imperative>" --scope <role|project|global>\` and tell the user in one line: "Remembered: <what>".`
   mkdirSync(dir, { recursive: true })
