@@ -83,3 +83,10 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop a /goal-driven agent fo
 - `handoff_at` is what lets the dashboard adopt the new `ticket` over its own mirrored copy
   (`data/agent-tags.json`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
 - `wt-finish` clears `task` when the work is retired.
+
+## Knowing when a handoff is done
+
+- The target's `handoff.sh --reply` is the mid-task signal. SendMessage's `notify_when_idle` reaches the sender only after
+  the sender's own turn ends (WP-259): a hint, never the completion signal.
+- A target that acknowledges and then goes idle or exits without moving the card or replying is flagged by the dashboard
+  (WP-261): the message becomes `expired`, and an Inbox item says it finished without reporting.
