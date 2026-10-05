@@ -2368,8 +2368,6 @@ async function deliver(a, text, paste) { // a slash command (/goal arms, /wt-aud
   await paste()
   return 'pasted'
 }
-// WP-242: the message that follows a short typed /goal line goes through the queue when the pane's mod is live.
-const enqueueFor = (a) => async (text) => a.local !== false && deliveries.live(a.id) && (deliveries.enqueue(a.id, text), broadcastEvent('deliveries', { pane: a.id }), true)
 // A mod that died with rows queued: paste them (and say so in the row) rather than strand them.
 setInterval(async () => {
   for (const r of deliveries.stranded()) {
@@ -2591,7 +2589,7 @@ const rooms = new Rooms({
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
     if (!m) throw new Error(`machine ${a.machine} unavailable`)
-    await deliver(a, text, () => promptOn(herdrOn, m, a.id, text, enqueueFor(a)))
+    await deliver(a, text, () => promptOn(herdrOn, m, a.id, text))
     store.delete('agents:local')
   },
 })
@@ -3254,7 +3252,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      await deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), enqueueFor(a)))
+      await deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o)))
       store.delete('agents:local')
     },
     spawn: (b) => spawnAgent(b),

@@ -311,16 +311,24 @@ hand_to() {
     herdr agent prompt "$1" "/clear" >/dev/null || true
     sleep 2
   fi
-  # WP-240/242: herdr's prompt pastes, and so does any long burst of typed text, which Claude Code hands the model as
-  # pasted content it will not act on. So type only a SHORT /goal line, then send the full message as a normal prompt
-  # (the dashboard queue: the mod submits it as real input once the goal turn ends; else herdr's paste).
-  if [ "$goal" -eq 1 ] && herdr pane send-text "$1" "$goal_line" >/dev/null 2>&1; then
+  # WP-240/243: herdr's prompt pastes, and so does any long burst of typed text, which Claude Code hands the model as
+  # pasted content it will not act on. So the message goes to a mode-600 file and only a SHORT /goal line naming it is
+  # typed: no queue, no ordering (a queue only drains between turns, and /goal's Stop hook keeps the turn open).
+  if [ "$goal" -eq 1 ] && msgfile=$(save_message) && herdr pane send-text "$1" "$goal_line $msgfile; reporting what it asks for is the goal" >/dev/null 2>&1; then
     sleep 0.4 # an Enter sent in the same instant as the text is dropped
     herdr pane send-keys "$1" enter >/dev/null
-    queue_prompt "$1" "$send" || herdr agent prompt "$1" "$send" >/dev/null
   else
     herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   fi
+}
+
+# WP-243: the wt-message as a file under the dashboard's data dir (7-day prune); prints its path.
+save_message() {
+  d=${WT_MESSAGES_DIR:-$HOME/.local/share/wt-dashboard/messages}
+  id=$(printf '%s' "$send" | sed -n '1s/^<wt-message id=\([^ >]*\).*/\1/p'); id=${id:-$(date +%s)$$}
+  (umask 077; mkdir -p "$d" && printf '%s\n' "$send" > "$d/$id.md") || return 1
+  find "$d" -name '*.md' -mtime +7 -delete 2>/dev/null || true
+  printf '%s' "$d/$id.md"
 }
 
 # WP-210 queue: true when the target's wt-deliver-mod is live and took the text (needs a pane-identified sender).
@@ -422,7 +430,7 @@ if [ "$goal" -eq 1 ]; then
   fi
   send=$prompt                # sent as a normal prompt after the short line (WP-242)
   send_full="/goal $flat"     # fallback when the line cannot be typed
-  goal_line="/goal ${ticket:+$ticket: }finish the wt-message that follows; reporting what it asks for is the goal"
+  goal_line="/goal ${ticket:+$ticket: }do the task in"
 else
   send=$prompt
 fi

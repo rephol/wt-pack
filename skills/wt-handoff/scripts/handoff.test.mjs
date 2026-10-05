@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -321,10 +321,12 @@ test('WP-240: a /goal handoff is typed (send-text + Enter), not pasted via agent
   writeFileSync(log, '')
   run(['--role', 'worker', '--pane', 'wW:p9', repo], 'do the thing')
   let calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr pane send-text wW:p9 \/goal finish the wt-message that follows/m)
-  assert.match(calls, /^herdr agent prompt wW:p9 <wt-message/m) // the message itself: a normal prompt (no mod queue in the test), never typed
+  const file = calls.match(/^herdr pane send-text wW:p9 \/goal do the task in (\S+\.md); reporting what it asks for is the goal$/m)?.[1]
+  assert.ok(file, calls) // WP-243: one short typed line naming the message file; nothing queued or pasted
+  assert.match(readFileSync(file, 'utf8'), /^<wt-message id=\w+ kind=handoff[^>]*>[\s\S]*do the thing/)
+  assert.equal(statSync(file).mode & 0o777, 0o600)
   assert.match(calls, /^herdr pane send-keys wW:p9 enter/m)
-  assert.doesNotMatch(calls, /agent prompt wW:p9 \/goal|send-text .*<wt-message/)
+  assert.doesNotMatch(calls, /agent prompt|send-text .*<wt-message/)
   writeFileSync(log, '')
   run(['--role', 'worker', '--pane', 'wW:p9', '--no-goal', repo], 'do the thing')
   calls = readFileSync(log, 'utf8')
@@ -348,21 +350,4 @@ test('WP-238: --team picks only that team\'s agents (a plain handoff skips them)
   assert.throws(() => run(['--role', 'worker', '--team', 'web', repo], 'x'), (e) => e.status === 3 && /team full: 1\/1 worker in web/.test(e.stderr)) // exits before any spawn or send
   assert.match(run(['--role', 'worker', '--team', 'web', '--dry-run', repo], 'x'), /^dry-run: team full: 1\/1 worker in web/)
   assert.throws(() => run(['--role', 'reviewer', '--team', 'web', '--dry-run', repo], 'x'), (e) => e.status === 2 && /team web has no reviewer member/.test(e.stderr))
-})
-
-test('WP-242: a server-run handoff (no pane id, WT_DELIVER_TOKEN) queues the message with x-wt-server and does not paste it', async () => {
-  const { createServer } = await import('node:http'); const { execFile } = await import('node:child_process'); const { promisify } = await import('node:util')
-  const seen = []
-  const srv = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { if (req.url === '/api/deliveries') seen.push({ h: req.headers, b: JSON.parse(b) }); res.end(req.url === '/api/deliveries' ? '{"queued":true}' : '{}') }) })
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r))
-  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [] } }))
-  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
-    { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
-  writeFileSync(log, '')
-  const p = promisify(execFile)(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_PANE_ID: '', WT_DELIVER_TOKEN: 'tok', HERDR_DASH_URL: `http://127.0.0.1:${srv.address().port}` } })
-  p.child.stdin.end('do the thing'); await p
-  srv.close()
-  assert.equal(seen.length, 1); assert.equal(seen[0].h['x-wt-server'], 'tok'); assert.match(seen[0].b.text, /^<wt-message/)
-  const calls = readFileSync(log, 'utf8')
-  assert.match(calls, /send-text wW:p9 \/goal finish/); assert.doesNotMatch(calls, /agent prompt wW:p9/)
 })
