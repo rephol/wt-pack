@@ -87,13 +87,16 @@ export class Messages {
   }
 
   // Expiry pass. deps: { seen(row) → bool (the target is demonstrably working on it: counts as an ack),
-  // resend(row) → Promise (re-deliver row.body, same envelope id), flag(row) }. Returns what it did.
-  async sweep({ seen, resend, flag }, { ackMs = ACK_MS, maxAttempts = MAX_ATTEMPTS } = {}) {
+  // pending(row) → bool (WP-258: still waiting in the target's delivery queue — nothing is lost, so it is neither
+  // resent nor counted against its attempts nor flagged), resend(row) → Promise (re-deliver row.body, same envelope id),
+  // flag(row) }. Returns what it did.
+  async sweep({ seen, pending, resend, flag }, { ackMs = ACK_MS, maxAttempts = MAX_ATTEMPTS } = {}) {
     const done = []
     const cut = new Date(this.now() - ackMs).toISOString()
     const rows = this.db.prepare(`SELECT * FROM wt_messages WHERE state IN ('queued', 'delivered') AND updated < ? ORDER BY created`).all(cut)
     for (const row of rows) {
       if (!ACK_KINDS.has(row.kind)) continue // replies, system notes and room traffic expect no ack
+      if (await Promise.resolve(pending?.(row)).catch(() => false)) continue
       if (await Promise.resolve(seen?.(row)).catch(() => false)) { this.ack(row.id, null); done.push({ id: row.id, did: 'acknowledged' }); continue }
       if (row.attempts >= maxAttempts) {
         this.move(row.id, 'expired', { error: `no acknowledgement after ${row.attempts} sends` })

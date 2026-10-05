@@ -96,3 +96,14 @@ test('envelopeOf also reads a room delivery, but not its context tag', () => {
   assert.deepEqual(envelopeOf('<room-message id=r9 room=wt-pack from="Rep" kind=mention>x</room-message>'), { id: 'r9', kind: 'room', sender: 'Rep', ticket: null })
   assert.equal(envelopeOf('<room-message id=r9 room=wt-pack from="dashboard" kind=context since=3>x</room-message>'), null)
 })
+
+test('WP-258: a message still waiting in the target\'s queue is neither resent, counted nor flagged', async () => {
+  const { m, clock, draft } = await setup()
+  m.record(draft({ id: 'q1', state: 'queued' })); const at0 = m.get('q1').attempts
+  let waiting = true; const sent = []
+  const deps = { pending: () => waiting, resend: async (r) => { sent.push(r.id) }, flag: () => assert.fail('flagged') }
+  for (let i = 0; i < 5; i++) { clock.t += 6 * 60_000; assert.deepEqual(await m.sweep(deps), []) } // a long turn: 30 min
+  assert.deepEqual(sent, []); assert.equal(m.get('q1').attempts, at0); assert.equal(m.get('q1').state, 'queued')
+  waiting = false // the queue was pasted away (mod went quiet): the normal expiry takes over
+  assert.deepEqual(await m.sweep(deps), [{ id: 'q1', did: 'resent' }])
+})

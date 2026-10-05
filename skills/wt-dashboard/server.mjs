@@ -2469,6 +2469,7 @@ const messageSweep = async () => {
   const ags = await agents().catch(() => null)
   if (!ags) return
   await messages.sweep({
+    pending: (row) => deliveries.live(row.target) && deliveries.queuedFor(row.target, row.id), // WP-258: queued behind a running turn, not lost
     seen: (row) => ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
     resend: async (row) => {
       if (!ags.some((a) => a.id === row.target && a.local !== false)) throw new Error(`${row.target} is gone`)

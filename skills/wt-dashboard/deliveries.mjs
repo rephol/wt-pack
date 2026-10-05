@@ -25,6 +25,10 @@ export class Deliveries {
   }
   // The oldest queued row for this pane. Not claimed: it stays queued until acked, so a crashed mod re-pulls it.
   next(pane) { return this.db.prepare("SELECT * FROM deliveries WHERE pane = ? AND status = 'queued' ORDER BY seq LIMIT 1").get(pane) ?? null }
+  // WP-258: is this envelope still waiting in the pane's queue? (Its id is `[\w-]+`, so the LIKE needs no escaping.)
+  queuedFor(pane, envelopeId) {
+    return !!this.db.prepare("SELECT 1 FROM deliveries WHERE pane = ? AND status = 'queued' AND body LIKE ?").get(pane, `%<wt-message id=${envelopeId} %`)
+  }
   // Only the owning pane acks, and only a queued row (the first ack wins).
   ack(id, pane, status = 'delivered') {
     if (!STATUS.includes(status) || status === 'queued') throw err(400, `status: ${STATUS.slice(1).join('|')}`)
