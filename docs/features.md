@@ -800,6 +800,28 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   - **Add to team.** A member row with a free seat lists the project's agents that are on no team (a hand-started persona agent); picking one tags it `team=<name>` (and `persona=<name>` for a custom persona; a base-role seat needs an agent of that role). `POST /api/teams/<project>/<team>/adopt {agent, persona}`, session only. There is no auto-adopt.
   - **Routines and room mentions.** A routine skips a team agent unless the routine names that agent. An `@mention` in a room to a team agent is allowed: it names one agent, so a person chose it, and a room turn is conversation, not ticket work.
 
+## wt MCP server (WP-255)
+
+The plugin registers a second MCP server, `wt` (`skills/wt-shared/mcp/wt-server.mjs`, stdio, no dependencies), that gives an
+agent typed tools over the CLIs it already has: `ticket_list`, `ticket_show`, `ticket_new`, `ticket_move`, `ticket_comment`
+(wt-ticket), `handoff`, `handoff_reply`, `handoff_ack` (handoff.sh), `room_list`, `room_read`, `room_post` (room), `ask` and
+`ask_answer` (wt-ask). Every tool shells out to its CLI, so the CLIs keep working unchanged and stay the one source of truth.
+
+- **Typed arguments.** Each tool has a JSON schema (enums for columns, types and roles; patterns for ticket ids, pane ids and
+  room slugs; length limits); a bad call fails `invalid_argument` before any CLI runs, and a text value that starts with `-`
+  is refused, so an argument can never read as a flag. The handoff prompt travels on stdin.
+- **Typed errors.** A failure is `isError` with `{ error: { code, message, retryable, exit } }`: `invalid_argument`,
+  `unknown_tool`, `refused` (a gate, a cross-team handoff), `not_found`, `pool_full` / `team_full` (retryable),
+  `dashboard_unreachable` (retryable), `timeout` (retryable), `resolved` (an ask closed without an answer), `failed`.
+- **Idempotency.** Every tool that changes something takes an optional `idempotency_key`: repeating it returns the first
+  result and does nothing again (`handoff` passes it on as `--request-id mcp:<key>`, WP-251; the others use the receipts
+  store). A failed call is not remembered, so retrying it runs it again.
+- **Deadline.** Claude Code aborts an MCP call after about 60 s, so a CLI still running after 50 s (`WT_MCP_TIMEOUT_MS`) is
+  killed with its children and the call fails `timeout`; repeat it with the same key. `ask_answer` waits at most 45 s per call
+  (`{ answered: false }` = still open, call again).
+- Identity is the agent's own pane (`$HERDR_PANE_ID`, inherited). The server is loaded by agents that load the wt-pack plugin;
+  an agent spawned in `WT_AGENTS_MCP=lean` mode (a strict per-role MCP set) does not get it.
+
 ## wt-ticket CLI
 
 Talks to the dashboard at `$HERDR_DASH_URL` (default `http://127.0.0.1:7777`); project defaults to the
