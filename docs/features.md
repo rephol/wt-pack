@@ -742,7 +742,15 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   persona into its base pool); `agents.sh spawn <role|persona> --team <name>` adds one. Every member pane carries a
   display-only `team=<name>` token (shown in the agent's tags; like `pair` it lives on the pane, so a herdr restart clears it
   until the agent is respawned). A failed member makes `spawn --team` exit 1 after the others have started; the whole-team form takes an absolute or `./` path. This ticket (WP-237) covers definitions and spawn;
-  routing tickets to a team and stage gates are separate (WP-238, WP-239).
+  ticket routing is WP-238 (below), stage gates WP-239.
+- Ticket ownership and stage routing (WP-238, Dispatch): when a repo has team files, a card's first assignment gives it a
+  `team` (the ticket's own if set, else the least-loaded team with room; capacity = members of the team's build persona).
+  Every later Dispatch stage goes only to that team's persona for the stage (its `stages:` map, else planner / worker /
+  reviewer / auditor): `plan` and `build` through `handoff.sh --team`, the pair buddy as the team's `review` persona.
+  `qa` has no automatic dispatch yet. A team whose roster has no such member, or all teams full, leaves the card in Ready
+  with the reason in Dispatch's status. `handoff.sh` candidates, routine role picks, buddy picks and the drawer's buddy route
+  match on the `team` pane token (an agent's team must equal the ticket's, none = none), and a team spawn never exceeds
+  the file's count (exit 3, `team full`). A card already taken through Planning goes to a worker next, not a second planner.
 - Dashboard: the **Teams** page (`#teams`, `GET /api/teams`) lists each project's teams with the agents filling every
   member, load (agents up of defined, working, tickets) and the team's workflow as a Mermaid flowchart generated from
   the file (stage → persona with count → gate, review/QA looping back to build), bundled in the web app (no CDN). The
