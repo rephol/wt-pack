@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
 #   handoff.sh --cancel <pane|name> ["why"]               # stop a /goal-driven agent: escape, end its goal,
 #                                                          # clear task/ticket tokens, return its card if assigned
@@ -60,6 +60,7 @@ set -eu
 mode=auto
 role=
 persona=
+team=
 pane_arg=
 clear=0
 kind=handoff
@@ -99,6 +100,8 @@ while :; do
              case "$role" in worker|planner|reviewer) ;; *) echo "--role: worker, planner or reviewer" >&2; exit 2 ;; esac ;;
     --persona) persona=$2; shift 2   # WP-204: only agents tagged persona=<name>, or a spawn of that persona
              printf '%s' "$persona" | grep -qE '^[a-z][a-z0-9-]{0,23}$' || { echo "--persona: a name like frontend-worker" >&2; exit 2; } ;;
+    --team)  team=$2; shift 2   # WP-238: only agents tagged team=<name> (a plain handoff skips team agents), spawns join it
+             printf '%s' "$team" | grep -qE '^[a-z][a-z0-9-]{0,23}$' || { echo "--team: a team name like web" >&2; exit 2; } ;;
     --pr)    pr=$2; shift 2 ;;   # WP-121: pr=/sha= on the wt-message (wt-watch-prs dispatch)
     --sha)   sha=$2; shift 2 ;;
     --mcp)   mcp=$2; shift 2 ;;
@@ -228,11 +231,11 @@ candidates() {
     | jq -c '[.tickets[]? | select(.column != "done") | {id, a: (.assignee.name // "")}]' 2>/dev/null) || held=
   [ -n "$held" ] || held='[]'
   herdr agent list \
-    | jq -r --arg ws "$ws" --arg persona "$persona" --argjson panes "$panes" \
+    | jq -r --arg ws "$ws" --arg persona "$persona" --arg team "$team" --argjson panes "$panes" \
       '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws)
        | . as $a | ($panes[$a.pane_id] // {}) as $t
        | select(($t.dnd // "") == "") | select(($t.pair // "") == "")
-       | select(($t.persona // "") == $persona)
+       | select(($t.persona // "") == $persona) | select(($t.team // "") == $team)
        | [$a.pane_id, $a.tab_id, $a.cwd, ($t.model // ""), ($t.effort // "")] | @tsv' \
     | while IFS="$tab" read -r id tid acwd amodel aeffort; do
         # Target by PANE ID, not name: an agent started by hand rather than by
@@ -500,7 +503,7 @@ fi
 # unset/non-numeric = no cap (today's behaviour). No queue: the caller (dispatch) keeps the card in Ready and
 # retries it on its next pass (dispatch.mjs's existing 3-strikes rule applies here too — a pool that stays full
 # for ~3 backoff cycles holds the card for a manual retry, same as any other repeated dispatch failure).
-if [ "$role" = worker ]; then
+if [ "$role" = worker ] && [ -z "$team" ]; then # a team is capped by its roster below, not by the plain pool cap
   cap=${WT_WORKERS_MAX:-$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get WT_WORKERS_MAX --cwd "${main_checkout:-$cwd}" 2>/dev/null)}
   case "$cap" in ''|*[!0-9]*) cap= ;; esac
   if [ -n "$cap" ]; then
@@ -519,10 +522,25 @@ if [ "$role" = worker ]; then
   fi
 fi
 
+# WP-238: a team never grows past its roster — the spawn below would add a member beyond the team file's count for this persona.
+if [ -n "$team" ]; then
+  want=${persona:-$role}
+  seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" list --cwd "${main_checkout:-$cwd}" 2>/dev/null \
+    | jq --arg t "$team" --arg p "$want" '[.[] | select(.name == $t) | .members[] | select(.persona == $p) | .count] | add // 0' 2>/dev/null) || seats=0
+  [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
+  have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
+  if [ "${have:-0}" -ge "$seats" ]; then
+    full="team full: $have/$seats $want in $team"
+    [ "$dry" -eq 1 ] && dry "$full"
+    echo "$full" >&2
+    exit 3
+  fi
+fi
+
 [ "$dry" -eq 1 ] && dry "would spawn a ${persona:+$persona }$role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
-created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"})
+created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"} ${team:+--team "$team"})
 label=${created%% *}
 pane=${created##* }
 

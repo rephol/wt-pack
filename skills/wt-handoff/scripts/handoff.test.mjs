@@ -329,3 +329,22 @@ test('WP-240: a /goal handoff is typed (send-text + Enter), not pasted via agent
   calls = readFileSync(log, 'utf8')
   assert.match(calls, /^herdr agent prompt wW:p9 /m)
 })
+
+test('WP-238: --team picks only that team\'s agents (a plain handoff skips them), spawns cap at the roster', () => {
+  mkdirSync(join(repo, '.wt-pack', 'teams'), { recursive: true })
+  writeFileSync(join(repo, '.wt-pack', 'teams', 'web.md'), '---\ndescription: t\nmembers: [worker x1]\nstages: [build=worker]\n---\n')
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo },
+    { name: 'demo-worker-02', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
+    { pane_id: 'wW:p1', tokens: {} }, { pane_id: 'wW:p2', tokens: { team: 'web', role: 'worker' } }] } }))
+  const list = (extra) => run(['--list', ...extra, repo]).trim().split('\n').filter(Boolean).map((l) => l.split('\t')[0])
+  assert.deepEqual(list([]), ['wW:p1'])
+  assert.deepEqual(list(['--team', 'web']), ['wW:p2'])
+  // the team's one worker seat is taken (p2 is busy): a spawn would exceed the roster → exit 3
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-02', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
+  assert.throws(() => run(['--role', 'worker', '--team', 'web', repo], 'x'), (e) => e.status === 3 && /team full: 1\/1 worker in web/.test(e.stderr)) // exits before any spawn or send
+  assert.match(run(['--role', 'worker', '--team', 'web', '--dry-run', repo], 'x'), /^dry-run: team full: 1\/1 worker in web/)
+  assert.throws(() => run(['--role', 'reviewer', '--team', 'web', '--dry-run', repo], 'x'), (e) => e.status === 2 && /team web has no reviewer member/.test(e.stderr))
+})
