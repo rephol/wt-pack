@@ -16,7 +16,7 @@ injects. It is versioned with the code: reviewed, branched and committed like co
 wt-roles list                                        what is in effect here (kind, base, size, status)
 wt-roles new <name> [--base <role>] [--from-default] write a starting file
 wt-roles check                                       validate every file (exit 1 on an error)
-wt-roles team list|check|new <name> [--template solo|standard|full] [--user]   team files: members (persona xN) + stage→persona map (WP-237)
+wt-roles team list|check|new <name> [--template solo|standard|full] [--user]   (no --template: an empty team to fill in)  team files: members (persona xN) + stage→persona map (WP-237)
 ```
 All take `--cwd <dir>` (default: here). The CLI is `scripts/wt-roles` in this skill's directory (it is not on
 `PATH`). A worktree reads and writes its repo's **main checkout**.

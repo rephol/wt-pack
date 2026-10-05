@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync, realpathSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, realpathSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -54,6 +54,9 @@ test('WP-237 team: new from a template, list, check; refuses clobber, bad templa
   assert.match(readFileSync(t('pod'), 'utf8'), /members: \[planner, worker x2, reviewer, auditor\]/)
   assert.equal(run('team', 'new', 'pod').code, 1)
   assert.equal(run('team', 'new', 'x', '--template', 'huge').code, 2)
+  assert.equal(run('team', 'new', 'empty').code, 0) // WP-244: no --template is an empty team
+  assert.match(readFileSync(t('empty'), 'utf8'), /^---\ndescription: \nmembers: \[\]\nstages: \[\]\n---\n/)
+  rmSync(t('empty'))
   assert.match(run('team', 'list').out, /^pod\s+ok\s+planner, worker x2, reviewer, auditor/m)
   assert.equal(run('team', 'check').code, 0)
   writeFileSync(t('pod'), '---\nmembers: [ghost]\n---\n')
