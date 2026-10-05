@@ -29,6 +29,8 @@ function Flow({ source }: { source: string }) {
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     let live = true
+    setFailed(false) // a bad source (an empty draft mid-edit) must not leave every later one as raw text
+    if (!source) return
     import('mermaid').then(async ({ default: mermaid }) => {
       mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' })
       const out = await mermaid.render(id, source)
@@ -37,7 +39,7 @@ function Flow({ source }: { source: string }) {
     return () => { live = false }
   }, [id, source])
   if (failed) return <pre style={{ margin: 0, fontSize: 12, whiteSpace: 'pre-wrap' }}>{source}</pre>
-  if (!svg) return <Text type="supporting" size="sm">Drawing workflow…</Text>
+  if (!source || !svg) return <Text type="supporting" size="sm">Drawing workflow…</Text>
   return <div role="img" aria-label="Team workflow" style={{ overflowX: 'auto', maxWidth: '100%' }} dangerouslySetInnerHTML={{ __html: svg }} />
 }
 
@@ -80,8 +82,12 @@ function NewTeam({ projects, onClose, onBlank }: { projects: string[]; onClose: 
 
 // `create`: a blank new team — Save POSTs it (name + this body) instead of PUTting over an existing file.
 function EditTeam({ t, onClose, create }: { t: Team; onClose: () => void; create?: boolean }) {
-  const [d, setD] = useState<Draft>({ description: t.description, members: t.members.map((m) => ({ persona: m.persona, count: m.count })), stages: t.stages.map((x) => ({ ...x })) })
+  const [d, setD] = useState<Draft>({ description: t.description, members: t.members.reduce<Draft['members']>((a, m) => { const x = a.find((y) => y.persona === m.persona); x ? (x.count += m.count) : a.push({ persona: m.persona, count: m.count }); return a }, []), stages: t.stages.map((x) => ({ ...x })) })
   const [flow, setFlow] = useState(t.flowchart)
+  // WP-245: nothing is typed — a member is a base role or one of the project's personas, each at most once; a stage is one of STAGES.
+  const roles = useQuery({ queryKey: ['project-roles', t.project], queryFn: () => api<{ bases: string[]; files: { name: string; kind: string }[] }>(`/api/projects/${encodeURIComponent(t.project)}/roles`) })
+  const personas = [...new Set([...(roles.data?.bases ?? ['planner', 'worker', 'reviewer', 'auditor']), ...(roles.data?.files.filter((f) => f.kind === 'persona').map((f) => f.name) ?? [])])]
+  const free = personas.filter((p) => !d.members.some((m) => m.persona === p)).sort((x, y) => Number(y === 'worker') - Number(x === 'worker')) // worker first: the usual add
   const act = useTeamAction(create ? 'Team created' : 'Team saved')
   useEffect(() => {
     const h = setTimeout(() => api<{ flowchart: string }>('/api/teams/preview', { method: 'POST', body: JSON.stringify(d) }).then((r) => setFlow(r.flowchart), () => {}), 300)
@@ -97,22 +103,22 @@ function EditTeam({ t, onClose, create }: { t: Team; onClose: () => void; create
           <TextInput label="Description" value={d.description} onChange={(description) => setD({ ...d, description })} />
           <Text weight="semibold" size="sm">Members (role or persona × count)</Text>
           {d.members.map((m, i) => (
-            <HStack key={i} gap={2} align="end">
-              <TextInput label="Persona" value={m.persona} onChange={(persona) => setM(i, { persona: persona.toLowerCase() })} />
+            <HStack key={i} gap={2} align="end" wrap="wrap">
+              <Selector label="Persona" value={m.persona} options={[m.persona, ...free].map((x) => ({ value: x, label: x }))} onChange={(persona) => setM(i, { persona })} />
               <TextInput label="Count" value={String(m.count)} onChange={(v) => setM(i, { count: Number(v) || 0 })} />
               <Button label="Remove" variant="ghost" onClick={() => setD({ ...d, members: d.members.filter((_, j) => j !== i) })} />
             </HStack>
           ))}
-          <Button label="Add member" variant="ghost" onClick={() => setD({ ...d, members: [...d.members, { persona: 'worker', count: 1 }] })} />
+          <Button label="Add member" variant="ghost" isDisabled={!free.length} onClick={() => setD({ ...d, members: [...d.members, { persona: free[0], count: 1 }] })} />
           <Text weight="semibold" size="sm">Stage → persona</Text>
           {d.stages.map((s, i) => (
-            <HStack key={i} gap={2} align="end">
-              <Selector label="Stage" value={s.stage} options={STAGES.map((x) => ({ value: x, label: x }))} onChange={(stage) => setS(i, { stage })} />
+            <HStack key={i} gap={2} align="end" wrap="wrap">
+              <Selector label="Stage" value={s.stage} options={STAGES.filter((x) => x === s.stage || !d.stages.some((o) => o.stage === x)).map((x) => ({ value: x, label: x }))} onChange={(stage) => setS(i, { stage })} />
               <Selector label="Persona" value={s.persona} options={[...new Set([s.persona, ...d.members.map((m) => m.persona)])].map((x) => ({ value: x, label: x }))} onChange={(persona) => setS(i, { persona })} />
               <Button label="Remove" variant="ghost" onClick={() => setD({ ...d, stages: d.stages.filter((_, j) => j !== i) })} />
             </HStack>
           ))}
-          <Button label="Add stage" variant="ghost" onClick={() => setD({ ...d, stages: [...d.stages, { stage: STAGES.find((x) => !d.stages.some((s) => s.stage === x)) ?? 'build', persona: d.members[0]?.persona ?? 'worker' }] })} />
+          <Button label="Add stage" variant="ghost" isDisabled={d.stages.length >= STAGES.length} onClick={() => setD({ ...d, stages: [...d.stages, { stage: STAGES.find((x) => !d.stages.some((s) => s.stage === x)) ?? 'build', persona: d.members[0]?.persona ?? 'worker' }] })} />
           <Flow source={flow} />
         </VStack>
       
