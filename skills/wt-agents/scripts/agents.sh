@@ -23,6 +23,10 @@
 #                                            cwd, tokens and claude session (model/effort tokens re-applied as
 #                                            --model/--effort so the respawn keeps its tier, not the role floor);
 #                                            --stale: every pool agent lacking either
+#   agents.sh spawn --team <name> [cwd]    # WP-237: bring a whole team up (.wt-pack/teams/<name>.md, see wt-roles team):
+#                                            one `spawn <persona> [cwd] --team <name>` per member x count, prints each
+#                                            "<name> <pane>"; `spawn <role|persona> --team <name>` adds ONE agent to a
+#                                            team. Every member pane gets the display-only `team` token.
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
@@ -118,7 +122,7 @@ list)
 spawn|mcp-args|mcp-file)
   # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
   # --label/--resume are respawn's (WP-125): keep the old name, resume its claude session.
-  extra=; model=; effort=; fixed=; resume=; n=$#
+  extra=; model=; effort=; fixed=; resume=; team=; n=$#
   while [ "$n" -gt 0 ]; do
     a=$1; shift; n=$((n - 1))
     if [ "$a" = --mcp ]; then extra=$1; shift; n=$((n - 1))
@@ -126,8 +130,21 @@ spawn|mcp-args|mcp-file)
     elif [ "$a" = --effort ]; then effort=$1; shift; n=$((n - 1))
     elif [ "$a" = --label ]; then fixed=$1; shift; n=$((n - 1))
     elif [ "$a" = --resume ]; then resume=$1; shift; n=$((n - 1))
+    elif [ "$a" = --team ]; then team=$1; shift; n=$((n - 1))
     else set -- "$@" "$a"; fi
   done
+  if [ -n "$team" ] && ! printf '%s' "$team" | grep -Eq '^[a-z][a-z0-9-]{0,22}$'; then
+    echo "--team: a team name ([a-z][a-z0-9-]*, <= 23 chars)" >&2; exit 2
+  fi
+  # WP-237: `spawn --team <name> [cwd]` (no role) spawns every member of the team file, one process per agent.
+  if [ -n "$team" ] && [ "$cmd" = spawn ] && { [ $# -eq 0 ] || [ -d "$1" ]; }; then
+    tcwd=$(cd "${1:-$PWD}" 2>/dev/null && pwd) || { echo "no such directory: ${1:-}" >&2; exit 1; }
+    members=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" members "$team" --cwd "$tcwd") || { echo "team $team: not found or invalid (wt-roles team check)" >&2; exit 1; }
+    [ -z "$members" ] || printf '%s\n' "$members" | while IFS= read -r m; do
+      WT_AGENTS_SPAWNED_BY="${WT_AGENTS_SPAWNED_BY:-wt-agents}" "$0" spawn "$m" "$tcwd" --team "$team" ${model:+--model "$model"} ${effort:+--effort "$effort"} ${extra:+--mcp "$extra"} < /dev/null
+    done
+    exit 0
+  fi
   role=${1:?role required, e.g. worker|planner}
   # WP-204: a name that is not a base role but has a project-role file (.wt-pack/roles/<name>.md) is a PERSONA: it
   # spawns into its BASE role's pool with role=<base> and a persona token, so retire, DND/pair gates and Dispatch
@@ -279,7 +296,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # role token from this pane, and a tag set after start arrives too late for it.
   # (Best effort: an older herdr has no report-metadata.)
   herdr pane report-metadata "$pane" --source wt-dashboard --token "role=$role" --token "project=$repo" \
-    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" ${persona:+--token "persona=$persona"} >/dev/null 2>&1 || true
+    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" ${persona:+--token "persona=$persona"} ${team:+--token "team=$team"} >/dev/null 2>&1 || true
 
   # A fresh pane is not at its shell prompt the instant `tab create` returns.
   n=0
