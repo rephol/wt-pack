@@ -313,3 +313,19 @@ esac
   writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
+
+test('WP-240: a /goal handoff is typed (send-text + Enter), not pasted via agent prompt; --no-goal still pastes', () => {
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [] } }))
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(log, '')
+  run(['--role', 'worker', '--pane', 'wW:p9', repo], 'do the thing')
+  let calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr pane send-text wW:p9 \/goal .*<wt-message/m)
+  assert.match(calls, /^herdr pane send-keys wW:p9 enter/m)
+  assert.doesNotMatch(calls, /agent prompt wW:p9 \/goal/)
+  writeFileSync(log, '')
+  run(['--role', 'worker', '--pane', 'wW:p9', '--no-goal', repo], 'do the thing')
+  calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr agent prompt wW:p9 /m)
+})
