@@ -20,7 +20,8 @@ import { LoadError } from './skeletons'
 type Agent = { name: string; status: string; ticket: string | null; stage: string | null }
 type Team = { stages: { stage: string; persona: string }[]; name: string; project: string; description: string; where: string; errors: string[]; flowchart: string
   members: { persona: string; count: number; agents: Agent[] }[]
-  load: { agents: number; of: number; working: number; tickets: number }; tickets: { id: string; stage: string }[]; active: string[] }
+  other: Agent[] // WP-246: team agents that fill no member (no matching persona token, name or role)
+  load: { agents: number; of: number; working: number; tickets: number; other: number }; tickets: { id: string; stage: string }[]; active: string[] }
 
 // mermaid is bundled (no CDN) and loaded on first use: the page itself stays small. securityLevel strict sanitises its SVG.
 function Flow({ source }: { source: string }) {
@@ -32,7 +33,7 @@ function Flow({ source }: { source: string }) {
     setFailed(false) // a bad source (an empty draft mid-edit) must not leave every later one as raw text
     if (!source) return
     import('mermaid').then(async ({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' })
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', flowchart: { useMaxWidth: false }, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' })
       const out = await mermaid.render(id, source)
       if (live) setSvg(out.svg)
     }).catch(() => live && setFailed(true))
@@ -154,7 +155,7 @@ function TeamCard({ t, showProject }: { t: Team; showProject: boolean }) {
     <VStack gap={2} style={{ padding: 12, border: '1px solid var(--color-border-primary, rgba(127,127,127,.3))', borderRadius: 8 }}>
       <HStack justify="between" align="center" wrap="wrap" gap={2}>
         <Heading level={3}>{t.name}{showProject ? ` · ${t.project}` : ''}</Heading>
-        <Text type="supporting" size="sm">{`${t.load.agents}/${t.load.of} up · ${t.load.working} working · ${t.load.tickets} ticket${t.load.tickets === 1 ? '' : 's'}`}</Text>
+        <Text type="supporting" size="sm">{`${t.load.agents}/${t.load.of} up · ${t.load.other ? `${t.load.other} other · ` : ''}${t.load.working} working · ${t.load.tickets} ticket${t.load.tickets === 1 ? '' : 's'}`}</Text>
       </HStack>
       {t.description && <Text size="sm">{t.description}</Text>}
       {t.errors.length > 0 && <Banner status="warning" title="Team file has problems" description={`${t.errors.join('; ')} (wt-roles team check)`} />}
@@ -167,6 +168,12 @@ function TeamCard({ t, showProject }: { t: Team; showProject: boolean }) {
               : <Text size="sm">{m.agents.map((a) => `${a.name} (${a.status}${a.ticket ? ` · ${a.ticket}${a.stage ? ` ${a.stage}` : ''}` : ''})`).join(', ')}</Text>}
           </HStack>
         ))}
+        {t.other.length > 0 && (
+          <HStack gap={2} wrap="wrap" align="start">
+            <Text weight="semibold" size="sm">Other</Text>
+            <Text size="sm">{t.other.map((a) => `${a.name} (${a.status}${a.ticket ? ` · ${a.ticket}${a.stage ? ` ${a.stage}` : ''}` : ''})`).join(', ')}</Text>
+          </HStack>
+        )}
       </VStack>
       <Flow source={t.flowchart} />
       <HStack gap={2} wrap="wrap">
@@ -190,7 +197,7 @@ export function TeamsPage({ project, projectNames }: { project: string; projectN
   return (
     <VStack gap={3}>
       <HStack justify="end"><Button label="New team" variant="primary" isDisabled={!projects.length} onClick={() => setNewOpen(true)} /></HStack>
-      {newOpen && <NewTeam projects={projects} onClose={() => setNewOpen(false)} onBlank={(project, name) => setBlank({ project, name, description: '', where: '', errors: [], flowchart: '', stages: [], members: [], load: { agents: 0, of: 0, working: 0, tickets: 0 }, tickets: [], active: [] })} />}
+      {newOpen && <NewTeam projects={projects} onClose={() => setNewOpen(false)} onBlank={(project, name) => setBlank({ project, name, description: '', where: '', errors: [], flowchart: '', stages: [], members: [], other: [], load: { agents: 0, of: 0, working: 0, tickets: 0, other: 0 }, tickets: [], active: [] })} />}
       {blank && <EditTeam create t={blank} onClose={() => setBlank(null)} />}
       <Text type="supporting" size="sm">A team is a pod of agents defined in .wt-pack/teams/&lt;name&gt;.md (or the user-level folder): members as persona × count, and which persona takes each stage.</Text>
       {teams.length === 0 && <Text type="supporting" size="sm">No teams yet. Use New team above (or wt-roles team new &lt;name&gt; [--template solo|standard|full])</Text>}

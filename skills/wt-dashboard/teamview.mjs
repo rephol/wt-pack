@@ -10,20 +10,27 @@ export function teamView(team, project, agents, columnOf) {
   const mine = agents.filter((a) => a.tags?.team === team.name && a.tags.project === project)
   const qa = team.stages.find((s) => s.stage === 'qa')?.persona
   const tickets = []
-  const members = team.members.map((m) => {
-    const filled = mine.filter((a) => (a.tags.persona ?? a.tags.role) === m.persona)
-    return { persona: m.persona, count: m.count, agents: filled.map((a) => {
-      const id = a.tags.ticket || null
-      const column = id ? columnOf(id) : undefined
-      let stage = STAGE_OF[column] ?? null
-      if (stage === 'review' && qa === m.persona) stage = 'qa'
-      if (id && stage && !tickets.some((t) => t.id === id)) tickets.push({ id, stage })
-      return { name: a.name, status: a.status, ticket: id, stage }
-    }) }
-  })
+  // WP-246: an agent fills the member its persona token names; with no token, the one its name says
+  // (<project>-<persona>-NN, as wt-agents names them), else the one its role is. Any other team agent is "other".
+  const slot = (a) => {
+    const t = a.tags, ps = team.members.map((m) => m.persona)
+    if (t.persona) return ps.find((p) => p === t.persona)
+    return ps.find((p) => new RegExp(`^${project.replace(/[^\w-]/g, '\\$&')}-${p.replace(/[^\w-]/g, '\\$&')}-\\d+$`).test(a.name)) ?? ps.find((p) => p === t.role)
+  }
+  const place = (a, persona) => {
+    const id = a.tags.ticket || null
+    const column = id ? columnOf(id) : undefined
+    let stage = STAGE_OF[column] ?? null
+    if (stage === 'review' && qa === persona) stage = 'qa'
+    if (id && stage && !tickets.some((t) => t.id === id)) tickets.push({ id, stage })
+    return { name: a.name, status: a.status, ticket: id, stage }
+  }
+  const placed = mine.map((a) => [a, slot(a)])
+  const members = team.members.map((m) => ({ persona: m.persona, count: m.count, agents: placed.filter(([, p]) => p === m.persona).map(([a]) => place(a, m.persona)) }))
+  const other = placed.filter(([, p]) => !p).map(([a]) => place(a, null))
   const up = members.reduce((n, m) => n + m.agents.length, 0)
   const busy = mine.filter((a) => a.status === 'working').length
-  return { name: team.name, project, description: team.description, members, stages: team.stages, tickets,
-    load: { agents: up, of: team.members.reduce((n, m) => n + m.count, 0), working: busy, tickets: tickets.length },
+  return { name: team.name, project, description: team.description, members, other, stages: team.stages, tickets,
+    load: { agents: up, of: team.members.reduce((n, m) => n + m.count, 0), working: busy, tickets: tickets.length, other: other.length },
     active: [...new Set(tickets.map((t) => t.stage))] }
 }
