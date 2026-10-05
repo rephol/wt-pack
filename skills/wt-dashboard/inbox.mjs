@@ -5,8 +5,9 @@ import { readdirSync, lstatSync, readFileSync, statSync } from 'node:fs'
 import { open, tx } from './store.mjs'
 import { randomUUID } from 'node:crypto'
 
-export const KINDS = ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'ask']
-export const ACTIONABLE = new Set(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask'])
+import { KINDS, ACTIONABLE_KINDS } from './contracts.mjs' // WP-254: the kind lists live in contracts.mjs
+export { KINDS }
+export const ACTIONABLE = new Set(ACTIONABLE_KINDS)
 
 // A transition (from server.mjs transitions()) → an inbox item draft.
 export function itemFromTransition(e) {
