@@ -25,6 +25,8 @@
 #                                            --stale: every pool agent lacking either
 #   agents.sh spawn --team <name> [cwd]    # WP-237: bring a whole team up (.wt-pack/teams/<name>.md, see wt-roles team):
 #                                            one `spawn <persona> [cwd] --team <name>` per member x count, prints each
+#                                            (WP-247: only the seats not already taken; a single spawn into a team refuses a
+#                                            non-member persona (exit 2) and a full seat (exit 3))
 #                                            "<name> <pane>"; `spawn <role|persona> --team <name>` adds ONE agent to a
 #                                            team. Every member pane gets the display-only `team` token.
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
@@ -144,7 +146,8 @@ spawn|mcp-args|mcp-file)
     fail=0
     while IFS= read -r m; do
       [ -n "$m" ] || continue
-      WT_AGENTS_SPAWNED_BY="${WT_AGENTS_SPAWNED_BY:-wt-agents}" "$0" spawn "$m" "$tcwd" --team "$team" ${model:+--model "$model"} ${effort:+--effort "$effort"} ${extra:+--mcp "$extra"} < /dev/null || { echo "team $team: spawning $m failed" >&2; fail=1; }
+      # WP-247: only missing seats are filled — a seat already taken makes the single spawn exit 3 (team full), which is not a failure
+      WT_AGENTS_SPAWNED_BY="${WT_AGENTS_SPAWNED_BY:-wt-agents}" "$0" spawn "$m" "$tcwd" --team "$team" ${model:+--model "$model"} ${effort:+--effort "$effort"} ${extra:+--mcp "$extra"} < /dev/null || { [ $? -eq 3 ] || { echo "team $team: spawning $m failed" >&2; fail=1; }; }
     done <<TEAM_MEMBERS
 $members
 TEAM_MEMBERS
@@ -192,6 +195,16 @@ TEAM_MEMBERS
   # WP-199: the pool, the name's slug and the project token follow the TARGET directory's repo — not the caller's.
   # Spawning `orchestrator ~/Work/projects/other` from this checkout made wt-pack-orchestrator-NN in wt-pack's pool.
   tmain=$(repo_root "$cwd"); case "$tmain" in ''|.) ;; *) main=$tmain; repo=$(basename "$main") ;; esac
+
+  # WP-247: a spawn that names a team joins it only as a persona/role the team file has, and only into a free seat
+  # (the same checks and messages as handoff.sh --team). exit 2: not a member; exit 3: roster full.
+  if [ -n "$team" ] && [ "$cmd" = spawn ]; then
+    want=$lrole
+    seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "$cwd" 2>/dev/null) || seats=0
+    [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
+    have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
+    [ "${have:-0}" -lt "$seats" ] || { echo "team full: $have/$seats $want in $team" >&2; exit 3; }
+  fi
 
   [ "$cmd" != spawn ] || {
   # WP-216: a workspace herdr creates here comes with a default tab "1" (a plain shell); remember it to close below.

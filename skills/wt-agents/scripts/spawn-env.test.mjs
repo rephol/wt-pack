@@ -17,6 +17,7 @@ stub('herdr', `case "$1 $2" in
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-workers","workspace_id":"w1"}]}}' ;;
   "agent list") echo '{"result":{"agents":[]}}' ;;
   "tab create") echo '{"result":{"root_pane":{"pane_id":"w1:p9"}}}' ;;
+  "pane list") cat ${join(tmp, 'panes.json')} 2>/dev/null ;;
   "workspace create") echo '{"result":{"workspace":{"workspace_id":"w7"}}}' ;;
 esac`)
 stub('gh', `[ "$1 $2 $3 $4" = "auth token --user rephol" ] && { echo tok123; exit 0; }; exit 1`)
@@ -193,18 +194,45 @@ test('WP-237: spawn --team spawns every member x count with the team token; --te
   const names = s.out.trim().split('\n').map((l) => l.split(' ')[0])
   assert.deepEqual(names, ['demo-planner-01', 'demo-frontend-worker-01', 'demo-frontend-worker-01']) // the stub's agent list is static, so numbers do not advance here
   assert.equal(s.calls.filter((l) => l.startsWith('herdr pane report-metadata') && l.includes('role=') && l.includes('--token team=web')).length, 3)
-  const one = spawn(['spawn', 'worker', repo, '--team', 'web'])
-  assert.ok(one.calls.some((l) => /report-metadata .*--token role=worker .*--token team=web/.test(l)))
+  const one = spawn(['spawn', 'planner', repo, '--team', 'web'])
+  assert.ok(one.calls.some((l) => /report-metadata .*--token role=planner .*--token team=web/.test(l)))
   const noTeam = spawn(['spawn', 'worker', repo])
   assert.ok(!noTeam.calls.some((l) => l.includes('team=')))
   // a role named like a directory in the cwd still spawns ONE agent; a path-like first arg is the whole-team form
   mkdirSync(join(repo, 'worker'), { recursive: true })
-  assert.equal(spawn(['spawn', 'worker', '--team', 'web']).out.trim().split('\n').length, 1)
+  assert.equal(spawn(['spawn', 'planner', '--team', 'web']).out.trim().split('\n').length, 1)
   for (const args of [['spawn', '--team', 'nope', repo], ['spawn', 'worker', repo, '--team', 'Bad_Name'], ['spawn', 'worker', repo, '--team', 'a\nb'], ['spawn', 'worker', repo, '--team', 'a'.repeat(25)]]) {
     const r = spawnSync(join(here, 'agents.sh'), args, { cwd: repo, encoding: 'utf8',
       env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
     assert.notEqual(r.status, 0, args.join(' '))
   }
+})
+
+test('WP-247: a spawn into a team needs a member persona and a free seat; the bulk spawn fills only missing seats', () => {
+  setAccount(null)
+  const run = (args) => spawnSync(join(here, 'agents.sh'), args, { cwd: repo, encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
+  const panes = (...rows) => writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: rows.map(([persona, role]) => ({ tokens: { team: 'web', role, persona } })) } }))
+  try {
+    panes()
+    // a role the team file does not list, and a persona it does not have
+    const r1 = run(['spawn', 'worker', repo, '--team', 'web'])
+    assert.equal(r1.status, 2); assert.match(r1.stderr, /team web has no worker member/)
+    assert.equal(run(['spawn', 'reviewer', repo, '--team', 'web']).status, 2)
+    // frontend-worker x2: the first two spawns pass, the third is refused
+    panes(['frontend-worker', 'worker'])
+    assert.equal(run(['spawn', 'frontend-worker', repo, '--team', 'web']).status, 0)
+    panes(['frontend-worker', 'worker'], ['frontend-worker', 'worker'])
+    const full = run(['spawn', 'frontend-worker', repo, '--team', 'web'])
+    assert.equal(full.status, 3); assert.match(full.stderr, /team full: 2\/2 frontend-worker in web/)
+    // bulk: both worker seats are taken -> exactly one spawn (the planner), and a complete team spawns none
+    panes(['frontend-worker', 'worker'], ['frontend-worker', 'worker'])
+    const bulk = run(['spawn', '--team', 'web', repo])
+    assert.equal(bulk.status, 0); assert.equal(bulk.stdout.trim().split('\n').filter(Boolean).length, 1); assert.match(bulk.stdout, /planner/)
+    panes(['planner', 'planner'], ['frontend-worker', 'worker'], ['frontend-worker', 'worker'])
+    const none = run(['spawn', '--team', 'web', repo])
+    assert.equal(none.status, 0); assert.equal(none.stdout.trim(), '')
+  } finally { rmSync(join(tmp, 'panes.json'), { force: true }) }
 })
 
 test('WP-205: a *-worker name with no valid role file warns that it spawns a plain role', () => {
