@@ -154,3 +154,26 @@ test('WP-261: ticketless, answered and non-ack kinds are never flagged as unrepo
   clock.t += 60 * 60_000
   assert.deepEqual(await m.unreported({ moved: () => false, busy: () => false, flag: () => assert.fail('flagged') }), [])
 })
+
+test('WP-263: a message the sweep may not resend is flagged once and never typed again', async () => {
+  const { m, clock, draft } = await setup()
+  m.record(draft({ state: 'delivered', requestId: 'req-1' }))
+  const sent = [], flagged = []
+  clock.t += 6 * 60_000
+  assert.deepEqual(await m.sweep({ resendable: () => false, resend: async (r) => sent.push(r.id), flag: (r) => flagged.push(r.id) }), [{ id: 'a1', did: 'expired' }])
+  assert.deepEqual(sent, [])
+  assert.deepEqual(flagged, ['a1'])
+  assert.equal(m.get('a1').error, 'no acknowledgement after 1 send')
+})
+
+test('WP-263: maxAttempts 2 = the original send plus one resend', async () => {
+  const { m, clock, draft } = await setup()
+  m.record(draft({ state: 'delivered', requestId: 'req-1' }))
+  const sent = []
+  const deps = { resendable: () => true, resend: async (r) => sent.push(r.id), flag: () => {} }
+  clock.t += 6 * 60_000
+  assert.deepEqual(await m.sweep(deps, { maxAttempts: 2 }), [{ id: 'a1', did: 'resent' }])
+  clock.t += 6 * 60_000
+  assert.deepEqual(await m.sweep(deps, { maxAttempts: 2 }), [{ id: 'a1', did: 'expired' }])
+  assert.deepEqual(sent, ['a1'])
+})
