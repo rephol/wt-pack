@@ -190,7 +190,7 @@ function recall(prompt, o) {
   appendFileSync(seen, hits.map((e) => e.id + '\n').join(''))
   const log = process.env.WT_MEMORY_READS || join(homedir(), '.local', 'share', 'wt-memory', 'reads.jsonl')
   mkdirSync(dirname(log), { recursive: true })
-  appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), session: o.session ?? null, ids: hits.map((e) => e.id) }) + '\n')
+  appendFileSync(log, JSON.stringify({ at: new Date().toISOString(), session: o.session ?? null, kind: 'recall', ids: hits.map((e) => e.id) }) + '\n')
   return hits.map((e) => `- ${e.text}`).join('\n')
 }
 

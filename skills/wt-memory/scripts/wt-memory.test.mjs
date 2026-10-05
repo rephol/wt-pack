@@ -192,5 +192,5 @@ test('recall (WP-235): keyword match in own scopes, once per session, logged', a
   assert.equal(rec('run the linter again'), '') // already shown this session
   assert.equal(run(['recall', 'run the linter', '--session', 's2', '--project', 'demo'], env), '- Always run the linter before committing')
   const log = readFileSync(env.WT_MEMORY_READS, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
-  assert.deepEqual(log.map((l) => [l.session, l.ids]), [['s1', ['aaaa1111']], ['s2', ['aaaa1111']]])
+  assert.deepEqual(log.map((l) => [l.session, l.kind, l.ids]), [['s1', 'recall', ['aaaa1111']], ['s2', 'recall', ['aaaa1111']]])
 })
