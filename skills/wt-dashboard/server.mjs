@@ -4,7 +4,7 @@ import { ensureHerdr } from './herdrd.mjs'
 import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, statfs, mkdir, writeFile, appendFile } from 'node:fs/promises'
-import { randomUUID, createHash } from 'node:crypto'
+import { randomUUID, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
@@ -1547,7 +1547,7 @@ async function handoffTask(id, mode) {
   if (!t) throw Object.assign(new Error('unknown task'), { status: 404 })
   const { args, prompt } = handoffArgs(t, mode)
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(HANDOFF_SH, args, { cwd: t.worktree, maxBuffer: 1 << 20, timeout: 120_000 }, (err, o, stderr) =>
+    const child = execFile(HANDOFF_SH, args, { cwd: t.worktree, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '', WT_DELIVER_TOKEN: SERVER_TOKEN } }, (err, o, stderr) =>
       err ? reject(new Error(stderr || err.message)) : resolve(o))
     child.stdin.end(prompt)
   })
@@ -2283,8 +2283,13 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/ack)?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
+  if (headers['x-wt-server'] && method === 'POST' && path === '/api/deliveries') return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
   return true
 }
+// WP-242: a per-process secret only the server's own handoff.sh children get (runHandoff env), so a Dispatch (no pane id)
+// can queue its wt-message instead of pasting it. Accepted for POST /api/deliveries only, wt-message text only.
+const SERVER_TOKEN = randomBytes(24).toString('hex')
+const serverTokenOk = (h) => { const a = Buffer.from(String(h ?? '')), b = Buffer.from(SERVER_TOKEN); return a.length === b.length && timingSafeEqual(a, b) }
 
 // ---- local ticket boards (tickets.mjs) ----
 // A ticket entering Ready on an 'Auto' board prompts that project's orchestrator agent, batched per minute (WP-39).
@@ -2382,10 +2387,10 @@ const asks = new Asks({
   },
   broadcast: broadcastEvent,
   deliver: async (pane, text) => {
-    const paste = () => runHandoff(execFile, HANDOFF_SH)(['--reply', pane, '--from', 'user'], text, process.cwd())
+    const paste = () => runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })(['--reply', pane, '--from', 'user'], text, process.cwd())
     if (!deliveries.live(pane)) return paste()
     // Wrap exactly as handoff.sh --reply does, so the mod submits the same kind=reply message.
-    const msg = await runHandoff(execFile, HANDOFF_SH)(['--reply', pane, '--from', 'user', '--dry-run'], text, process.cwd()).then((o) => o.split('\nsend: ')[1]?.trim())
+    const msg = await runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })(['--reply', pane, '--from', 'user', '--dry-run'], text, process.cwd()).then((o) => o.split('\nsend: ')[1]?.trim())
     return msg ? deliver({ id: pane }, msg, paste) : paste()
   },
 })
@@ -2545,7 +2550,9 @@ async function asksApi(req, res, url, parts) {
 // WP-210 deliveries: POST /api/deliveries {pane, text} (handoff.sh / user) → { queued } (false: pane's mod not live, paste),
 // POST /hello, GET /next, POST /:id/ack (the pane's own mod), GET ?pane= (the user).
 async function deliveriesApi(req, res, url, parts) {
-  const author = await roomAuthor(req)
+  const srv = req.method === 'POST' && parts.length === 2 && req.headers['x-wt-server'] !== undefined && serverTokenOk(req.headers['x-wt-server']) &&
+    /^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '') // loopback only, like the pane path
+  const author = srv ? { kind: 'server' } : await roomAuthor(req)
   const mine = () => { if (author.kind !== 'agent') throw Object.assign(new Error('the pane\'s own mod calls this (x-herdr-pane)'), { status: 403 }); return author.pane }
   if (req.method === 'GET' && parts[2] === 'next') { const r = deliveries.next(mine()); return send(res, 200, r ? { id: r.id, kind: r.kind, text: r.body } : {}) }
   if (req.method === 'GET' && parts.length === 2) { if (author.kind !== 'user') return send(res, 403, { error: 'user only' }); return send(res, 200, deliveries.list(url.searchParams.get('pane') || undefined)) }
@@ -3294,7 +3301,7 @@ const dispatcher = new Dispatch({
     tagPair: (pane, ticket) => herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', ...(ticket ? ['--token', `pair=${ticket}`] : ['--clear-token', 'pair']))
       .then(() => store.delete('paneMeta'), (e) => console.error('tokens:', pane, e.message)),
     handoff: async (args, prompt, cwd) => {
-      try { return await runHandoff(execFile, HANDOFF_SH)(args, prompt, cwd) } finally { store.delete('agents:local'); store.delete('overview') }
+      try { return await runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })(args, prompt, cwd) } finally { store.delete('agents:local'); store.delete('overview') }
     },
   },
 })
@@ -3499,7 +3506,7 @@ async function watchdogApi(req, res, sub) {
       if (!a) return send(res, 409, { error: 'no free auditor agent — spawn one (wt-agents spawn auditor) or use Investigate' })
       target = ['--pane', a.id]
     }
-    const out = await runHandoff(execFile, HANDOFF_SH)([...target, '--kind', 'system', '--from', 'watchdog', '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
+    const out = await runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })([...target, '--kind', 'system', '--from', 'watchdog', '--task', `watchdog ${key}`.slice(0, 80), root], investigatePrompt(f), root)
     store.delete('agents:local')
     return send(res, 200, { ok: true, message: out.trim().split('\n')[0] })
   }

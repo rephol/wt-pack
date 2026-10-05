@@ -349,3 +349,20 @@ test('WP-238: --team picks only that team\'s agents (a plain handoff skips them)
   assert.match(run(['--role', 'worker', '--team', 'web', '--dry-run', repo], 'x'), /^dry-run: team full: 1\/1 worker in web/)
   assert.throws(() => run(['--role', 'reviewer', '--team', 'web', '--dry-run', repo], 'x'), (e) => e.status === 2 && /team web has no reviewer member/.test(e.stderr))
 })
+
+test('WP-242: a server-run handoff (no pane id, WT_DELIVER_TOKEN) queues the message with x-wt-server and does not paste it', async () => {
+  const { createServer } = await import('node:http'); const { execFile } = await import('node:child_process'); const { promisify } = await import('node:util')
+  const seen = []
+  const srv = createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { if (req.url === '/api/deliveries') seen.push({ h: req.headers, b: JSON.parse(b) }); res.end(req.url === '/api/deliveries' ? '{"queued":true}' : '{}') }) })
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r))
+  writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [] } }))
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(log, '')
+  const p = promisify(execFile)(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_PANE_ID: '', WT_DELIVER_TOKEN: 'tok', HERDR_DASH_URL: `http://127.0.0.1:${srv.address().port}` } })
+  p.child.stdin.end('do the thing'); await p
+  srv.close()
+  assert.equal(seen.length, 1); assert.equal(seen[0].h['x-wt-server'], 'tok'); assert.match(seen[0].b.text, /^<wt-message/)
+  const calls = readFileSync(log, 'utf8')
+  assert.match(calls, /send-text wW:p9 \/goal finish/); assert.doesNotMatch(calls, /agent prompt wW:p9/)
+})

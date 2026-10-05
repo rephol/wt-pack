@@ -215,6 +215,8 @@ test('session gate: state-changing API calls need the page cookie; only agent ro
   const { needsSession, hasSession } = await import('./server.mjs')
   assert.equal(needsSession('GET', '/api/overview', {}), false)
   assert.equal(needsSession('POST', '/api/agents/m/p1', {}), true)
+  assert.equal(needsSession('POST', '/api/deliveries', { 'x-wt-server': 'x' }), false) // WP-242: the token itself is checked in deliveriesApi
+  assert.equal(needsSession('POST', '/api/tickets', { 'x-wt-server': 'x' }), true)
   assert.equal(needsSession('POST', '/api/agents/m/p1/stop', {}), true)
   assert.equal(needsSession('POST', '/api/uploads', {}), true)
   assert.equal(needsSession('PATCH', '/api/settings', {}), true)
