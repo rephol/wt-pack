@@ -316,6 +316,14 @@ wait_ready() { # <pane>
     || echo "warning: $1 not ready after ${WT_READY_TIMEOUT:-60}s, sending anyway" >&2
 }
 hand_to() {
+  # WP-249: a reused agent that never registered (absent from `agent list`) gets the fresh-spawn treatment: renamed
+  # to its tab label, then waited on until ready.
+  if [ "$fresh" -eq 0 ] && [ -z "$(name_of "$1")" ]; then
+    tab_id=$(herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.tab_id // empty')
+    fresh_label=$(herdr tab list 2>/dev/null | jq -r --arg t "$tab_id" '.result.tabs[] | select(.tab_id == $t) | .label // empty' | head -1)
+    [ -z "$fresh_label" ] || herdr agent rename "$1" "$fresh_label" >/dev/null 2>&1 || true
+    fresh=1
+  fi
   [ "$fresh" -eq 0 ] || wait_ready "$1"
   # /clear is the user's call, never a default: a reused agent's prior context
   # can be exactly what makes it the right one to continue in.

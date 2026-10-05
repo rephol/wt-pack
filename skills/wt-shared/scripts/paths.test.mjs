@@ -22,6 +22,7 @@ const ALLOW = {
   'skills/wt-dashboard/app/src-tauri/src/main.rs': ['~/.claude/skills/wt-dashboard', '{home}/.claude/skills/wt-dashboard'],
   'skills/wt-agents/scripts/agents.sh': ['a plugin-only install has no such link'],
   'skills/wt-dashboard/dispatch.mjs': ['that a plugin install lacks'],
+  'skills/wt-mods/hooks/guards.ts': ['never write ~/.claude/skills/… in sent strings'], // the guard's own message
   // prose about the ./setup install itself (the Codex hookup, wt-setup's link, the desktop app's launcher)
   'skills/wt-memory/SKILL.md': ['codex mcp add', '"command":"node ~/.claude/skills/wt-memory', 'node $HOME/.claude/skills/wt-memory/', '/Users/<you>/.claude/skills/wt-memory/'],
   'skills/wt-setup/SKILL.md': ['the directory `~/.claude/skills/wt-setup` links into'],

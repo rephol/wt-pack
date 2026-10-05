@@ -14,6 +14,7 @@ writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$
   "workspace list") echo '{"result":{"workspaces":[{"label":"demo-reviewers","workspace_id":"wR"},{"label":"demo-workers","workspace_id":"wW"}]}}' ;;
   "agent list") cat "${tmp}/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
   "pane list") cat "${tmp}/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
+  "tab list") cat "${tmp}/tabs.json" 2>/dev/null || echo '{"result":{"tabs":[]}}' ;;
   "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
   "pane get") cat "${tmp}/pane-$(echo "$3" | tr : _).json" 2>/dev/null || echo '{"result":{"pane":{"tokens":{}}}}' ;;
   "agent prompt") case " $* " in *" --wait "*) [ -f "${tmp}/goal-clear-fails" ] && exit 1 || exit 0 ;; esac ;;
@@ -350,4 +351,19 @@ test('WP-238: --team picks only that team\'s agents (a plain handoff skips them)
   assert.throws(() => run(['--role', 'worker', '--team', 'web', repo], 'x'), (e) => e.status === 3 && /team full: 1\/1 worker in web/.test(e.stderr)) // exits before any spawn or send
   assert.match(run(['--role', 'worker', '--team', 'web', '--dry-run', repo], 'x'), /^dry-run: team full: 1\/1 worker in web/)
   assert.throws(() => run(['--role', 'reviewer', '--team', 'web', '--dry-run', repo], 'x'), (e) => e.status === 2 && /team web has no reviewer member/.test(e.stderr))
+})
+
+test('WP-249: a reused agent missing from agent list is renamed to its tab label before typing', () => {
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+  writeFileSync(join(tmp, 'pane-wW_p7.json'), JSON.stringify({ result: { pane: { pane_id: 'wW:p7', tab_id: 'wW:t7', tokens: {} } } }))
+  writeFileSync(join(tmp, 'tabs.json'), JSON.stringify({ result: { tabs: [{ tab_id: 'wW:t7', label: 'demo-worker-07' }] } }))
+  writeFileSync(log, '')
+  run(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
+  const calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr agent rename wW:p7 demo-worker-07$/m)
+  assert.ok(calls.indexOf('agent rename') < calls.indexOf('send-text'), calls)
+  writeFileSync(log, '')
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [{ name: 'demo-worker-07', pane_id: 'wW:p7', tab_id: 'wW:t7', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  run(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /agent rename/) // registered: left alone
 })
