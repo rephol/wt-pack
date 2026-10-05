@@ -82,6 +82,16 @@ dry=0
 buddy_arg=
 request_id=
 RECEIPTS="$(dirname "$0")/../../wt-shared/scripts/receipts.mjs"
+ack_id=; ack_state=acknowledged
+# WP-257: write the envelope to the dashboard's message record (best effort: never blocks or fails a send).
+# A server-run handoff proves itself with its token, an agent with its pane id (like /api/deliveries).
+record_message() { # <pane> <text> <state>
+  command -v curl >/dev/null && command -v jq >/dev/null || return 0
+  [ -n "${deliver_token:-}${HERDR_PANE_ID:-}" ] || return 0
+  jq -n --arg p "$1" --arg t "$2" --arg s "$3" --arg r "$request_id" '{target:$p,body:$t,state:$s} + (if $r == "" then {} else {requestId:$r} end)' \
+    | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")" \
+      -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages" >/dev/null 2>&1 || true
+}
 while :; do
   case "${1:-}" in
     -h|--help) sed -n "2,/^[^#]/{/^#/s/^# \{0,1\}//p;}" "$0"; exit 0 ;;
@@ -90,6 +100,8 @@ while :; do
     --clear) clear=1; shift ;;
     --pane)  pane_arg=$2; mode=pane; shift 2
              printf '%s' "$pane_arg" | grep -qE "$PANE_RE" || { echo "--pane: bad pane id" >&2; exit 2; } ;;
+    --ack) ack_id=$2; shift 2 ;;   # WP-257: acknowledge a wt-message by its id (add --answered once it is dealt with)
+    --answered) ack_state=answered; shift ;;
     --reply) reply=$2; shift 2
              printf '%s' "$reply" | grep -qE "$PANE_RE" || { echo "--reply: bad pane id" >&2; exit 2; } ;;
     --cancel) cancel=$2; shift 2
@@ -130,6 +142,15 @@ pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // emp
 name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
 pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | select(.name == $n) | .pane_id' | head -1; }
 
+# --ack <id> [--answered]: tell the dashboard this agent has the message (WP-257). Needs a pane (HERDR_PANE_ID).
+if [ -n "$ack_id" ]; then
+  case "$ack_id" in *[!A-Za-z0-9_-]*) echo "--ack: bad id" >&2; exit 2 ;; esac
+  [ -n "${HERDR_PANE_ID:-}" ] || { echo "--ack needs a herdr pane (HERDR_PANE_ID)" >&2; exit 2; }
+  curl -sS --max-time 5 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" -H 'content-type: application/json' \
+    --data "$(jq -n --arg s "$ack_state" '{state:$s}')" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages/$ack_id/ack" | jq -r 'if .error then "ack failed: " + .error else "\(.id) \(.state)" end'
+  exit 0
+fi
+
 # --reply: a plain answer to whoever sent us a wt-message — no /goal, no tokens, no worker selection.
 if [ -n "$reply" ]; then
   text=${1:-}
@@ -144,9 +165,10 @@ if [ -n "$reply" ]; then
   if [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
     q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
-    [ "$q" = true ] && { echo "replied $reply (queued)"; exit 0; }
+    [ "$q" = true ] && { record_message "$reply" "$msg" queued; echo "replied $reply (queued)"; exit 0; }
   fi
   herdr agent prompt "$reply" "$msg" >/dev/null
+  record_message "$reply" "$msg" delivered
   echo "replied $reply"
   exit 0
 fi
@@ -475,6 +497,7 @@ finish() {  # <first output line> <target pane>
   [ -n "$ticket" ] && set -- "$@" --token "ticket=$ticket"
   [ -n "$from_pane" ] && set -- "$@" --token "handoff_from=${from_name:-$from_pane}" --token "handoff_from_pane=$from_pane"
   line=$1; shift
+  record_message "$to" "$send" delivered # WP-257: hand_to confirmed the prompt was submitted
   tag "$@"
   [ -n "$from_pane" ] && tag "$from_pane" --token "handoff_to=${to_name:-$to}" --token "handoff_to_pane=$to"
   # A planner handing its plan over: its task label moves on to "handed to <worker>".
