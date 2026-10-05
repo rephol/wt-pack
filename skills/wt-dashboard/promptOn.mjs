@@ -21,7 +21,14 @@ function saveMessage(msg) {
     return file
   } catch { return null }
 }
-export async function promptOn(herdrOn, m, pane, text) {
+// WP-248: `opts.confirm` re-presses Enter (bounded) when the typed line is still in the input box, and fails if it stays.
+async function confirmed(herdrOn, m, pane, opts) {
+  if (!opts.confirm) return
+  const { confirmSubmitted } = await import('../wt-shared/scripts/pane-submit.mjs').catch(() => ({}))
+  if (confirmSubmitted && !(await confirmSubmitted(() => herdrOn(m, 'pane', 'read', pane, '--source', 'visible', '--format', 'text'), () => herdrOn(m, 'pane', 'send-keys', pane, 'enter'), { settleMs: opts.settleMs })))
+    throw new Error(`prompt not submitted: still in the input box of ${pane}`)
+}
+export async function promptOn(herdrOn, m, pane, text, opts = {}) {
   if (text.startsWith('/') && !text.includes('\n')) {
     const msg = text.length > SHORT ? text.match(/^\/goal\s+(<wt-message\s.*)$/s)?.[1] : undefined
     const file = msg && saveMessage(msg)
@@ -33,8 +40,10 @@ export async function promptOn(herdrOn, m, pane, text) {
       await herdrOn(m, 'pane', 'send-text', pane, line)
       typed = true
       await new Promise((r) => setTimeout(r, ENTER_DELAY_MS)) // an Enter sent in the same instant as the text is dropped
-      return await herdrOn(m, 'pane', 'send-keys', pane, 'enter')
-    } catch { if (!typed) return herdrOn(m, 'agent', 'prompt', pane, text) /* paste */ }
+      const r = await herdrOn(m, 'pane', 'send-keys', pane, 'enter')
+      await confirmed(herdrOn, m, pane, opts)
+      return r
+    } catch (e) { if (typed && /not submitted/.test(e.message)) throw e; if (!typed) return herdrOn(m, 'agent', 'prompt', pane, text) /* paste */ }
   }
   return herdrOn(m, 'agent', 'prompt', pane, text)
 }

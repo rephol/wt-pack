@@ -2646,7 +2646,7 @@ const rooms = new Rooms({
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
     if (!m) throw new Error(`machine ${a.machine} unavailable`)
-    await deliver(a, text, () => promptOn(herdrOn, m, a.id, text))
+    await deliver(a, text, () => promptOn(herdrOn, m, a.id, text, { confirm: true }))
     store.delete('agents:local')
   },
 })
@@ -3309,7 +3309,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      await deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o)))
+      await deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), { confirm: true }))
       store.delete('agents:local')
     },
     spawn: (b) => spawnAgent(b),
