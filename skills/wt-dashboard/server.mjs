@@ -16,6 +16,7 @@ import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
 import { teamView } from './teamview.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
+import { createTeam, deleteTeam, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { promptOn } from './promptOn.mjs'
@@ -995,10 +996,33 @@ export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, {
 // ---- roles (Settings › Roles) ----
 // WP-237: every project's team files with who fills them and where their tickets are (GET only). wt-shared is
 // imported dynamically (a checkout without it just has no teams).
-async function teamsApi(req, res) {
-  if (req.method !== 'GET') return send(res, 405, { error: 'GET' })
+// WP-241 writes (session only): POST /api/teams/preview {members,stages}; POST /api/teams/:project {name, template|description,members,stages};
+// PUT|DELETE /api/teams/:project/:name; POST /api/teams/:project/:name/spawn. project-teams.mjs confines every path.
+async function teamsWrite(req, res, parts) {
+  if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
+  const mod = await import('../wt-shared/scripts/teams.mjs')
+  const b = req.method === 'DELETE' ? {} : JSON.parse((await body(req)) || '{}')
+  if (parts[2] === 'preview' && req.method === 'POST') {
+    mod.teamText(b) // same validation as a save, so the preview never draws what could not be written
+    return send(res, 200, { flowchart: mod.flowchart({ members: b.members, stages: b.stages }) })
+  }
+  const root = (await projectRoots()).get(parts[2])
+  if (!root) return send(res, 404, { error: `no checkout for ${parts[2]}` })
+  const name = parts[3]
+  if (parts.length === 3 && req.method === 'POST') return send(res, 200, { errors: createTeam(root, b.name, b) })
+  if (parts.length === 4 && req.method === 'PUT') return send(res, 200, { errors: updateTeam(root, name, b) })
+  if (parts.length === 4 && req.method === 'DELETE') { deleteTeam(root, name); return send(res, 200, { ok: true }) }
+  if (parts.length === 5 && parts[4] === 'spawn' && req.method === 'POST') {
+    const out = await run(AGENTS_SH, ['spawn', '--team', name, root], root, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' }).catch((e) => { throw Object.assign(new Error(String(e.message).trim()), { status: 400 }) })
+    store.delete('agents:local')
+    return send(res, 200, { spawned: out.trim().split('\n').filter(Boolean) })
+  }
+  send(res, 404, { error: 'not found' })
+}
+async function teamsApi(req, res, parts = []) {
+  if (req.method !== 'GET') return teamsWrite(req, res, parts)
   const mod = await import('../wt-shared/scripts/teams.mjs').catch(() => null)
-  if (!mod) return send(res, 200, { teams: [] })
+  if (!mod) return send(res, 200, { teams: [], projects: [] })
   const ag = (await agents().catch(() => [])).filter((a) => a.local)
   const cols = new Map()
   const columnOf = (id) => cols.get(id)
@@ -1009,10 +1033,10 @@ async function teamsApi(req, res) {
     const problems = mod.check(root)
     for (const t of mod.list(root)) {
       const v = teamView(t, project, ag, columnOf)
-      teams.push({ ...v, where: mod.teamsDir(root), flowchart: mod.flowchart(t, v.active), errors: problems.filter((p) => p.name === t.name && p.level === 'error').map((p) => p.msg) })
+      teams.push({ ...v, stages: t.stages, where: mod.teamsDir(root), flowchart: mod.flowchart(t, v.active), errors: problems.filter((p) => p.name === t.name && p.level === 'error').map((p) => p.msg) })
     }
   }
-  send(res, 200, { teams })
+  send(res, 200, { teams, projects: [...(await projectRoots()).keys()] }) // projects: where New team can write, even with no agents yet
 }
 async function rolesApi(req, res) {
   const inUse = {}
@@ -3049,7 +3073,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (url.pathname === '/api/teams') return await teamsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (url.pathname === '/api/teams' || url.pathname.startsWith('/api/teams/')) return await teamsApi(req, res, url.pathname.split('/').filter(Boolean).slice(0, 5)).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
