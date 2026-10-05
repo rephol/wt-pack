@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { evaluate, crossed, gatesFor, projectGates } from './gates.mjs'
+import { evaluate, crossed, gatesFor, projectGates, origin } from './gates.mjs'
 import { get, check, flowchart, TEMPLATES, templateText } from './teams.mjs'
 
 const card = (...texts) => ({ id: 'WP-9', history: texts.map((text) => ({ kind: 'comment', author: 'a', text })) })
@@ -31,12 +31,26 @@ test('review: the newest verdict must be Approve or Approve with fixes', () => {
   assert.match(why(card('verdict: Approve', 'verdict: Send back'), 'review').why, /Send back/)
   assert.equal(why(card('I approve'), 'review').ok, false)
 })
+test('wording: "Approved", "tests: all green" and "tests: passing" count; a newer Approved beats an older Send back', () => {
+  assert.equal(why(card('verdict: Send back', 'verdict: Approved'), 'review').ok, true)
+  assert.equal(why(card('verdict: Approved with fixes'), 'review').ok, true)
+  assert.equal(why(card('tests: all green'), 'build', { tip: 'abc1234' }).ok, true)
+  assert.equal(why(card('tests: passing 431'), 'build', { tip: 'abc1234' }).ok, true)
+  assert.equal(why(card('tests: 431 passing'), 'build', { tip: 'abc1234' }).ok, false) // the word right after "tests:" decides
+})
+test('origin: a Blocked card is judged from the column it was blocked from, so blocking is no way round a gate', () => {
+  const blocked = { column: 'blocked', history: [{ kind: 'move', from: 'ready', to: 'building' }, { kind: 'move', from: 'building', to: 'blocked' }] }
+  assert.equal(origin(blocked), 'building')
+  assert.deepEqual(crossed(['build', 'review'], origin(blocked), 'done'), ['build', 'review'])
+  assert.equal(origin({ column: 'review', history: [] }), 'review')
+  assert.equal(origin({ column: 'blocked', history: [] }), 'blocked') // unknown origin: no gates (nothing to anchor to)
+})
 test('qa: a live-check note', () => {
   assert.equal(why(card(), 'qa').ok, false)
   assert.equal(why(card('live-check:'), 'qa').ok, false)
   assert.equal(why(card('live-check: opened #teams at 412px, SVG drew'), 'qa').ok, true)
 })
-test('crossed: only forward moves of a card already working; blocked, backward and Ready starts are free', () => {
+test('crossed: forward moves only; blocked, backward and Ready → Planning/Building are free; Ready/Backlog jumping on need build onward', () => {
   const all = ['plan', 'build', 'review', 'qa']
   assert.deepEqual(crossed(all, 'planning', 'building'), ['plan'])
   assert.deepEqual(crossed(all, 'building', 'review'), ['build'])
@@ -44,13 +58,16 @@ test('crossed: only forward moves of a card already working; blocked, backward a
   assert.deepEqual(crossed(all, 'planning', 'review'), ['plan', 'build'])
   assert.deepEqual(crossed(all, 'building', 'done'), ['build', 'review', 'qa'])
   assert.deepEqual(crossed(['plan', 'build'], 'building', 'done'), ['build'])
-  for (const [f, t] of [['ready', 'building'], ['backlog', 'review'], ['building', 'blocked'], ['review', 'building'], ['building', 'building'], ['done', 'review']]) assert.deepEqual(crossed(all, f, t), [], `${f}→${t}`)
+  assert.deepEqual(crossed(all, 'ready', 'review'), ['build'])
+  assert.deepEqual(crossed(all, 'backlog', 'done'), ['build', 'review', 'qa'])
+  for (const [f, t] of [['ready', 'building'], ['ready', 'planning'], ['building', 'blocked'], ['review', 'building'], ['building', 'building'], ['done', 'review']]) assert.deepEqual(crossed(all, f, t), [], `${f}→${t}`)
 })
 test('gatesFor: a team list wins (even empty), else the project default', () => {
   assert.deepEqual(gatesFor({ gates: ['qa'] }, ['plan']), ['qa'])
   assert.deepEqual(gatesFor({ gates: [] }, ['plan']), [])
   assert.deepEqual(gatesFor({ gates: null }, ['plan']), ['plan'])
   assert.deepEqual(gatesFor(null, ['plan']), ['plan'])
+  assert.deepEqual(gatesFor({ gates: ['deploy', 'qa'] }, []), ['qa']) // an unknown stage is not a gate
 })
 test('projectGates reads <settings>/gates.md, ignoring unknown stages; absent = none', () => {
   const r = mkdtempSync(join(tmpdir(), 'gates-'))

@@ -27,7 +27,7 @@ export function projectGates(checkout) {
   } catch { return [] }
 }
 // A team's own list wins (an explicit `gates: []` turns the project default off for it).
-export const gatesFor = (team, project) => (team?.gates ? team.gates : project)
+export const gatesFor = (team, project) => (team?.gates ? team.gates : project).filter((s) => GATE_STAGES.includes(s))
 
 const comments = (t) => (t.history ?? []).filter((h) => h.kind === 'comment' && typeof h.text === 'string')
 const newest = (t, re) => comments(t).reverse().map((h) => re.exec(h.text.trim())).find(Boolean) ?? null
@@ -38,13 +38,13 @@ export function evaluate(t, stages, facts = {}) {
     let why = null
     if (stage === 'plan') { if (!facts.plan) why = `no plan file docs/plans/${t.id.toLowerCase()}-*.md` }
     else if (stage === 'build') {
-      const tests = newest(t, /^tests:\s*(\S+)/i)
+      const tests = newest(t, /^tests:\s*(?:all\s+)?(\S+)/i)
       const tip = facts.tip || comments(t).some((h) => /(?:^|\n)\s*tip[: ]+[0-9a-f]{7,40}\b/i.test(h.text))
       if (!tests) why = 'no "tests: green" comment'
-      else if (!/^(green|pass(ed)?|ok)$/i.test(tests[1])) why = `latest tests comment is "${tests[1]}", not green`
+      else if (!/^(green|pass(ed|ing)?|ok)$/i.test(tests[1])) why = `latest tests comment is "${tests[1]}", not green`
       else if (!tip) why = `no branch ${t.id.toLowerCase()}-* with commits, and no "tip: <sha>" comment`
     } else if (stage === 'review') {
-      const v = newest(t, /^verdict:\s*(approve with fixes|approve|send back)\b/i)
+      const v = newest(t, /^verdict:\s*(approved? with fixes|approved?|send back)\b/i)
       if (!v) why = 'no "verdict: Approve|Approve with fixes" comment'
       else if (/^send back/i.test(v[1])) why = 'latest verdict is Send back'
     } else if (stage === 'qa') { if (!newest(t, /^live-check:\s*\S/i)) why = 'no "live-check: <note>" comment' }
@@ -52,10 +52,17 @@ export function evaluate(t, stages, facts = {}) {
   })
 }
 
-// The enabled stages a move from `from` to `to` passes. Only forward moves of a card already in a work column count
-// (Backlog/Ready → anything is a card starting, not leaving a stage); blocked and backward moves are never gated.
+// Where a card really is: a Blocked card is still in the column it was blocked from, so blocking is not a way round a gate.
+export function origin(t) {
+  if (t.column !== 'blocked') return t.column
+  const m = [...(t.history ?? [])].reverse().find((h) => h.kind === 'move' && h.to === 'blocked')
+  return ORDER.includes(m?.from) ? m.from : 'blocked'
+}
+// The enabled stages a move from `from` to `to` passes. Forward moves only; blocked and backward moves are never gated. A
+// card in Backlog/Ready is not in a stage yet and may start at Planning or Building (the plan stage is skipped when it goes
+// straight to a worker), so its first gate is build's: Ready → Building is free, Ready → Review needs build.
 export function crossed(enabled, from, to) {
-  const a = ORDER.indexOf(from), b = ORDER.indexOf(to)
-  if (a < ORDER.indexOf('planning') || b <= a) return []
+  const a = Math.max(ORDER.indexOf(from), from === 'backlog' || from === 'ready' ? ORDER.indexOf('building') : 0), b = ORDER.indexOf(to)
+  if (ORDER.indexOf(from) < 0 || b <= a) return []
   return enabled.filter((s) => { const c = ORDER.indexOf(STAGE_COLUMN[s]); return c >= a && c < b })
 }
