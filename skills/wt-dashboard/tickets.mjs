@@ -55,6 +55,9 @@ export function clean(b, { create = false } = {}) {
   }
   if (b.note !== undefined && (typeof b.note !== 'string' || b.note.length > 20_000)) throw err(400, 'note: up to 20000 chars')
   if (b.note !== undefined) out.note = b.note
+  // WP-238: the team that owns the ticket (set by Dispatch on first assign; null = none). Same name shape as teams.
+  if (b.team !== undefined && b.team !== null && !(typeof b.team === 'string' && /^[a-z][a-z0-9-]{0,23}$/.test(b.team))) throw err(400, 'team: a team name or null')
+  if (b.team !== undefined) out.team = b.team
   // WP-147: { worker: {name,pane}, buddy: {name,pane,role} } | null — a paired ticket's worker + buddy.
   if (b.pair !== undefined) {
     const person = (x) => x === null || x === undefined || (typeof x.name === 'string' && typeof x.pane === 'string')

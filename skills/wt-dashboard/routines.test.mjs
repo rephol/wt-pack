@@ -274,3 +274,13 @@ test('WP-205: a role-based routine pick skips a persona agent; naming it still w
   await r.runNow(named.id); await r.idle()
   assert.deepEqual(w.calls.prompt, [['fe-worker', 'y']])
 })
+
+test('WP-238: a role-based routine pick skips a team member; naming it still works', async () => {
+  const { w, r } = setup()
+  w.list = [{ id: 'p1', name: 'web-worker-01', pool: 'worker', project: 'wt-pack', status: 'idle', paneTokens: { team: 'web' } }]
+  const by = r.create({ name: 'p', schedule: 'every 1h', target: { kind: 'prompt', role: 'worker', project: 'wt-pack', text: 'x' } })
+  assert.equal((await r.runNow(by.id)).reason, 'no agent')
+  const named = r.create({ name: 'q', schedule: 'every 1h', target: { kind: 'prompt', agent: 'web-worker-01', text: 'y' } })
+  await r.runNow(named.id); await r.idle()
+  assert.deepEqual(w.calls.prompt, [['web-worker-01', 'y']])
+})

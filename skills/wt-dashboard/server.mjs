@@ -2487,6 +2487,7 @@ async function ticketsApi(req, res, url, parts) {
       if (!a) return send(res, 400, { error: `unknown agent ${b.buddy}` })
       if (a.paneTokens?.dnd) return send(res, 400, { error: `${b.buddy} is DND` })
       if (a.paneTokens?.pair && a.paneTokens.pair !== id) return send(res, 400, { error: `${b.buddy} is already paired on ${a.paneTokens.pair}` })
+      if ((a.paneTokens?.team || null) !== (t.team || null)) return send(res, 400, { error: `${b.buddy} is ${a.paneTokens?.team ? `on team ${a.paneTokens.team}` : 'not on a team'}; ${t.id} is ${t.team ? `team ${t.team}'s` : 'teamless'}` }) // WP-238
       buddy = { name: a.name, pane: a.id, role: a.pool }
     }
     const oldBuddy = t.pair?.buddy
@@ -3276,6 +3277,8 @@ const dispatcher = new Dispatch({
     repoOf: async (project) => (await projectRoots()).get(project) ?? null,
     // WP-204: the repo's persona files (dynamic import: wt-shared may be absent).
     personasOf: async (repo) => { const r = await import('../wt-shared/scripts/roles.mjs'); const co = r.mainCheckout(repo, 3000); return co ? r.personas(co) : [] },
+    // WP-238: the repo's team files (dynamic import, like roles).
+    teamsOf: async (repo) => { const r = await import('../wt-shared/scripts/teams.mjs'); const co = (await import('../wt-shared/scripts/roles.mjs')).mainCheckout(repo, 3000); return co ? r.list(co) : [] },
     // The project's room is the one named after it (WP-74); archived rooms don't count.
     // WP-75: where the dispatched agent reports (dispatch.mjs resolveReport).
     reportOf: async (project) => { await rooms.list(); return resolveReport(project, await tickets.settings(project), (s) => rooms.room(s), await agents().catch(() => [])) },
