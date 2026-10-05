@@ -62,8 +62,8 @@ runs" instead of empty charts. Use Astryx components already imported in that fi
 
 ## Implementation units
 
-**U1 — inject log line** (`skills/wt-memory/claude-plugin/hooks/inject.mjs`, `skills/wt-memory/scripts/wt-memory.test.mjs`, which already drives inject.mjs
-else `skills/wt-memory/scripts/wt-memory.test.mjs`). On SessionStart, after `out(text)`, append
+**U1 — inject log line** (`skills/wt-memory/claude-plugin/hooks/inject.mjs`, `skills/wt-memory/scripts/wt-memory.test.mjs`, which already drives inject.mjs).
+On SessionStart, after `out(text)`, append
 `{at, session, kind:'inject', ids:[]}` to the read log (mkdir -p). Verify: a test runs inject.mjs with a
 SessionStart payload and `HOME`/`WT_MEMORY_READS` pointed at a temp dir and asserts one `inject` line; an
 UserPromptSubmit payload writes none. Commit: `wt-memory: WP-236 …`.
