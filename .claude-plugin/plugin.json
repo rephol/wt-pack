@@ -1,6 +1,6 @@
 {
   "name": "wt-pack",
-  "description": "wt-pack: every wt-* skill for running herdr agents on a ticket pipeline, plus wt-memory's hooks (preferences, pkill guard) and MCP server. The dashboard, board and rooms need the full ./setup.",
+  "description": "wt-pack: every wt-* skill for running herdr agents on a ticket pipeline, plus wt-memory's hooks (preferences, pkill guard) and MCP server, and the wt MCP server (typed ticket, handoff, room and ask tools). The dashboard, board and rooms need the full ./setup.",
   "author": {
     "name": "rephol",
     "url": "https://github.com/rephol/wt-pack"
@@ -11,6 +11,12 @@
       "command": "node",
       "args": [
         "${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/mcp/server.mjs"
+      ]
+    },
+    "wt": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/skills/wt-shared/mcp/wt-server.mjs"
       ]
     }
   },
