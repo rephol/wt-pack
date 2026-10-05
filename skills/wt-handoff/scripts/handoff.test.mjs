@@ -367,3 +367,16 @@ test('WP-249: a reused agent missing from agent list is renamed to its tab label
   run(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
   assert.doesNotMatch(readFileSync(log, 'utf8'), /agent rename/) // registered: left alone
 })
+
+test('WP-251: --request-id sends once; a repeat returns the first output, a different id sends again', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [{ name: 'demo-worker-07', pane_id: 'wW:p7', tab_id: 'wW:t7', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  const sends = () => (readFileSync(log, 'utf8').match(/send-text/g) ?? []).length
+  const go = (id) => run(['--role', 'worker', '--pane', 'wW:p7', '--request-id', id, repo], 'do the thing')
+  writeFileSync(log, '')
+  const first = go('req-1')
+  assert.equal(sends(), 1)
+  assert.equal(go('req-1'), first)
+  assert.equal(sends(), 1)
+  go('req-2')
+  assert.equal(sends(), 2)
+})
