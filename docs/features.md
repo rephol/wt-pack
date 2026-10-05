@@ -772,7 +772,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   the file (stage → persona with count → gate, review/QA looping back to build), bundled in the web app (no CDN). The
   stage each current ticket is in is highlighted: a team agent's `ticket` tag and its card's column (planning → plan,
   building → build, review → review; a review card held by the `qa` persona → qa).
-  WP-241: the page also writes: **New team** (project, name, template blank/solo/standard/full; blank, the default, opens the editor on an empty team and saves it as a new file, WP-244), **Edit** (description, members as
+  WP-241: the page also writes: **New team** (project, name, template blank/solo/standard/full; blank, the default, opens the editor on an empty team and saves it as a new file, WP-244), **Edit** (description, members picked from the base roles and the project's personas, each once, stages from plan/build/review/qa, WP-245; members as
   persona × count, stage → persona map, live Mermaid preview that validates like a save), **Delete** (confirm dialog) and
   **Spawn team** (`agents.sh spawn --team`, disabled while the file has errors). Writes need the dashboard session, go to the
   project's current settings location (repo `.wt-pack/teams` or the user folder), are confined to `<name>.md` there (no
