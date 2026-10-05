@@ -4,7 +4,7 @@
 //   wt-roles new <name> [--base <role>] [--from-default] [--user] [--cwd D]   (an override needs no --base; a persona does;
 //                                                       --user writes to ~/.config/wt-pack/projects/<repo>/ instead of .wt-pack/, WP-234)
 //   wt-roles check [--cwd D]                                         exit 1 on an error
-//   wt-roles team list | check | new <name> [--template solo|standard|full] [--user]   team files (WP-237), <settings>/teams/<name>.md
+//   wt-roles team list | check | new <name> [--template solo|standard|full] [--user]   (no --template: an empty team)  team files (WP-237), <settings>/teams/<name>.md
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,13 +40,13 @@ if (cmd === 'team') {
     process.exit(f.some((x) => x.level === 'error') ? 1 : 0)
   } else if (sub === 'new') {
     if (!NAME.test(name ?? '')) die(`name must match ${NAME}`, 2)
-    const t = teams.TEMPLATES[o.template ?? 'standard']
-    if (!t) die(`--template: ${Object.keys(teams.TEMPLATES).join(', ')}`, 2)
+    const t = o.template ? teams.TEMPLATES[o.template] : null // WP-244: no --template writes an empty team
+    if (o.template && !t) die(`--template: ${Object.keys(teams.TEMPLATES).join(', ')}`, 2)
     if (o.user && settingsWhere(checkout) === 'repo' && existsSync(join(checkout, '.wt-pack'))) die('this repo has a .wt-pack/ folder, which wins over the user-level one: move it in the dashboard (Settings › Projects) first')
     const file = join(teams.teamsDir(checkout, o.user ? 'user' : undefined), `${name}.md`)
     if (existsSync(file)) die(`${file} already exists`)
     mkdirSync(dirname(file), { recursive: true })
-    writeFileSync(file, teams.templateText(name, t))
+    writeFileSync(file, t ? teams.templateText(name, t) : teams.teamText({}, `Notes for ${name} (free-form; not injected into agents).\n`))
     console.log(`${file}\nedit it, \`wt-roles team check\`, then \`agents.sh spawn --team ${name}\``)
   } else die('usage: wt-roles team list | check | new <name> [--template solo|standard|full] [--user]', 2)
 } else if (cmd === 'list') {

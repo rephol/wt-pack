@@ -8,6 +8,13 @@ import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.m
 
 const repo = () => { const d = mkdtempSync(join(tmpdir(), 'wp241-')); execFileSync('git', ['init', '-q', d]); mkdirSync(join(d, '.wt-pack')); return d }
 
+test('WP-244: a blank team is created from {description, members, stages} with no template', () => {
+  const r = repo(), f = join(r, '.wt-pack', 'teams', 'solo2.md')
+  assert.deepEqual(createTeam(r, 'solo2', { description: 'd', members: [{ persona: 'worker', count: 2 }], stages: [{ stage: 'build', persona: 'worker' }] }), [])
+  assert.match(readFileSync(f, 'utf8'), /members: \[worker x2\]\nstages: \[build=worker\]/)
+  assert.deepEqual(createTeam(r, 'empty', {}), ['no members']) // written, with the finding the editor shows
+})
+
 test('WP-241: create from a template, edit keeps the notes, delete removes the file', () => {
   const r = repo(), f = join(r, '.wt-pack', 'teams', 'web.md')
   assert.deepEqual(createTeam(r, 'web', { template: 'standard' }), [])
