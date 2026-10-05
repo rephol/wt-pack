@@ -16,7 +16,7 @@ import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
 import { teamView } from './teamview.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
-import { createTeam, deleteTeam, updateTeam } from './project-teams.mjs'
+import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { promptOn } from './promptOn.mjs'
@@ -1013,7 +1013,8 @@ async function teamsWrite(req, res, parts) {
   if (parts.length === 4 && req.method === 'PUT') return send(res, 200, { errors: updateTeam(root, name, b) })
   if (parts.length === 4 && req.method === 'DELETE') { deleteTeam(root, name); return send(res, 200, { ok: true }) }
   if (parts.length === 5 && parts[4] === 'spawn' && req.method === 'POST') {
-    const out = await run(AGENTS_SH, ['spawn', '--team', name, root], root, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' }).catch((e) => { throw Object.assign(new Error(String(e.message).trim()), { status: 400 }) })
+    const co = spawnable(root, name)
+    const out = await run(AGENTS_SH, ['spawn', '--team', name, co], co, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' }).catch((e) => { throw Object.assign(new Error(String(e.message).trim()), { status: 400 }) })
     store.delete('agents:local')
     return send(res, 200, { spawned: out.trim().split('\n').filter(Boolean) })
   }

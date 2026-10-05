@@ -47,3 +47,9 @@ export function deleteTeam(root, name) {
   if (!get(t.co, name)) throw bad('no such team', 404)
   unlinkSync(t.file)
 }
+// Spawn guard: the name reaches agents.sh argv, so it must be a valid name of an existing team (never `--x`, `../y`).
+export function spawnable(root, name) {
+  const t = target(root, name)
+  if (!get(t.co, name)) throw bad('no such team', 404)
+  return t.co
+}
