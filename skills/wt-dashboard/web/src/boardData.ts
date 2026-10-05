@@ -1,33 +1,9 @@
 // The local ticket board (docs/plans/local-kanban-plan.md, API contract). Pure, so it is unit-tested.
-export const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked'] as const
-export type Column = (typeof COLUMNS)[number]
-export const TYPES = ['bug', 'ux', 'gap', 'debt', 'feature'] as const
-export const SIZES = ['S', 'M', 'L'] as const
-export interface HistoryEntry { at: string; author: string; kind: 'create' | 'move' | 'comment' | 'edit' | 'assign' | 'pair'; from?: unknown; to?: unknown; text?: string }
-// WP-147: worker + buddy pairing. `buddy` is optional (the worker may pair alone); a gone member without a
-// replacement leaves that side null but the pairing itself stays until the ticket is Done.
-export interface TicketPair { worker: { name: string; pane: string } | null; buddy?: { name: string; pane: string; role: string } | null }
-export interface Ticket {
-  id: string
-  title: string
-  body?: string
-  type?: string | null
-  size?: string | null
-  priority?: number | null
-  labels?: string[]
-  links?: string[]
-  column: Column
-  assignee?: { name: string; pane?: string } | null
-  pair?: TicketPair | null
-  created?: string
-  updated?: string
-  history?: HistoryEntry[]
-  jev?: TicketJev | null
-  dispatch?: TicketDispatch | null
-  messages?: TicketMessages | null
-}
-// WP-257 (messages.mjs): the newest wt-pack message sent about this card, and how many are still unacknowledged.
-export interface TicketMessages { last: { id: string; kind: string; state: 'queued' | 'delivered' | 'acknowledged' | 'answered' | 'expired' | 'failed'; attempts: number; target: string }; open: number }
+// WP-254: the enums and the API shapes live in skills/wt-dashboard/contracts.mjs (+ contracts.d.mts); re-exported here.
+import { COLUMNS, TYPES, SIZES } from '../../contracts.mjs'
+import type { Column, HistoryEntry, TicketPair, Ticket, TicketMessages, TicketDispatch, DispatchStatus, TicketJev, Board } from '../../contracts.mjs'
+export { COLUMNS, TYPES, SIZES }
+export type { Column, HistoryEntry, TicketPair, Ticket, TicketMessages, TicketDispatch, DispatchStatus, TicketJev, Board }
 // The card's message badge, if any: [label, variant, tooltip]. Answered/acknowledged stay quiet-blue, a lost one is an error.
 export function messageBadge(m?: TicketMessages | null): [string, 'info' | 'warning' | 'error', string] | null {
   if (!m?.last) return null
@@ -39,11 +15,6 @@ export function messageBadge(m?: TicketMessages | null): [string, 'info' | 'warn
   if (state === 'delivered') return [attempts > 1 ? `Resent ×${attempts - 1}` : 'Msg sent', attempts > 1 ? 'warning' : 'info', `${tip}: waiting for an ack`]
   return [state === 'answered' ? 'Answered' : 'Acked', 'info', tip]
 }
-// Board Dispatch (WP-52, dispatch.mjs): claim state, failures, and reconcile's stall flag. `undelivered`
-// (WP-177) is distinct from `stalled`: a handoff that never reached the agent at all (resend already tried),
-// not a long-idle one that did.
-export interface TicketDispatch { state?: 'dispatching' | 'sent' | 'failed' | 'held' | 'interrupted'; at?: string; agent?: string; fails?: number; reason?: string; stalled?: string; undelivered?: string }
-export interface DispatchStatus { last: { at: number; text: string } | null; waiting: string | null; inflight: number }
 // The card's dispatch badge, if any: [label, variant, tooltip].
 export function dispatchBadge(d?: TicketDispatch | null): [string, 'info' | 'warning' | 'error', string] | null {
   if (!d) return null
@@ -64,9 +35,7 @@ export function dispatchLine(s?: DispatchStatus | null, now = Date.now()): strin
   return 'idle'
 }
 // Server-owned Jev triage (ticketJev.mjs): fields it filled (undoable), advisory owner role, likely duplicates.
-export interface TicketJev { at: string; applied: Record<string, { from: unknown; to: unknown }>; owner: 'planner' | 'worker' | null; dupes: string[] }
 export const jevChip = (t: Ticket) => !!t.jev && (Object.keys(t.jev.applied).length > 0 || t.jev.dupes.length > 0)
-export interface Board { key: string | null; auto?: boolean; minPriority?: number; dispatch?: boolean; stallMin?: number; reportRoom?: string | null; reportOrch?: boolean; dispatchStatus?: DispatchStatus; tickets: Ticket[] }
 
 export const columnLabel = (c: string) => c[0].toUpperCase() + c.slice(1)
 // Linear's scale: 0 none, 1 urgent … 4 low.

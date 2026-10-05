@@ -52,19 +52,10 @@ import type { MarkdownInlinePlugin } from '@astryxdesign/core/Markdown'
 import { useRoles } from './roles'
 import { roomRows, membersFirst, attMarker, orphanedAtts, numberMarkers } from './roomRows'
 
+import type { Room, RoomMsg } from '../../contracts.mjs' // WP-254
 export interface RoomAgent { key: string; name: string; status: string; asks?: boolean; machine: string; pool?: string }
-interface Room { slug: string; title: string; project: string | null; createdAt: string; paused: boolean; archived?: boolean; members: string[]; hops: number; responder?: string | null; responderName?: string | null; responderPinned?: boolean; broadcast?: boolean; needsYou?: { agent: string; text: string }[]; lastAt?: string | null; lastFrom?: string | null; lastText?: string | null }
 export interface Profile { name: string; handle: string; avatar: string | null }
 interface Suggestion { ticket: string; slug: string; title: string; agent: string | null; reason: string }
-interface RoomMsg {
-  id: string; ts: string; text: string; mentions: string[]; deliveredTo: string[]
-  author: { kind: 'user' | 'agent' | 'system'; name: string; machine?: string; avatar?: string | null }
-  blocked?: { name: string; reason: string }[]
-  queuedFor?: string[]; notified?: boolean
-  attachments?: { path: string; type: string; size: number; name?: string }[]; undelivered?: { to: string; n: number }[]
-  command?: { text: string; target: string }; agentKey?: string
-  replyTo?: { id: string; name: string; text: string }
-}
 export interface RoomSettings { profile: Profile; agentToAgent: boolean; agentsCreateRooms: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
 
 const dotOf = (a?: RoomAgent) => (!a ? 'neutral' : a.asks ? 'error' : a.status === 'working' ? 'accent' : a.status === 'done' ? 'success' : 'neutral') as 'neutral' | 'error' | 'accent' | 'success'

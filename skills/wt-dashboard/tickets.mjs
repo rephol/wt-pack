@@ -3,9 +3,8 @@
 import { join } from 'node:path'
 import { open, tx } from './store.mjs'
 
-export const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked']
-export const TYPES = ['bug', 'ux', 'gap', 'debt', 'feature']
-export const SIZES = ['S', 'M', 'L']
+import { COLUMNS, TYPES, SIZES } from './contracts.mjs' // WP-254: the enums live in contracts.mjs
+export { COLUMNS, TYPES, SIZES }
 const DEFAULTS = { type: 'feature', size: null, priority: 0 } // create()'s defaults; Jev only fills these
 const PROJECT = /^[\w.-]{1,64}$/
 const err = (status, m) => Object.assign(new Error(m), { status })
