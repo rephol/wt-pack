@@ -1496,6 +1496,10 @@ test('WP-143 retireIdle: keeps the N most-recently-handed-off idle/done agents p
   assert.deepEqual(new Set(retireIdle(agents, 0)), new Set(['p1', 'p2', 'p3', 'p4']))
   assert.deepEqual(retireIdle(agents, 5), []) // every tier has <= 5
   assert.deepEqual(retireIdle([idle('solo', 'opus', 1)], 1), []) // the only one of its tier is never removed
+  // WP-247: an idle team member is never retired, however many idle ones its tier holds
+  const member = (pane, at) => ({ pane_id: pane, agent_status: 'idle', tokens: { role: 'worker', model: 'sonnet', team: 'web', handoff_at: String(at) } })
+  assert.deepEqual(retireIdle([member('t1', 1), member('t2', 2), member('t3', 3)], 0), [])
+  assert.deepEqual(retireIdle([member('t1', 1), idle('p1', 'sonnet', 9), idle('p2', 'sonnet', 8)], 1), ['p2']) // a team member takes no keep slot either
 })
 
 test('WP-147 retireIdle: a DND or paired agent is never a candidate', async () => {

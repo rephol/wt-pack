@@ -5,8 +5,9 @@
 const STAGE_OF = { planning: 'plan', building: 'build', review: 'review' }
 
 // team: {name, members:[{persona,count}], stages:[{stage,persona}]}; agents: [{name, status, tags:{team,project,persona,role,ticket}}];
-// columnOf(ticketId) → card column | undefined.
-export function teamView(team, project, agents, columnOf) {
+// columnOf(ticketId) → card column | undefined. teamOf(ticketId) → the card's team name | null (teamless) | undefined
+// (not on a board); WP-247: an agent whose ticket belongs to another team (or none) is flagged offTeam.
+export function teamView(team, project, agents, columnOf, teamOf = () => undefined) {
   const mine = agents.filter((a) => a.tags?.team === team.name && a.tags.project === project)
   const qa = team.stages.find((s) => s.stage === 'qa')?.persona
   const tickets = []
@@ -23,7 +24,8 @@ export function teamView(team, project, agents, columnOf) {
     let stage = STAGE_OF[column] ?? null
     if (stage === 'review' && qa === persona) stage = 'qa'
     if (id && stage && !tickets.some((t) => t.id === id)) tickets.push({ id, stage })
-    return { name: a.name, status: a.status, ticket: id, stage }
+    const ct = id ? teamOf(id) : undefined
+    return { name: a.name, status: a.status, ticket: id, stage, ...(ct !== undefined && (ct || null) !== team.name ? { offTeam: true } : {}) }
   }
   const placed = mine.map((a) => [a, slot(a)])
   const members = team.members.map((m) => ({ persona: m.persona, count: m.count, agents: placed.filter(([, p]) => p === m.persona).map(([a]) => place(a, m.persona)) }))
@@ -33,4 +35,12 @@ export function teamView(team, project, agents, columnOf) {
   return { name: team.name, project, description: team.description, members, other, stages: team.stages, tickets,
     load: { agents: up, of: team.members.reduce((n, m) => n + m.count, 0), working: busy, tickets: tickets.length, other: other.length },
     active: [...new Set(tickets.map((t) => t.stage))] }
+}
+
+// WP-247: which teams the dashboard should refill. A team is refilled when it has an open card (`openTeams`: the team
+// names of every card not done), fewer agents up than its roster, and was not refilled within `throttleMs` (`lastAt`:
+// key → ms). Pure; `views` are teamView() results with a `project`, the key is `<project>/<team>`.
+export const REFILL_THROTTLE_MS = 10 * 60_000
+export function teamsNeedingRefill(views, openTeams, lastAt, now, throttleMs = REFILL_THROTTLE_MS) {
+  return views.filter((v) => openTeams.has(`${v.project}/${v.name}`) && v.load.agents < v.load.of && now - (lastAt.get(`${v.project}/${v.name}`) ?? -Infinity) >= throttleMs)
 }

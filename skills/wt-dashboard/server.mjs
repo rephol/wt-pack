@@ -14,7 +14,7 @@ import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteR
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
-import { teamView } from './teamview.mjs'
+import { teamView, teamsNeedingRefill } from './teamview.mjs'
 import { guardMove } from './gatemove.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
@@ -1001,7 +1001,11 @@ export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, {
 // WP-237: every project's team files with who fills them and where their tickets are (GET only). wt-shared is
 // imported dynamically (a checkout without it just has no teams).
 // WP-241 writes (session only): POST /api/teams/preview {members,stages}; POST /api/teams/:project {name, template|description,members,stages};
-// PUT|DELETE /api/teams/:project/:name; POST /api/teams/:project/:name/spawn. project-teams.mjs confines every path.
+// PUT|DELETE /api/teams/:project/:name; POST /api/teams/:project/:name/spawn; POST .../adopt {agent, persona} (WP-247 Add to team).
+// project-teams.mjs confines every path.
+const BASE_ROLES = ['orchestrator', 'planner', 'worker', 'auditor', 'reviewer']
+// An agent belongs to a project by its `project` token (every spawned one has it), else by working inside its checkout.
+const agentInProject = (a, project, root) => (a.tags?.project ? a.tags.project === project : !!a.cwd && (a.cwd === root || a.cwd.startsWith(`${root}/`)))
 async function teamsWrite(req, res, parts) {
   if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })
   const mod = await import('../wt-shared/scripts/teams.mjs')
@@ -1016,6 +1020,27 @@ async function teamsWrite(req, res, parts) {
   if (parts.length === 3 && req.method === 'POST') return send(res, 200, { errors: createTeam(root, b.name, b) })
   if (parts.length === 4 && req.method === 'PUT') return send(res, 200, { errors: updateTeam(root, name, b) })
   if (parts.length === 4 && req.method === 'DELETE') { deleteTeam(root, name); return send(res, 200, { ok: true }) }
+  // WP-247 Add to team: tag a hand-started project agent onto a free seat. team + (for a custom persona) persona tokens,
+  // the shape agents.sh spawn --team writes; a base role keeps only `team` (the role token already says which seat).
+  if (parts.length === 5 && parts[4] === 'adopt' && req.method === 'POST') {
+    const mod = await import('../wt-shared/scripts/teams.mjs')
+    const t = mod.get(root, name)
+    if (!t) return send(res, 404, { error: `no team ${name}` })
+    const seat = t.members.find((m) => m.persona === b.persona)
+    if (!seat) return send(res, 400, { error: `team ${name} has no ${b.persona} member` })
+    const ag = (await agents().catch(() => [])).filter((a) => a.local)
+    const a = ag.find((x) => x.name === b.agent)
+    if (!a) return send(res, 400, { error: `unknown agent ${b.agent}` })
+    if (!agentInProject(a, parts[2], root)) return send(res, 400, { error: `${a.name} does not belong to ${parts[2]}` })
+    if (a.paneTokens?.team) return send(res, 400, { error: `${a.name} is already on team ${a.paneTokens.team}` })
+    const isBase = BASE_ROLES.includes(seat.persona)
+    if (isBase && (a.tags?.role || a.pool) !== seat.persona) return send(res, 400, { error: `${a.name} is a ${a.tags?.role || a.pool}, not a ${seat.persona}` })
+    const taken = teamView(t, parts[2], ag, () => undefined).members.find((m) => m.persona === seat.persona)?.agents.length ?? 0
+    if (taken >= seat.count) return send(res, 400, { error: `team full: ${taken}/${seat.count} ${seat.persona} in ${name}` })
+    await herdr('pane', 'report-metadata', a.id, '--source', 'wt-dashboard', '--token', `team=${name}`, ...(isBase ? [] : ['--token', `persona=${seat.persona}`]))
+    store.delete('paneMeta'); store.delete('agents:local')
+    return send(res, 200, { ok: true, agent: a.name, team: name, persona: seat.persona })
+  }
   if (parts.length === 5 && parts[4] === 'spawn' && req.method === 'POST') {
     const co = spawnable(root, name)
     const out = await run(AGENTS_SH, ['spawn', '--team', name, co], co, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' }).catch((e) => { throw Object.assign(new Error(String(e.message).trim()), { status: 400 }) })
@@ -1029,16 +1054,19 @@ async function teamsApi(req, res, parts = []) {
   const mod = await import('../wt-shared/scripts/teams.mjs').catch(() => null)
   if (!mod) return send(res, 200, { teams: [], projects: [] })
   const ag = (await agents().catch(() => [])).filter((a) => a.local)
-  const cols = new Map()
+  const cols = new Map(), cardTeam = new Map()
   const columnOf = (id) => cols.get(id)
+  const teamOf = (id) => cardTeam.get(id) // WP-247: the card's team, null = teamless, undefined = not on a board
   const ids = new Set(ag.map((a) => a.tags?.ticket).filter((t) => /^[A-Z][A-Z0-9]*-\d+$/.test(t ?? '')))
-  await Promise.all([...ids].map(async (id) => { try { cols.set(id, (await tickets.get(id)).column) } catch { /* not on a board */ } }))
+  await Promise.all([...ids].map(async (id) => { try { const c = await tickets.get(id); cols.set(id, c.column); cardTeam.set(id, c.team || null) } catch { /* not on a board */ } }))
   const teams = []
   for (const [project, root] of await projectRoots()) {
     const problems = mod.check(root)
     for (const t of mod.list(root)) {
-      const v = teamView(t, project, ag, columnOf)
-      teams.push({ ...v, stages: t.stages, where: mod.teamsDir(root), flowchart: mod.flowchart(t, v.active), errors: problems.filter((p) => p.name === t.name && p.level === 'error').map((p) => p.msg) })
+      const v = teamView(t, project, ag, columnOf, teamOf)
+      // WP-247 Add to team: the project's agents on no team (a hand-started persona agent), for the member rows with a free seat
+      const adoptable = ag.filter((a) => !a.paneTokens?.team && agentInProject(a, project, root)).map((a) => ({ name: a.name, role: a.tags?.persona || a.tags?.role || a.pool }))
+      teams.push({ ...v, adoptable, stages: t.stages, where: mod.teamsDir(root), flowchart: mod.flowchart(t, v.active), errors: problems.filter((p) => p.name === t.name && p.level === 'error').map((p) => p.msg) })
     }
   }
   send(res, 200, { teams, projects: [...(await projectRoots()).keys()] }) // projects: where New team can write, even with no agents yet
@@ -1241,7 +1269,7 @@ const AGENTS_SH = fileURLToPath(new URL('../wt-agents/scripts/agents.sh', import
 // (including the pane that just went idle), nothing in it is removed.
 export function retireIdle(agents, n) {
   const eligible = agents.filter((a) => a.tokens?.role === 'worker' && a.tokens?.model && !a.tokens?.task
-    && !a.tokens?.dnd && !a.tokens?.pair
+    && !a.tokens?.dnd && !a.tokens?.pair && !a.tokens?.team // WP-247: a team member is its roster's, never an idle extra
     && (a.agent_status === 'idle' || a.agent_status === 'done'))
   return [...Map.groupBy(eligible, (a) => a.tokens.model).values()].flatMap((list) =>
     list.sort((a, b) => Number(b.tokens.handoff_at ?? 0) - Number(a.tokens.handoff_at ?? 0)).slice(n).map((a) => a.pane_id))
@@ -1266,6 +1294,27 @@ async function retireIdleWorkers(project) {
     await run(AGENTS_SH, ['rm', pane], homedir(), 30_000).catch((e) => console.error(`retire ${pane}:`, e.message))
   }
   store.delete('agents:local')
+}
+// WP-247: a team with open work and a seat missing is refilled — the bulk `agents.sh spawn --team` now fills only missing
+// seats. Decision in teamview.mjs (open card, below roster, once per 10 min per team); a failing spawn is not retried sooner.
+const refillAt = new Map()
+async function refillTeams(project) {
+  const mod = await import('../wt-shared/scripts/teams.mjs').catch(() => null)
+  const root = (await projectRoots()).get(project)
+  if (!mod || !root) return
+  const teams = mod.list(root)
+  if (!teams.length) return
+  const ag = (await agents().catch(() => [])).filter((a) => a.local)
+  const open = new Set((await tickets.list(project)).tickets.filter((t) => t.team && ['ready', 'planning', 'building', 'review'].includes(t.column)).map((t) => `${project}/${t.team}`))
+  const views = teams.map((t) => teamView(t, project, ag, () => undefined))
+  for (const v of teamsNeedingRefill(views, open, refillAt, Date.now())) {
+    refillAt.set(`${project}/${v.name}`, Date.now())
+    try {
+      const co = spawnable(root, v.name)
+      await run(AGENTS_SH, ['spawn', '--team', v.name, co], co, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
+    } catch (e) { console.error(`refill ${project}/${v.name}:`, e.message) }
+    store.delete('agents:local')
+  }
 }
 // Project name → main checkout: the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
 // and every repo a local agent is working in, minus $WT_DASHBOARD_HIDDEN_PROJECTS (names).
@@ -2386,6 +2435,7 @@ const tickets = new Tickets({
     }
     // WP-143: retire idle routed workers past what this tier keeps, now that this one is free again.
     await retireIdleWorkers(project).catch((e) => console.error('retire idle:', e.message))
+    await refillTeams(project).catch((e) => console.error('refill teams:', e.message)) // WP-247
   },
 })
 // WP-164 wt-ask: deliver reuses handoff.sh --reply verbatim, so it inherits whatever that already does on a
@@ -3686,6 +3736,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     setInterval(roomsLoop, 4000)
     setInterval(() => agents().then((ag) => { const live = new Set(ag.filter((a) => a.local).map((a) => a.id)); return live.size && asks.expire(live) }).catch((e) => console.error('asks expire:', e.message)), 60_000).unref() // WP-209
     setInterval(tick, 4000)
+    setInterval(async () => { for (const project of (await projectRoots()).keys()) await refillTeams(project).catch((e) => console.error('refill teams:', e.message)) }, 60_000).unref() // WP-247: a missing seat is noticed without waiting for a Done
     setTimeout(tick, 500)
     if (selfBuild()) { const fw = () => freshenWeb().catch((e) => console.error('web:', e.message)); setTimeout(fw, 5000); setInterval(fw, 120_000) }
     const hkRun = () => runHousekeeping().catch((e) => console.error('housekeeping:', e.message))

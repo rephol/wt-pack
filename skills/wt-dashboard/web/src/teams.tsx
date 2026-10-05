@@ -17,9 +17,10 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { api } from './rooms'
 import { LoadError } from './skeletons'
 
-type Agent = { name: string; status: string; ticket: string | null; stage: string | null }
+type Agent = { name: string; status: string; ticket: string | null; stage: string | null; offTeam?: boolean } // offTeam (WP-247): its ticket belongs to another team (or none)
 type Team = { stages: { stage: string; persona: string }[]; name: string; project: string; description: string; where: string; errors: string[]; flowchart: string
   members: { persona: string; count: number; agents: Agent[] }[]
+  adoptable?: { name: string; role: string }[] // WP-247: the project's agents on no team, for Add to team
   other: Agent[] // WP-246: team agents that fill no member (no matching persona token, name or role)
   load: { agents: number; of: number; working: number; tickets: number; other: number }; tickets: { id: string; stage: string }[]; active: string[] }
 
@@ -147,6 +148,20 @@ function DeleteTeam({ t, onClose }: { t: Team; onClose: () => void }) {
   )
 }
 
+const BASE_ROLES = ['orchestrator', 'planner', 'worker', 'auditor', 'reviewer']
+const agentLine = (a: Agent) => `${a.name} (${a.status}${a.ticket ? ` · ${a.ticket}${a.stage ? ` ${a.stage}` : ''}` : ''}${a.offTeam ? ' · ⚠ off-team ticket' : ''})`
+
+// WP-247 Add to team: a free seat lists the project's team-less agents that could fill it (a base-role seat needs that role).
+function AdoptPick({ t, persona }: { t: Team; persona: string }) {
+  const adopt = useTeamAction('Added to team')
+  const options = (t.adoptable ?? []).filter((a) => !BASE_ROLES.includes(persona) || a.role === persona)
+  if (!options.length) return null
+  return (
+    <Selector label="Add to team" width={220} value="" options={[{ value: '', label: 'Pick an agent…' }, ...options.map((a) => ({ value: a.name, label: a.name }))]}
+      onChange={(agent) => agent && adopt(() => api(url(t.project, t.name, '/adopt'), { method: 'POST', body: JSON.stringify({ agent, persona }) }))} />
+  )
+}
+
 function TeamCard({ t, showProject }: { t: Team; showProject: boolean }) {
   const [dlg, setDlg] = useState<'edit' | 'delete' | null>(null)
   const spawn = useTeamAction('Team spawned')
@@ -165,13 +180,14 @@ function TeamCard({ t, showProject }: { t: Team; showProject: boolean }) {
             <Text weight="semibold" size="sm">{m.persona}{m.count > 1 ? ` ×${m.count}` : ''}</Text>
             {m.agents.length === 0
               ? <Text type="supporting" size="sm">not started</Text>
-              : <Text size="sm">{m.agents.map((a) => `${a.name} (${a.status}${a.ticket ? ` · ${a.ticket}${a.stage ? ` ${a.stage}` : ''}` : ''})`).join(', ')}</Text>}
+              : <Text size="sm">{m.agents.map(agentLine).join(', ')}</Text>}
+            {m.agents.length < m.count && <AdoptPick t={t} persona={m.persona} />}
           </HStack>
         ))}
         {t.other.length > 0 && (
           <HStack gap={2} wrap="wrap" align="start">
             <Text weight="semibold" size="sm">Other</Text>
-            <Text size="sm">{t.other.map((a) => `${a.name} (${a.status}${a.ticket ? ` · ${a.ticket}${a.stage ? ` ${a.stage}` : ''}` : ''})`).join(', ')}</Text>
+            <Text size="sm">{t.other.map(agentLine).join(', ')}</Text>
           </HStack>
         )}
       </VStack>
