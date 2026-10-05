@@ -729,6 +729,26 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   never commits; shows `git status` for the folder) and creates new ones.
 - The `wt-roles` skill is the guide and CLI: `wt-roles list | new <name> [--base <role>] [--from-default] | check`.
 
+## Teams
+
+- A **team** is a pod of agents defined in `<settings>/teams/<name>.md` (the repo's `.wt-pack/` or the user-level
+  folder, same lookup as roles; commit it like code). Frontmatter: `description`, `members: [planner, frontend-worker x2,
+  reviewer]` (a base role or persona, optionally `xN`, 1–8; one entry per persona) and an optional `stages: [plan=planner,
+  build=frontend-worker, review=reviewer, qa=auditor]` map (stages: plan, build, review, qa; each persona must be a
+  member). The body is notes, not injected.
+- `wt-roles team list | check | new <name> [--template solo|standard|full] [--user]` — templates: **solo** (one
+  worker does everything), **standard** (planner, 2 workers, reviewer), **full** SDLC (adds a QA auditor).
+- `agents.sh spawn --team <name> [cwd]` brings the whole team up, one agent per member × count (each spawned as that
+  persona into its base pool); `agents.sh spawn <role|persona> --team <name>` adds one. Every member pane carries a
+  display-only `team=<name>` token (shown in the agent's tags; like `pair` it lives on the pane, so a herdr restart clears it
+  until the agent is respawned). A failed member makes `spawn --team` exit 1 after the others have started; the whole-team form takes an absolute or `./` path. This ticket (WP-237) covers definitions and spawn;
+  routing tickets to a team and stage gates are separate (WP-238, WP-239).
+- Dashboard: the **Teams** page (`#teams`, `GET /api/teams`) lists each project's teams with the agents filling every
+  member, load (agents up of defined, working, tickets) and the team's workflow as a Mermaid flowchart generated from
+  the file (stage → persona with count → gate, review/QA looping back to build), bundled in the web app (no CDN). The
+  stage each current ticket is in is highlighted: a team agent's `ticket` tag and its card's column (planning → plan,
+  building → build, review → review; a review card held by the `qa` persona → qa).
+
 ## wt-ticket CLI
 
 Talks to the dashboard at `$HERDR_DASH_URL` (default `http://127.0.0.1:7777`); project defaults to the

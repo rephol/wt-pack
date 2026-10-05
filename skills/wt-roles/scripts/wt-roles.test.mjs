@@ -47,3 +47,17 @@ test('new --user writes to the user folder (WP-234); refused while the repo has 
   execFileSync('mkdir', ['-p', join(r2, '.wt-pack')])
   assert.equal(go('new', 'auditor', '--user', '--from-default').code, 1)
 })
+
+test('WP-237 team: new from a template, list, check; refuses clobber, bad template and a member with no role file', () => {
+  const t = (n) => join(repo, '.wt-pack', 'teams', `${n}.md`)
+  assert.equal(run('team', 'new', 'pod', '--template', 'full').code, 0)
+  assert.match(readFileSync(t('pod'), 'utf8'), /members: \[planner, worker x2, reviewer, auditor\]/)
+  assert.equal(run('team', 'new', 'pod').code, 1)
+  assert.equal(run('team', 'new', 'x', '--template', 'huge').code, 2)
+  assert.match(run('team', 'list').out, /^pod\s+ok\s+planner, worker x2, reviewer, auditor/m)
+  assert.equal(run('team', 'check').code, 0)
+  writeFileSync(t('pod'), '---\nmembers: [ghost]\n---\n')
+  const c = run('team', 'check')
+  assert.equal(c.code, 1)
+  assert.match(c.out, /`ghost` has no role file/)
+})
