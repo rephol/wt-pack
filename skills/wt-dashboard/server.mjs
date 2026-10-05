@@ -14,6 +14,7 @@ import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteR
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
+import { teamView } from './teamview.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
@@ -991,6 +992,27 @@ export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, {
 }
 
 // ---- roles (Settings › Roles) ----
+// WP-237: every project's team files with who fills them and where their tickets are (GET only). wt-shared is
+// imported dynamically (a checkout without it just has no teams).
+async function teamsApi(req, res) {
+  if (req.method !== 'GET') return send(res, 405, { error: 'GET' })
+  const mod = await import('../wt-shared/scripts/teams.mjs').catch(() => null)
+  if (!mod) return send(res, 200, { teams: [] })
+  const ag = (await agents().catch(() => [])).filter((a) => a.local)
+  const cols = new Map()
+  const columnOf = (id) => cols.get(id)
+  const ids = new Set(ag.map((a) => a.tags?.ticket).filter((t) => /^[A-Z][A-Z0-9]*-\d+$/.test(t ?? '')))
+  await Promise.all([...ids].map(async (id) => { try { cols.set(id, (await tickets.get(id)).column) } catch { /* not on a board */ } }))
+  const teams = []
+  for (const [project, root] of await projectRoots()) {
+    const problems = mod.check(root)
+    for (const t of mod.list(root)) {
+      const v = teamView(t, project, ag, columnOf)
+      teams.push({ ...v, where: mod.teamsDir(root), flowchart: mod.flowchart(t, v.active), errors: problems.filter((p) => p.name === t.name && p.level === 'error').map((p) => p.msg) })
+    }
+  }
+  send(res, 200, { teams })
+}
 async function rolesApi(req, res) {
   const inUse = {}
   for (const a of (await agents().catch(() => []))) inUse[a.pool] = (inUse[a.pool] ?? 0) + 1
@@ -3018,6 +3040,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (url.pathname === '/api/teams') return await teamsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
