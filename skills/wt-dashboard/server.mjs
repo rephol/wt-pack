@@ -2475,14 +2475,16 @@ const messageSweep = async () => {
   await messages.sweep({
     pending: (row) => deliveries.live(row.target) && deliveries.queuedFor(row.target, row.id), // WP-258: queued behind a running turn, not lost
     seen: async (row) => (await tickets.get(row.ticket).then((c) => movedOn(c, row), () => false)) || ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
+    // WP-263: only our own project's agents are ever re-typed (other projects' agents don't know --ack); WT_MESSAGE_RESEND=off stops all resends.
+    resendable: (row) => cfg.get('WT_MESSAGE_RESEND') !== 'off' && ags.some((a) => a.id === row.target && a.project === REPO_PROJECT),
     resend: async (row) => {
       if (!ags.some((a) => a.id === row.target && a.local !== false)) throw new Error(`${row.target} is gone`)
       const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message
       await deliver({ id: row.target }, body, () => herdr('agent', 'prompt', row.target, body))
     },
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
-      body: `${row.attempts} sends, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
-  })
+      body: `${row.attempts} send${row.attempts === 1 ? '' : 's'}, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
+  }, { maxAttempts: 2 }) // WP-263: the original send plus one resend
   // WP-261: acknowledged, then the agent went idle or vanished and the card never moved on and nothing was reported.
   await messages.unreported({
     moved: (row) => tickets.get(row.ticket).then((c) => movedOn(c, row), () => true),

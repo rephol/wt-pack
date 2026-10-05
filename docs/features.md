@@ -123,7 +123,7 @@ header, remembered per viewer and defaulting to the global project; picking ther
   to `wt_messages` in `wt.db`: sender, target, kind, ticket, `request_id`, body, state (`queued → delivered → acknowledged →
   answered`; `expired`, `failed`), attempts, timestamps. The existing CLIs and the `<wt-message>` text are unchanged. An agent
   acknowledges by id: `handoff.sh --ack <id> [--answered]` (the Dispatch prompt asks for it first thing). A handoff or dispatch not acknowledged within 5 min is resent
-  (same envelope id, up to 3 sends; a target working on the card counts as an ack, and so does a card that has moved on: done or blocked, or moved by anyone but Dispatch after delivery, WP-260, so a finished ticket is never resent), then flagged **No ack** on the card and
+  (same envelope id, one resend, WP-263: only to an agent of the dashboard's own project, never to another project's agents, which are flagged **No ack** without being typed into again, and `WT_MESSAGE_RESEND=off` (Settings) stops resends altogether; a target working on the card counts as an ack, and so does a card that has moved on: done or blocked, or moved by anyone but Dispatch after delivery, WP-260, so a finished ticket is never resent), then flagged **No ack** on the card and
   in the Inbox. Recording the same `request_id` twice returns the first row. Board cards show the newest message's state
   (`Msg sent`, `Resent ×n`, `Acked`, `Answered`, `No ack`). `GET /api/messages?ticket=&target=` lists them.
 - **Finished without reporting** (WP-261): a handoff or dispatch with a ticket that the target acknowledged is flagged when,
@@ -392,7 +392,7 @@ down) is pasted exactly as before. Slash-command traffic (`/goal …` handoffs, 
 counts as a paste too, so a long `/goal <wt-message …>` writes the message to `~/.local/share/wt-dashboard/messages/<id>.md` (mode 600, pruned after 7 days)
 and types one short line, `/goal <ticket>: do the task in <path>; reporting what it asks for is the goal`. No queue and no ordering: a queue only drains between
 turns, and the goal keeps its turn open (WP-243; the WP-242 queue deadlocked). A file that cannot be written pastes the whole message. A queued delivery waits for the running turn to end (a pasted message used to sit in the TUI's own queue
-instead). A message still waiting in a pane's queue (its mod is live, a long turn is running) is not resent, counted against its 3 sends or flagged **No ack** by the WP-257 expiry sweep: it is not lost, so the sweep only acts once the queue no longer holds it (WP-258).
+instead). A message still waiting in a pane's queue (its mod is live, a long turn is running) is not resent, counted against its sends or flagged **No ack** by the WP-257 expiry sweep: it is not lost, so the sweep only acts once the queue no longer holds it (WP-258).
 A session loads the mod at its next start or `/reload-plugins`.
 Typed prompts are checked (WP-248): `handoff.sh` waits up to 60 s (`WT_READY_TIMEOUT`) for a freshly spawned session to register and go idle before typing (a missed registration is nudged once with `herdr agent rename`), and after typing, `wt-shared/scripts/pane-submit.mjs` reads the pane and presses Enter again (3 tries) if the text is still in the input box; if it stays there the handoff exits 1 with "prompt not submitted". The dashboard's typed sends (Dispatch, routines) run the same check and fail the send.
 
