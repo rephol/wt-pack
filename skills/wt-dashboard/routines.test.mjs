@@ -257,7 +257,8 @@ test('routine sends name themselves (WP-104): prompt gets { routine }, spawn get
   w.list.push({ id: 'p1', name: 'orch', status: 'idle', pool: 'orchestrator', project: 'x' })
   const p = r.create({ name: 'Digest', schedule: 'every 1h', target: { kind: 'prompt', agent: 'orch', text: 'digest' } })
   await r.runNow(p.id); await r.idle()
-  assert.deepEqual(w.calls.promptOpts, { routine: 'Digest' })
+  assert.match(w.calls.promptOpts.requestId, /^routine:.+:\d+$/) // WP-251
+  assert.equal(w.calls.promptOpts.routine, 'Digest')
   const s = r.create({ name: 'Audit', schedule: 'every 1h', target: { kind: 'spawn', role: 'auditor', project: 'x', prompt: '/wt-audit' } })
   await r.runNow(s.id)
   setTimeout(() => { w.list.find((a) => a.id === 'p9').status = 'idle' }, 20)

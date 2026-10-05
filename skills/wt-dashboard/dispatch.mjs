@@ -232,7 +232,7 @@ export class Dispatch {
     const persona = team ? personas.find((p) => p.name === tpersona) ?? null : personaFor(next, personas, role)
     const hrole = team ? persona?.base ?? tpersona : role
     try {
-      const args = ['--role', hrole, ...(persona ? ['--persona', persona.name] : []), ...(team ? ['--team', team.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
+      const args = ['--role', hrole, ...(persona ? ['--persona', persona.name] : []), ...(team ? ['--team', team.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--request-id', dispatchRequestId(next, hrole), '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
       const gates = (await this.deps.gatesOf?.(repo, team).catch(() => [])) ?? []
       const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null, gates), repo)
       const { name, pane } = parseHandoff(out)
@@ -461,6 +461,9 @@ export class Dispatch {
 
 // wt-handoff from the server: prompt on stdin, 120 s cap, and HERDR_PANE_ID blanked so a service started from a pane
 // does not pose as that pane (sender tokens, wt-ticket auth).
+// WP-251: one id per dispatch of a card at a given point in its life — a retry or re-evaluation repeats it (sends once);
+// a move (a return from review, a new stage) changes it, so a real re-dispatch still goes out.
+export const dispatchRequestId = (t, role) => `dispatch:${t.id}:${role}:${(t.history ?? []).filter((h) => h.kind === 'move').length}`
 export const runHandoff = (execFile, bin, env = {}) => (args, prompt, cwd) => new Promise((resolve, reject) => {
   const child = execFile(bin, args, { cwd, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '', ...env } },
     (err, o, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(o))

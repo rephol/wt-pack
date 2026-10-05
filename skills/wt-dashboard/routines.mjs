@@ -259,7 +259,7 @@ export class Routines {
   async #run(r, runId, started, a) {
     const t = r.target, ms = r.timeout_min * 60_000
     if (t.kind === 'prompt') {
-      await this.deps.prompt(a, t.text, { routine: r.name }) // WP-104: sent as <wt-message kind=routine>
+      await this.deps.prompt(a, t.text, { routine: r.name, requestId: `routine:${r.id}:${runId}` }) // WP-104: sent as <wt-message kind=routine>
       return this.#close(runId, 'ok', `prompted ${a.name}`)
     }
     if (t.kind === 'action') {

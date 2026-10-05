@@ -3,6 +3,7 @@
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
 #   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh ... [--request-id <id>] ...               # WP-251: a repeat of the same id prints the first run's output and sends nothing
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
 #   handoff.sh --cancel <pane|name> ["why"]               # stop a /goal-driven agent: escape, end its goal,
 #                                                          # clear task/ticket tokens, return its card if assigned
@@ -79,6 +80,8 @@ sha=
 skill=
 dry=0
 buddy_arg=
+request_id=
+RECEIPTS="$(dirname "$0")/../../wt-shared/scripts/receipts.mjs"
 while :; do
   case "${1:-}" in
     -h|--help) sed -n "2,/^[^#]/{/^#/s/^# \{0,1\}//p;}" "$0"; exit 0 ;;
@@ -107,6 +110,7 @@ while :; do
     --mcp)   mcp=$2; shift 2 ;;
     --skill) skill=$2; shift 2 ;;   # WP-129: the caller's own skill name, for routing/tuning stats
     --dry-run) dry=1; shift ;;
+    --request-id) request_id=$2; shift 2 ;;   # WP-251
     --buddy) buddy_arg=$2; shift 2 ;;   # WP-147: pane id, or "self" for the sending pane
 
     *) break ;;
@@ -114,6 +118,9 @@ while :; do
 done
 
 
+
+# WP-251: a repeated request id returns the earlier output (a lost Enter, a restart, Dispatch re-evaluating a card).
+[ -z "$request_id" ] || [ "$dry" -eq 1 ] || ! node "$RECEIPTS" get "$request_id" 2>/dev/null || exit 0
 
 command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 
@@ -500,11 +507,13 @@ finish() {  # <first output line> <target pane>
       fi
     fi
   fi
-  echo "$line"
-  [ -z "$route_line" ] || echo "$route_line"
-  echo "target ${to_name:-?} $to${task:+ — $task}"
-  echo "reach: $SELF --reply $to \"...\""
-  [ -z "$routed" ] || echo "$routed"
+  out=$(echo "$line"
+    [ -z "$route_line" ] || echo "$route_line"
+    echo "target ${to_name:-?} $to${task:+ — $task}"
+    echo "reach: $SELF --reply $to \"...\""
+    [ -z "$routed" ] || echo "$routed")
+  printf '%s\n' "$out"
+  [ -z "$request_id" ] || printf '%s\n' "$out" | node "$RECEIPTS" put "$request_id" 2>/dev/null || true
 }
 
 dry() {  # <what would happen>

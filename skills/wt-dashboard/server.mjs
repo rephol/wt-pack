@@ -21,6 +21,7 @@ import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.m
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { promptOn } from './promptOn.mjs'
+import * as receipts from '../wt-shared/scripts/receipts.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
 import { sweep as recoverySweep } from './recovery.mjs'
 import { Dispatch, runHandoff, resolveReport, routeRef, strikes } from './dispatch.mjs'
@@ -3310,7 +3311,8 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      await deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), { confirm: true }))
+      const send = () => deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), { confirm: true }))
+      await (o?.requestId ? receipts.once(o.requestId, async () => (await send()) ?? '') : send()) // WP-251
       store.delete('agents:local')
     },
     spawn: (b) => spawnAgent(b),
@@ -3642,7 +3644,11 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     // Board dispatch + reconcile: finish or clear claims a restart orphaned, then every 30s beside routines.
     dispatcher.recover().then(() => recoverySweep({ tickets, deps: { agents: () => agents(), notify: (i) => inbox.add(i), event: (...a) => dispatcher.event(...a),
       // WP-251 seam: pass `key` as the idempotency key once it lands. Until then the Ready claim (a row CAS) is what stops a double send.
-      redispatch: async (t) => { await tickets.dropAssignee(t.id, t.assignee.name, 'dispatch', `interrupted: dashboard restarted; ${t.assignee.name} is gone, re-dispatching`); return true } } }))
+      redispatch: async (t, { key } = {}) => { // WP-251: the sweep's key makes a repeated re-dispatch of the same interruption a no-op
+        const drop = async () => { await tickets.dropAssignee(t.id, t.assignee.name, 'dispatch', `interrupted: dashboard restarted; ${t.assignee.name} is gone, re-dispatching`); return 'ok' }
+        await (key ? receipts.once(`recovery:${key}`, drop) : drop())
+        return true
+      } } }))
       .catch((e) => console.error('recovery:', e.message)).finally(() => {
       const dt = () => dispatcher.tick().catch((e) => console.error('dispatch:', e.message))
       setTimeout(dt, 15_000)
