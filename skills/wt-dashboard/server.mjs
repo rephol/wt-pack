@@ -2465,10 +2465,10 @@ async function gateState(t, stages) {
   if (want.includes('build')) {
     const base = (await git(root, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD').catch(() => 'main')).trim() || 'main'
     for (const ref of (await git(root, 'for-each-ref', '--format=%(refname:short)', `refs/heads/${id}-*`).catch(() => '')).split('\n').filter(Boolean)) {
-      if (Number(await git(root, 'rev-list', '--count', `${base}..${ref}`).catch(() => '0')) > 0) { facts.tip = (await git(root, 'rev-parse', '--short', ref)).trim(); break }
+      if (Number(await git(root, 'rev-list', '--count', `${base}..${ref}`).catch(() => '0')) > 0) { facts.tip = (await git(root, 'rev-parse', '--short', ref).catch(() => ref)).trim(); break }
     }
   }
-  return { enabled, gates: g.evaluate(t, want, facts), crossed: (from, to) => g.crossed(enabled, from, to) }
+  return { enabled, gates: g.evaluate(t, want, facts), crossed: (to) => g.crossed(enabled, g.origin(t), to) }
 }
 async function ticketsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
@@ -2533,11 +2533,13 @@ async function ticketsApi(req, res, url, parts) {
     if (b.column) {
       const cur = await tickets.get(id)
       if (b.column !== cur.column) {
-        const st = await gateState(cur)
-        const fails = st.gates.filter((x) => !x.ok && st.crossed(cur.column, b.column).includes(x.stage))
+        // a gate that cannot be evaluated (git trouble, a broken team file) fails OPEN: it must not freeze the board
+        const st = await gateState(cur).catch((e) => { console.error('gates:', e.message); return { gates: [], crossed: () => [] } })
+        const fails = st.gates.filter((x) => !x.ok && st.crossed(b.column).includes(x.stage))
         if (fails.length && b.force !== true) {
           const msg = fails.map((x) => `${x.stage}: ${x.why}`).join('; ')
-          await tickets.comment(id, `gate blocked ${cur.column} → ${b.column}. ${msg}`, { name: 'gates' }).catch(() => {})
+          const note = `gate blocked ${cur.column} → ${b.column}. ${msg}`
+          if (cur.history.at(-1)?.text !== note) await tickets.comment(id, note, { name: 'gates' }).catch(() => {}) // a retry does not pile up copies
           return send(res, 409, { error: `gate blocked ${cur.column} → ${b.column}: ${msg} (--force overrides)`, gates: fails })
         }
         if (fails.length) overridden = fails.map((x) => x.stage).join(', ')
