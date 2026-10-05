@@ -14,6 +14,7 @@
 import { readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { join, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { CHECK_LABEL } from './gates.mjs'
 import { BASES, NAME, list as listRoles, mainCheckout, parse, settingsRoot } from './roles.mjs'
 
 export const STAGES = ['plan', 'build', 'review', 'qa'] // the pipeline order; the flowchart and stage routing (WP-238) follow it
@@ -21,11 +22,11 @@ export const MAX_COUNT = 8
 export const teamsDir = (checkout, where) => join(settingsRoot(checkout, where), 'teams')
 
 export const TEMPLATES = {
-  solo: { description: 'One worker plans, builds and reviews', members: ['worker'], stages: ['plan=worker', 'build=worker', 'review=worker'] },
-  standard: { description: 'Planner, two workers and a reviewer', members: ['planner', 'worker x2', 'reviewer'], stages: ['plan=planner', 'build=worker', 'review=reviewer'] },
-  full: { description: 'Full SDLC: planner, two workers, reviewer, QA auditor', members: ['planner', 'worker x2', 'reviewer', 'auditor'], stages: ['plan=planner', 'build=worker', 'review=reviewer', 'qa=auditor'] },
+  solo: { description: 'One worker plans, builds and reviews', members: ['worker'], stages: ['plan=worker', 'build=worker', 'review=worker'], gates: [] },
+  standard: { description: 'Planner, two workers and a reviewer', members: ['planner', 'worker x2', 'reviewer'], stages: ['plan=planner', 'build=worker', 'review=reviewer'], gates: ['plan', 'build', 'review'] },
+  full: { description: 'Full SDLC: planner, two workers, reviewer, QA auditor', members: ['planner', 'worker x2', 'reviewer', 'auditor'], stages: ['plan=planner', 'build=worker', 'review=reviewer', 'qa=auditor'], gates: ['plan', 'build', 'review', 'qa'] },
 }
-export const templateText = (name, t) => `---\ndescription: ${t.description}\nmembers: [${t.members.join(', ')}]\nstages: [${t.stages.join(', ')}]\n---\nNotes for ${name} (free-form; not injected into agents).\n`
+export const templateText = (name, t) => `---\ndescription: ${t.description}\nmembers: [${t.members.join(', ')}]\nstages: [${t.stages.join(', ')}]\n${t.gates.length ? `gates: [${t.gates.join(', ')}]\n` : ''}---\nNotes for ${name} (free-form; not injected into agents).\n`
 
 // WP-241: the team file for structured input (the dashboard editor). Every value is validated before it reaches the
 // frontmatter, so a name or description can never inject a key or a line. `notes` is the free-form body.
@@ -63,7 +64,7 @@ export function list(checkout) {
       text = readFileSync(f, 'utf8').slice(0, 24 * 1024)
     } catch { continue }
     const { meta, body } = parse(text)
-    out.push({ name, description: String(meta.description ?? ''), members: arr(meta.members).map(member), stages: arr(meta.stages).map(stage), body, meta })
+    out.push({ name, description: String(meta.description ?? ''), members: arr(meta.members).map(member), stages: arr(meta.stages).map(stage), gates: 'gates' in meta ? arr(meta.gates) : null, body, meta })
   }
   return out
 }
@@ -78,7 +79,7 @@ export function check(checkout) {
   const personas = new Set(listRoles(checkout).filter((r) => !r.override).map((r) => r.name))
   for (const t of list(checkout)) {
     if (!NAME.test(t.name)) warn(t.name, `name must match ${NAME}`, 'error')
-    for (const k of Object.keys(t.meta)) if (!['description', 'members', 'stages'].includes(k)) warn(t.name, `unknown key \`${k}\``)
+    for (const k of Object.keys(t.meta)) if (!['description', 'members', 'stages', 'gates'].includes(k)) warn(t.name, `unknown key \`${k}\``)
     if (!t.members.length) warn(t.name, 'no members', 'error')
     const known = (p) => BASES.includes(p) || personas.has(p)
     for (const m of t.members) {
@@ -87,6 +88,7 @@ export function check(checkout) {
       if (!(m.count >= 1 && m.count <= MAX_COUNT)) warn(t.name, `member \`${m.persona}\`: count must be 1-${MAX_COUNT} (\`persona x2\`)`, 'error')
     }
     if (new Set(t.members.map((m) => m.persona)).size < t.members.length) warn(t.name, 'a persona is listed twice; use `persona xN`', 'error')
+    for (const g of t.gates ?? []) if (!STAGES.includes(g)) warn(t.name, `unknown gate \`${g}\` (${STAGES.join(', ')})`, 'error')
     const have = new Set(t.members.map((m) => m.persona))
     const seen = new Set()
     for (const s of t.stages) {
@@ -112,7 +114,7 @@ export function flowchart(team, active = []) {
   stages.forEach((s, i) => {
     L.push(`  ${s.stage}["${lab(s)}"]`)
     const next = stages[i + 1]
-    L.push(`  ${s.stage} --> ${s.stage}_gate{{"gate"}}`)
+    L.push(`  ${s.stage} --> ${s.stage}_gate{{"${(team.gates ?? []).includes(s.stage) ? `gate: ${CHECK_LABEL[s.stage]}` : 'gate'}"}}`)
     L.push(next ? `  ${s.stage}_gate --> ${next.stage}` : `  ${s.stage}_gate --> done(["done"])`)
   })
   const build = stages.find((s) => s.stage === 'build')
