@@ -724,6 +724,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   `{"at": <ISO time>, "session": <id>, "kind": "inject" | "recall", "ids": [<6-hex entry id>]}`. The hook writes
   `inject` (`ids: []`) at every SessionStart; `wt-memory recall` writes `recall` (WP-235). Unknown lines are ignored.
 
+- **Standing role rules from t3code's known failure modes** (WP-256), kept as role notes (`wt-memory remember --scope role`,
+  in the store, not in git) so every agent of the role gets them at session start:
+  - *orchestrator, planner*: before retrying a failed agent launch or handoff, check whether it already took effect (`wt-agents list`, `herdr pane read`, the ticket's assignee); a launch has no idempotency key, so a blind retry starts a duplicate. Retry `handoff.sh` only with the same `--request-id`.
+  - *worker, planner*: a `cd` or `git worktree add` rebinds only the Bash shell, not the session (hooks, MCP servers, memory and CLAUDE.md were chosen at start). After entering a worktree verify `pwd` and `git rev-parse --show-toplevel`, use absolute paths, and start an agent that must live in a worktree there (`wt-agents spawn worker <worktree>`).
+  - *worker, planner, orchestrator*: a lazily loaded MCP tool (not in the tool list yet) gets one bounded direct attempt (load it with ToolSearch, call it once), then is reported absent with that error: never looped, never assumed present or missing untried.
+  A fresh checkout does not carry these notes; re-add them with `wt-memory remember` (the entries are the three lines above).
+
 ## Project roles and personas
 
 - A repo can carry its own role instructions in `.wt-pack/roles/<name>.md` (read from the repo's **main checkout**,
