@@ -21,6 +21,7 @@ import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.m
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn } from './messages.mjs'
+import { Changes } from './changes.mjs'
 import { promptOn } from './promptOn.mjs'
 import * as receipts from '../wt-shared/scripts/receipts.mjs'
 import { Routines, preview as schedulePreview } from './routines.mjs'
@@ -1828,7 +1829,9 @@ export function transitions(prev, next) {
 }
 // One always-on loop feeds the inbox (data/wt.db) from successive overviews; /api/events
 // relays new items (native notifications) and the tray list (unresolved actionable items) to the app.
-const inbox = new Inbox(DATA)
+// WP-253: the change stream (GET /api/changes). Writes to tickets, the inbox and rooms each add an event; the web app refetches.
+const changes = new Changes()
+const inbox = new Inbox(DATA, () => changes.add('inbox'))
 const subs = new Set()
 let lastSnap = null
 // WP-166: `project` lets the app route a tray click to that project's window (absent for rooms/memory items).
@@ -2404,6 +2407,7 @@ async function recordRoutingOutcome(t, what, fallbackWhy) {
 // (WP-134): clear the stale task/ticket tokens so wt-handoff's free-worker pick sees it as free again.
 const tickets = new Tickets({
   dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM),
+  onChange: (project) => changes.add('tickets', { project }),
   onReady: (project, t) => readyNotes.add(project, t),
   onReopen: (project, t) => recordRoutingOutcome(t, 'returned', 'reopened').catch((e) => console.error('routing outcome:', e.message)),
   onDone: async (project, t) => {
@@ -2749,6 +2753,7 @@ const jevOn = (feature, project) => (PKEYS[`WT_JEV_${feature}`] ? psettings.get(
 const jevAsk = (feature, state, questions, pick, opts) => jevJudge(feature.toLowerCase(), state, questions, { key: cfg.get('TYPESAFE_API_KEY') ?? '', pick, ...opts })
 const rooms = new Rooms({
   dir: DATA,
+  onChange: (d) => changes.add('rooms', d),
   judge: async (state) => {
     if (!jevOn('ROOM_RESOLVE')) return null
     const min = minFor('room_resolve')
@@ -3203,6 +3208,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === '/api/health') return send(res, 200, await health())
       if (url.pathname === '/api/events') return streamEvents(req, res)
+      if (url.pathname === '/api/changes') return changes.stream(req, res, req.headers['last-event-id'] || url.searchParams.get('since'))
       if (url.pathname === '/api/build') return send(res, 200, await buildInfo(url.searchParams.get('since')))
       if (url.pathname.startsWith('/api/notifications')) return await inboxApi(req, res, url)
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)

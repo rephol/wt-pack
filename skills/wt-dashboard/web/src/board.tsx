@@ -4,6 +4,7 @@
 // Phone (<768px): the toolbar gets a column Selector and one column fills the width; cards move from the menu or
 // the ticket. API: docs/plans/local-kanban-plan.md.
 // ponytail: plain CSS classes (hd-kb-*) instead of the templates' StyleX xstyle — this app has no StyleX compiler.
+import { POLL_FALLBACK_MS } from './changes'
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel, HStack, VStack, StackItem, Card, Section } from '@astryxdesign/core/Layout'
@@ -77,7 +78,7 @@ function BoardPicker({ projects, onProject }: { projects: string[]; onProject: (
 export function Board({ project, phone, projects = [], onProject }: { project: string; phone: boolean; projects?: string[]; onProject?: (p: string) => void }) {
   const qc = useQueryClient()
   const key = ['tickets', project]
-  const q = useQuery({ queryKey: key, queryFn: () => api<BoardT>(`/api/tickets?project=${encodeURIComponent(project)}`), refetchInterval: 4000, enabled: project !== 'all' })
+  const q = useQuery({ queryKey: key, queryFn: () => api<BoardT>(`/api/tickets?project=${encodeURIComponent(project)}`), refetchInterval: POLL_FALLBACK_MS, enabled: project !== 'all' })
   const [openId, setOpenId] = useState<string | null>(null) // ticket id, or 'new'
   const [blockAsk, setBlockAsk] = useState(false) // opened by a drop on Blocked: the note is required
   const [col, setCol] = useState<Column>('ready')

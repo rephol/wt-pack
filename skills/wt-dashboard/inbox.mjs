@@ -103,7 +103,8 @@ export const inboxRank = {
 export class Inbox {
   // dir: the data dir; items live in its wt.db (store.mjs). `items` is the in-memory copy: the server is the only
   // writer, and each change updates it in the same call as the DB.
-  constructor(dir) { Object.assign(this, { file: join(dir, 'wt.db'), items: null, subs: new Set() }) }
+  // onChange(): any item added, patched or dropped (WP-253's change stream); `subs` feeds native notifications.
+  constructor(dir, onChange = () => {}) { Object.assign(this, { file: join(dir, 'wt.db'), items: null, subs: new Set(), onChange }) }
   get db() { return open(this.file) }
   async load() {
     if (this.items) return
@@ -119,6 +120,7 @@ export class Inbox {
     this.db.prepare('INSERT INTO notifications (id, json) VALUES (?, ?)').run(it.id, JSON.stringify(it))
     this.items.push(it)
     for (const f of this.subs) f(it)
+    this.onChange()
     return it
   }
   async patch(ids, patch) {
@@ -130,6 +132,7 @@ export class Inbox {
       for (const it of hit) up.run(JSON.stringify({ ...it, ...patch }), it.id)
     })
     for (const it of hit) Object.assign(it, patch)
+    if (hit.length) this.onChange()
     return hit.length
   }
   // Drop items matching `drop`. Returns {dropped}.
@@ -139,6 +142,7 @@ export class Inbox {
     if (gone.length && !dryRun) {
       tx(this.db, () => { const del = this.db.prepare('DELETE FROM notifications WHERE id = ?'); for (const it of gone) del.run(it.id) })
       this.items = this.items.filter((it) => !gone.includes(it))
+      this.onChange()
     }
     return { dropped: gone.length }
   }

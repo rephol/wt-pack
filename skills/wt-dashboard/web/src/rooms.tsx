@@ -1,4 +1,5 @@
 // Rooms: shared chat between the user and agents. Live via /api/rooms/:slug/stream; posting as the user.
+import { POLL_FALLBACK_MS } from './changes'
 import { roomInProject } from './switcherData'
 import { useDraft } from './draft'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
@@ -75,7 +76,7 @@ export const api = async <T,>(url: string, init?: RequestInit): Promise<T> => {
 }
 
 export function useRoomsList() {
-  return useQuery({ queryKey: ['rooms'], queryFn: () => api<{ rooms: Room[]; settings: RoomSettings; suggestions: Suggestion[]; pending: Record<string, number> }>('/api/rooms'), refetchInterval: 10_000 })
+  return useQuery({ queryKey: ['rooms'], queryFn: () => api<{ rooms: Room[]; settings: RoomSettings; suggestions: Suggestion[]; pending: Record<string, number> }>('/api/rooms'), refetchInterval: POLL_FALLBACK_MS })
 }
 
 export function RoomsPage({ slug, project = 'all', projects = [], agents, onSelect, onOpenAgent, onProject }: { slug: string | null; project?: string; projects?: string[]; agents: RoomAgent[]; onSelect: (slug: string | null) => void; onOpenAgent: (key: string) => void; onProject?: (p: string) => void }) {
