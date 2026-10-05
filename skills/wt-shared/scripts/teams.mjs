@@ -11,8 +11,8 @@
 //   teams.mjs members <name> [--cwd D] one persona per line, count-expanded (what `agents.sh spawn --team` spawns)
 //   teams.mjs check   [--cwd D]       JSON findings; exit 1 on any error
 // Pure and synchronous; frontmatter is the same flat `key: value` / `[a, b]` dialect as roles.mjs.
-import { readFileSync, readdirSync } from 'node:fs'
-import { join, resolve as resolvePath } from 'node:path'
+import { readFileSync, readdirSync, realpathSync } from 'node:fs'
+import { join, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BASES, NAME, list as listRoles, mainCheckout, parse, settingsRoot } from './roles.mjs'
 
@@ -28,9 +28,10 @@ export const TEMPLATES = {
 export const templateText = (name, t) => `---\ndescription: ${t.description}\nmembers: [${t.members.join(', ')}]\nstages: [${t.stages.join(', ')}]\n---\nNotes for ${name} (free-form; not injected into agents).\n`
 
 const arr = (v) => (Array.isArray(v) ? v : v ? [v] : [])
-// "frontend-worker x2" | "frontend-worker" → {persona, count}; a bad shape keeps count NaN so check() can name it.
+// "frontend-worker x2" | "frontend-worker" → {persona, count}. The count needs whitespace before the x, so a persona
+// named linux2 stays linux2; a bad shape keeps count NaN so check() can name it.
 export const member = (s) => {
-  const m = /^(\S+?)(?:\s*[x×]\s*(\d+))?$/.exec(String(s).trim())
+  const m = /^(\S+)(?:\s+[x×]\s*(\d+))?$/.exec(String(s).trim())
   return m ? { persona: m[1], count: m[2] ? Number(m[2]) : 1 } : { persona: String(s).trim(), count: NaN }
 }
 export const stage = (s) => {
@@ -44,7 +45,12 @@ export function list(checkout) {
   const out = []
   for (const name of names) {
     let text
-    try { text = readFileSync(join(teamsDir(checkout), `${name}.md`), 'utf8').slice(0, 24 * 1024) } catch { continue }
+    try {
+      // a symlink out of the settings root is not a team file (roles.mjs bounds its files the same way)
+      const f = join(teamsDir(checkout), `${name}.md`)
+      if (!realpathSync(f).startsWith(realpathSync(settingsRoot(checkout)) + sep)) continue
+      text = readFileSync(f, 'utf8').slice(0, 24 * 1024)
+    } catch { continue }
     const { meta, body } = parse(text)
     out.push({ name, description: String(meta.description ?? ''), members: arr(meta.members).map(member), stages: arr(meta.stages).map(stage), body, meta })
   }
@@ -88,7 +94,8 @@ export function check(checkout) {
 export function flowchart(team, active = []) {
   const count = new Map(team.members.map((m) => [m.persona, m.count]))
   const stages = STAGES.map((s) => team.stages.find((x) => x.stage === s)).filter(Boolean)
-  const lab = (s) => `${s.stage}\\n${s.persona}${count.get(s.persona) > 1 ? ` ×${count.get(s.persona)}` : ''}`
+  const safe = (x) => String(x).replace(/[^\w-]/g, '') // check() rejects anything else, but the API draws invalid teams too
+  const lab = (s) => `${s.stage}\\n${safe(s.persona)}${count.get(s.persona) > 1 ? ` ×${count.get(s.persona)}` : ''}`
   if (!stages.length) return 'flowchart LR\n  none["no stages mapped"]'
   const L = ['flowchart LR']
   stages.forEach((s, i) => {

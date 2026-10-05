@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { list, get, expand, check, flowchart, member, TEMPLATES, templateText } from './teams.mjs'
@@ -18,6 +18,8 @@ const team = (r, name, text) => writeFileSync(join(r, '.wt-pack', 'teams', `${na
 test('member parses "persona xN"; list/get/expand read the file', () => {
   assert.deepEqual(member('frontend-worker x2'), { persona: 'frontend-worker', count: 2 })
   assert.deepEqual(member('planner'), { persona: 'planner', count: 1 })
+  assert.deepEqual(member('linux2'), { persona: 'linux2', count: 1 })
+  assert.match(flowchart({ members: [], stages: [{ stage: 'build', persona: 'a"]\nclick x' }] }), /build\\naclickx/)
   const r = repo()
   team(r, 'web', '---\ndescription: Web pod\nmembers: [planner, frontend-worker x2, reviewer]\nstages: [plan=planner, build=frontend-worker, review=reviewer]\n---\nnotes')
   const t = get(r, 'web')
@@ -55,4 +57,18 @@ test('flowchart: stages in pipeline order with counts, gates, review/qa loop bac
   assert.match(hi, /class build,qa active/)
   assert.doesNotMatch(flowchart(get(r, 'full'), []), /classDef/)
   assert.match(flowchart({ members: [], stages: [] }), /no stages mapped/)
+})
+
+test('a symlinked team file pointing outside the settings root is ignored; the members CLI refuses an invalid team', () => {
+  const r = repo()
+  const outside = join(mkdtempSync(join(tmpdir(), 'teams-out-')), 'evil.md')
+  writeFileSync(outside, '---\nmembers: [worker]\n---\n')
+  symlinkSync(outside, join(r, '.wt-pack', 'teams', 'evil.md'))
+  assert.deepEqual(list(r), [])
+  team(r, 'ok', '---\nmembers: [worker x2]\n---\n')
+  team(r, 'broken', '---\nmembers: [ghost]\n---\n')
+  const cli = (n) => { try { return { out: execFileSync(process.execPath, [new URL('./teams.mjs', import.meta.url).pathname, 'members', n, '--cwd', r], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), code: 0 } } catch (e) { return { out: e.stderr, code: e.status } } }
+  assert.deepEqual(cli('ok'), { out: 'worker\nworker\n', code: 0 })
+  assert.equal(cli('broken').code, 1)
+  assert.equal(cli('missing').code, 1)
 })
