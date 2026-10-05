@@ -758,3 +758,15 @@ test('WP-239 Dispatch: the prompt carries the gates the repo has on; none on = n
   await missing.d.tick()
   assert.doesNotMatch(missing.calls[0].prompt, /Stage gates/)
 })
+
+test('WP-251: a card recovery stamped sends with that request id, and #sent clears it', async () => {
+  const { tickets, d, calls } = await setup()
+  const t = await ready(tickets, 'recovered', { size: 'M' })
+  const { recoveryRequestId } = await import('./dispatch.mjs')
+  const stamped = recoveryRequestId({ ...t, column: 'building' })
+  assert.match(stamped, /^dispatch:WP-\d+:worker:\d+$/)
+  await tickets.mutate(t.id, (c) => ({ ...c, requestId: stamped }))
+  await d.tick()
+  assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf('--request-id'), calls[0].args.indexOf('--request-id') + 2), ['--request-id', stamped])
+  assert.equal((await tickets.get(t.id)).requestId, undefined)
+})
