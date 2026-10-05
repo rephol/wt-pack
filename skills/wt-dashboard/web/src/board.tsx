@@ -375,7 +375,7 @@ function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Colu
           {db && <Tooltip content={db[2]}><Badge label={db[0]} variant={db[1]} /></Tooltip>}
         </HStack>
         <MoreMenu label={`Actions for ${t.id}`} size="sm" alignment="end" presentation="adaptive"
-          items={[...(t.dispatch?.state === 'held' || t.dispatch?.state === 'failed' ? [{ label: 'Retry dispatch', onClick: () => { send(`${tUrl(t.id)}/dispatch-retry`, 'POST', {}).catch(() => {}) } }] : []),
+          items={[...(t.dispatch?.state === 'held' || t.dispatch?.state === 'failed' || t.dispatch?.state === 'interrupted' ? [{ label: 'Retry dispatch', onClick: () => { send(`${tUrl(t.id)}/dispatch-retry`, 'POST', {}).catch(() => {}) } }] : []),
             ...COLUMNS.filter((c) => c !== t.column).map((c) => ({ label: `Move to ${columnLabel(c)}`, onClick: () => onMove(t.id, c) }))]} />
       </HStack>
       <VStack gap={1}>
