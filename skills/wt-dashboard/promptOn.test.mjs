@@ -37,3 +37,11 @@ test('WP-243: a long /goal types a short line naming a mode-600 message file (pa
   assert.deepEqual(c, ['agent prompt p1 /goal ' + msg])
   delete process.env.WT_MESSAGES_DIR
 })
+test('WP-248: with confirm, a typed line left in the input box gets Enter again (bounded), else the send fails', async () => {
+  const rule = '─'.repeat(30); let box = 'still here', c = [], clears = true
+  const h = async (m, ...a) => { c.push(a.join(' ')); if (a[1] === 'read') return `${rule}\n❯ ${box}\n${rule}`; if (a[1] === 'send-keys' && clears && c.filter((x) => x.includes('send-keys')).length === 2) box = '' }
+  await promptOn(h, {}, 'p1', '/wt-audit', { confirm: true, settleMs: 0 })
+  assert.deepEqual(c.filter((x) => x.includes('send-keys')).length, 2) // typed Enter + one retry that cleared it
+  box = 'stuck'; c = []; clears = false
+  await assert.rejects(promptOn(h, {}, 'p1', '/wt-audit', { confirm: true, settleMs: 0 }), /not submitted/)
+})

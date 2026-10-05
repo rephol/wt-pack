@@ -304,7 +304,19 @@ has_picks() {
 
 # WP-242: taken once and unset, so the agents this script spawns never inherit it.
 deliver_token=${WT_DELIVER_TOKEN:-}; unset WT_DELIVER_TOKEN
+# WP-248: a session that has just spawned is still loading its start-up context and drops typed input, so wait until
+# it is registered and idle before typing (a missed registration is nudged once with a rename), and after typing
+# check the text left the input box (Enter again if not). Env knobs: WT_READY_TIMEOUT s, WT_SUBMIT_SETTLE_MS.
+PANE_SUBMIT="$(dirname "$0")/../../wt-shared/scripts/pane-submit.mjs"
+fresh=0; fresh_label=
+wait_ready() { # <pane>
+  node "$PANE_SUBMIT" ready "$1" --timeout "${WT_READY_TIMEOUT:-60}" 2>/dev/null && return 0
+  [ -z "$fresh_label" ] || herdr agent rename "$1" "$fresh_label" >/dev/null 2>&1 || true
+  node "$PANE_SUBMIT" ready "$1" --timeout "$(( ${WT_READY_TIMEOUT:-60} / 6 ))" 2>/dev/null \
+    || echo "warning: $1 not ready after ${WT_READY_TIMEOUT:-60}s, sending anyway" >&2
+}
 hand_to() {
+  [ "$fresh" -eq 0 ] || wait_ready "$1"
   # /clear is the user's call, never a default: a reused agent's prior context
   # can be exactly what makes it the right one to continue in.
   if [ "$clear" -eq 1 ]; then
@@ -320,6 +332,8 @@ hand_to() {
   else
     herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   fi
+  node "$PANE_SUBMIT" confirm "$1" --settle "${WT_SUBMIT_SETTLE_MS:-1500}" 2>/dev/null \
+    || { echo "prompt not submitted: it is still in the input box of $1" >&2; exit 1; }
 }
 
 # WP-243: the wt-message as a file under the dashboard's data dir (7-day prune); prints its path.
@@ -569,5 +583,6 @@ label=${created%% *}
 pane=${created##* }
 
 clear=0   # a fresh agent has nothing to clear
+fresh=1; fresh_label=$label
 hand_to "$pane"
 finish "created $label $pane" "$pane"
