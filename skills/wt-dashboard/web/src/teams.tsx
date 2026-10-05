@@ -54,8 +54,8 @@ function useTeamAction(done: string) {
   }, (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }))
 }
 
-function NewTeam({ projects, onClose }: { projects: string[]; onClose: () => void }) {
-  const [project, setProject] = useState(projects[0] ?? ''), [name, setName] = useState(''), [template, setTemplate] = useState('standard')
+function NewTeam({ projects, onClose, onBlank }: { projects: string[]; onClose: () => void; onBlank: (project: string, name: string) => void }) {
+  const [project, setProject] = useState(projects[0] ?? ''), [name, setName] = useState(''), [template, setTemplate] = useState('blank')
   const act = useTeamAction('Team created')
   return (
     <Dialog isOpen onOpenChange={(o) => !o && onClose()} width={420}>
@@ -65,23 +65,24 @@ function NewTeam({ projects, onClose }: { projects: string[]; onClose: () => voi
           <Selector label="Project" width="100%" value={project} options={projects.map((p) => ({ value: p, label: p }))} onChange={setProject} />
           <TextInput label="Name" value={name} onChange={(v) => setName(v.toLowerCase())} placeholder="web" />
           <Selector label="Template" width="100%" value={template} onChange={setTemplate}
-            options={[{ value: 'solo', label: 'solo — one worker' }, { value: 'standard', label: 'standard — planner, 2 workers, reviewer' }, { value: 'full', label: 'full — plus QA auditor' }]} />
+            options={[{ value: 'blank', label: 'blank — start empty, add members and stages' }, { value: 'solo', label: 'solo — one worker' }, { value: 'standard', label: 'standard — planner, 2 workers, reviewer' }, { value: 'full', label: 'full — plus QA auditor' }]} />
           <Text type="supporting" size="sm">Saved to the project's .wt-pack/teams (or the user-level folder, as set for the project). Not committed.</Text>
         </VStack>
       
       <HStack justify="end" gap={2}>
         <Button label="Cancel" variant="ghost" onClick={onClose} />
-        <Button label="Create" variant="primary" isDisabled={!project || !name} onClick={() => act(() => api(url(project), { method: 'POST', body: JSON.stringify({ name, template }) }), onClose)} />
+        <Button label={template === 'blank' ? 'Next' : 'Create'} variant="primary" isDisabled={!project || !name} onClick={() => template === 'blank' ? (onBlank(project, name), onClose()) : act(() => api(url(project), { method: 'POST', body: JSON.stringify({ name, template }) }), onClose)} />
       </HStack>
       </VStack>
     </Dialog>
   )
 }
 
-function EditTeam({ t, onClose }: { t: Team; onClose: () => void }) {
+// `create`: a blank new team — Save POSTs it (name + this body) instead of PUTting over an existing file.
+function EditTeam({ t, onClose, create }: { t: Team; onClose: () => void; create?: boolean }) {
   const [d, setD] = useState<Draft>({ description: t.description, members: t.members.map((m) => ({ persona: m.persona, count: m.count })), stages: t.stages.map((x) => ({ ...x })) })
   const [flow, setFlow] = useState(t.flowchart)
-  const act = useTeamAction('Team saved')
+  const act = useTeamAction(create ? 'Team created' : 'Team saved')
   useEffect(() => {
     const h = setTimeout(() => api<{ flowchart: string }>('/api/teams/preview', { method: 'POST', body: JSON.stringify(d) }).then((r) => setFlow(r.flowchart), () => {}), 300)
     return () => clearTimeout(h)
@@ -91,7 +92,7 @@ function EditTeam({ t, onClose }: { t: Team; onClose: () => void }) {
   return (
     <Dialog isOpen onOpenChange={(o) => !o && onClose()} width={560}>
       <VStack gap={3}>
-      <Heading level={3}>{`Edit ${t.name}`}</Heading>
+      <Heading level={3}>{`${create ? 'New' : 'Edit'} ${t.name}`}</Heading>
         <VStack gap={2}>
           <TextInput label="Description" value={d.description} onChange={(description) => setD({ ...d, description })} />
           <Text weight="semibold" size="sm">Members (role or persona × count)</Text>
@@ -117,7 +118,7 @@ function EditTeam({ t, onClose }: { t: Team; onClose: () => void }) {
       
       <HStack justify="end" gap={2}>
         <Button label="Cancel" variant="ghost" onClick={onClose} />
-        <Button label="Save" variant="primary" onClick={() => act(() => api(url(t.project, t.name), { method: 'PUT', body: JSON.stringify(d) }), onClose)} />
+        <Button label="Save" variant="primary" onClick={() => act(() => create ? api(url(t.project), { method: 'POST', body: JSON.stringify({ name: t.name, ...d }) }) : api(url(t.project, t.name), { method: 'PUT', body: JSON.stringify(d) }), onClose)} />
       </HStack>
       </VStack>
     </Dialog>
@@ -174,7 +175,7 @@ function TeamCard({ t, showProject }: { t: Team; showProject: boolean }) {
 }
 
 export function TeamsPage({ project, projectNames }: { project: string; projectNames?: string[] }) {
-  const [newOpen, setNewOpen] = useState(false)
+  const [newOpen, setNewOpen] = useState(false), [blank, setBlank] = useState<Team | null>(null)
   const q = useQuery({ queryKey: ['teams'], queryFn: () => api<{ teams: Team[]; projects?: string[] }>('/api/teams'), refetchInterval: 15_000 })
   if (q.error) return <LoadError what="teams" error={q.error} retry={() => q.refetch()} />
   if (!q.data) return null
@@ -183,9 +184,10 @@ export function TeamsPage({ project, projectNames }: { project: string; projectN
   return (
     <VStack gap={3}>
       <HStack justify="end"><Button label="New team" variant="primary" isDisabled={!projects.length} onClick={() => setNewOpen(true)} /></HStack>
-      {newOpen && <NewTeam projects={projects} onClose={() => setNewOpen(false)} />}
+      {newOpen && <NewTeam projects={projects} onClose={() => setNewOpen(false)} onBlank={(project, name) => setBlank({ project, name, description: '', where: '', errors: [], flowchart: '', stages: [], members: [], load: { agents: 0, of: 0, working: 0, tickets: 0 }, tickets: [], active: [] })} />}
+      {blank && <EditTeam create t={blank} onClose={() => setBlank(null)} />}
       <Text type="supporting" size="sm">A team is a pod of agents defined in .wt-pack/teams/&lt;name&gt;.md (or the user-level folder): members as persona × count, and which persona takes each stage.</Text>
-      {teams.length === 0 && <Text type="supporting" size="sm">No teams yet. Use New team above (or wt-roles team new &lt;name&gt; --template solo|standard|full)</Text>}
+      {teams.length === 0 && <Text type="supporting" size="sm">No teams yet. Use New team above (or wt-roles team new &lt;name&gt; [--template solo|standard|full])</Text>}
       {teams.map((t) => <TeamCard key={`${t.project}/${t.name}`} t={t} showProject={project === 'all'} />)}
     </VStack>
   )
