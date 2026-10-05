@@ -247,8 +247,9 @@ export const checkProject = (project) => {
 
 export class Rooms {
   // judge(state) → Promise<boolean|null>: optional Jev resolve (true = still needs the user, null = no answer).
-  constructor({ dir, agents, prompt, log = console.error, judge = null }) {
-    Object.assign(this, { dir, agentsFn: agents, promptFn: prompt, log, judge })
+  // onChange(data): a room or its messages changed (WP-253's change stream); data is {slug} or {} for the list/settings.
+  constructor({ dir, agents, prompt, log = console.error, judge = null, onChange = () => {} }) {
+    Object.assign(this, { dir, agentsFn: agents, promptFn: prompt, log, judge, onChange })
     this.index = null // [{slug,title,project,createdAt,paused,members,hops}]
     this.settings = null
     this.msgs = new Map() // slug -> [message] (folded: deliveredTo filled in)
@@ -285,7 +286,9 @@ export class Rooms {
       const ins = this.db.prepare('INSERT INTO rooms (slug, pos, json) VALUES (?, ?, ?)')
       this.index.forEach((r, i) => ins.run(r.slug, i, JSON.stringify(r)))
     })
+    this.notify({})
   }
+  notify(data) { try { this.onChange(data) } catch (e) { this.log('rooms onChange:', e.message) } }
   async setSettings(patch) {
     await this.load()
     for (const [k, v] of Object.entries(patch)) {
@@ -302,6 +305,7 @@ export class Rooms {
     }
     Object.assign(this.settings, patch)
     await atomicWrite(join(this.dir, 'settings.json'), JSON.stringify(this.settings, null, 2))
+    this.notify({})
     return this.settings
   }
   room(slug) { return this.index.find((r) => r.slug === slug) }
@@ -385,6 +389,7 @@ export class Rooms {
     return this.db.prepare(`SELECT m.json FROM messages m JOIN rooms r ON r.slug = m.room WHERE json_extract(r.json, '$.archived') IS NOT 1`).all().map((m) => m.json).join('\n')
   }
   emit(slug, event, data) {
+    this.notify({ slug })
     for (const res of this.subs.get(slug) ?? []) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   }
   // Post a message. author: {kind, name, machine?, pane?, key?}. Returns the stored message.

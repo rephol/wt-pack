@@ -84,8 +84,9 @@ export class Tickets {
   // onReady(project, ticket): a ticket entered Ready (created there or moved in, by anyone).
   // onDone(project, ticket): a ticket entered Done (merge reconcile or a manual move), by anyone.
   // onReopen(project, ticket): a Done ticket left Done (reopened), by anyone.
-  constructor({ dir, reserved = [], log = console.error, onReady = () => {}, onDone = () => {}, onReopen = () => {} }) {
-    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log, onReady, onDone, onReopen })
+  // onChange(project): any write to a board or its tickets (WP-253's change stream).
+  constructor({ dir, reserved = [], log = console.error, onReady = () => {}, onDone = () => {}, onReopen = () => {}, onChange = () => {} }) {
+    Object.assign(this, { file: join(dir, 'wt.db'), reserved: new Set(reserved), log, onReady, onDone, onReopen, onChange })
   }
   // Board 'Auto' (WP-39): Jev may promote Backlog → Ready. Off for a board that does not exist yet.
   async auto(project) { return (await this.settings(project)).auto }
@@ -109,6 +110,7 @@ export class Tickets {
     if (stallMin !== undefined) this.db.prepare('UPDATE boards SET stall_min = ? WHERE project = ?').run(stallMin, project)
     if (reportRoom !== undefined) this.db.prepare('UPDATE boards SET report_room = ? WHERE project = ?').run(reportRoom, project)
     if (reportOrch !== undefined) this.db.prepare('UPDATE boards SET report_orch = ? WHERE project = ?').run(reportOrch ? 1 : 0, project)
+    this.changed(project)
     return this.settings(project)
   }
   async setAuto(project, on) { return (await this.setSettings(project, { auto: on })).auto }
@@ -159,12 +161,13 @@ export class Tickets {
       this.db.prepare('UPDATE boards SET next = ? WHERE project = ?').run(b.next + 1, project)
       return t
     })
+    this.changed(project)
     if (t.column === 'ready') this.ready(project, t)
     return t
   }
   // fn(ticket, at) → mutated copy; read, apply and write in one transaction.
   async mutate(id, fn) {
-    let entered = false, finished = false, reopened = false
+    let entered = false, finished = false, reopened = false, wrote = false
     const t = tx(this.db, () => {
       const old = this.row(id)
       const at = new Date().toISOString()
@@ -172,16 +175,19 @@ export class Tickets {
       if (JSON.stringify(t) === JSON.stringify(old)) return t // no-op: no write, no updated bump
       t.updated = at
       this.db.prepare('UPDATE tickets SET json = ? WHERE id = ?').run(JSON.stringify(t), old.id)
+      wrote = true
       if (t.column === 'ready' && old.column !== 'ready') entered = true
       if (t.column === 'done' && old.column !== 'done') finished = true
       if (t.column !== 'done' && old.column === 'done') reopened = true
       return t
     })
+    if (wrote) this.changed(await this.project(t.id))
     if (entered) this.ready(await this.project(t.id), t)
     if (finished) this.done(await this.project(t.id), t)
     if (reopened) this.reopen(await this.project(t.id), t)
     return t
   }
+  changed(project) { try { this.onChange(project) } catch (e) { this.log('tickets onChange:', e.message) } }
   ready(project, t) { try { this.onReady(project, t) } catch (e) { this.log('tickets onReady:', e.message) } }
   done(project, t) { try { this.onDone(project, t) } catch (e) { this.log('tickets onDone:', e.message) } }
   reopen(project, t) { try { this.onReopen(project, t) } catch (e) { this.log('tickets onReopen:', e.message) } }

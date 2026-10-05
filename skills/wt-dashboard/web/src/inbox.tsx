@@ -1,5 +1,6 @@
 // Notifications inbox: a right-side panel over the feed at /api/notifications. "Needs you" (unresolved
 // actionables) pinned on top, then "Recent". Opened from the sidebar bell or openInbox(kind).
+import { POLL_FALLBACK_MS } from './changes'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
@@ -29,7 +30,7 @@ const LABEL: Record<Kind, string> = {
 }
 
 export function useInbox() {
-  const q = useQuery({ queryKey: ['inbox'], queryFn: () => api<{ items: InboxItem[] }>('/api/notifications'), refetchInterval: 5000, refetchIntervalInBackground: true })
+  const q = useQuery({ queryKey: ['inbox'], queryFn: () => api<{ items: InboxItem[] }>('/api/notifications'), refetchInterval: POLL_FALLBACK_MS })
   const prefs = loadPrefs()
   const items = (q.data?.items ?? []).filter((it) => prefs.inbox[it.kind] !== false)
   return { items, loaded: Boolean(q.data), error: q.isError ? q.error : null, retry: () => q.refetch(), open: items.filter(needsYou) }

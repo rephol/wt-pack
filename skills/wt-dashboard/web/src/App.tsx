@@ -77,6 +77,7 @@ import { TaskQueue } from './tasks'
 import { Board } from './board'
 import { RoutinesPage } from './routines'
 import { TeamsPage } from './teams'
+import { useChangeStream } from './changes'
 
 // ---------- types (mirror server.mjs) ----------
 type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
@@ -321,6 +322,7 @@ const pageFromHash = (): Page => {
 }
 
 export default function App() {
+  useChangeStream() // WP-253: board, inbox and rooms refetch on /api/changes instead of fast polling
   const [page, setPage] = useState<Page>(pageFromHash)
   const [linearHidden, setLinearHidden] = useState(() => { try { return localStorage.getItem('linear-banner-hidden') === '1' } catch { return false } })
   const hideLinear = () => { setLinearHidden(true); try { localStorage.setItem('linear-banner-hidden', '1') } catch { /* private mode */ } }
