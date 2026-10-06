@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const here = import.meta.dirname
+// WP-267: confirm needs a real screen (box found empty, prompt echoed) — a real capture of a just-submitted prompt
+const submitted = new URL('../../wt-shared/scripts/fixtures/pane-submit-submitted.txt', import.meta.url).pathname
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'wt-handoff-')))
 const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'demo')
 mkdirSync(bin); mkdirSync(repo)
@@ -15,6 +17,7 @@ writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$
   "agent list") cat "${tmp}/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
   "pane list") cat "${tmp}/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "tab list") cat "${tmp}/tabs.json" 2>/dev/null || echo '{"result":{"tabs":[]}}' ;;
+  "pane read") cat "${submitted}" ;;
   "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
   "pane get") cat "${tmp}/pane-$(echo "$3" | tr : _).json" 2>/dev/null || echo '{"result":{"pane":{"tokens":{}}}}' ;;
   "agent prompt") case " $* " in *" --wait "*) [ -f "${tmp}/goal-clear-fails" ] && exit 1 || exit 0 ;; esac ;;
