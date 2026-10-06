@@ -406,9 +406,8 @@ queue_prompt() { # <pane> <text>
 queue_pulled() { # <pane>
   base=${HERDR_DASH_URL:-http://127.0.0.1:7777}; qid=
   command -v jq >/dev/null || return 1
+  queue_prompt "$1" "$send" || return 1 # not live: nothing queued, nothing recorded (finish records it delivered once typed)
   record_message "$1" "$send" queued
-  queue_prompt "$1" "$send" || return 1
-  [ -n "$qid" ] || return 1
   n=0; max=${WT_PULL_WAIT_S:-30}
   while [ "$n" -lt "$max" ]; do
     st=$(curl -sS --max-time 3 -H "$(auth_header)" "$base/api/deliveries/$qid" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
