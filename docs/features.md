@@ -420,6 +420,16 @@ Typed prompts are checked (WP-248): `handoff.sh` waits up to 60 s (`WT_READY_TIM
 - **Settings › Notifications**: per kind, an **Inbox** switch and a **Native** switch (macOS notifications,
   desktop app only; stored per browser). Native notifications fire once per item, at most one per target
   per 30s, and not for the agent you are looking at.
+- **Phone switch / Web Push** (WP-268): a third **Phone** switch per kind sends the same items as a push
+  notification to a phone or browser, even with the dashboard closed. Under *Phone and browser push*, **Enable on
+  this device** (the browser asks for permission only on that click) subscribes it; **Send test**, **Turn off**,
+  and a list of the other devices with **Remove**. The Phone switches belong to that device and live on the
+  server (not in the browser), default like Native (every kind except room suggestions and server events), and
+  the same gate applies per device: once per item, at most one per target per 30s. Unlike Native it does not
+  know what you are looking at, so a push can arrive while the dashboard is open. Tapping one focuses the open
+  dashboard and goes to the room (`#rooms/<slug>`) or the Inbox (`#inbox`). Dead subscriptions (the push
+  service answers 404/410) are removed; at most 20 devices. Not shown in the desktop app (it has Native).
+  Setup and requirements (https, iPhone install): [Mac app, PWA and Tailscale](#mac-app-pwa-and-tailscale).
 
 ## Routines
 
@@ -697,6 +707,20 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   back on their own (respawn them).
 - **PWA**: in a browser on a secure origin, **Install app** (iOS: Share → Add to Home Screen); an update banner
   shows when a new build lands. The service worker never caches `/api`.
+- **Phone push (Web Push)** (WP-268): VAPID keys are generated on first use into `<data dir>/vapid.json` (mode 600);
+  subscriptions are rows in `wt.db` (`push_subscriptions`). Encryption (aes128gcm, RFC 8291) and the VAPID JWT use
+  `node:crypto` only, no dependency; `push.test.mjs` reproduces the RFC's own example byte for byte. The server
+  only POSTs to the browsers' push services (FCM, Mozilla, Apple, Windows), never to an arbitrary URL a client
+  sends (`WT_DASHBOARD_PUSH_HOSTS`, a `host:port` list in the process env only, adds a host for tests or a
+  self-hosted service; `WT_DASHBOARD_PUSH_SUBJECT` overrides the VAPID contact, default `mailto:wt-dashboard@example.com`).
+  Routes: `GET /api/push` (public key and device list, no endpoints or keys), `POST /api/push/subscription`,
+  `PATCH`/`DELETE /api/push/subscription/:id`, `POST /api/push/test`; writes need the session cookie and the usual
+  Host/Origin check. **Reaching it from a phone:** a browser only allows push (and installing) on https, so
+  serve the dashboard over https with `tailscale serve --bg --https=443 http://127.0.0.1:7777` and add that
+  hostname to `WT_DASHBOARD_ALLOWED_HOSTS`. **iPhone/iPad** (16.4+) additionally need the app installed:
+  Safari → Share → Add to Home Screen, open it from the home screen, then Enable in Settings › Notifications.
+  Android Chrome and desktop browsers work from the https page directly. Settings shows what is missing (install,
+  https, blocked permission) next to the Enable button.
 - **Tailscale**: the server listens on loopback only; expose it with `tailscale serve` and add the hostname to
   `WT_DASHBOARD_ALLOWED_HOSTS` (from loopback).
 - **Bind address** (WP-80): `WT_DASHBOARD_HOST` (process env only, default `127.0.0.1`). Anything but
