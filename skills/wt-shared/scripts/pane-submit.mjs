@@ -46,7 +46,7 @@ export async function confirmSubmitted(read, press, { retries = 3, settleMs = 15
 const hx = promisify(execFile)
 const herdr = async (...a) => (await hx('herdr', a, { timeout: 8000 })).stdout
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+async function main() {
   const [cmd, pane, ...rest] = process.argv.slice(2)
   const opt = (k, d) => { const i = rest.indexOf(k); return i >= 0 ? Number(rest[i + 1]) : d }
   if (!pane || !['ready', 'confirm'].includes(cmd)) { console.error('usage: pane-submit.mjs ready|confirm <pane> [--timeout s | --retries n]'); process.exit(2) }
@@ -55,3 +55,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     : await confirmSubmitted(() => herdr('pane', 'read', pane, '--source', 'visible', '--format', 'text'), () => herdr('pane', 'send-keys', pane, 'enter'), { retries: opt('--retries', 3), settleMs: opt('--settle', 1500) })
   process.exit(ok ? 0 : 1)
 }
+
+if (import.meta.url === `file://${process.argv[1]}`) main()
