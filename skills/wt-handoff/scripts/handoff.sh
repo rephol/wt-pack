@@ -367,6 +367,8 @@ hand_to() {
     sleep 0.4 # an Enter sent in the same instant as the text is dropped
     herdr pane send-keys "$1" enter >/dev/null
   else
+    # WP-267: say why the whole message is pasted instead of the short /goal line (it was silent before)
+    [ "$goal" -eq 1 ] && echo "warning: could not type the /goal line into $1 (message file or send-text failed): pasting the full message" >&2
     herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   fi
   node "$PANE_SUBMIT" confirm "$1" --settle "${WT_SUBMIT_SETTLE_MS:-1500}" 2>/dev/null \
