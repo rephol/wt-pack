@@ -35,9 +35,11 @@ export async function once(id, fn) {
   return p
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+async function main() {
   const [cmd, id] = process.argv.slice(2)
   if (!id || !['get', 'put'].includes(cmd)) { console.error('usage: receipts.mjs get|put <id>'); process.exit(2) }
   if (cmd === 'get') { const r = get(id); if (r === null) process.exit(1); process.stdout.write(r) }
   else { let s = ''; process.stdin.setEncoding('utf8'); for await (const c of process.stdin) s += c; put(id, s) }
 }
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) main()
