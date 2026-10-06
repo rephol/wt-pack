@@ -6,7 +6,7 @@ import { createECDH, createCipheriv, createPrivateKey, generateKeyPairSync, hkdf
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { open } from './store.mjs'
-import { KINDS } from './contracts.mjs'
+import { KINDS, categoryOf } from './contracts.mjs'
 
 const b64u = (b) => Buffer.from(b).toString('base64url')
 const unb64u = (s) => Buffer.from(String(s), 'base64url')
@@ -87,10 +87,11 @@ export function gate(it, device, s) {
   return true
 }
 
-// What the service worker shows, and where a click goes (hash routes of the web app).
+// What the service worker shows, and where a click goes (hash routes of the web app). `cat` = the Settings section
+// (the worker groups by it, WP-271); `tag` stays per item for the worker to read, it never reaches the OS.
 export const payloadOf = (it) => JSON.stringify({
   title: String(it.title ?? 'wt-dashboard').slice(0, 120), body: String(it.body ?? '').slice(0, 200),
-  tag: String(it.key ?? it.id ?? '').slice(0, 100), url: it.target?.room ? `/#rooms/${encodeURIComponent(it.target.room)}` : '/#inbox',
+  tag: String(it.key ?? it.id ?? '').slice(0, 100), cat: categoryOf(it.kind), kind: String(it.kind ?? ''), url: it.target?.room ? `/#rooms/${encodeURIComponent(it.target.room)}` : '/#inbox',
 })
 
 const cleanKinds = (k) => Object.fromEntries(KINDS.map((x) => [x, typeof k?.[x] === 'boolean' ? k[x] : defaultKinds()[x]]))

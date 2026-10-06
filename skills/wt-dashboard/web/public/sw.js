@@ -3,7 +3,7 @@
 // requests are not intercepted at all. Navigations are network-first (a new build shows up on the next load),
 // falling back to the cached shell and then to offline.html; hashed assets are stale-while-revalidate.
 const CACHE = 'wtd-shell-v1'
-const SHELL = ['./', './index.html', './offline.html', './manifest.webmanifest', './icon-192.png', './favicon.svg']
+const SHELL = ['./', './index.html', './push-summary.js', './offline.html', './manifest.webmanifest', './icon-192.png', './favicon.svg']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()))
@@ -39,12 +39,19 @@ self.addEventListener('fetch', (e) => {
   }
 })
 
-// WP-268 Web Push: the server sends {title, body, tag, url} (push.mjs payloadOf); `tag` makes a repeat replace, not stack.
+// WP-268 Web Push: the server sends {title, body, tag, cat, kind, url} (push.mjs payloadOf). WP-271: the notification's tag is
+// the category (Settings section), so a new item replaces the one shown for that category with a summary built from it
+// (push-summary.js) and renotify makes it ring again; a payload without a category (the test push) keeps its own tag.
+importScripts('./push-summary.js')
+let queue = Promise.resolve() // pushes in a burst run one after another, else each reads the tag's notifications before the previous shows
 self.addEventListener('push', (e) => {
   let d = {}
   try { d = e.data.json() } catch { d = { body: e.data ? e.data.text() : '' } }
-  e.waitUntil(self.registration.showNotification(d.title || 'wt-dashboard', {
-    body: d.body || '', tag: d.tag || undefined, icon: './icon-192.png', badge: './icon-192.png', data: { url: d.url || '/#inbox' },
+  e.waitUntil(queue = queue.catch(() => {}).then(async () => {
+    const tag = d.cat || d.tag || undefined
+    const shown = d.cat ? await self.registration.getNotifications({ tag }) : []
+    const s = self.pushSummary(shown[0]?.data ?? null, { ...d, title: d.title || 'wt-dashboard', url: d.url || '/#inbox' })
+    await self.registration.showNotification(s.title, { body: s.body, tag, renotify: Boolean(tag), icon: './icon-192.png', badge: './icon-192.png', data: s.data })
   }))
 })
 // A click focuses the open dashboard window and moves it to the item's hash route, else opens one.

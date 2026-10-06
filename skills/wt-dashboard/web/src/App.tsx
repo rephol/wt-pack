@@ -587,7 +587,7 @@ export default function App() {
           if (mode === 'full') { if (key.startsWith('room:')) location.hash = `rooms/${encodeURIComponent(key.slice(5))}`; else openFull(key); return }
           toPanel(key)
         }} />}
-      <PwaHost openInbox={() => openInbox()} />
+      <PwaHost openInbox={openInbox} />
       <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => open(`room:${sl}`)} unread={narrow && Object.keys(dockMarks).length > 0}

@@ -429,6 +429,12 @@ Typed prompts are checked (WP-248): `handoff.sh` waits up to 60 s (`WT_READY_TIM
   know what you are looking at, so a push can arrive while the dashboard is open. Tapping one focuses the open
   dashboard and goes to the room (`#rooms/<slug>`) or the Inbox (`#inbox`). Dead subscriptions (the push
   service answers 404/410) are removed; at most 20 devices. Not shown in the desktop app (it has Native).
+  **Grouped** (WP-271): the phone keeps one notification per Settings section (*Needs you*, *Agents*, *System*)
+  instead of one per item. A second item replaces the first with a summary ("4 agents done", "2 need you", "3 agent
+  updates") and the newest names in the body, and rings again. Tapping a summary opens the Inbox filtered to that
+  section (`#inbox/<needs-you|agents|system>`); tapping a single item opens it. The Inbox filter has the same three
+  sections. A new inbox kind lands in *Needs you* if actionable, else *System*, unless added to the Agents list in
+  `contracts.mjs` (`categoryOf`).
   Setup and requirements (https, iPhone install): [Mac app, PWA and Tailscale](#mac-app-pwa-and-tailscale).
 
 ## Routines

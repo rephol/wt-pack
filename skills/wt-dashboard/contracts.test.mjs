@@ -54,3 +54,9 @@ test('no other source file defines a column, kind or actionable list of its own'
   const hits = walk(here).filter((p) => copies.test(readFileSync(p, 'utf8'))).map((p) => p.slice(here.length + 1))
   assert.deepEqual(hits, [])
 })
+
+test('categoryOf: the Settings > Notifications sections (WP-271)', () => {
+  const cat = { 'needs-you': ['question', 'mention-user', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask', 'needs-you'], agents: ['agent-done', 'agent-stalled', 'ci-failed', 'room-suggestion', 'memory'], system: ['server', 'watchdog', 'usage', 'jev-auth'] }
+  for (const [k, kinds] of Object.entries(cat)) for (const kind of kinds) assert.equal(c.categoryOf(kind), k, kind)
+  for (const kind of c.KINDS) assert.ok(['needs-you', 'agents', 'system'].includes(c.categoryOf(kind)), kind)
+})
