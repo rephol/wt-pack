@@ -19,6 +19,7 @@ export const KEYS = {
   // Linear teams whose tickets the dashboard shows and recognises: KEY=project (project defaults to the key, lower-cased).
   WT_LINEAR_TEAMS: { list: ',', label: 'Linear teams', restart: true },
   // Read by the shell scripts too (wt-shared/scripts/mcp-mode.sh): lean | full (default).
+  WT_NUDGE: { oneOf: ['on', 'off'], label: 'Nudge handed-off agents whose card is not in review' }, // WP-272: off = no "continue" line
   WT_MESSAGE_RESEND: { oneOf: ['on', 'off'], label: 'Resend unacknowledged messages' }, // WP-263: off = the sweep only flags, never re-types
   WT_AGENTS_MCP: { oneOf: ['full', 'lean'], label: 'Lean agent MCP' },
   // Jev integrations (read by the server via cfg.get, by the CLIs via typesafe.mjs enabled()). ON where calls are

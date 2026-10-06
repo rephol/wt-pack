@@ -16,6 +16,7 @@ export const NEXT = {
 export const ACK_KINDS = new Set(['handoff', 'dispatch', 'routine'])
 export const ACK_MS = 5 * 60_000
 export const MAX_ATTEMPTS = 3
+export const NUDGE_MS = 4 * 60_000 // WP-272
 const OPEN = ['queued', 'delivered']
 
 // Envelope fields of a `<wt-message id=… kind=… from="…" [ticket=…]>` (after a slash command), or null.
@@ -37,6 +38,18 @@ export function movedOn(card, row) {
   const since = row.delivered_at ?? row.created
   return (card.history ?? []).some((h) => h.kind === 'move' && h.author !== 'dispatch' && h.at > since)
 }
+
+// WP-272: the one line the server types at a handed-off agent whose card has not moved on, worded by its role.
+export const nudgeText = (role, ticket) => ({
+  worker: `${ticket}: your card is not in review. Continue, or report what blocks you with handoff.sh --reply`,
+  planner: `${ticket}: the plan is not handed back. Finish it, or report what blocks you with handoff.sh --reply`,
+}[role] ?? `${ticket}: not reported yet. Continue, or report with handoff.sh --reply`)
+export const CARD_OPEN = (card) => !!card && !['done', 'blocked', 'review'].includes(card.column)
+
+// WP-272: may the server nudge this agent? Its card is open work, it is one of this repo's own agents (others do not know
+// handoff.sh --reply) and it is neither working nor blocked. `off` = WT_NUDGE=off.
+export const nudgeEligible = ({ card, agent, project, off = false }) =>
+  !off && CARD_OPEN(card) && !!agent && agent.local !== false && agent.project === project && !['working', 'blocked'].includes(agent.status)
 
 export class Messages {
   constructor({ dir, log = console.error, now = Date.now } = {}) {
@@ -131,10 +144,11 @@ export class Messages {
   // Then the row becomes `expired` ("finished without reporting"), which is also the dedupe, and is flagged once.
   // ponytail: ticketless rows are skipped (nothing to judge "reported" by). Ceiling: a worker that acks, works past
   // quietMs, then idles briefly between its own turns can be flagged early; add a two-sweeps-in-a-row rule if it misfires.
-  async unreported({ moved, busy, flag }, { quietMs = 10 * 60_000 } = {}) {
+  // WP-272: a row the server nudged is judged `afterNudgeMs` after the nudge instead (nudge at 4 min, flag ~4 min later).
+  async unreported({ moved, busy, flag }, { quietMs = 10 * 60_000, afterNudgeMs = NUDGE_MS } = {}) {
     const done = []
-    const cut = new Date(this.now() - quietMs).toISOString()
-    const rows = this.db.prepare("SELECT * FROM wt_messages WHERE state = 'acknowledged' AND ticket IS NOT NULL AND updated < ? ORDER BY created").all(cut)
+    const cut = new Date(this.now() - quietMs).toISOString(), cutNudged = new Date(this.now() - afterNudgeMs).toISOString()
+    const rows = this.db.prepare("SELECT * FROM wt_messages WHERE state = 'acknowledged' AND ticket IS NOT NULL AND ((nudged_at IS NULL AND updated < ?) OR nudged_at < ?) ORDER BY created").all(cut, cutNudged)
     for (const row of rows) {
       if (!ACK_KINDS.has(row.kind)) continue
       if (await Promise.resolve(moved?.(row)).catch(() => true)) continue // an error is "don't flag", like sweep's
@@ -144,5 +158,30 @@ export class Messages {
       done.push({ id: row.id, did: 'unreported' })
     }
     return done
+  }
+
+  // WP-272: once per message, ever (nudged_at survives a restart). True only for the call that set it.
+  nudge(id) { return this.db.prepare('UPDATE wt_messages SET nudged_at = ? WHERE id = ? AND nudged_at IS NULL').run(this.#at(), id).changes > 0 }
+  // An acknowledged, unanswered handoff whose agent has been quiet for `nudgeMs`: eligible(row) → bool (card not in
+  // review/done/blocked, own project, agent not working) gates it, send(row) types the one line. Failures are not retried.
+  async nudges({ eligible, send }, { nudgeMs = NUDGE_MS } = {}) {
+    const done = []
+    const cut = new Date(this.now() - nudgeMs).toISOString()
+    for (const row of this.db.prepare("SELECT * FROM wt_messages WHERE state = 'acknowledged' AND ticket IS NOT NULL AND nudged_at IS NULL AND updated < ? ORDER BY created").all(cut)) {
+      if (!ACK_KINDS.has(row.kind)) continue
+      if (!(await Promise.resolve(eligible?.(row)).catch(() => false))) continue
+      if (!this.nudge(row.id)) continue
+      try { await send(row); done.push({ id: row.id, did: 'nudged' }) } catch (e) { this.log(`messages nudge ${row.id}: ${e.message}`) }
+    }
+    return done
+  }
+  // WP-272 finish check: the newest acknowledged, unanswered handoff to `target` not yet reminded; marks it reminded.
+  // `open(row)` → bool: its card is still open work. Null when there is nothing to remind about.
+  async remindable(target, open) {
+    for (const row of this.db.prepare("SELECT * FROM wt_messages WHERE state = 'acknowledged' AND ticket IS NOT NULL AND target = ? AND reminded_at IS NULL ORDER BY created DESC, rowid DESC").all(target)) {
+      if (!ACK_KINDS.has(row.kind) || !(await Promise.resolve(open(row)).catch(() => false))) continue
+      if (this.db.prepare('UPDATE wt_messages SET reminded_at = ? WHERE id = ? AND reminded_at IS NULL').run(this.#at(), row.id).changes) return row
+    }
+    return null
   }
 }

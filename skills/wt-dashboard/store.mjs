@@ -199,6 +199,9 @@ export const MIGRATIONS = [
   { sql: `CREATE TABLE push_subscriptions (id TEXT PRIMARY KEY, endpoint TEXT UNIQUE NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
           label TEXT NOT NULL, kinds TEXT NOT NULL, created TEXT NOT NULL, last_ok TEXT);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-272: once-only markers on a message — nudged_at (the server's "continue" line) and reminded_at (the finish check).
+  { sql: `ALTER TABLE wt_messages ADD COLUMN nudged_at TEXT; ALTER TABLE wt_messages ADD COLUMN reminded_at TEXT;`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
