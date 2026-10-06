@@ -184,7 +184,11 @@ export function parsePane(text, raw = '') {
   const lastAssistant = out.findLast((t) => t.role === 'assistant')
   const lastUser = out.findLast((t) => t.role === 'user')
   const tail = body.slice(-25).join('\n')
-  const choicePrompt = /❯\s*1\.|Do you want to|\(y\/n\)|\[Y\/n\]/i.test(tail)
+  // WP-270: a prompt only blocks the agent while it is the last thing on screen. One still in the 25-line tail
+  // under a later user turn (❯ text), assistant turn (⏺) or turn-end line (✻ / ※) was answered and the agent went on.
+  const tailLines = tail.split('\n')
+  const promptAt = tailLines.findLastIndex((l) => /❯\s*1\.|Do you want to|\(y\/n\)|\[Y\/n\]/i.test(l))
+  const choicePrompt = promptAt >= 0 && !tailLines.slice(promptAt + 1).some((l) => /^\s*(?:[⏺✻※]|❯\s*(?!\d+\.)\S)/.test(l))
   // ponytail: only a prompt on screen blocks the agent. A reply ending in "?" is just `done` — treating it as
   // needs-you left a red dot nothing could clear except sending another message.
   const question = choicePrompt ? tail.split('\n').filter((l) => l.trim()).slice(-6).join('\n').trim() : null

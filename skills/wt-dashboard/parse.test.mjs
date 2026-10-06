@@ -1662,3 +1662,25 @@ test('projectName: a worktree cwd (even a removed one) lists under its repo, not
   assert.equal(projectName('/w/wt-pack'), 'wt-pack')
   assert.equal(projectName('/w/wt-pack/.claude/worktrees'), 'worktrees') // no worktree name: plain basename
 })
+
+// WP-270: a permission prompt that was answered and followed by a plain statement must stop asking. Screens follow
+// the real pane captures' conventions (⏺ turn, ✻ turn-end line, ❯ input box between rules, statusline footer).
+test('parsePane: a prompt only asks while it is the last thing on screen (WP-270)', () => {
+  const footer = `${rule}\n❯\n${rule}\n   Context: ▓░░░░░░░░░ 56k/1M (6%)  Model: X\n   cwd: /tmp/wt/acm-12`
+  const menu = `⏺ Bash(rm /tmp/x)
+
+ Bash command
+   rm /tmp/x
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No`
+  const open = parsePane(`❯ clean up\n${menu}\n`)
+  assert.equal(open.asks, true) // still waiting on the menu
+  const answered = parsePane(`❯ clean up\n${menu}\n❯ yes\n⏺ Deleted it.\n  I'll report back when the re-run results come in.\n\n✻ Sautéed for 5s\n\n${footer}`)
+  assert.equal(answered.asks, false)
+  assert.equal(answered.question, null)
+  // no later user turn, but the agent has moved on (assistant turn + turn-end line under the old prompt)
+  assert.equal(parsePane(`❯ go\n${menu}\n⏺ Ran it.\n✻ Cooked for 3s\n\n${footer}`).asks, false)
+  assert.equal(parsePane(`❯ go\n${menu}\n`).asks, true)
+})
