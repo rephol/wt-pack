@@ -8,7 +8,6 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { BottomSheet } from '@astryxdesign/core/BottomSheet'
-import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -106,7 +105,7 @@ function AskCard({ ask, onClose, onAnswered }: { ask: Ask; onClose: () => void; 
       )}
       {otherInput}
       {last && <TextInput label="Anything else? (optional)" value={text} onChange={setText} isDisabled={answer.isPending} placeholder="Type something" />}
-      <HStack gap={2} justify="end">
+      <HStack gap={2} justify="end" style={{ position: 'sticky', bottom: 0, paddingBlock: 8, background: 'var(--color-background-surface)' }}>
         <Button label="Chat about this" size="sm" variant="ghost" isDisabled={answer.isPending} onClick={() => answer.mutate(true)} />
         {step > 0 && <Button label="Back" size="sm" variant="ghost" isDisabled={answer.isPending} onClick={() => setStep((s) => s - 1)} />}
         {last
@@ -133,9 +132,10 @@ export function QuestionPopup({ target, onClose, onDone }: { target: PopupTarget
         <HStack justify="end" style={{ paddingTop: 20, paddingInline: 16, flexShrink: 0 }}>
           <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
         </HStack>
-        <ScrollableArea label={label} style={{ padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
+        {/* WP-265: native scroller (ScrollableArea stayed overflow:clip here, so Other / Answer fell off the screen); the card's action row sticks to its bottom. */}
+        <div aria-label={label} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 16px calc(env(safe-area-inset-bottom) + 16px)' }}>
           {card}
-        </ScrollableArea>
+        </div>
       </div>
     </BottomSheet>
   )
