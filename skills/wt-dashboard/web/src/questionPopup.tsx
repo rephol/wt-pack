@@ -141,12 +141,15 @@ export function QuestionPopup({ target, onClose, onDone }: { target: PopupTarget
   )
   return (
     <Dialog isOpen onOpenChange={(o: boolean) => !o && onClose()} width={480} padding={4}>
-      <VStack gap={3}>
-        <HStack justify="end">
+      {/* WP-269: same trap as the sheet — cap to the Dialog's own 75dvh limit (less its padding) and scroll the body natively; the close row stays put. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 'calc(75dvh - 40px)', minWidth: 0 }}>
+        <HStack justify="end" style={{ flexShrink: 0 }}>
           <IconButton label="Close" icon={<Icon icon="close" />} size="sm" variant="ghost" onClick={onClose} style={{ minWidth: 44, minHeight: 44 }} />
         </HStack>
-        {card}
-      </VStack>
+        <div aria-label={label} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          {card}
+        </div>
+      </div>
     </Dialog>
   )
 }
