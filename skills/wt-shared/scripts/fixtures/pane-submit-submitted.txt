@@ -1,0 +1,40 @@
+
+▗ ▗   ▖ ▖  Claude Code v2.1.291
+           Opus 5.5 with low effort · Claude Max
+ ▘▘   ▝▝   /private/tmp/wp267-MiH2 · /rc
+
+
+❯ Reply with just the word ok.
+  filler line 1 of a long wt-message body
+  filler line 2 of a long wt-message body
+  filler line 3 of a long wt-message body
+  filler line 4 of a long wt-message body
+  filler line 5 of a long wt-message body
+  filler line 6 of a long wt-message body
+  filler line 7 of a long wt-message body
+  filler line 8 of a long wt-message body
+  filler line 9 of a long wt-message body
+  filler line 10 of a long wt-message body
+  filler line 11 of a long wt-message body
+  filler line 12 of a long wt-message body
+
+
+
+
+
+
+
+
+
+
+
+✶ Schlepping… (running UserPromptSubmit hooks… 0/3 · 2s)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ⎇ main  𖠰 main
+   Session: 5.0%  Reset: 2h52m  Weekly: 38.0%  Weekly Reset: 3d 13hr 22m
+   Context: ░░░░░░░░░░ 0/1M (0%)  Model: Opus 5.5  Thinking: low
+   cwd: /private/tmp/wp267-MiH2
+  paste again to expand
