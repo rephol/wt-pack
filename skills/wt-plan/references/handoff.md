@@ -92,7 +92,10 @@ once the user has chosen. It prints `reused <pane>` or `created <name> <pane>`, 
 nothing — **on a non-zero exit, print the prompt as usual.** The clipboard path is the fallback, never
 something to retry into.
 
-### The prompt is sent as a `/goal`
+### The prompt is a plain prompt; `--goal` arms a `/goal` (WP-272)
+
+Since WP-272 the default is no goal: the dashboard nudges an acknowledged handoff whose card is still open (once, after
+4 min) and the delivery mod reminds the agent at the end of a turn that did not report. Pass `--goal` to get the loop below.
 
 A plain prompt stops at the end of its first turn, which for a multi-step plan means it stops half-done in a
 tab nobody is watching. `/goal` adds an evaluator that runs after every turn and re-prompts until the
@@ -110,7 +113,7 @@ Three constraints the script handles, worth knowing because each fails silently:
   the worker surfaces. "Definition of Done met, then wt-ship" works because the worker says so in the
   transcript.
 
-Pass `--no-goal` only when the work genuinely is one turn.
+Pass `--goal` when the work is a long unattended multi-step run; `--no-goal` (the default) otherwise.
 
 What a goal does **not** promise: the evaluator can judge a condition impossible and clear it, and Claude Code
 stops the loop if several turns pass with no tool use. Both land the worker idle, mid-plan, with the plan

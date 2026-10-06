@@ -20,7 +20,7 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Deliveries } from './deliveries.mjs'
-import { Messages, envelopeOf, movedOn } from './messages.mjs'
+import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
 import { Changes } from './changes.mjs'
 import { promptOn } from './promptOn.mjs'
 import * as receipts from '../wt-shared/scripts/receipts.mjs'
@@ -2392,9 +2392,9 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
-  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/ack)?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/(ack|cancel))?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/messages(\/[^/]+\/ack)?$/.test(path)) return false // WP-257: handoff.sh records, the target acks by id (roomAuthor verifies the pane)
-  if (headers['x-wt-server'] && method === 'POST' && (path === '/api/deliveries' || path === '/api/messages')) return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
+  if (headers['x-wt-server'] && method === 'POST' && (path === '/api/deliveries' || path === '/api/messages' || /^\/api\/deliveries\/[^/]+\/cancel$/.test(path))) return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
   return true
 }
 // WP-242: a per-process secret only the server's own handoff.sh children get (runHandoff env), so a Dispatch (no pane id)
@@ -2514,6 +2514,15 @@ const messageSweep = async () => {
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
       body: `${row.attempts} send${row.attempts === 1 ? '' : 's'}, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
   }, { maxAttempts: 2 }) // WP-263: the original send plus one resend
+  // WP-272: a handed-off agent that acked and went quiet while its card is still open gets ONE "continue" line, 4 min in.
+  if (cfg.get('WT_NUDGE') !== 'off') await messages.nudges({
+    eligible: async (row) => nudgeEligible({ card: await tickets.get(row.ticket).catch(() => null), agent: ags.find((a) => a.id === row.target), project: REPO_PROJECT }),
+    send: (row) => {
+      const a = ags.find((x) => x.id === row.target)
+      const text = wrap({ kind: 'system', from: 'wt-dashboard', ticket: row.ticket }, nudgeText(a?.tags?.role ?? a?.pool, row.ticket))
+      return deliver({ id: row.target }, text, () => herdr('agent', 'prompt', row.target, text))
+    },
+  }).catch((e) => console.error('messages nudge:', e.message))
   // WP-261: acknowledged, then the agent went idle or vanished and the card never moved on and nothing was reported.
   await messages.unreported({
     moved: (row) => tickets.get(row.ticket).then((c) => movedOn(c, row), () => true),
@@ -2728,9 +2737,23 @@ async function asksApi(req, res, url, parts) {
 // WP-210 deliveries: POST /api/deliveries {pane, text} (handoff.sh / user) → { queued } (false: pane's mod not live, paste),
 // POST /hello, GET /next, POST /:id/ack (the pane's own mod), GET ?pane= (the user).
 async function deliveriesApi(req, res, url, parts) {
-  const srv = req.method === 'POST' && parts.length === 2 && req.headers['x-wt-server'] !== undefined && serverTokenOk(req.headers['x-wt-server']) &&
+  const srv = (req.method === 'POST' ? parts.length === 2 || parts[3] === 'cancel' : req.method === 'GET' && parts.length === 3) && req.headers['x-wt-server'] !== undefined && serverTokenOk(req.headers['x-wt-server']) &&
     /^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '') // loopback only, like the pane path
   const author = srv ? { kind: 'server' } : await roomAuthor(req)
+  // WP-272: handoff.sh watches the row it queued (status), and cancels it when the mod does not pull it in time.
+  if (req.method === 'GET' && parts.length === 3 && parts[2] !== 'next') {
+    const r = deliveries.db.prepare('SELECT status FROM deliveries WHERE id = ?').get(parts[2])
+    return r ? send(res, 200, { status: r.status }) : send(res, 404, { error: `no delivery ${parts[2]}` })
+  }
+  if (req.method === 'POST' && parts[3] === 'cancel') {
+    if (author.kind !== 'agent' && author.kind !== 'server') return send(res, 403, { error: 'handoff.sh cancels (x-herdr-pane or the server token)' })
+    const r = deliveries.db.prepare('SELECT body FROM deliveries WHERE id = ?').get(parts[2])
+    if (!r) return send(res, 404, { error: `no delivery ${parts[2]}` })
+    const won = deliveries.settle(parts[2], 'pasted') // the caller types the short line itself
+    const env = won && envelopeOf(r.body)
+    if (env) msgSafe(() => messages.move(env.id, 'delivered'))
+    return send(res, 200, { cancelled: won })
+  }
   const mine = () => { if (author.kind !== 'agent') throw Object.assign(new Error('the pane\'s own mod calls this (x-herdr-pane)'), { status: 403 }); return author.pane }
   if (req.method === 'GET' && parts[2] === 'next') { const r = deliveries.next(mine()); return send(res, 200, r ? { id: r.id, kind: r.kind, text: r.body } : {}) }
   if (req.method === 'GET' && parts.length === 2) { if (author.kind !== 'user') return send(res, 403, { error: 'user only' }); return send(res, 200, deliveries.list(url.searchParams.get('pane') || undefined)) }
@@ -2760,6 +2783,21 @@ async function deliveriesApi(req, res, url, parts) {
 async function messagesApi(req, res, url, parts) {
   const srv = req.method === 'POST' && parts.length === 2 && req.headers['x-wt-server'] !== undefined && serverTokenOk(req.headers['x-wt-server']) && /^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '')
   const author = srv ? { kind: 'server' } : await roomAuthor(req)
+  // WP-272 finish check (wt-deliver check-finish, at the end of an agent's turn): its newest acked, unanswered handoff whose
+  // card is still open gets ONE system reminder queued, once per message. Fails open: anything else is {queued:false}.
+  if (req.method === 'GET' && parts[2] === 'check-finish') {
+    if (author.kind !== 'agent') return send(res, 403, { error: 'the pane itself asks (x-herdr-pane)' })
+    if (cfg.get('WT_NUDGE') === 'off' || !deliveries.live(author.pane)) return send(res, 200, { queued: false })
+    const pane = (await canonicalPane(author.pane).catch(() => null)) ?? author.pane
+    const row = await messages.remindable(pane, async (r) => CARD_OPEN(await tickets.get(r.ticket).catch(() => null)))
+    if (!row) return send(res, 200, { queued: false })
+    const a = (await agents().catch(() => [])).find((x) => x.id === pane)
+    const text = wrap({ kind: 'system', from: 'wt-dashboard', ticket: row.ticket }, nudgeText(a?.tags?.role ?? a?.pool, row.ticket))
+    const env = envelopeOf(text)
+    msgSafe(() => messages.record({ ...env, target: pane, body: text }))
+    deliveries.enqueue(pane, text); broadcastEvent('deliveries', { pane })
+    return send(res, 200, { queued: true, ticket: row.ticket })
+  }
   if (req.method === 'GET') {
     if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
     return send(res, 200, messages.list({ ticket: url.searchParams.get('ticket') || undefined, target: url.searchParams.get('target') || undefined, limit: url.searchParams.get('limit') }))

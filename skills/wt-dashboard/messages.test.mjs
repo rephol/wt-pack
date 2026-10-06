@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Messages, parseEnvelope, envelopeOf, movedOn, MAX_ATTEMPTS } from './messages.mjs'
+import { Messages, parseEnvelope, envelopeOf, movedOn, MAX_ATTEMPTS, NUDGE_MS, nudgeText, nudgeEligible } from './messages.mjs'
 
 async function setup() {
   const clock = { t: Date.parse('2026-01-01T00:00:00Z') }
@@ -176,4 +176,75 @@ test('WP-263: maxAttempts 2 = the original send plus one resend', async () => {
   clock.t += 6 * 60_000
   assert.deepEqual(await m.sweep(deps, { maxAttempts: 2 }), [{ id: 'a1', did: 'expired' }])
   assert.deepEqual(sent, ['a1'])
+})
+
+// ---- WP-272: the server's "continue" nudge and the finish-check reminder ----
+const acked = (m, draft, o = {}) => { m.record(draft(o)); m.move(o.id ?? 'a1', 'delivered'); m.ack(o.id ?? 'a1', null) }
+const mins = (n) => n * 60_000
+
+test('WP-272 nudge: not due → none; due → once; a second pass and a restart (same db) send nothing more', async () => {
+  const { m, clock, draft } = await setup()
+  acked(m, draft)
+  const sent = []
+  const deps = { eligible: () => true, send: (r) => { sent.push(r.id) } }
+  clock.t += NUDGE_MS - 1000
+  assert.deepEqual(await m.nudges(deps), [])
+  clock.t += 2000
+  assert.deepEqual((await m.nudges(deps)).map((d) => d.did), ['nudged'])
+  assert.deepEqual(await m.nudges(deps), [])
+  const again = new Messages({ dir: m.file.replace(/\/wt\.db$/, ''), log: () => {}, now: () => clock.t }) // a restart
+  assert.deepEqual(await again.nudges(deps), [])
+  assert.deepEqual(sent, ['a1'])
+})
+
+test('WP-272 nudge: ineligible rows (card in review, other project, off) and non-ack kinds are skipped, unanswered only', async () => {
+  const { m, clock, draft } = await setup()
+  acked(m, draft); acked(m, draft, { id: 'r1', kind: 'reply', ticket: 'WP-2' })
+  clock.t += mins(5)
+  const card = (column) => ({ column }), agent = { local: true, project: 'wt-pack', status: 'idle' }
+  assert.equal(nudgeEligible({ card: card('building'), agent, project: 'wt-pack' }), true)
+  assert.equal(nudgeEligible({ card: card('review'), agent, project: 'wt-pack' }), false)
+  assert.equal(nudgeEligible({ card: card('done'), agent, project: 'wt-pack' }), false)
+  assert.equal(nudgeEligible({ card: card('building'), agent: { ...agent, project: 'other' }, project: 'wt-pack' }), false)
+  assert.equal(nudgeEligible({ card: card('building'), agent: { ...agent, status: 'working' }, project: 'wt-pack' }), false)
+  assert.equal(nudgeEligible({ card: card('building'), agent, project: 'wt-pack', off: true }), false)
+  const sent = []
+  await m.nudges({ eligible: () => false, send: (r) => sent.push(r.id) })
+  assert.deepEqual(sent, [])
+  await m.nudges({ eligible: () => true, send: (r) => sent.push(r.id) })
+  assert.deepEqual(sent, ['a1']) // the reply kind expects no ack
+})
+
+test('WP-272: wording by role', () => {
+  assert.match(nudgeText('worker', 'WP-9'), /^WP-9: your card is not in review\. Continue, or report what blocks you with handoff\.sh --reply$/)
+  assert.match(nudgeText('planner', 'WP-9'), /^WP-9: the plan is not handed back\./)
+  assert.match(nudgeText('reviewer', 'WP-9'), /^WP-9: not reported yet\./)
+})
+
+test('WP-272: unreported counts from the nudge when there was one (4 min), else from the ack (10 min)', async () => {
+  const { m, clock, draft } = await setup()
+  acked(m, draft); acked(m, draft, { id: 'b2', ticket: 'WP-2' })
+  clock.t += NUDGE_MS + 1000
+  await m.nudges({ eligible: (r) => r.id === 'a1', send: () => {} })
+  const flagged = []
+  const deps = { moved: () => false, busy: () => false, flag: (r) => flagged.push(r.id) }
+  await m.unreported(deps)
+  assert.deepEqual(flagged, []) // nudged just now: 4 more minutes
+  clock.t += NUDGE_MS + 1000
+  await m.unreported(deps)
+  assert.deepEqual(flagged, ['a1']) // b2 was never nudged: still inside its 10 minutes
+  clock.t += mins(5)
+  await m.unreported(deps)
+  assert.deepEqual(flagged, ['a1', 'b2'])
+})
+
+test('WP-272 finish check: the newest acked, unanswered handoff with an open card is reminded once; answered or closed → none', async () => {
+  const { m, draft } = await setup()
+  acked(m, draft)
+  assert.equal(await m.remindable('w9:p9', () => true), null)
+  assert.equal(await m.remindable('w1:p1', () => false), null) // the card is in review
+  assert.equal((await m.remindable('w1:p1', () => true)).id, 'a1')
+  assert.equal(await m.remindable('w1:p1', () => true), null) // once
+  m.record(draft({ id: 'c3', ticket: 'WP-3' })); m.move('c3', 'delivered'); m.ack('c3', null, 'answered')
+  assert.equal(await m.remindable('w1:p1', () => true), null)
 })

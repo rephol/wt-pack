@@ -113,9 +113,9 @@ tool('ticket_comment', 'Add a comment to a card (wt-ticket comment).', { id: str
 tool('handoff', 'Hand a prompt to another agent (handoff.sh): reuses a free agent or spawns one, and types the prompt wrapped as a wt-message. Returns { target, pane, created, route, output }. A new agent can take over a minute: on timeout repeat with the same idempotency_key.', {
   prompt: text('What the agent should do', { maxLength: 100_000, noLeadingDash: false }), task: text('"<TICKET> <title>" label for the target pane'), role: str('Target role', { enum: ['worker', 'planner', 'reviewer'] }),
   pane: str('A specific pane id (then no pick/spawn)', PANE), persona: str('Project persona (.wt-pack/roles/<name>.md)', { pattern: '^[a-z][a-z0-9-]{0,23}$' }), team: str('Team name', { pattern: '^[a-z][a-z0-9-]{0,23}$' }),
-  no_goal: { type: 'boolean', description: 'Do not arm /goal on the target' }, dry_run: { type: 'boolean', description: 'Say what would happen; send nothing' },
+  goal: { type: 'boolean', description: 'Arm a /goal on the target (default: no goal)' }, no_goal: { type: 'boolean', description: 'Accepted, now the default' }, dry_run: { type: 'boolean', description: 'Say what would happen; send nothing' },
 }, ['prompt'], async (a, ctx) => {
-  const out = await run(BIN.handoff, [...flags(a, { pane: '--pane', role: '--role', persona: '--persona', team: '--team', task: '--task', no_goal: '--no-goal', dry_run: '--dry-run' }), ...(ctx.key ? ['--request-id', `mcp:${ctx.key}`] : [])], { input: a.prompt })
+  const out = await run(BIN.handoff, [...flags(a, { pane: '--pane', role: '--role', persona: '--persona', team: '--team', task: '--task', goal: '--goal', no_goal: '--no-goal', dry_run: '--dry-run' }), ...(ctx.key ? ['--request-id', `mcp:${ctx.key}`] : [])], { input: a.prompt })
   if (a.dry_run) return { dry_run: true, output: out }
   const lines = out.split('\n'), first = lines[0].split(' ')
   const target = lines.find((l) => l.startsWith('target '))?.split(' ')

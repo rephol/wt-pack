@@ -56,3 +56,19 @@ test('an unreachable dashboard submits nothing and retries next tick', async ($,
   await clock.advance(4_000)
   expect(submitted).toEqual(['x'])
 })
+
+test('WP-272: a turn ending runs the finish check once, and a failing check is ignored', async ($, on) => {
+  const clock = mock.clock(on)
+  const { calls } = setup(on, (cmd) => (cmd === 'check-finish' ? out(1) : out(0, '{}')))
+  await $.session.start({ cwd: '/', surface: 'terminal', interactive: true } as any)
+  const done = (turnId: string) => $.turn.complete({ turnId, reason: 'answer', answer: '', durationMs: 1, isAborted: false } as any)
+  await $.turn.start({ text: 'work', turnId: 't1' })
+  await done('t1')
+  await done('t1') // a second complete in the same turn: no second call
+  await clock.advance(1)
+  expect(calls.filter((c) => c === 'check-finish').length).toBe(1)
+  await $.turn.start({ text: 'more', turnId: 't2' })
+  await done('t2')
+  await clock.advance(1)
+  expect(calls.filter((c) => c === 'check-finish').length).toBe(2)
+})

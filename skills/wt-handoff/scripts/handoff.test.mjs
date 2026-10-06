@@ -1,7 +1,7 @@
 // Run: node --test skills/wt-handoff/scripts/handoff.test.mjs — handoff.sh against a stub herdr.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -92,7 +92,7 @@ test('WP-143: live routing reuses a free worker already on the routed tier/effor
   assert.match(out, /would reuse worker demo-worker-01 \(wW:p1\) \(model sonnet\)/) // routed dry-run wording (plan Unit 2)
   execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
   let calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr agent prompt wW:p1 /m)
+  assert.match(calls, /^herdr pane send-text wW:p1 Do the task in /m) // WP-272: the plain short line
   assert.ok(!calls.includes('tab create'))
 
   // same model, different effort: still a spawn, not a reuse (the effort half of the match rule)
@@ -318,23 +318,63 @@ esac
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
-test('WP-240: a /goal handoff is typed (send-text + Enter), not pasted via agent prompt; --no-goal still pastes', () => {
+test('WP-272: no /goal by default (typed short line naming the file); --goal arms one; --no-goal is the default; an unwritable file pastes with a warning', () => {
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [] } }))
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  for (const flags of [[], ['--no-goal']]) {
+    writeFileSync(log, '')
+    run(['--role', 'worker', '--pane', 'wW:p9', ...flags, repo], 'do the thing')
+    const calls = readFileSync(log, 'utf8')
+    const file = calls.match(/^herdr pane send-text wW:p9 Do the task in (\S+\.md), then report with handoff\.sh --reply$/m)?.[1]
+    assert.ok(file, calls) // no /goal; one short typed line naming the message file; nothing pasted
+    assert.match(readFileSync(file, 'utf8'), /^<wt-message id=\w+ kind=handoff[^>]*>[\s\S]*do the thing/)
+    assert.equal(statSync(file).mode & 0o777, 0o600)
+    assert.match(calls, /^herdr pane send-keys wW:p9 enter/m)
+    assert.doesNotMatch(calls, /agent prompt|\/goal|send-text .*<wt-message/)
+  }
   writeFileSync(log, '')
-  run(['--role', 'worker', '--pane', 'wW:p9', repo], 'do the thing')
+  run(['--role', 'worker', '--pane', 'wW:p9', '--task', 'WP-5 x', '--goal', repo], 'do the thing')
   let calls = readFileSync(log, 'utf8')
-  const file = calls.match(/^herdr pane send-text wW:p9 \/goal do the task in (\S+\.md); reporting what it asks for is the goal$/m)?.[1]
-  assert.ok(file, calls) // WP-243: one short typed line naming the message file; nothing queued or pasted
-  assert.match(readFileSync(file, 'utf8'), /^<wt-message id=\w+ kind=handoff[^>]*>[\s\S]*do the thing/)
-  assert.equal(statSync(file).mode & 0o777, 0o600)
-  assert.match(calls, /^herdr pane send-keys wW:p9 enter/m)
-  assert.doesNotMatch(calls, /agent prompt|send-text .*<wt-message/)
+  const gfile = calls.match(/^herdr pane send-text wW:p9 \/goal WP-5: do the task in (\S+\.md); reporting what it asks for is the goal$/m)?.[1]
+  assert.ok(gfile, calls)
+  assert.doesNotMatch(calls, /agent prompt/)
+  // the file cannot be written: the full message is pasted, and the script says why
+  const blocker = join(tmp, 'not-a-dir'); writeFileSync(blocker, '')
   writeFileSync(log, '')
-  run(['--role', 'worker', '--pane', 'wW:p9', '--no-goal', repo], 'do the thing')
-  calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr agent prompt wW:p9 /m)
+  const r = spawnSync(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { input: 'do the thing', encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MESSAGES_DIR: join(blocker, 'x') } })
+  assert.match(r.stderr, /warning: could not type the short line/)
+  assert.match(readFileSync(log, 'utf8'), /^herdr agent prompt wW:p9 /m)
+})
+
+test('WP-272: with the target\'s mod live the message is queued first; typed once only if it is not pulled in time', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  const curlBin = join(tmp, 'curlbin272'); mkdirSync(curlBin, { recursive: true })
+  const curlLog = join(tmp, 'curl272.log')
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+echo "$*" >> ${curlLog}
+for a in "$@"; do url=$a; done
+case "$url" in
+  */api/deliveries) echo '{"queued":true,"id":"q1"}' ;;
+  */api/deliveries/q1/cancel) echo "{\\"cancelled\\":true}" ;;
+  */api/deliveries/q1) echo "{\\"status\\":\\"$(cat ${tmp}/q1-status)\\"}" ;;
+  *) echo '{}' ;;
+esac
+`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_PANE_ID: 'wS:p1', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_PULL_WAIT_S: '1' }
+  const go = () => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { input: 'do the thing', encoding: 'utf8', env })
+  writeFileSync(join(tmp, 'q1-status'), 'delivered'); writeFileSync(log, ''); writeFileSync(curlLog, '')
+  go()
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /send-text|agent prompt/) // the mod pulled it: nothing typed
+  assert.doesNotMatch(readFileSync(curlLog, 'utf8'), /cancel/)
+  writeFileSync(join(tmp, 'q1-status'), 'queued'); writeFileSync(log, ''); writeFileSync(curlLog, '')
+  go()
+  assert.equal((readFileSync(log, 'utf8').match(/send-text wW:p9 Do the task in /g) ?? []).length, 1) // not pulled: cancelled, typed once
+  assert.match(readFileSync(curlLog, 'utf8'), /deliveries\/q1\/cancel/)
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
 
 test('WP-238: --team picks only that team\'s agents (a plain handoff skips them), spawns cap at the roster', () => {

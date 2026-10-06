@@ -282,8 +282,8 @@ Three things in that reference are easy to skip and all three have already gone 
   criterion and dropped `wt-ship`, and had to be corrected in the next message.
 - **When `herdr` is on PATH, always offer** to send it to a worker rather than making the user paste it —
   and wait for a yes.
-- **The prompt goes out as a one-line `/goal`**, which re-prompts the worker after every turn until the
-  condition holds. It is one line because herdr types it into the pane and a newline is Enter, so let the
+- **The prompt goes out as a plain prompt** (WP-272; `--goal` makes it a one-line `/goal`, which re-prompts the worker after
+  every turn until the condition holds). Without a goal the dashboard nudges a worker whose card is still open. It is one line because herdr types it into the pane and a newline is Enter, so let the
   script flatten it. It can still end early — impossible verdict, or no tool use for several turns — so say
   it may need a nudge rather than promising an unattended run.
 

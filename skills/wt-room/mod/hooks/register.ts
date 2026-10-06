@@ -12,10 +12,13 @@ export const deliverHooks = (skills: SkillsDir): Hooks => {
   let pulling = false
   let lastSubmitted = ''
   let pullNow: () => Promise<void> = async () => {}
+  let runCli: (argv: string[]) => Promise<{ exitCode?: number; stdout: string } | null> = async () => null
+  let checked = false // WP-272: the finish check runs at most once per turn
 
   const onStart: Hook = async (ctx, e, next) => {
     const wt = `${skills(ctx.root)}/wt-room/mod/scripts/wt-deliver`
     const run = (argv: string[]) => ctx.run([wt, ...argv], { timeoutMs: 6000 }).catch(() => null)
+    runCli = run
     const pull = async () => {
       if (turnRunning || pulling) return
       pulling = true
@@ -39,11 +42,14 @@ export const deliverHooks = (skills: SkillsDir): Hooks => {
     ctx.every(PULL_MS, () => { void pull() })
     return next(e)
   }
-  const onTurnStart: Hook = (_ctx, e, next) => { turnRunning = true; return next(e) }
+  const onTurnStart: Hook = (_ctx, e, next) => { turnRunning = true; checked = false; return next(e) }
   const onComplete: Hook = async (_ctx, e, next) => {
     const r = await next(e)
     turnRunning = false
     void pullNow()
+    // WP-272: a handed-off agent that ends its turn without reporting gets one reminder (the server decides: it knows the
+    // card and the message). The reminder is queued for this pane, so pull it right away. Fails open: errors are ignored.
+    if (!checked) { checked = true; void runCli(['check-finish']).then(() => pullNow()) }
     return r
   }
 

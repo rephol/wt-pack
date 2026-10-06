@@ -112,5 +112,5 @@ defect evidence.
 - **Keep the task list current** and reference the plan's unit ids in blockers and summaries.
 - **Do not open a PR, review your own diff, or run the tail.** That is `wt-ship`.
 - **Infra errors are not yours to retry.** If a command fails for a cause outside the ticket (auth, network, a down
-  service), report it once through the reply channel and stop. Do not retry under `/goal`: it re-prompts every turn,
+  service), report it once through the reply channel and stop. Do not retry under a `/goal` (when one was armed with `--goal`): it re-prompts every turn,
   and the dashboard watchdog clears the goal of an agent that repeats the same infra error (WP-220).

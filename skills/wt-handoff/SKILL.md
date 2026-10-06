@@ -2,7 +2,7 @@
 name: wt-handoff
 description: >
   Hand a prompt to a herdr agent — a free worker from the repo's pool, a named pane, or a freshly spawned
-  one — as a /goal, and leave both ends aware of each other: the target pane is labelled with the task
+  one — as a plain prompt (a /goal only with --goal), and leave both ends aware of each other: the target pane is labelled with the task
   (shown in wt-dashboard) and told who sent it and how to reply; the sender is told where it went. Use
   when handing off a plan or any work prompt to another agent instead of the clipboard. Called by
   wt-plan's handoff step; also useful invoked alone.
@@ -17,10 +17,10 @@ work both from the `./setup` links and from a plugin install (WP-122).
 ```bash
 scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--no-goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
+  [--pane <id> [--clear] | --new] [--goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
 scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
 scripts/handoff.sh --ack <id> [--answered]   # WP-257: acknowledge a wt-message by its id (the id in its tag)
-scripts/handoff.sh --cancel <pane|name> ["why"]   # stop a /goal-driven agent for real
+scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
 ```
 
 - **Every prompt is wrapped** (WP-104) as `<wt-message id=<nonce> kind=handoff|dispatch|routine|reply|system
@@ -41,8 +41,13 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop a /goal-driven agent fo
   task="…"][, returned <ID> to ready]`. Dispatch and reconcile use it when they withdraw a hand-off.
 
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
-  one through `wt-agents`. `--clear` sends `/clear` first. `--no-goal` sends a plain prompt instead of `/goal`
-  (why a goal, and its one-line / 4000-character rules: `../wt-plan/references/handoff.md`).
+  one through `wt-agents`. `--clear` sends `/clear` first. No `/goal` by default (WP-272): when the
+  target's delivery mod is live the message is queued and the target pulls it between turns (if not pulled within
+  `WT_PULL_WAIT_S`, 30 s, the queued row is cancelled and the short line is typed once, same envelope id); otherwise the
+  message goes to a mode-600 file and one short line `<ticket>: Do the task in <file>, then report with handoff.sh --reply`
+  is typed. `--goal` arms a `/goal` as before (its one-line / 4000-character rules: `../wt-plan/references/handoff.md`);
+  `--no-goal` is accepted and is the default. Without a goal the dashboard keeps the agent going: it nudges an acknowledged
+  handoff whose card is still open (4 min, once) and the delivery mod reminds at the end of a turn that did not report.
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
   `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
   sent; print the prompt for a human instead.

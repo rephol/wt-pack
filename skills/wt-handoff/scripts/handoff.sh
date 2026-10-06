@@ -2,10 +2,10 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--no-goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh ... [--request-id <id>] ...               # WP-251: a repeat of the same id prints the first run's output and sends nothing
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
-#   handoff.sh --cancel <pane|name> ["why"]               # stop a /goal-driven agent: escape, end its goal,
+#   handoff.sh --cancel <pane|name> ["why"]               # stop an agent: escape, end its /goal if any,
 #                                                          # clear task/ticket tokens, return its card if assigned
 #
 # WP-104: every prompt goes out wrapped as <wt-message id=… kind=handoff|dispatch|routine|reply|system from="…"
@@ -72,7 +72,7 @@ PANE_RE='^[A-Za-z0-9:_][A-Za-z0-9:_-]*$'
 WTMSG="$(cd "$(dirname "$0")" && pwd)/../../wt-shared/scripts/wt-message-cli.mjs"
 # WP-122: the path the target runs to reply — this install's own handoff.sh (symlinks or the plugin cache).
 SELF="$(cd "$(dirname "$0")" && pwd -P)/handoff.sh"
-goal=1
+goal=0 # WP-272: no /goal by default (--goal opts in)
 task=
 mcp=
 pr=
@@ -109,7 +109,8 @@ while :; do
     --kind)  kind=$2; shift 2
              case "$kind" in handoff|dispatch|routine|reply|system) ;; *) echo "--kind: handoff, dispatch, routine, reply or system" >&2; exit 2 ;; esac ;;
     --from)  from_arg=$2; shift 2 ;;
-    --no-goal) goal=0; shift ;;
+    --goal)  goal=1; shift ;;   # WP-272: arm a /goal on the target (the old default)
+    --no-goal) goal=0; shift ;; # accepted: now the default
     --task)  task=$2; shift 2 ;;
     --role)  role=$2; shift 2
              case "$role" in worker|planner|reviewer) ;; *) echo "--role: worker, planner or reviewer" >&2; exit 2 ;; esac ;;
@@ -361,14 +362,19 @@ hand_to() {
     sleep 2
   fi
   # WP-240/243: herdr's prompt pastes, and so does any long burst of typed text, which Claude Code hands the model as
-  # pasted content it will not act on. So the message goes to a mode-600 file and only a SHORT /goal line naming it is
+  # pasted content it will not act on. So the message goes to a mode-600 file and only a SHORT line naming it is
   # typed: no queue, no ordering (a queue only drains between turns, and /goal's Stop hook keeps the turn open).
-  if [ "$goal" -eq 1 ] && msgfile=$(save_message) && herdr pane send-text "$1" "$goal_line $msgfile; reporting what it asks for is the goal" >/dev/null 2>&1; then
+  # WP-272: without --goal that line is plain ("Do the task in <file>") and, when the target's delivery mod is live,
+  # the message is queued first and only typed if the mod does not pull it within WT_PULL_WAIT_S.
+  if [ "$goal" -eq 0 ] && queue_pulled "$1"; then
+    return 0
+  fi
+  if msgfile=$(save_message) && herdr pane send-text "$1" "$( [ "$goal" -eq 1 ] && printf '%s' "$goal_line $msgfile; reporting what it asks for is the goal" || printf '%s' "${ticket:+$ticket: }Do the task in $msgfile, then report with handoff.sh --reply")" >/dev/null 2>&1; then
     sleep 0.4 # an Enter sent in the same instant as the text is dropped
     herdr pane send-keys "$1" enter >/dev/null
   else
-    # WP-267: say why the whole message is pasted instead of the short /goal line (it was silent before)
-    [ "$goal" -eq 1 ] && echo "warning: could not type the /goal line into $1 (message file or send-text failed): pasting the full message" >&2
+    # WP-267: say why the whole message is pasted instead of the short line (it was silent before)
+    echo "warning: could not type the short line into $1 (message file or send-text failed): pasting the full message" >&2
     herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   fi
   node "$PANE_SUBMIT" confirm "$1" --settle "${WT_SUBMIT_SETTLE_MS:-1500}" 2>/dev/null \
@@ -390,9 +396,29 @@ queue_prompt() { # <pane> <text>
   # A server-run handoff (Dispatch, routines) has no pane id: it proves itself with the dashboard's private token instead.
   set -- "$1" "$2" -H "$( [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")"
   [ -n "$deliver_token${HERDR_PANE_ID:-}" ] || return 1
-  [ "$(jq -n --arg p "$1" --arg t "$2" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST "$3" "$4" \
-    -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null)" = true ]
+  qid=$(jq -n --arg p "$1" --arg t "$2" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST "$3" "$4" \
+    -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r 'if .queued == true then .id else empty end' 2>/dev/null)
+  [ -n "$qid" ]
 }
+
+# WP-272: queue-first handoff. True when the target's mod is live, took the message and PULLED it within WT_PULL_WAIT_S.
+# An unpulled row is cancelled (the server settles it as pasted) and the caller types the short line once: same envelope id.
+queue_pulled() { # <pane>
+  base=${HERDR_DASH_URL:-http://127.0.0.1:7777}; qid=
+  command -v jq >/dev/null || return 1
+  queue_prompt "$1" "$send" || return 1 # not live: nothing queued, nothing recorded (finish records it delivered once typed)
+  record_message "$1" "$send" queued
+  n=0; max=${WT_PULL_WAIT_S:-30}
+  while [ "$n" -lt "$max" ]; do
+    st=$(curl -sS --max-time 3 -H "$(auth_header)" "$base/api/deliveries/$qid" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
+    case "$st" in delivered) return 0 ;; queued|'') ;; *) return 1 ;; esac
+    sleep 1; n=$((n + 1))
+  done
+  c=$(curl -sS --max-time 3 -X POST -H "$(auth_header)" "$base/api/deliveries/$qid/cancel" 2>/dev/null | jq -r '.cancelled // false' 2>/dev/null)
+  [ "$c" = true ] && return 1
+  return 0 # the mod pulled it as we cancelled
+}
+auth_header() { [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}"; }
 
 task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
 from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
