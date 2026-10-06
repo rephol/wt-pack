@@ -31,6 +31,7 @@ import { BoardHistorySection, RoutinesHistorySection } from './routines'
 import { IntegrationsSection } from './integrations'
 import { TerminalsSection } from './terminals'
 import { InstallRow } from './pwa'
+import { usePush, PhoneCard } from './push'
 import { RolesSection } from './roles'
 import { ObservabilitySection } from './observability'
 import { MemorySection } from './memory'
@@ -48,7 +49,7 @@ type Panel = { id: Section; label: string; description: string }
 const GROUPS: { label: string; panels: Panel[] }[] = [
   { label: 'You', panels: [
     { id: 'profile', label: 'General', description: 'Your profile in rooms, and how chat looks in this browser.' },
-    { id: 'notifications', label: 'Notifications', description: 'What reaches the inbox and, in the desktop app, macOS notifications.' },
+    { id: 'notifications', label: 'Notifications', description: 'What reaches the inbox, macOS notifications in the desktop app, and push to your phone.' },
   ] },
   { label: 'Agents', panels: [
     { id: 'rooms', label: 'Rooms', description: 'How agents talk to each other and to you in rooms.' },
@@ -318,6 +319,7 @@ function RoomsSection() {
 
 function NotificationsSection() {
   const [prefs, setPrefs] = useState(loadPrefs)
+  const push = usePush() // WP-268: the Phone column
   const [savedAt, setSavedAt] = useState(0)
   const set = (where: 'inbox' | 'native', k: Kind, v: boolean) => {
     const next = { ...prefs, [where]: { ...prefs[where], [k]: v } }
@@ -330,10 +332,11 @@ function NotificationsSection() {
     ['System', [['server', 'Server events'], ['watchdog', 'Watchdog findings'], ['usage', 'Claude usage at 80% / 95%']]],
   ]
   const cell = { width: 52, display: 'flex', justifyContent: 'center' } as const
-  const head = <HStack gap={0}><div style={cell}><Text type="supporting" size="sm">Inbox</Text></div><div style={cell}><Text type="supporting" size="sm">Native</Text></div></HStack>
+  const head = <HStack gap={0}><div style={cell}><Text type="supporting" size="sm">Inbox</Text></div><div style={cell}><Text type="supporting" size="sm">Native</Text></div>{!isDesktop && <div style={cell}><Text type="supporting" size="sm">Phone</Text></div>}</HStack>
   return (
     <>
-      <Text type="supporting">{`Inbox: shown in the bell panel. Native: macOS notifications from the desktop app${isDesktop ? '' : ' (not this browser)'}; needs the inbox kind on. Remembered in this browser.`}</Text>
+      <Text type="supporting">{`Inbox: shown in the bell panel. Native: macOS notifications from the desktop app${isDesktop ? '' : ' (not this browser)'}; needs the inbox kind on. Remembered in this browser.${isDesktop ? '' : ' Phone: Web Push to this device once enabled below; kept on the server, per device.'}`}</Text>
+      <PhoneCard p={push} />
       {GROUPS.map(([title, kinds], gi) => (
         <SettingsCard key={title} title={title} end={<HStack gap={3} align="center">{gi === 0 && <Status text={Date.now() - savedAt < 3000 ? 'Saved' : ''} />}{head}</HStack>}>
           {kinds.map(([k, label]) => (
@@ -341,6 +344,7 @@ function NotificationsSection() {
               control={<HStack gap={0}>
                 <div style={cell}><Switch label={`${label} in the inbox`} isLabelHidden value={prefs.inbox[k]} onChange={(v) => set('inbox', k, v)} /></div>
                 <div style={cell}><Switch label={`${label} as a native notification`} isLabelHidden value={prefs.native[k]} isDisabled={!prefs.inbox[k]} onChange={(v) => set('native', k, v)} /></div>
+                {!isDesktop && <div style={cell}><Switch label={`${label} as a phone notification`} isLabelHidden value={push.mine?.kinds[k] ?? false} isDisabled={push.state !== 'on' || push.busy} onChange={(v) => push.setKind(k, v)} /></div>}
               </HStack>} />
           ))}
         </SettingsCard>
