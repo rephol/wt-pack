@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, projectName } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -1654,4 +1654,11 @@ test('WP-219: a delivery carries what the room said since the agent last saw it,
   await rooms.post('r', { author: user, text: '@ag again' })
   await rooms.flush()
   assert.doesNotMatch(sent.find(([n]) => n === 'ag')[1], /kind=context/) // nothing new in between
+})
+
+test('projectName: a worktree cwd (even a removed one) lists under its repo, not the worktree dir', () => {
+  assert.equal(projectName('/w/wt-pack/.claude/worktrees/wp-262-x'), 'wt-pack')
+  assert.equal(projectName('/w/wt-pack/.claude/worktrees/wp-262-x/skills/wt-dashboard'), 'wt-pack')
+  assert.equal(projectName('/w/wt-pack'), 'wt-pack')
+  assert.equal(projectName('/w/wt-pack/.claude/worktrees'), 'worktrees') // no worktree name: plain basename
 })

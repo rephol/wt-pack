@@ -272,12 +272,15 @@ const herdrOn = (m, ...args) => (m.local ? herdr(...args) : run('herdr', ['--mac
 // ---- projects ----
 // Project = the repo a cwd belongs to; worktrees resolve to their main repo via --git-common-dir.
 const projectCache = new Map() // cwd → { name, at }
+// No git needed: a path under <repo>/.claude/worktrees/<name> belongs to <repo>. Covers a worktree already
+// removed (git fails there) and remote machines; else the cwd's own basename.
+export const projectName = (cwd) => basename(cwd.match(/^(.+?)\/\.claude\/worktrees\/[^/]+(?:\/|$)/)?.[1] ?? cwd)
 async function projectOf(cwd) {
   if (!cwd) return null
   const hit = projectCache.get(cwd)
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.name
   const common = await git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
-  const name = common ? basename(dirname(common.trim())) : basename(cwd)
+  const name = common ? basename(dirname(common.trim())) : projectName(cwd)
   projectCache.set(cwd, { name, at: Date.now() })
   return name
 }
@@ -584,8 +587,8 @@ async function listAgents(m) {
       // The transcript's last write (local sessions); else when the status last changed.
       lastActivity: (await transcriptMtime(session)) || since.get(k).at, // statusSince resets on a server restart
       cwd,
-      // Remote: no git over SSH, so the cwd's basename stands in.
-      project: m.local ? await projectOf(cwd) : cwd ? basename(cwd) : null,
+      // Remote: no git over SSH, so the path stands in.
+      project: m.local ? await projectOf(cwd) : cwd ? projectName(cwd) : null,
       recap: p.recap ?? null,
       context: p.context ?? null,
       background: p.background ?? 0,
