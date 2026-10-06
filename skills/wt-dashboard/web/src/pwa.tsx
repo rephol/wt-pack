@@ -2,6 +2,7 @@
 // UpdateBanner when a new build's worker takes over, and a one-time install hint on phones
 // (iOS Safari has no prompt: it gets Share → Add to Home Screen instead). Not in the desktop app.
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import type { Category, Kind } from '../../contracts.mjs'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Text } from '@astryxdesign/core/Text'
@@ -47,9 +48,16 @@ getBuild().then((b) => { loaded = b.build }, () => {})
 tauriEmit?.('update', false).catch(() => {}) // a fresh page clears the Dock/tray dot
 
 // Mounted once in App: update detection, and the "Needs you" shortcut (#inbox opens the inbox on Overview).
-export function PwaHost({ openInbox }: { openInbox: () => void }) {
+// WP-271: #inbox/<category> (a tap on a grouped phone notification) opens it filtered; also on a hash change while open.
+export function PwaHost({ openInbox }: { openInbox: (filter?: 'all' | Kind | `cat:${Category}`) => void }) {
   useEffect(() => {
-    if (location.hash === '#inbox') { history.replaceState(null, '', '#overview'); dispatchEvent(new HashChangeEvent('hashchange')); openInbox() }
+    const route = () => {
+      const m = /^#inbox(?:\/(needs-you|agents|system))?$/.exec(location.hash)
+      if (!m) return
+      history.replaceState(null, '', '#overview'); dispatchEvent(new HashChangeEvent('hashchange')); openInbox(m[1] ? `cat:${m[1] as Category}` : 'all')
+    }
+    route()
+    addEventListener('hashchange', route)
     let pending = false
     const hidden = () => { if (pending && document.hidden) location.reload() }
     const onUpdate = async () => {
@@ -67,7 +75,7 @@ export function PwaHost({ openInbox }: { openInbox: () => void }) {
     const had = Boolean(sw?.controller)
     const on = () => { if (had) onUpdate() }
     sw?.addEventListener('controllerchange', on)
-    return () => { document.removeEventListener('visibilitychange', hidden); removeEventListener('hd-update', onUpdate); sw?.removeEventListener('controllerchange', on) }
+    return () => { removeEventListener('hashchange', route); document.removeEventListener('visibilitychange', hidden); removeEventListener('hd-update', onUpdate); sw?.removeEventListener('controllerchange', on) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return null
 }

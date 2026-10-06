@@ -17,13 +17,15 @@ import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/Segme
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { useToast } from '@astryxdesign/core/Toast'
 import { collapseRepeats, needsYou, groupInbox, shortAgo, type InboxGroup, type InboxItem, type InboxRow, type Kind } from './notifyGate'
+import { categoryOf, type Category } from '../../contracts.mjs'
 import { loadPrefs } from './desktop'
 import { api } from './rooms'
 import { Delayed, LoadError, Rows } from './skeletons'
 import { useOverviewAgents } from './pickerCard'
 import { QuestionPopup, type PopupTarget, type Ask } from './questionPopup'
 
-export const openInbox = (filter: 'all' | Kind = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
+export type InboxFilter = 'all' | Kind | `cat:${Category}`
+export const openInbox = (filter: InboxFilter = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
 const LABEL: Record<Kind, string> = {
   question: 'Question', 'mention-user': '@you', 'needs-you': 'Needs you', 'room-suggestion': 'Suggestion',
   'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage', 'room-created': 'New room', memory: 'Memory', 'memory-proposal': 'Proposal', watchdog: 'Watchdog', 'pr-held': 'Held PR', 'routing-escalation': 'Escalated', 'jev-auth': 'Jev key rejected', 'pair-gone': 'Pair gone', 'dispatch-undelivered': 'Undelivered', ask: 'Question',
@@ -52,7 +54,7 @@ export function InboxButton({ collapsed }: { collapsed: boolean }) {
 }
 
 export function InboxHost({ onOpenAgent }: { onOpenAgent: (key: string) => void }) {
-  const [filter, setFilter] = useState<'all' | Kind | null>(null)
+  const [filter, setFilter] = useState<InboxFilter | null>(null)
   const [popupTarget, setPopupTarget] = useState<PopupTarget | null>(null)
   // WP-231: an open ask pops up by itself on every page and project (the Inbox is not project-scoped, but a
   // phone in the terminal view never saw the badge). Once per ask per tab: closing it leaves the Inbox card.
@@ -69,7 +71,7 @@ export function InboxHost({ onOpenAgent }: { onOpenAgent: (key: string) => void 
   const stillOpen = !openAskId || !inbox.loaded || inbox.open.some((it) => it.target.ask === openAskId)
   useEffect(() => { if (!stillOpen) setPopupTarget(null) }, [stillOpen])
   useEffect(() => {
-    const on = (e: Event) => setFilter((e as CustomEvent<'all' | Kind>).detail)
+    const on = (e: Event) => setFilter((e as CustomEvent<InboxFilter>).detail)
     addEventListener('open-inbox', on)
     return () => removeEventListener('open-inbox', on)
   }, [])
@@ -106,7 +108,7 @@ const ICON: Record<Kind, React.ReactNode> = {
   'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus, memory: I.bulb, 'memory-proposal': I.bulb, watchdog: I.server, 'pr-held': I.clock, 'routing-escalation': I.bulb, 'jev-auth': I.x, 'pair-gone': I.clock, 'dispatch-undelivered': I.x, ask: I.q,
 }
 
-function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: { filter: 'all' | Kind; setFilter: (f: 'all' | Kind) => void; onClose: () => void; onOpenAgent: (key: string) => void; openQuestion: (t: PopupTarget) => void }) {
+function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: { filter: InboxFilter; setFilter: (f: InboxFilter) => void; onClose: () => void; onOpenAgent: (key: string) => void; openQuestion: (t: PopupTarget) => void }) {
   const qc = useQueryClient()
   const toast = useToast()
   const { items, loaded, error, retry } = useInbox()
@@ -155,7 +157,7 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: {
     mutationFn: (ticket: string) => api('/api/rooms/dismiss', { method: 'POST', body: JSON.stringify({ ticket }) }),
     onSuccess: refresh, onError: (e) => toast({ body: String(e), type: 'error' }),
   })
-  const shown = items.filter((it) => filter === 'all' || it.kind === filter)
+  const shown = items.filter((it) => filter === 'all' || it.kind === filter || filter === `cat:${categoryOf(it.kind)}`)
   const pinned = collapseRepeats(shown.filter(needsYou))
   const recent = groupInbox(collapseRepeats(shown.filter((it) => !needsYou(it))).slice(0, 150))
   const go = (it: InboxRow) => {
@@ -256,8 +258,12 @@ function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: {
             </HStack>
           </HStack>
           <div className="hd-filter" style={{ overflowX: 'auto', margin: '0 -4px', padding: '0 4px' }}>
-            <SegmentedControl label="Filter" value={filter} onChange={(v) => setFilter(v as 'all' | Kind)} size="sm">
+            <SegmentedControl label="Filter" value={filter} onChange={(v) => setFilter(v as InboxFilter)} size="sm">
               <SegmentedControlItem value="all" label="All" />
+              {/* WP-271: the Settings sections; a tap on a grouped phone notification lands on one of these */}
+              <SegmentedControlItem value="cat:needs-you" label="Needs you" />
+              <SegmentedControlItem value="cat:agents" label="Agents" />
+              <SegmentedControlItem value="cat:system" label="System" />
               <SegmentedControlItem value="question" label="Questions" />
               <SegmentedControlItem value="mention-user" label="@you" />
               <SegmentedControlItem value="room-suggestion" label="Suggestions" />

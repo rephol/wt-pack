@@ -13,6 +13,11 @@ export const KINDS = freeze(['needs-you', 'question', 'mention-user', 'room-sugg
 // The kinds that need the user (badge, Inbox "Needs you", Overview tile).
 export const ACTIONABLE_KINDS = freeze(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask'])
 
+// WP-271: the Settings > Notifications sections. A kind is "Agents" if listed here, else "Needs you" when actionable,
+// else "System", so a new kind needs no change in the push code (only here, if it belongs under Agents).
+const AGENT_KINDS = freeze(['agent-done', 'agent-stalled', 'ci-failed', 'room-suggestion', 'memory', 'room-created', 'pair-gone', 'dispatch-undelivered'])
+export const categoryOf = (kind) => AGENT_KINDS.includes(kind) ? 'agents' : ACTIONABLE_KINDS.includes(kind) ? 'needs-you' : 'system'
+
 // A value must be one of `list`; the error has the `{ status: 400 }` shape the API's routes already use.
 export function oneOf(list, v, field) {
   if (!list.includes(v)) throw Object.assign(new Error(`${field}: ${list.join(' | ')}`), { status: 400 })

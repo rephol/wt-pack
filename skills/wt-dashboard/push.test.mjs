@@ -104,7 +104,7 @@ test('gate: per-device kind switch, quiet items, once per key, one per target pe
   assert.equal(gate(item({ key: 'k1', target: { agent: 'w:5' } }), { id: 'd3', kinds: defaultKinds() }, s), true, 'seen is per device')
 })
 test('payloadOf: short, with a hash route for the click', () => {
-  assert.deepEqual(JSON.parse(payloadOf(item({ body: 'x'.repeat(500) }))), { title: 'a asks you', body: 'x'.repeat(200), tag: 'k1', url: '/#inbox' })
+  assert.deepEqual(JSON.parse(payloadOf(item({ body: 'x'.repeat(500) }))), { title: 'a asks you', body: 'x'.repeat(200), tag: 'k1', cat: 'needs-you', kind: 'question', url: '/#inbox' })
   assert.equal(JSON.parse(payloadOf(item({ target: { room: 'my room' } }))).url, '/#rooms/my%20room')
 })
 

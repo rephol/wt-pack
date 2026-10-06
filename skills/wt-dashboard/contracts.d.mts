@@ -8,6 +8,8 @@ export declare const SIZES: readonly ['S', 'M', 'L']
 export declare const KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'pair-gone', 'dispatch-undelivered', 'ask']
 export type Kind = (typeof KINDS)[number]
 export declare const ACTIONABLE_KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask']
+export type Category = 'needs-you' | 'agents' | 'system'
+export declare function categoryOf(kind: string): Category
 
 // ---- tickets (tickets.mjs; GET/PATCH /api/tickets) ----
 export interface HistoryEntry { at: string; author: string; kind: 'create' | 'move' | 'comment' | 'edit' | 'assign' | 'pair'; from?: unknown; to?: unknown; text?: string }
