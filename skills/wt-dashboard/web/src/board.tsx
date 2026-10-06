@@ -61,20 +61,6 @@ interface DragState { id: string; width: number; height: number; offsetX: number
 
 // ============= BOARD =============
 
-// 'All projects' (WP-33): one button per project that has a board, with its open-ticket count.
-function BoardPicker({ projects, onProject }: { projects: string[]; onProject: (p: string) => void }) {
-  const q = useQuery({
-    queryKey: ['board-picker', projects.join(':')], staleTime: 10_000,
-    queryFn: () => Promise.all(projects.map((p) => api<BoardT>(`/api/tickets?project=${encodeURIComponent(p)}`)
-      .then((b) => ({ p, key: b.key, open: b.tickets.filter((t) => t.column !== 'done').length }), () => ({ p, key: null, open: 0 })))),
-  })
-  const boards = (q.data ?? []).filter((b) => b.key)
-  return (
-    <EmptyState title="Pick a project" description={boards.length ? 'The board is per project.' : q.isPending ? 'Loading boards…' : 'No project has a board yet: create a ticket with wt-ticket new.'}
-      actions={boards.length ? <HStack gap={2} wrap="wrap" hAlign="center">{boards.map((b) => <Button key={b.p} label={`${b.p} · ${b.open} open`} variant="secondary" onClick={() => onProject(b.p)} />)}</HStack> : undefined} />
-  )
-}
-
 export function Board({ project, phone, projects = [], onProject }: { project: string; phone: boolean; projects?: string[]; onProject?: (p: string) => void }) {
   const qc = useQueryClient()
   const key = ['tickets', project]
@@ -141,7 +127,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
     return () => removeEventListener('hashchange', on)
   }, [])
 
-  if (project === 'all') return onProject ? <BoardPicker projects={projects} onProject={onProject} /> : <EmptyState title="Pick a project" description="The board is per project: choose one in the sidebar." />
+  if (project === 'all') return <EmptyState title="Select a project" description="Choose one in the sidebar." />
   if (q.isError) return <Banner status="error" title={`Board: ${q.error.message}`} />
   if (!q.data) return <Text type="supporting">Loading board…</Text>
   const tickets = q.data.tickets
