@@ -1,7 +1,9 @@
 # WP-272 — handoff without /goal by default, server nudge, finish check in the delivery mod
 
-Status: **two questions open with the orchestrator (Q1, Q2 below)**. Do not hand to a worker until both are
-answered and this file is updated; the recommended answers are written in so the units read whole.
+Settled decisions (orchestrator, 2026-10-06): **Q1 A** — queue-first when the target's delivery mod is live, else the
+short typed line + pane-submit confirm; a queued message not pulled within N s falls back to the short line once, same
+request id. **Q2 A** — nudge any card assigned to a handed-off agent with an acknowledged, unanswered wt_messages row,
+every column except done/blocked/review; wording per role; this repo's agents only.
 
 ## What exists (evidence)
 - `skills/wt-handoff/scripts/handoff.sh:75` `goal=1`; `:112` `--no-goal) goal=0`. With goal=1, `hand_to` saves the
@@ -27,8 +29,11 @@ answered and this file is updated; the recommended answers are written in so the
 
 ## Part 1 — default goal=0
 - `handoff.sh`: `goal=0`; add `--goal` (sets 1); keep `--no-goal` (no-op, accepted). Usage line updated.
-- With goal=0 (Q1, recommended A): if the target's delivery mod is live (`POST /api/deliveries` returns `queued: true`,
-  the path `deliver()` already uses, `server.mjs:2482-2486`), queue the full message; otherwise save the file and type
+- With goal=0 (Q1 A): "mod is live" = `deliveries.live(pane)`, i.e. a `wt-deliver hello` from that pane within the
+  freshness window (hello every 20 s, `skills/wt-room/mod/hooks/register.ts` `HELLO_MS`). If live, `POST /api/deliveries`
+  queues the full message (the path `deliver()` already uses, `server.mjs:2482-2486`); handoff.sh then polls the row
+  up to `WT_PULL_WAIT_S` (default 30 s); not pulled by then → cancel the queued row and fall back ONCE to the short
+  line under the same `--request-id`/envelope id (`messages.record` dedupes on id, so no second row). Not live → save the file and type
   ONE short line `${ticket:+$ticket: }Do the task in <file>, then report with handoff.sh --reply` (no `/goal`) with the
   same send-text → 0.4 s → Enter → `pane-submit confirm` sequence as the goal line. Fallback when the file can't be
   written: paste (today's behaviour) with the WP-267 warning.
@@ -40,10 +45,11 @@ answered and this file is updated; the recommended answers are written in so the
   `--goal` → `/goal … do the task in`; `--no-goal` accepted, same as default; file-write failure → paste + warning.
 
 ## Part 2 — server-side nudge (`server.mjs` messageSweep + `messages.mjs`)
-- Q2 scope (recommended B): an `acknowledged`, not `answered`, `ACK_KINDS` row with a ticket whose card is not
-  done/blocked/review (the ticket text says Building only — A), target in `REPO_PROJECT`, target status not
-  working/blocked, and `updated` older than 4 min → ONE typed line via `deliver()`:
-  `WP-N: your card is not in review. Continue, or report what blocks you with handoff.sh --reply`.
+- Scope (Q2 A): an `acknowledged`, not `answered`, `ACK_KINDS` row with a ticket whose card is not
+  done/blocked/review, target in `REPO_PROJECT`, target status not working/blocked, `updated` older than 4 min →
+  ONE line via `deliver()`, worded by the target's `role` token: worker `WP-N: your card is not in review. Continue,
+  or report what blocks you with handoff.sh --reply`; planner `WP-N: the plan is not handed back. Finish it, or report
+  what blocks you with handoff.sh --reply`; other roles `WP-N: not reported yet. Continue, or report with handoff.sh --reply`.
 - Once-only, restart-safe: new column `nudged_at TEXT` on `wt_messages` (migration entry in `store.mjs`, pattern of
   `:192`); `messages.nudge(id)` sets it with `WHERE nudged_at IS NULL` and returns whether it changed → sends only then.
 - After the nudge: `unreported` already flags after 10 min idle (`messages.mjs:134`); change its window to count from
