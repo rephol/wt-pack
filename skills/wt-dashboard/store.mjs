@@ -195,6 +195,10 @@ export const MIGRATIONS = [
           CREATE INDEX wt_messages_ticket ON wt_messages (ticket, created);
           CREATE INDEX wt_messages_open ON wt_messages (state, updated);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-268 Web Push subscriptions, one per browser/device with its own per-kind switches (push.mjs). Not exported.
+  { sql: `CREATE TABLE push_subscriptions (id TEXT PRIMARY KEY, endpoint TEXT UNIQUE NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+          label TEXT NOT NULL, kinds TEXT NOT NULL, created TEXT NOT NULL, last_ok TEXT);`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

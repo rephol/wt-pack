@@ -28,6 +28,7 @@ import { Routines, preview as schedulePreview } from './routines.mjs'
 import { sweep as recoverySweep } from './recovery.mjs'
 import { Dispatch, runHandoff, recoveryRequestId, resolveReport, routeRef, strikes } from './dispatch.mjs'
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
+import { Push } from './push.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds, watchPrsUnwatched, watchPrsStale } from './inbox.mjs'
 import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
 import { ccBlock } from './ccusage.mjs'
@@ -1860,6 +1861,10 @@ export const sendTrayIfChanged = (tray) => {
   return true
 }
 inbox.subs.add((it) => broadcastEvent('notification', it))
+// WP-268: Web Push to phones/browsers (push.mjs). WT_DASHBOARD_PUSH_HOSTS (env only, host:port list) allows a non-service
+// endpoint for tests/self-hosting; never a UI setting, since it widens what the server will POST to. Its own gate (kind switch per device, once per item, 1 per target per 30 s).
+const push = new Push(DATA, { extraHosts: (process.env.WT_DASHBOARD_PUSH_HOSTS ?? '').split(',').filter(Boolean), subject: process.env.WT_DASHBOARD_PUSH_SUBJECT || undefined })
+inbox.subs.add((it) => { push.notify(it).catch((e) => console.error('push:', e.message)) })
 // Scored once, async, after it is stored; the web reads `urgency` on its next list fetch (no re-broadcast: that
 // would notify twice). No answer → no urgency, which sorts as FYI.
 inbox.subs.add((it) => {
@@ -2007,6 +2012,23 @@ async function inboxApi(req, res, url) {
     broadcastEvent('inbox', { changed: true })
     broadcastEvent('tray', trayOfInbox())
     return send(res, 200, { ok: true, cleared: n })
+  }
+  send(res, 404, { error: 'not found' })
+}
+// WP-268: GET /api/push (public key + devices), POST/PATCH/DELETE /api/push/subscription[/:id], POST /api/push/test.
+// Writes need the session cookie (needsSession) like every other write; an endpoint must be a known push service (push.mjs).
+async function pushApi(req, res, url) {
+  const parts = url.pathname.split('/').filter(Boolean) // api push [subscription [id] | test]
+  if (req.method === 'GET' && parts.length === 2) return send(res, 200, { publicKey: push.publicKey, devices: push.list() })
+  const b = req.method === 'DELETE' ? {} : JSON.parse((await body(req)) || '{}')
+  if (parts[2] === 'subscription' && parts.length === 3 && req.method === 'POST') return send(res, 200, { ok: true, id: push.upsert(b.subscription, { label: b.label, kinds: b.kinds }) })
+  if (parts[2] === 'subscription' && parts.length === 4 && req.method === 'PATCH') return push.setKinds(parts[3], b.kinds) ? send(res, 200, { ok: true }) : send(res, 404, { error: 'no such device' })
+  if (parts[2] === 'subscription' && parts.length === 4 && req.method === 'DELETE') return push.remove(parts[3]) ? send(res, 200, { ok: true }) : send(res, 404, { error: 'no such device' })
+  if (parts[2] === 'test' && parts.length === 3 && req.method === 'POST') {
+    const d = push.rows().find((r) => r.id === b.id)
+    if (!d) return send(res, 404, { error: 'no such device' })
+    const status = await push.send(d, push.testPayload())
+    return send(res, status < 400 ? 200 : 502, { ok: status < 400, status })
   }
   send(res, 404, { error: 'not found' })
 }
@@ -3223,6 +3245,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/changes') return changes.stream(req, res, req.headers['last-event-id'] || url.searchParams.get('since'))
       if (url.pathname === '/api/build') return send(res, 200, await buildInfo(url.searchParams.get('since')))
       if (url.pathname.startsWith('/api/notifications')) return await inboxApi(req, res, url)
+      if (url.pathname === '/api/push' || url.pathname.startsWith('/api/push/')) return await pushApi(req, res, url).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 502), { error: e.message }))
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)
       if (url.pathname.startsWith('/api/unfurl') && req.method === 'GET') {
         if (!hasSession(req.headers.cookie)) return send(res, 403, { error: 'session required' })

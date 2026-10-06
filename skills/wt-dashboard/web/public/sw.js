@@ -1,4 +1,4 @@
-// wt-dashboard service worker: installable PWA + an app shell that opens without the network.
+// wt-dashboard service worker: installable PWA + an app shell that opens without the network, and Web Push (WP-268).
 // It never touches /api/* (JSON, SSE streams, uploads, files — all live, all behind the session cookie): those
 // requests are not intercepted at all. Navigations are network-first (a new build shows up on the next load),
 // falling back to the cached shell and then to offline.html; hashed assets are stale-while-revalidate.
@@ -37,4 +37,23 @@ self.addEventListener('fetch', (e) => {
       return hit ?? (await net) ?? Response.error()
     })())
   }
+})
+
+// WP-268 Web Push: the server sends {title, body, tag, url} (push.mjs payloadOf); `tag` makes a repeat replace, not stack.
+self.addEventListener('push', (e) => {
+  let d = {}
+  try { d = e.data.json() } catch { d = { body: e.data ? e.data.text() : '' } }
+  e.waitUntil(self.registration.showNotification(d.title || 'wt-dashboard', {
+    body: d.body || '', tag: d.tag || undefined, icon: './icon-192.png', badge: './icon-192.png', data: { url: d.url || '/#inbox' },
+  }))
+})
+// A click focuses the open dashboard window and moves it to the item's hash route, else opens one.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  const url = new URL(e.notification.data?.url || '/#inbox', self.location.origin).href
+  e.waitUntil((async () => {
+    const w = (await clients.matchAll({ type: 'window', includeUncontrolled: true })).find((c) => new URL(c.url).origin === self.location.origin)
+    if (w) { try { await w.focus(); await w.navigate(url); return } catch { /* not controllable: open a new one */ } }
+    await clients.openWindow(url)
+  })())
 })
