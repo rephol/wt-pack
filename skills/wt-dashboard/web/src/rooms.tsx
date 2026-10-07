@@ -37,6 +37,8 @@ import { Divider } from '@astryxdesign/core/Divider'
 import { Icon } from '@astryxdesign/core/Icon'
 import { useToast } from '@astryxdesign/core/Toast'
 import { openInbox } from './inbox'
+import { MsgActions, PinnedBar, useJumpRequest } from './pins'
+import { roomChat } from './pinState'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { ImageRow, useAttachments, uploadUrl, AttachmentChip, AttachmentDownload, ATTACH_ACCEPT, IMAGE_TYPES, MAX_IMAGES } from './attachments'
@@ -262,6 +264,7 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
     const el = byId()
     if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); flash() } else setTimeout(flash, 300)
   }, [])
+  useJumpRequest(`room:${room.slug}`, jumpTo) // WP-273: a Saved bookmark opens this room at its message
   const post = useMutation({
     mutationFn: (b: { text: string; confirmAll?: boolean }) => api<RoomMsg>(`/api/rooms/${room.slug}/messages`, { method: 'POST',
       body: JSON.stringify({ ...b, text: numberMarkers(b.text, atts.filter((a) => a.path).map((a) => a.id)),
@@ -375,7 +378,7 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
               name={m.author.kind === 'agent'
                 ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
                 : <Text size="sm" weight="medium">{profile.name}</Text>}
-              metadata={<RoomMeta m={m} onReply={startReply} />}>
+              metadata={<RoomMeta m={m} slug={room.slug} onReply={startReply} />}>
               <span id={`rm-${m.id}`} />
               {m.replyTo && <Link onClick={() => jumpTo(m.replyTo!.id)}><Text type="supporting" size="sm" maxLines={1}>{`↪ ${m.replyTo.name}: ${m.replyTo.text}`}</Text></Link>}
               {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions} breaks={m.author.kind === 'user'}>{m.text}</ChatMarkdown></ChatMessageBubble>}
@@ -465,6 +468,7 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
         description="It leaves the Rooms list and becomes read-only: agents' posts to it are refused. Messages are kept; restore it any time from Rooms › Archived." actionLabel="Archive" actionVariant="primary"
         onAction={() => { setArchiving(false); patch.mutate({ archived: true }) }} />
       {popupTarget && <QuestionPopup target={popupTarget} onClose={() => setPopupTarget(null)} onDone={() => setPopupTarget(null)} />}
+      <PinnedBar chat={roomChat(room.slug)} onJump={jumpTo} />
       <ChatLayout ref={layoutRef} style={{ flex: 1, minHeight: 0 }}
         emptyState={syncing ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" description="@mention an agent to bring it in." />}
         composer={room.archived ? null : (
@@ -518,7 +522,7 @@ export function ShowEarlier({ onClick }: { onClick: () => void }) {
 
 
 // Timestamp, with the details behind an info icon (as in the agent chat).
-function RoomMeta({ m, onReply }: { m: RoomMsg; onReply: (m: RoomMsg) => void }) {
+function RoomMeta({ m, slug, onReply }: { m: RoomMsg; slug: string; onReply: (m: RoomMsg) => void }) {
   const [open, setOpen] = useState(false)
   const details = [new Date(m.ts).toLocaleString(), m.mentions.length ? `mentions ${m.mentions.map((n) => `@${n}`).join(' ')}` : '',
     m.deliveredTo.length ? `delivered to ${m.deliveredTo.join(', ')}` : ''].filter(Boolean).join(' · ')
@@ -526,6 +530,7 @@ function RoomMeta({ m, onReply }: { m: RoomMsg; onReply: (m: RoomMsg) => void })
     <VStack gap={0}>
       <HStack gap={1} align="center"><Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" /></Text>
         <IconButton label="Reply" icon={<ReplyIcon />} variant="ghost" size="sm" onClick={() => onReply(m)} />
+        {m.text && <MsgActions chat={roomChat(slug)} m={{ msg: m.id, author: m.author.name, text: m.text }} />}
         <IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)} /></HStack>
       {open && <Text type="supporting" size="sm">{details}</Text>}
     </VStack>

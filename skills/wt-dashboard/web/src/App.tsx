@@ -24,6 +24,8 @@ import { dockReducer, load as loadDock, save as saveDock, unread as dockUnread, 
 import { SettingsHost, openSettings } from './settings'
 import { openProjectSettings } from './projects-settings'
 import { InboxButton, InboxHost } from './inbox'
+import { MsgActions, PinnedBar, SavedButton, SavedHost, useJumpRequest } from './pins'
+import { agentChat, type ChatRef, type MsgRef } from './pinState'
 import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier, ReplyIcon } from './rooms'
 import { withReply } from './replyQuote'
 import { composerEnter } from './keys'
@@ -463,7 +465,7 @@ export default function App() {
       // Mobile top bar and drawer (below AppShell's lg breakpoint): the project picker alone, one row; the title is desktop-only.
       header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr agent control room" />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
-      footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
+      footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SavedButton /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'board', 'agents', 'rooms', 'routines', 'teams', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
         const alert = p === 'overview' && data ? tileCounts(data.tasks).needsYou : 0
         return (
@@ -567,6 +569,7 @@ export default function App() {
       <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
+      <SavedHost />
       {!narrow && <Dock state={dock} dispatch={dockDispatch} unread={dockMarks} need={(all?.agents ?? []).filter(needsYou).length}
         meta={(key) => {
           if (key.startsWith('room:')) { const r = roomsQ.data?.rooms.find((x) => x.slug === key.slice(5)); return { name: `#${key.slice(5)}`, dot: r?.needsYou?.length ? 'error' : 'neutral', label: r?.needsYou?.length ? 'needs you' : 'room' } }
@@ -1101,7 +1104,7 @@ function setShowAllDetails(v: boolean) {
   try { localStorage.setItem('msg-details', v ? '1' : '0') } catch { /* private mode */ }
   detailSubs.forEach((f) => f())
 }
-function MetaLine({ meta, extraAttachments = 0, copyText, onReply }: { meta?: Meta; extraAttachments?: number; copyText?: string; onReply?: () => void }) {
+function MetaLine({ meta, extraAttachments = 0, copyText, onReply, pin }: { meta?: Meta; extraAttachments?: number; copyText?: string; onReply?: () => void; pin?: { chat: ChatRef; m: MsgRef } }) {
   const [abs, setAbs] = useState(false)
   const all = useSyncExternalStore(subDetails, () => showAllDetails)
   const [own, setOwn] = useState<boolean | null>(null) // per message; null follows the global toggle
@@ -1130,6 +1133,7 @@ function MetaLine({ meta, extraAttachments = 0, copyText, onReply }: { meta?: Me
         {stop && <Badge label={stop} variant="error" />}
         {parts.length > 0 && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOwn(!open)} /></span>}
         {onReply && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Reply" icon={<ReplyIcon />} variant="ghost" size="sm" onClick={onReply} /></span>}
+        {pin && pin.m.text && <MsgActions chat={pin.chat} m={pin.m} />}
         {copyText && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" size="sm" />} variant="ghost" size="sm" onClick={copy} /></span>}
       </div>
       {open && parts.length > 0 && <Text type="supporting" size="sm">{parts.join(' · ')}</Text>}
@@ -1253,6 +1257,18 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   const allRows = useMemo(() => toRows(msgs), [msgs])
   const [limit, setLimit] = useState(mode === 'dock' ? DOCK_LIMIT : Infinity)
   const rows = useMemo(() => (allRows.length > limit ? allRows.slice(-limit) : allRows), [allRows, limit])
+  // WP-273: pins and bookmarks are keyed by the transcript's session id; a Saved tap or a pinned-bar tap jumps to the message.
+  const chatRef = agentChat(agent)
+  const [jump, setJump] = useState<{ key: string } | null>(null)
+  const jumpTo = (id: string) => {
+    setLimit(Infinity) // the message may be above the shown rows
+    setJump({ key: id })
+    const byId = () => chatBox.current?.querySelector(`#rm-${CSS.escape(id)}`)
+    const flash = () => byId()?.parentElement?.animate([{ background: 'var(--color-background-muted, rgba(127,127,127,.25))' }, { background: 'transparent' }], 1200)
+    const el = byId()
+    if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); flash() } else setTimeout(flash, 300)
+  }
+  useJumpRequest(chatRef?.chat ?? null, jumpTo)
 
   // Stop: Escape via the server's stale-checked /stop. "Stopping…" until the status leaves working (10s → toast).
   const toast = useToast()
@@ -1306,7 +1322,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   const messageList = useMemo(() => noneYet ? <Delayed><ChatSkeleton /></Delayed> : (
               <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
                 {allRows.length > rows.length && <ShowEarlier onClick={() => setLimit((l) => l + DOCK_LIMIT)} />}
-                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'msg' ? r.m.id : r.id)} render={(r) =>
+                <VirtualRows items={rows} scrollRef={layoutRef} keyOf={(r) => (r.kind === 'msg' ? r.m.id : r.id)} jump={jump} render={(r) =>
                   r.kind === 'post' ? (
                     <ChatMessage key={r.id} sender="assistant">
                       <Text type="supporting" size="sm"><a href={`#rooms/${encodeURIComponent(r.slug)}`}>answered in #{r.slug}</a></Text>
@@ -1323,7 +1339,8 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                       <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} onReply={splitUploads(r.m.text).text ? () => startReply('you', splitUploads(r.m.text).text) : undefined} />}>
+                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} onReply={splitUploads(r.m.text).text ? () => startReply('you', splitUploads(r.m.text).text) : undefined} pin={chatRef ? { chat: chatRef, m: { msg: r.m.id, author: 'you', text: splitUploads(r.m.text).text } } : undefined} />}>
+                      <span id={`rm-${r.m.id}`} />
                       {r.room ? <RoomPrompt room={r.room} /> : (() => {
                         const u = splitUploads(r.m.text)
                         const imgs = [...u.urls, ...(r.m.images ?? [])]
@@ -1337,7 +1354,8 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                       })()}
                     </ChatMessage>
                   ) : (
-                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} onReply={r.m.text ? () => startReply(agent.name, r.m.text) : undefined} />}>
+                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} onReply={r.m.text ? () => startReply(agent.name, r.m.text) : undefined} pin={chatRef ? { chat: chatRef, m: { msg: r.m.id, author: agent.name, text: r.m.text } } : undefined} />}>
+                      <span id={`rm-${r.m.id}`} />
                       <ChatMessageBubble variant="ghost" width="100%">
                         {r.m.text && (r.collapsed
                           ? <Collapsed lines={r.m.text.trim().split('\n').filter(Boolean).length}><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown><LinkPreviews text={r.m.text} /></Collapsed>
@@ -1348,7 +1366,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                     </ChatMessage>
                   )} />
               </ChatMessageList>
-  ), [rows, allRows.length, working, density, noneYet])
+  ), [rows, allRows.length, working, density, noneYet, jump, chatRef?.chat])
 
   const page = mode === 'page'
   const summary = <AgentSummary agent={agent} task={task} dnd={dnd} onToggleDnd={() => dndM.mutate(!dnd)} />
@@ -1364,6 +1382,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
               <div role="status" style={{ height: 0, overflow: 'visible', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1, pointerEvents: 'none' }}>
                 <HStack gap={1} align="center" style={{ height: 20 }}><StatusDot variant="neutral" label="" /><Text type="supporting" size="sm">syncing…</Text></HStack></div>)}
             {send.isError && <Banner status="error" title="Send failed" description={String(send.error)} />}
+            {chatRef && <PinnedBar chat={chatRef} onJump={jumpTo} />}
             <div ref={chatBox} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <ChatLayout ref={layoutRef}
               emptyState={transcript && !stream.synced ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" />}

@@ -316,6 +316,17 @@ Chat rooms shared by you and agents.
 - **Reply in agent chat** (WP-217): ↩ under an agent or user message (side panel, full page, phone) quotes it above
   the composer as in rooms (`↪ name: first line`, × or Esc cancels); the send goes to the agent as
   `replying to <name>: "<first line>"` then your text.
+- **Pin and bookmark** (WP-273): under every room message and every agent Conversation message (desktop, side panel,
+  phone) two toggles sit next to reply/copy; the icon fills when on. **Pin** is shared and per chat: a collapsible
+  *N pinned* bar at the top of that room or agent chat lists the pins newest first, a tap jumps to the message in the
+  thread, × unpins. **Bookmark** is yours and global: *Saved* in the sidebar (on phones, the menu) opens a panel of every
+  bookmark grouped by chat, with search; a tap opens the chat at that message, × removes it. Both keep a short text
+  snapshot, so they survive a pruned transcript or an archived room. Agent messages are keyed by session id + message
+  uuid (a `/clear` starts a new session, so its old pins stay with the old session); remote and session-less agents have
+  no buttons. Stored in `wt.db` (`pins`, `bookmarks`; not exported on a JSON rollback), written by the dashboard user
+  only (`/api/pins`, `/api/bookmarks`, session cookie; an agent pane is refused) and pushed to other open windows
+  through `/api/changes`. A pin is never sent to an agent as a prompt; the only place an agent sees one is `room read`,
+  which prefixes a pinned message with a plain `[pinned]` mark after its time.
 - **Recent room context** (WP-219): a delivery opens with a `kind=context since=N` tag holding what the room said since
   that agent last saw it (last delivery or own post): up to 10 lines / ~2 KB, oldest dropped, `author: text`, attachments by
   name. Context only; the agent runs `room read <slug> --since N` when it needs more. Both paths (paste and queued mod).
