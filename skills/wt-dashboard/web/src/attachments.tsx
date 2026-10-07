@@ -1,10 +1,9 @@
-// What an agent shows or sends: inline images (click → Lightbox) and file cards for SendUserFile.
-import { useEffect, useRef, useState } from 'react'
+// What an agent shows or sends: inline images (click → ImageViewer) and file cards for SendUserFile.
+import { useEffect, useState } from 'react'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { useToast } from '@astryxdesign/core/Toast'
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
-import { Lightbox } from '@astryxdesign/core/Lightbox'
-import { usePinchZoom } from './pinchZoom'
+import { ImageViewer } from './imageViewer'
 import { Card } from '@astryxdesign/core/Card'
 import { HStack } from '@astryxdesign/core/HStack'
 import { VStack } from '@astryxdesign/core/VStack'
@@ -104,8 +103,6 @@ function FilePreview({ f, onClose }: { f: SharedFile; onClose: () => void }) {
 
 export function ImageRow({ srcs }: { srcs: string[] }) {
   const [at, setAt] = useState<number | null>(null)
-  const box = useRef<HTMLDialogElement>(null)
-  usePinchZoom(box, at !== null, at)
   return (
     <HStack gap={2} wrap="wrap">
       {srcs.map((src, i) => (
@@ -113,8 +110,7 @@ export function ImageRow({ srcs }: { srcs: string[] }) {
           <Thumbnail src={src} alt={`Image ${i + 1}`} style={{ width: 320, maxWidth: "100%", height: 200 }} onClick={() => setAt(i)} />
         </div>
       ))}
-      <Lightbox isOpen={at !== null} onOpenChange={(o) => !o && setAt(null)} media={srcs.map((src, i) => ({ src, alt: `Image ${i + 1}` }))}
-        ref={box} index={at ?? 0} onIndexChange={setAt} />
+      {at !== null && <ImageViewer srcs={srcs} at={at} onAt={setAt} onClose={() => setAt(null)} />}
     </HStack>
   )
 }
