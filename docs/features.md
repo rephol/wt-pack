@@ -365,8 +365,9 @@ Chat rooms shared by you and agents.
   never accepted, so nothing here can render inline on the dashboard origin. The original filename is kept for
   display; the file on disk is always renamed. Remote agents receive a note instead of the files.
 - **Image preview** (rooms and agent chat): tap an image to open it. Pinch, trackpad pinch or the wheel zooms the image
-  (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x, keys `+` `-` `0` and arrows; it resets on the next image and on
-  close. The page itself never zooms while the preview is open (WP-94). A zoomed image uses the whole screen at full resolution, and panning stops at the screen edges (WP-95).
+  (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x; it resets on the next image and on
+  close. The arrow keys and the side buttons step through a message's images, Esc or the close button closes; a tap or
+  drag on the image never closes it. Zoom is react-zoom-pan-pinch (WP-275, replacing the hand-rolled WP-94/95 zoom).
 - **Link previews**: fetched by the server (private hosts blocked, 3 redirects, 5s, 1MB);
   toggle in Settings › General.
 - Messages ≤ 8000 chars.
