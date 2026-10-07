@@ -5,7 +5,8 @@ import { useDraft } from './draft'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChatLayout, ChatMessageList, ChatMessage, ChatMessageBubble, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
+import { ChatLayout, ChatMessageList, ChatMessage, ChatComposer, ChatComposerInput, ChatComposerDrawer, type ChatComposerTrigger, type ChatComposerInputHandle } from '@astryxdesign/core/Chat'
+import { ChatMessageRow } from './chatMessage'
 import { useFixTriggerMenuPosition } from './triggerMenuFix'
 import { TypeaheadItem, type SearchSource, type SearchableItem } from '@astryxdesign/core/Typeahead'
 import { AlertDialog } from '@astryxdesign/core/AlertDialog'
@@ -22,7 +23,6 @@ import { Card } from '@astryxdesign/core/Card'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { ChatMarkdown } from './links'
 import { useTicketPlugins } from './ticketChip'
 import { useRoomChips, RoomChips } from './roomChips'
 import { QuestionPopup, type PopupTarget } from './questionPopup'
@@ -37,7 +37,7 @@ import { Divider } from '@astryxdesign/core/Divider'
 import { Icon } from '@astryxdesign/core/Icon'
 import { useToast } from '@astryxdesign/core/Toast'
 import { openInbox } from './inbox'
-import { MsgActions, PinnedBar, useJumpRequest } from './pins'
+import { PinnedBar, useJumpRequest } from './pins'
 import { roomChat } from './pinState'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
@@ -45,7 +45,6 @@ import { ImageRow, useAttachments, uploadUrl, AttachmentChip, AttachmentDownload
 import { Thumbnail } from '@astryxdesign/core/Thumbnail'
 import { Link } from '@astryxdesign/core/Link'
 import { useChatDensity } from './density'
-import { LinkPreviews } from './previews'
 import { useStream, mergeById } from './streamStore'
 import { Delayed, LoadError, ChatSkeleton } from './skeletons'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
@@ -373,22 +372,21 @@ export function RoomView({ room, agents, profile, projects = [], onBack, onOpenA
                 {m.agentKey && <>{' · '}<Link onClick={() => onOpenAgent(m.agentKey!)}>open agent</Link></>}</Text>
             </ChatMessage>
           ) : (
-            <ChatMessage key={m.id} sender={m.author.kind === 'user' ? 'user' : 'assistant'}
+            <ChatMessageRow key={m.id} sender={m.author.kind === 'user' ? 'user' : 'assistant'} anchorId={`rm-${m.id}`}
               avatar={m.author.kind === 'user' ? <Avatar name={profile.name} src={profile.avatar ?? undefined} size="sm" /> : undefined}
               name={m.author.kind === 'agent'
                 ? <HStack gap={1} align="center"><StatusDot variant={dotOf(byName.get(m.author.name))} label="" /><Text size="sm" weight="medium">{m.author.name}</Text></HStack>
                 : <Text size="sm" weight="medium">{profile.name}</Text>}
-              metadata={<RoomMeta m={m} slug={room.slug} onReply={startReply} />}>
-              <span id={`rm-${m.id}`} />
-              {m.replyTo && <Link onClick={() => jumpTo(m.replyTo!.id)}><Text type="supporting" size="sm" maxLines={1}>{`↪ ${m.replyTo.name}: ${m.replyTo.text}`}</Text></Link>}
-              {m.text && <ChatMessageBubble variant={m.author.kind === 'user' ? undefined : 'ghost'}><ChatMarkdown inlinePlugins={mentions} breaks={m.author.kind === 'user'}>{m.text}</ChatMarkdown></ChatMessageBubble>}
-              {m.text && <LinkPreviews text={m.text} />}
-              {m.attachments?.length ? <ChatMessageBubble variant="ghost"><VStack gap={2}>
-                {(() => { const imgs = m.attachments!.filter((a) => IMAGE_TYPES.includes(a.type))
-                  return imgs.length ? <ImageRow srcs={imgs.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /> : null })()}
-                {m.attachments!.filter((a) => !IMAGE_TYPES.includes(a.type)).map((a, i) => <AttachmentDownload key={i} a={a} />)}
-              </VStack></ChatMessageBubble> : null}
-            </ChatMessage>
+              actions={{ ts: m.ts, details: roomDetails(m), copyText: m.text || undefined, onReply: () => startReply(m),
+                pin: m.text ? { chat: roomChat(room.slug), m: { msg: m.id, author: m.author.name, text: m.text } } : undefined }}
+              header={m.replyTo && <Link onClick={() => jumpTo(m.replyTo!.id)}><Text type="supporting" size="sm" maxLines={1}>{`↪ ${m.replyTo.name}: ${m.replyTo.text}`}</Text></Link>}
+              text={m.text} plugins={mentions} breaks={m.author.kind === 'user'} ghost={m.author.kind !== 'user'} previews
+              media={m.attachments?.length ? (
+                <VStack gap={2}>
+                  {(() => { const imgs = m.attachments!.filter((a) => IMAGE_TYPES.includes(a.type))
+                    return imgs.length ? <ImageRow srcs={imgs.map((a) => uploadUrl(a.path)).filter((u): u is string => Boolean(u))} /> : null })()}
+                  {m.attachments!.filter((a) => !IMAGE_TYPES.includes(a.type)).map((a, i) => <AttachmentDownload key={i} a={a} />)}
+                </VStack>) : undefined} />
           ))(r.m)} />
         </ChatMessageList>
   ), [rows, allRows.length, profile, agents, mentions, density, syncing, jump]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -521,21 +519,9 @@ export function ShowEarlier({ onClick }: { onClick: () => void }) {
 }
 
 
-// Timestamp, with the details behind an info icon (as in the agent chat).
-function RoomMeta({ m, slug, onReply }: { m: RoomMsg; slug: string; onReply: (m: RoomMsg) => void }) {
-  const [open, setOpen] = useState(false)
-  const details = [new Date(m.ts).toLocaleString(), m.mentions.length ? `mentions ${m.mentions.map((n) => `@${n}`).join(' ')}` : '',
-    m.deliveredTo.length ? `delivered to ${m.deliveredTo.join(', ')}` : ''].filter(Boolean).join(' · ')
-  return (
-    <VStack gap={0}>
-      <HStack gap={1} align="center"><Text type="supporting" size="sm"><Timestamp value={m.ts} format="relative" /></Text>
-        <IconButton label="Reply" icon={<ReplyIcon />} variant="ghost" size="sm" onClick={() => onReply(m)} />
-        {m.text && <MsgActions chat={roomChat(slug)} m={{ msg: m.id, author: m.author.name, text: m.text }} />}
-        <IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)} /></HStack>
-      {open && <Text type="supporting" size="sm">{details}</Text>}
-    </VStack>
-  )
-}
+// The details behind a room message's info icon.
+const roomDetails = (m: RoomMsg) => [new Date(m.ts).toLocaleString(), m.mentions.length ? `mentions ${m.mentions.map((n) => `@${n}`).join(' ')}` : '',
+  m.deliveredTo.length ? `delivered to ${m.deliveredTo.join(', ')}` : ''].filter(Boolean)
 const PeopleIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
     <circle cx="9" cy="8" r="4" /><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3" />
@@ -546,11 +532,6 @@ function useNarrow(q = '(max-width: 639px)') {
   useEffect(() => { const m = matchMedia(q); const on = () => setN(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on) }, [q])
   return n
 }
-export const ReplyIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M9 17 4 12l5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" />
-  </svg>
-)
 const AtIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <circle cx="12" cy="12" r="4" /><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />

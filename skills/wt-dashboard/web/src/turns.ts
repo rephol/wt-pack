@@ -133,3 +133,21 @@ export function roomTurns(msgs: TMsg[]): RoomTurns {
   close()
   return out
 }
+
+// The detail parts behind a message's info icon (user: source + attachments; turn: model, tokens, time, tools, cost).
+export function metaParts(meta: Meta | undefined, extraAttachments = 0): string[] {
+  const parts: string[] = []
+  if (meta?.kind === 'user') {
+    parts.push(meta.src === 'dashboard' ? 'you · dashboard · delivered' : meta.src ?? 'you')
+    const n = meta.attachments + extraAttachments
+    if (n) parts.push(`${n} attachment${n === 1 ? '' : 's'}`)
+  } else if (meta?.kind === 'turn') {
+    if (meta.model) parts.push(shortModel(meta.model)!)
+    if (meta.up || meta.down) parts.push(`↑${fmtTokens(meta.up)} (cache read ${fmtTokens(meta.cr)} · cache write ${fmtTokens(meta.cw)} · fresh ${fmtTokens(meta.fresh)}) ↓${fmtTokens(meta.down)}`)
+    if (meta.ms) parts.push(fmtDur(meta.ms))
+    if (meta.tools) parts.push(`${meta.tools} tool${meta.tools === 1 ? '' : 's'}`)
+    if (meta.cost != null) parts.push(`~$${meta.cost < 0.01 ? meta.cost.toFixed(3) : meta.cost.toFixed(2)}`)
+  }
+  return parts
+}
+export const stopLabel = (meta?: Meta) => (meta?.kind === 'turn' && meta.stop ? (meta.stop === 'max_tokens' ? 'hit max tokens' : meta.stop) : undefined)

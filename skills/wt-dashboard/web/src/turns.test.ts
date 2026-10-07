@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveMeta, toolGroupMeta, callDurations, shortModel, fmtTokens, fmtWhen, type TMsg } from './turns.ts'
+import { deriveMeta, toolGroupMeta, callDurations, shortModel, fmtTokens, fmtWhen, metaParts, stopLabel, type TMsg } from './turns.ts'
 
 const u = (mid: string, out: number, extra = {}) => ({ mid, model: 'claude-opus-5-5', in: 10, out, cw: 0, cr: 1000, cost: 0.01, stop: 'end_turn', ...extra })
 // Two turns: a dashboard prompt → text, a tool call, final text (one API message repeated across entries);
@@ -95,4 +95,14 @@ test('roomTurns: a command that only mentions room post is not a post', () => {
   for (const c of ['echo room post x', 'git commit -m "fix room post wt-pack"'])
     assert.equal(roomTurns([u, call('c', 't', c), res('r', 't'), say('a', 'x')]).posts.size, 0, c)
   assert.equal(roomTurns([u, call('c', 't', 'cd /x && room post wt-pack "y"'), res('r', 't')]).posts.get('c'), 'wt-pack')
+})
+
+test('metaParts: user source + attachments, turn model/tokens/tools/cost, stopLabel', () => {
+  assert.deepEqual(metaParts({ kind: 'user', ts: 't', src: 'dashboard', attachments: 1 }, 1), ['you · dashboard · delivered', '2 attachments'])
+  assert.deepEqual(metaParts({ kind: 'user', ts: 't', attachments: 0 }), ['you'])
+  const t = { kind: 'turn' as const, ts: 't', model: 'claude-opus-5-5', up: 10, cr: 1000, cw: 0, fresh: 10, down: 5, ms: 2000, tools: 1, cost: 0.005 }
+  assert.deepEqual(metaParts(t), ['Opus 5.5', '↑10 (cache read 1.0k · cache write 0 · fresh 10) ↓5', '2s', '1 tool', '~$0.005'])
+  assert.deepEqual(metaParts({ kind: 'plain', ts: 't' }), [])
+  assert.equal(stopLabel({ ...t, stop: 'max_tokens' }), 'hit max tokens')
+  assert.equal(stopLabel(t), undefined)
 })

@@ -24,9 +24,10 @@ import { dockReducer, load as loadDock, save as saveDock, unread as dockUnread, 
 import { SettingsHost, openSettings } from './settings'
 import { openProjectSettings } from './projects-settings'
 import { InboxButton, InboxHost } from './inbox'
-import { MsgActions, PinnedBar, SavedButton, SavedHost, useJumpRequest } from './pins'
-import { agentChat, type ChatRef, type MsgRef } from './pinState'
-import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier, ReplyIcon } from './rooms'
+import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier } from './rooms'
+import { PinnedBar, SavedButton, SavedHost, useJumpRequest } from './pins'
+import { agentChat } from './pinState'
+import { ChatMessageRow, useShowAllDetails, setShowAllDetails } from './chatMessage'
 import { withReply } from './replyQuote'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
@@ -42,16 +43,14 @@ import { Link } from '@astryxdesign/core/Link'
 import { ProgressBar } from '@astryxdesign/core/ProgressBar'
 import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Spinner } from '@astryxdesign/core/Spinner'
-import { ChatMarkdown } from './links'
 import { useTicketPlugins } from './ticketChip'
 import { TicketModal } from './ticketModal'
 import { openTicket } from './ticketParam'
 import { useChatDensity } from './density'
-import { LinkPreviews } from './previews'
 import { useRoles, plural, RoleBadge, TagsDialog, OTHER } from './roles'
 import { Delayed, LoadError, OverviewSkeleton, GroupedRows, Rows, ChatSkeleton } from './skeletons'
 import { useStream, mergeAgentMsgs } from './streamStore'
-import { deriveMeta, roomTurns, type RoomItem, toolGroupMeta, callDurations, fmtTokens, fmtDur, shortModel, fmtWhen, contextUsage, type Meta, type Usage } from './turns'
+import { deriveMeta, roomTurns, type RoomItem, toolGroupMeta, callDurations, fmtTokens, fmtDur, metaParts, stopLabel, contextUsage, type Meta, type Usage } from './turns'
 import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
 import { PwaHost, InstallHint, UpdateBanner } from './pwa'
@@ -1088,59 +1087,6 @@ function RoomPrompt({ room }: { room: { slug: string; items: RoomItem[] } }) {
     </ChatMessageBubble>
   )
 }
-// WP-105: chat text after the turn's room post, behind a toggle — the room has the answer.
-function Collapsed({ lines, children }: { lines: number; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
-  return open ? <>{children}</> : <Button label={`show ${lines} more line${lines === 1 ? '' : 's'}`} variant="ghost" size="sm" onClick={() => setOpen(true)} />
-}
-
-// One muted line under a message. The time is relative; hover shows the absolute time, a tap toggles it (phones).
-// "Show message details" (conversation ⋯ menu): expands every meta line; remembered per browser.
-let showAllDetails = (() => { try { return localStorage.getItem('msg-details') === '1' } catch { return false } })()
-const detailSubs = new Set<() => void>()
-const subDetails = (f: () => void) => { detailSubs.add(f); return () => { detailSubs.delete(f) } }
-function setShowAllDetails(v: boolean) {
-  showAllDetails = v
-  try { localStorage.setItem('msg-details', v ? '1' : '0') } catch { /* private mode */ }
-  detailSubs.forEach((f) => f())
-}
-function MetaLine({ meta, extraAttachments = 0, copyText, onReply, pin }: { meta?: Meta; extraAttachments?: number; copyText?: string; onReply?: () => void; pin?: { chat: ChatRef; m: MsgRef } }) {
-  const [abs, setAbs] = useState(false)
-  const all = useSyncExternalStore(subDetails, () => showAllDetails)
-  const [own, setOwn] = useState<boolean | null>(null) // per message; null follows the global toggle
-  const open = own ?? all
-  const toast = useToast()
-  if (!meta?.ts && !copyText) return null
-  const parts: string[] = []
-  if (meta?.kind === 'user') {
-    parts.push(meta.src === 'dashboard' ? 'you · dashboard · delivered' : meta.src ?? 'you')
-    const n = meta.attachments + extraAttachments
-    if (n) parts.push(`${n} attachment${n === 1 ? '' : 's'}`)
-  } else if (meta?.kind === 'turn') {
-    if (meta.model) parts.push(shortModel(meta.model)!)
-    if (meta.up || meta.down) parts.push(`↑${fmtTokens(meta.up)} (cache read ${fmtTokens(meta.cr)} · cache write ${fmtTokens(meta.cw)} · fresh ${fmtTokens(meta.fresh)}) ↓${fmtTokens(meta.down)}`)
-    if (meta.ms) parts.push(fmtDur(meta.ms))
-    if (meta.tools) parts.push(`${meta.tools} tool${meta.tools === 1 ? '' : 's'}`)
-    if (meta.cost != null) parts.push(`~$${meta.cost < 0.01 ? meta.cost.toFixed(3) : meta.cost.toFixed(2)}`)
-  }
-  const stop = meta?.kind === 'turn' && meta.stop ? (meta.stop === 'max_tokens' ? 'hit max tokens' : meta.stop) : null
-  const when = meta?.ts ? new Date(meta.ts) : null
-  const copy = () => navigator.clipboard.writeText(copyText!).then(() => toast({ body: 'Copied', type: 'info' }), (e) => toast({ body: `Copy failed: ${e}`, type: 'error' }))
-  return (
-    <div data-msg-meta style={{ marginTop: 8, maxWidth: '100%', minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28, minWidth: 0 }}>
-        {when && <Text type="supporting" size="sm"><span role="button" tabIndex={0} title={when.toLocaleString()} onClick={() => setAbs((v) => !v)} onKeyDown={(e) => e.key === 'Enter' && setAbs((v) => !v)}>{abs ? when.toLocaleString() : fmtWhen(meta!.ts)}</span></Text>}
-        {stop && <Badge label={stop} variant="error" />}
-        {parts.length > 0 && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Message details" icon={<Icon icon="info" size="sm" />} variant="ghost" size="sm" aria-expanded={open} onClick={() => setOwn(!open)} /></span>}
-        {onReply && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Reply" icon={<ReplyIcon />} variant="ghost" size="sm" onClick={onReply} /></span>}
-        {pin && pin.m.text && <MsgActions chat={pin.chat} m={pin.m} />}
-        {copyText && <span data-copy style={{ flexShrink: 0 }}><IconButton label="Copy message" icon={<Icon icon="copy" size="sm" />} variant="ghost" size="sm" onClick={copy} /></span>}
-      </div>
-      {open && parts.length > 0 && <Text type="supporting" size="sm">{parts.join(' · ')}</Text>}
-    </div>
-  )
-}
-
 // One conversation component for the side panel and the full page (#agents/<machine>/<pane>).
 // mode="page": Back instead of X, "Open as panel", and on a wide screen the Summary beside a centered column.
 // mode="dock" (WP-112): the conversation alone (the dock window has the header), the last DOCK_LIMIT rows.
@@ -1151,7 +1097,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   useFixTriggerMenuPosition() // WP-181: the '/' skills menu, wherever this composer renders (dock/panel/page)
   const ticketChips = useTicketPlugins()
   const narrow = useNarrow()
-  useSyncExternalStore(subDetails, () => showAllDetails) // the ⋯ menu's details label
+  const allDetails = useShowAllDetails() // the ⋯ menu's details label
   const { byId } = useRoles()
   const [tagsMode, setTagsMode] = useState<'role' | 'tags' | null>(null)
   const density = useChatDensity()
@@ -1339,31 +1285,19 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                       <ChatMessageBubble variant="ghost" width="100%"><QuestionSummary m={r.m} /></ChatMessageBubble>
                     </ChatMessage>
                   ) : r.m.role === 'user' ? (
-                    <ChatMessage key={r.m.id} sender="user" metadata={<MetaLine meta={r.meta} extraAttachments={splitUploads(r.m.text).urls.length} copyText={splitUploads(r.m.text).text || undefined} onReply={splitUploads(r.m.text).text ? () => startReply('you', splitUploads(r.m.text).text) : undefined} pin={chatRef ? { chat: chatRef, m: { msg: r.m.id, author: 'you', text: splitUploads(r.m.text).text } } : undefined} />}>
-                      <span id={`rm-${r.m.id}`} />
-                      {r.room ? <RoomPrompt room={r.room} /> : (() => {
-                        const u = splitUploads(r.m.text)
-                        const imgs = [...u.urls, ...(r.m.images ?? [])]
-                        return (
-                          <>
-                            {u.text && <ChatMessageBubble><span style={{ whiteSpace: 'pre-wrap' }}>{u.text}</span></ChatMessageBubble>}
-                            {u.text && <LinkPreviews text={u.text} />}
-                            {imgs.length > 0 && <ChatMessageBubble variant="ghost"><ImageRow srcs={imgs} /></ChatMessageBubble>}
-                          </>
-                        )
-                      })()}
-                    </ChatMessage>
+                    (() => {
+                      const u = splitUploads(r.m.text)
+                      const imgs = [...u.urls, ...(r.m.images ?? [])]
+                      return <ChatMessageRow key={r.m.id} sender="user" anchorId={`rm-${r.m.id}`} text={u.text} plain previews media={imgs.length > 0 ? <ImageRow srcs={imgs} /> : undefined}
+                        custom={r.room ? <RoomPrompt room={r.room} /> : undefined}
+                        actions={{ ts: r.meta?.ts, details: metaParts(r.meta, u.urls.length), copyText: u.text || undefined, onReply: u.text ? () => startReply('you', u.text) : undefined,
+                          pin: chatRef ? { chat: chatRef, m: { msg: r.m.id, author: 'you', text: u.text } } : undefined }} />
+                    })()
                   ) : (
-                    <ChatMessage key={r.m.id} sender="assistant" metadata={<MetaLine meta={r.meta} copyText={r.m.text || undefined} onReply={r.m.text ? () => startReply(agent.name, r.m.text) : undefined} pin={chatRef ? { chat: chatRef, m: { msg: r.m.id, author: agent.name, text: r.m.text } } : undefined} />}>
-                      <span id={`rm-${r.m.id}`} />
-                      <ChatMessageBubble variant="ghost" width="100%">
-                        {r.m.text && (r.collapsed
-                          ? <Collapsed lines={r.m.text.trim().split('\n').filter(Boolean).length}><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown><LinkPreviews text={r.m.text} /></Collapsed>
-                          : <><ChatMarkdown inlinePlugins={ticketChips}>{r.m.text}</ChatMarkdown><LinkPreviews text={r.m.text} /></>)}
-                        {r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}
-                        {r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}
-                      </ChatMessageBubble>
-                    </ChatMessage>
+                    <ChatMessageRow key={r.m.id} sender="assistant" anchorId={`rm-${r.m.id}`} text={r.m.text} plugins={ticketChips} previews grouped collapsed={r.collapsed ? r.m.text.trim().split('\n').filter(Boolean).length : undefined}
+                      media={<>{r.m.images?.length ? <ImageRow srcs={r.m.images} /> : null}{r.m.files?.length ? <FileCards files={r.m.files} caption={r.m.caption} /> : null}</>}
+                      actions={{ ts: r.meta?.ts, details: metaParts(r.meta), badge: stopLabel(r.meta), copyText: r.m.text || undefined, onReply: r.m.text ? () => startReply(agent.name, r.m.text) : undefined,
+                        pin: chatRef ? { chat: chatRef, m: { msg: r.m.id, author: agent.name, text: r.m.text } } : undefined }} />
                   )} />
               </ChatMessageList>
   ), [rows, allRows.length, working, density, noneYet, jump, chatRef?.chat])
@@ -1487,7 +1421,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
           {page && onAsPanel && <Button label="Open as panel" size="sm" variant="ghost" onClick={onAsPanel} />}
           <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
-            { label: showAllDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!showAllDetails) },
+            { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
             ...(agent.local ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
