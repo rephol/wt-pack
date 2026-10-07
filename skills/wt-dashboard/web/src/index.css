@@ -64,7 +64,7 @@ div:has(> .astryx-side-nav-section .hd-nav-scroll) { display: flex; flex-directi
 [data-switcher-phone] .astryx-command-palette-group-heading { position: sticky; top: 0; z-index: 1; padding: 6px 12px; background: var(--color-background-surface, var(--color-background-page, Canvas)); }
 
 /* Message meta line: the copy button shows on hover (pointer) and stays visible on touch. */
-@media (hover: hover) { [data-msg-meta] [data-copy] { opacity: 0; transition: opacity .12s } article.astryx-chat-message:hover [data-msg-meta] [data-copy], [data-msg-meta] [data-copy]:focus-within { opacity: 1 } }
+@media (hover: hover) and (min-width: 640px) { [data-msg-meta] [data-copy] { opacity: 0; transition: opacity .12s } article.astryx-chat-message:hover [data-msg-meta] [data-copy], [data-msg-meta] [data-copy]:focus-within { opacity: 1 } }
 [data-msg-meta] [data-copy] button { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; opacity: .7 }
 [data-msg-meta] [data-copy] svg { width: 16px; height: 16px }
 /* Tool-call group rows: a little air above and below (message spacing itself comes from the list's density). */
