@@ -6,7 +6,7 @@ import { useEffect } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 
 export const POLL_FALLBACK_MS = 60_000
-const KEYS: Record<string, string[][]> = { tickets: [['tickets'], ['ticket']], inbox: [['inbox']], rooms: [['rooms']] }
+const KEYS: Record<string, string[][]> = { tickets: [['tickets'], ['ticket']], inbox: [['inbox']], rooms: [['rooms']], pins: [['pins']], bookmarks: [['bookmarks']] }
 
 export function invalidateFor(qc: QueryClient, topic: string | null) {
   for (const k of topic ? (KEYS[topic] ?? []) : Object.values(KEYS).flat()) void qc.invalidateQueries({ queryKey: k })

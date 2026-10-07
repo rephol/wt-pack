@@ -19,6 +19,7 @@ import { guardMove } from './gatemove.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
+import { Pins } from './pins.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
 import { Changes } from './changes.mjs'
@@ -2021,6 +2022,26 @@ async function inboxApi(req, res, url) {
 }
 // WP-268: GET /api/push (public key + devices), POST/PATCH/DELETE /api/push/subscription[/:id], POST /api/push/test.
 // Writes need the session cookie (needsSession) like every other write; an endpoint must be a known push service (push.mjs).
+// WP-273: pins (shared per chat) and bookmarks (the user's Saved list). Mutations are the dashboard user's (session cookie, never an
+// agent pane); both tables are data only — no route here prompts, delivers or messages an agent.
+const pins = new Pins(DATA)
+async function pinsApi(req, res, url, parts) {
+  const user = async () => { if ((await roomAuthor(req)).kind !== 'user') throw Object.assign(new Error('dashboard only'), { status: 403 }) }
+  const json = async () => JSON.parse((await body(req)) || '{}')
+  const q = url.searchParams
+  if (parts[1] === 'pins' && req.method === 'GET') return send(res, 200, pins.pins(q.get('chat') ?? ''))
+  if (parts[1] === 'bookmarks' && req.method === 'GET') return send(res, 200, { saved: pins.saved(q.get('q') ?? '') })
+  await user()
+  if (parts[1] === 'pins') {
+    if (req.method === 'POST') { const b = await json(); const chat = pins.pin(b, (await roomAuthor(req)).name); changes.add('pins', { chat }); return send(res, 200, { ok: true }) }
+    if (req.method === 'DELETE') { const chat = q.get('chat') ?? ''; const had = pins.unpin(chat, q.get('msg') ?? ''); changes.add('pins', { chat }); return send(res, 200, { ok: true, had }) }
+  }
+  if (parts[1] === 'bookmarks') {
+    if (req.method === 'POST') { pins.bookmark(await json()); changes.add('bookmarks'); return send(res, 200, { ok: true }) }
+    if (req.method === 'DELETE') { const had = pins.unbookmark(q.get('chat') ?? '', q.get('msg') ?? ''); changes.add('bookmarks'); return send(res, 200, { ok: true, had }) }
+  }
+  send(res, 404, { error: 'not found' })
+}
 async function pushApi(req, res, url) {
   const parts = url.pathname.split('/').filter(Boolean) // api push [subscription [id] | test]
   if (req.method === 'GET' && parts.length === 2) return send(res, 200, { publicKey: push.publicKey, devices: push.list() })
@@ -2929,7 +2950,8 @@ export async function roomAttachments(author, b) {
   }
   return out
 }
-const roomText = (msgs) => msgs.map((m, i) => `${i + 1}. [${m.ts.slice(11, 16)}] ${m.author.name}: ${m.text}${(m.attachments ?? []).map((a) => `\n   ${a.path}`).join('')}`).join('\n') + '\n'
+// WP-273: a pinned message carries a plain ' [pinned]' mark after its time — the only place a pin reaches an agent, as data.
+export const roomText = (msgs, pinned = new Set()) => msgs.map((m, i) => `${i + 1}. [${m.ts.slice(11, 16)}]${pinned.has(m.id) ? ' [pinned]' : ''} ${m.author.name}: ${m.text}${(m.attachments ?? []).map((a) => `\n   ${a.path}`).join('')}`).join('\n') + '\n'
 async function roomsApi(req, res, url, parts) {
   const json = async () => JSON.parse((await body(req)) || '{}')
   const userOnly = async () => { if ((await roomAuthor(req)).kind !== 'user') throw Object.assign(new Error('dashboard only'), { status: 403 }) }
@@ -3001,7 +3023,7 @@ async function roomsApi(req, res, url, parts) {
   if (parts[3] === 'messages' && req.method === 'GET') {
     const since = Math.max(0, Number(url.searchParams.get('since')) || 0)
     const msgs = (await rooms.messages(slug)).slice(since)
-    return url.searchParams.get('format') === 'text' ? send(res, 200, roomText(msgs).replace(/^(\d+)\./gm, (_, n) => `${+n + since}.`), 'text/plain') : send(res, 200, msgs)
+    return url.searchParams.get('format') === 'text' ? send(res, 200, roomText(msgs, pins.pinnedIds(`room:${slug}`)).replace(/^(\d+)\./gm, (_, n) => `${+n + since}.`), 'text/plain') : send(res, 200, msgs)
   }
   if (parts[3] === 'messages' && req.method === 'POST') {
     const author = await roomAuthor(req)
@@ -3287,6 +3309,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/changes') return changes.stream(req, res, req.headers['last-event-id'] || url.searchParams.get('since'))
       if (url.pathname === '/api/build') return send(res, 200, await buildInfo(url.searchParams.get('since')))
       if (url.pathname.startsWith('/api/notifications')) return await inboxApi(req, res, url)
+      if (parts[0] === 'api' && (parts[1] === 'pins' || parts[1] === 'bookmarks') && parts.length === 2) return await pinsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (url.pathname === '/api/push' || url.pathname.startsWith('/api/push/')) return await pushApi(req, res, url).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 502), { error: e.message }))
       if (url.pathname === '/api/files' && req.method === 'GET') return serveFile(res, url)
       if (url.pathname.startsWith('/api/unfurl') && req.method === 'GET') {

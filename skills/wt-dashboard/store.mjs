@@ -202,6 +202,11 @@ export const MIGRATIONS = [
   // WP-272: once-only markers on a message — nudged_at (the server's "continue" line) and reminded_at (the finish check).
   { sql: `ALTER TABLE wt_messages ADD COLUMN nudged_at TEXT; ALTER TABLE wt_messages ADD COLUMN reminded_at TEXT;`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-273 pins (shared, per chat) and bookmarks (personal, global). chat = 'room:<slug>' | 'agent:<session id>', msg = the
+  // message id inside it; `text` is a snapshot so a row outlives a pruned transcript. Not exported (like routines).
+  { sql: `CREATE TABLE pins (chat TEXT NOT NULL, msg TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL, pinned_by TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (chat, msg));
+          CREATE TABLE bookmarks (chat TEXT NOT NULL, msg TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL, label TEXT NOT NULL, open TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (chat, msg));`,
+    legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
