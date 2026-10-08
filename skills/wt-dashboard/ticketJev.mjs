@@ -1,6 +1,7 @@
 // Jev triage of a new ticket (WT_JEV_TICKET_TRIAGE): one call suggests type, size, priority and owner role, and
 // flags likely duplicates among the board's open tickets. Server-side, after POST /api/tickets has answered.
 import { route } from '../wt-handoff/scripts/jev-route.mjs'
+import { isClosed } from './contracts.mjs'
 
 const TYPE_CRITERIA = {
   bug: 'Logic is broken: a crash, an error, wrong data or a wrong count, a failed build or request.',
@@ -19,7 +20,7 @@ const words = (s) => new Set(String(s ?? '').toLowerCase().match(/[a-z0-9]{3,}/g
 // ponytail: word-overlap prefilter, embeddings only if duplicate recall is visibly bad.
 export function candidates(t, open, n = 5) {
   const mine = words(`${t.title} ${t.body}`)
-  return open.filter((o) => o.id !== t.id && o.column !== 'done')
+  return open.filter((o) => o.id !== t.id && !isClosed(o.column))
     .map((o) => { let k = 0; for (const w of words(`${o.title} ${o.body}`)) if (mine.has(w)) k++; return { o, k } })
     .filter((x) => x.k > 0).sort((a, b) => b.k - a.k).slice(0, n).map(({ o }) => ({ id: o.id, title: o.title }))
 }

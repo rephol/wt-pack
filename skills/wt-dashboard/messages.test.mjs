@@ -113,7 +113,7 @@ test('WP-260: a dispatch whose card moved on (done/blocked, or moved by another 
   const card = (column, ...hist) => ({ column, history: hist.map(([at, author, kind = 'move']) => ({ at, author, kind })) })
   assert.equal(movedOn(null, row), false)
   assert.equal(movedOn(card('ready'), row), false) // still where it was sent
-  assert.equal(movedOn(card('done'), row), true); assert.equal(movedOn(card('blocked'), row), true)
+  assert.equal(movedOn(card('done'), row), true); assert.equal(movedOn(card('blocked'), row), true); assert.equal(movedOn(card('cancelled'), row), true)
   assert.equal(movedOn(card('building', ['2026-10-05T16:33:29.000Z', 'wt-pack-worker-04']), row), true) // the target took it
   assert.equal(movedOn(card('building', ['2026-10-05T16:26:10.000Z', 'dispatch']), row), false) // dispatch's own move does not count
   assert.equal(movedOn(card('ready', ['2026-10-05T16:20:00.000Z', 'user']), row), false) // a move before delivery

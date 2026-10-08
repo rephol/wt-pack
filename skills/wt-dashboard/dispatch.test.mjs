@@ -630,6 +630,13 @@ test('WP-225: a gone assignee of a still-Ready card unassigns and clears dispatc
   assert.equal(calls.length, 1)
 })
 
+test('WP-276: a cancelled card is closed — its assignee is not busy', async () => {
+  const { tickets, d } = await setup()
+  const gone = await ready(tickets, 'gone')
+  await tickets.patch(gone.id, { column: 'cancelled', note: 'dropped' }, user, { name: 'ex-holder', pane: 'w3:p1' })
+  assert.equal(d.busyAgents()({ name: 'ex-holder', paneTokens: { ticket: gone.id } }), false)
+})
+
 test('WP-225: busyAgents — assignee of an open card, or a ticket/task token naming one; Done does not count', async () => {
   const { tickets, d } = await setup()
   const open = await ready(tickets, 'open'), done = await ready(tickets, 'done')

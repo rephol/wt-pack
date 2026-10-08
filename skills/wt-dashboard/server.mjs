@@ -1549,7 +1549,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     // main checkout: its cwd alone made it an ad-hoc task that contradicted its own ticket).
     const ag = agents.filter((a) => a.local && ((wt && inside(a.cwd, wt.path)) || (tagTicket(a) === id && !worktrees.some((w) => w.path !== REPO && inside(a.cwd, w.path)))))
     // A local board ticket is a task once it is Ready or has live work; Backlog/Done alone stay on the board.
-    if (issue?.local && ['backlog', 'done'].includes(issue.column) && !wt && !pr && !ag.length) continue
+    if (issue?.local && ['backlog', 'done', 'cancelled'].includes(issue.column) && !wt && !pr && !ag.length) continue
     ag.forEach((a) => linked.add(a.key))
     // Jev's stall class, when there is one, decides: finished → not stalled, waiting_on_user → needs you,
     // stuck/looping → stalled (also a working agent found looping). No class → the idle-for-20-min rule.
@@ -2459,9 +2459,9 @@ const tickets = new Tickets({
   dir: DATA, reserved: Object.keys(PROJECT_BY_TEAM),
   onChange: (project) => changes.add('tickets', { project }),
   onReady: (project, t) => readyNotes.add(project, t),
-  onReopen: (project, t) => recordRoutingOutcome(t, 'returned', 'reopened').catch((e) => console.error('routing outcome:', e.message)),
+  onReopen: (project, t) => t.history?.findLast((h) => h.kind === 'move')?.from === 'cancelled' ? undefined : recordRoutingOutcome(t, 'returned', 'reopened').catch((e) => console.error('routing outcome:', e.message)),
   onDone: async (project, t) => {
-    if (!strikes(t)) await recordRoutingOutcome(t, 'ok', 'reached done').catch((e) => console.error('routing outcome:', e.message))
+    if (t.column === 'done' && !strikes(t)) await recordRoutingOutcome(t, 'ok', 'reached done').catch((e) => console.error('routing outcome:', e.message))
     if (t.assignee?.pane) {
       const pane = t.assignee.pane
       try {

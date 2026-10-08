@@ -2,6 +2,7 @@
 // An agent appears once, in its highest section: Needs you › Recent (5) › Working › Agents; then Rooms (waiting on you first).
 import type { SearchableItem } from '@astryxdesign/core/Typeahead'
 import { fuzzy } from './commands.ts'
+import { isClosed } from '../../contracts.mjs'
 
 export interface SwAgent {
   key: string; name: string; pool: string; machine: string; local: boolean
@@ -84,7 +85,7 @@ export function ticketItems(tickets: SwTicket[], query: string): SwItem[] {
     return fuzzy(q, t.title.toLowerCase()) >= 0 ? 1 : 0
   }
   return tickets.map((t) => ({ t, r: rank(t) })).filter((x) => x.r > 0)
-    .sort((a, b) => b.r - a.r || Number(a.t.column === 'done') - Number(b.t.column === 'done'))
+    .sort((a, b) => b.r - a.r || Number(isClosed(a.t.column)) - Number(isClosed(b.t.column)))
     .slice(0, 8).map(({ t }) => ({ id: `ticket:${t.project}:${t.id}`, label: `${t.id} ${t.title}`, auxiliaryData: { group: 'Tickets', kind: 'ticket', ticket: t, line: `${t.column} · ${t.project}` } }))
 }
 

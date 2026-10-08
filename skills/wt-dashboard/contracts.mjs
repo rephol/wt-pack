@@ -5,7 +5,9 @@
 // or if a copy of a list creeps back into another file. Started with tickets, inbox and rooms; other areas follow.
 const freeze = (a) => Object.freeze([...a])
 
-export const COLUMNS = freeze(['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked'])
+export const COLUMNS = freeze(['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked', 'cancelled'])
+// WP-276: Done and Cancelled are the terminal columns; nothing schedules, sweeps or counts a closed card.
+export const isClosed = (column) => column === 'done' || column === 'cancelled'
 export const TYPES = freeze(['bug', 'ux', 'gap', 'debt', 'feature'])
 export const SIZES = freeze(['S', 'M', 'L'])
 

@@ -4,6 +4,7 @@
 // failed. `request_id` (WP-251) is unique: recording the same id twice returns the first row and sends nothing.
 // Expiry: a kind that expects an ack (handoff/dispatch/routine) not acked within `ackMs` is resent with the same
 // envelope id up to `maxAttempts` times, then flagged (state expired, Inbox item). Not exported: no JSON rollback.
+import { isClosed } from './contracts.mjs'
 import { join } from 'node:path'
 import { open } from './store.mjs'
 
@@ -34,7 +35,7 @@ export const envelopeOf = (text) => parseEnvelope(text) ?? roomTag(text)
 // ready → building counts). Never resend a message for a finished ticket. `card` is the board card, null when unknown.
 export function movedOn(card, row) {
   if (!card) return false
-  if (card.column === 'done' || card.column === 'blocked') return true
+  if (isClosed(card.column) || card.column === 'blocked') return true
   const since = row.delivered_at ?? row.created
   return (card.history ?? []).some((h) => h.kind === 'move' && h.author !== 'dispatch' && h.at > since)
 }
@@ -44,7 +45,7 @@ export const nudgeText = (role, ticket) => ({
   worker: `${ticket}: your card is not in review. Continue, or report what blocks you with handoff.sh --reply`,
   planner: `${ticket}: the plan is not handed back. Finish it, or report what blocks you with handoff.sh --reply`,
 }[role] ?? `${ticket}: not reported yet. Continue, or report with handoff.sh --reply`)
-export const CARD_OPEN = (card) => !!card && !['done', 'blocked', 'review'].includes(card.column)
+export const CARD_OPEN = (card) => !!card && !['done', 'cancelled', 'blocked', 'review'].includes(card.column)
 
 // WP-272: may the server nudge this agent? Its card is open work, it is one of this repo's own agents (others do not know
 // handoff.sh --reply) and it is neither working nor blocked. `off` = WT_NUDGE=off.

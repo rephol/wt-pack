@@ -330,6 +330,26 @@ test('onReopen fires once when a Done card leaves Done, not on other moves or a 
   assert.deepEqual(reopened, [['wt-pack', a.id], ['wt-pack', a.id]])
 })
 
+test('WP-276: cancelled is a terminal column — accepted with or without a reason, filterable, fires onDone/onReopen, keeps its assignee', async () => {
+  const done = [], reopened = []
+  const t = new Tickets({ dir: await tmp(), onDone: (p, x) => done.push(x.column), onReopen: (p, x) => reopened.push(x.id) })
+  const who = { name: 'wt-pack-worker-09', pane: 'w9:p1' }
+  const a = await t.create('wt-pack', { title: 'x', column: 'ready' }, user)
+  await t.patch(a.id, { column: 'building' }, user, who)
+  const c = await t.patch(a.id, { column: 'cancelled', note: 'superseded' }, user)
+  assert.deepEqual([c.column, c.assignee, c.dispatch], ['cancelled', who, undefined])
+  assert.deepEqual(c.history.at(-1), { at: c.history.at(-1).at, author: 'Rep', kind: 'move', from: 'building', to: 'cancelled', text: 'superseded' })
+  assert.deepEqual(done, ['cancelled'])
+  assert.deepEqual((await t.list('wt-pack', 'cancelled')).tickets.map((x) => x.id), [a.id])
+  await t.leave(who.name) // closed cards keep their assignee, like done
+  assert.equal((await t.get(a.id)).assignee.name, who.name)
+  const b = await t.create('wt-pack', { title: 'y', column: 'building' }, user)
+  assert.equal((await t.patch(b.id, { column: 'cancelled' }, user)).history.at(-1).text, undefined) // the reason is optional
+  await t.patch(a.id, { column: 'backlog' }, user)
+  assert.deepEqual(reopened, [a.id])
+  await t.patch(a.id, { column: 'bogus' }, user).then(() => assert.fail(), (e) => assert.match(e.message, /cancelled/)) // the 400 lists it
+})
+
 test('dispatch settings: default off, stallMin validated', async () => {
   const t = new Tickets({ dir: await tmp() })
   await t.create('wt-pack', { title: 'x' }, user)

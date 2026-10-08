@@ -32,7 +32,7 @@ import { Timestamp } from '@astryxdesign/core/Timestamp'
 import { Toolbar } from '@astryxdesign/core/Toolbar'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { api, useRoomsList } from './rooms'
-import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, dispatchBadge, dispatchLine, messageBadge, group, jevChip, moveTicket, ticketMatches, type Board as BoardT, type Column, type Ticket } from './boardData'
+import { COLUMNS, PRIORITY, SIZES, TYPES, columnLabel, isClosed, dispatchBadge, dispatchLine, messageBadge, group, jevChip, moveTicket, ticketMatches, type Board as BoardT, type Column, type Ticket } from './boardData'
 
 const send = <T,>(url: string, method: string, body: object) => api<T>(url, { method, body: JSON.stringify(body) })
 // Board 'Auto' threshold (WP-46): promote tickets at this priority or more urgent; 0 = any, unprioritised too.
@@ -48,6 +48,7 @@ export const COLUMN_META: Record<Column, { variant: Dot; tooltip: string; empty:
   review: { variant: 'warning', tooltip: 'Implemented; under review.', empty: 'Tickets in review appear here.' },
   done: { variant: 'success', tooltip: 'Merged and shipped.', empty: 'Finished tickets appear here.' },
   blocked: { variant: 'error', tooltip: 'Stuck; the history says why.', empty: 'Nothing is blocked.' },
+  cancelled: { variant: 'neutral', tooltip: 'Abandoned; will not be done. Never scheduled.', empty: 'Cancelled tickets appear here.' },
 }
 const statusOptions = COLUMNS.map((c) => ({ value: c, label: columnLabel(c), icon: <StatusDot variant={COLUMN_META[c].variant} label={columnLabel(c)} /> }))
 // Linear's scale: 1 urgent … 4 low, 0 none.
@@ -68,6 +69,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
   const [openId, setOpenId] = useState<string | null>(null) // ticket id, or 'new'
   const [blockAsk, setBlockAsk] = useState(false) // opened by a drop on Blocked: the note is required
   const [col, setCol] = useState<Column>('ready')
+  const [showCancelled, setShowCancelled] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const columnEls = useRef(new Map<Column, HTMLElement>())
   const cardEls = useRef(new Map<string, HTMLElement>())
@@ -211,7 +213,8 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
 
   const dragged = drag ? tickets.find((t) => t.id === drag.id) : undefined
   const opened = openId && openId !== 'new' ? tickets.find((t) => t.id === openId) ?? null : null
-  const shown = phone ? [col] : COLUMNS
+  const nCancelled = cols.cancelled.length
+  const shown = phone ? [col] : COLUMNS.filter((c) => c !== 'cancelled' || showCancelled) // WP-276: Cancelled stays folded away until asked for
   // WP-229: the board's own project picker; keeps the current value selectable if it has no agents.
   const picker = <Selector label="Board project" isLabelHidden hasSearch width={phone ? '100%' : 200} value={project} onChange={(v: string) => onProject?.(v)}
     options={[...new Set([project, ...projects])].map((p) => ({ value: p, label: p }))} />
@@ -241,7 +244,7 @@ export function Board({ project, phone, projects = [], onProject }: { project: s
               </VStack>
             ) : (
               <Toolbar label="Board actions" gap={2} className="hd-kb-toolbar"
-                startContent={<>{picker}<Badge label={String(tickets.length)} variant="neutral" /></>}
+                startContent={<>{picker}<Badge label={String(tickets.length)} variant="neutral" />{(nCancelled > 0 || showCancelled) && <Button label={showCancelled ? 'Hide cancelled' : `Cancelled (${nCancelled})`} variant="ghost" size="sm" aria-pressed={showCancelled} onClick={() => setShowCancelled(!showCancelled)} />}</>}
                 endContent={<HStack gap={2} vAlign="center">{search}{automation}<Button label="New ticket" variant="primary" onClick={() => setOpenId('new')} /></HStack>} />
             )}
           </LayoutHeader>
@@ -349,7 +352,7 @@ function StallMinutes({ value, onSave }: { value: number; onSave: (n: number) =>
 // Shared by the column card and the floating drag clone so the two stay identical.
 function BoardCardBody({ t, onMove }: { t: Ticket; onMove: (id: string, to: Column) => void }) {
   const db = dispatchBadge(t.dispatch)
-  const mb = t.column === 'done' ? null : messageBadge(t.messages)
+  const mb = isClosed(t.column) ? null : messageBadge(t.messages)
   return (
     <VStack gap={2}>
       <HStack hAlign="between" vAlign="start">
@@ -439,6 +442,7 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
   const [editing, setEditing] = useState(isNew)
   const [draft, setDraft] = useState({ title: ticket?.title ?? '', body: ticket?.body ?? '', type: '', size: '', priority: '0' })
   const [blockTo, setBlockTo] = useState(blockAsk) // Status set to Blocked: waiting for the reason
+  const [cancelTo, setCancelTo] = useState(false) // WP-276: Cancel ticket / Status Cancelled: asking for the (optional) reason
   const [note, setNote] = useState('')
   const [comment, setComment] = useState('')
   const [railOpen, setRailOpen] = useState(true)
@@ -471,9 +475,10 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
       done(); if (t?.id) { setEditing(false); onCreated(t.id) } },
   })
   const block = useMutation({ mutationFn: () => send(tUrl(ticket!.id), 'PATCH', { column: 'blocked', note: note.trim() }), onSuccess: () => { setNote(''); setBlockTo(false); done() } })
+  const cancel = useMutation({ mutationFn: () => send(tUrl(ticket!.id), 'PATCH', { column: 'cancelled', ...(note.trim() && { note: note.trim() }) }), onSuccess: () => { setNote(''); setCancelTo(false); done() } })
   const say = useMutation({ mutationFn: () => send(`${tUrl(ticket!.id)}/comments`, 'POST', { text: comment.trim() }), onSuccess: () => { setComment(''); done() } })
-  const err = patch.error ?? create.error ?? block.error ?? say.error ?? setBuddyM.error
-  const setStatus = (v: string) => { if (v === 'blocked') setBlockTo(true); else { setBlockTo(false); if (v !== ticket!.column) patch.mutate({ column: v }) } }
+  const err = patch.error ?? create.error ?? block.error ?? cancel.error ?? say.error ?? setBuddyM.error
+  const setStatus = (v: string) => { if (v === 'blocked') { setCancelTo(false); setBlockTo(true) } else if (v === 'cancelled') { setBlockTo(false); setCancelTo(v !== ticket!.column) } else { setBlockTo(false); setCancelTo(false); if (v !== ticket!.column) patch.mutate({ column: v }) } }
   const label = isNew ? 'New ticket' : ticket?.id ?? 'Ticket'
 
   const header = (
@@ -494,11 +499,12 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
           </VStack>
           <HStack gap={1}>
             {ticket && !phone && <Button label={railOpen ? 'Hide details' : 'Show details'} variant="secondary" size="sm" onClick={() => setRailOpen(!railOpen)} />}
+            {ticket && !isClosed(ticket.column) && !cancelTo && <Button label="Cancel ticket" variant="ghost" size="sm" onClick={() => { setBlockTo(false); setCancelTo(true) }} />}
             <Button label="Close" variant="ghost" size="sm" onClick={onClose} />
           </HStack>
         </HStack>
         {ticket && <HStack gap={1} vAlign="center" wrap="wrap">
-          <Selector label="Status" isLabelHidden value={blockTo ? 'blocked' : ticket.column} onChange={setStatus} options={statusOptions} />
+          <Selector label="Status" isLabelHidden value={blockTo ? 'blocked' : cancelTo ? 'cancelled' : ticket.column} onChange={setStatus} options={statusOptions} />
           <Selector label="Priority" isLabelHidden value={String(ticket.priority ?? 0)} onChange={(v: string) => patch.mutate({ priority: Number(v) })}
             options={priorityOptions} renderValue={(o) => <PriorityBadge p={Number(o.value)} />} />
           <Selector label="Type" isLabelHidden value={ticket.type ?? ''} onChange={(v: string) => v && patch.mutate({ type: v })} options={opts(TYPES)} />
@@ -507,6 +513,11 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
         {ticket && blockTo && ticket.column !== 'blocked' && <HStack gap={2} vAlign="end">
           <StackItem size="fill"><TextInput label="Why is it blocked?" width="100%" value={note} onChange={setNote} placeholder="Required" /></StackItem>
           <Button label="Block" variant="primary" size="sm" isDisabled={!note.trim()} isLoading={block.isPending} onClick={() => block.mutate()} />
+        </HStack>}
+        {ticket && cancelTo && ticket.column !== 'cancelled' && <HStack gap={2} vAlign="end">
+          <StackItem size="fill"><TextInput label="Why is it cancelled?" width="100%" value={note} onChange={setNote} placeholder="Optional" /></StackItem>
+          <Button label="Cancel ticket" variant="primary" size="sm" isLoading={cancel.isPending} onClick={() => cancel.mutate()} />
+          <Button label="Keep" variant="ghost" size="sm" onClick={() => { setCancelTo(false); setNote('') }} />
         </HStack>}
         {err && <Banner status="error" title={err.message} />}
       </VStack>
