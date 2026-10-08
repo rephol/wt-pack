@@ -62,7 +62,7 @@ const str = (description, extra = {}) => ({ type: 'string', description, ...extr
 const TICKET = { pattern: '^[A-Za-z][A-Za-z0-9]*-\\d+$' }
 const PANE = { pattern: '^[A-Za-z0-9_:.-]{1,40}$' }
 const SLUG = { pattern: '^[a-z0-9][a-z0-9-]{0,40}$' }
-const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked']
+const COLUMNS = ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked', 'cancelled']
 const key = str('A caller-chosen id for this call (1-80 of A-Z a-z 0-9 _ : . -). Repeating it returns the first result and does nothing again, so a retry after a timeout is safe.', { pattern: '^[\\w:.-]{1,80}$' })
 // A value passed to a CLI as its own argument must not read as a flag.
 const text = (d, extra = {}) => str(d, { minLength: 1, maxLength: 20_000, noLeadingDash: true, ...extra })
@@ -106,7 +106,7 @@ tool('ticket_new', 'Create a card (wt-ticket new).', {
   body: str('Card body (markdown)', { maxLength: 20_000 }), column: str('Start column (default backlog)', { enum: COLUMNS }), project: str('Board/project'),
 }, ['title'], (a) => run(BIN.ticket, ['new', a.title, ...flags(a, { type: '--type', size: '--size', priority: '--priority', labels: '--label', links: '--link', body: '--body', column: '--column', project: '--project' }), '--json']).then(json), { mutates: true })
 tool('ticket_move', 'Move a card to a column (wt-ticket move). `blocked` needs a note; a stage gate can refuse the move (code refused).', {
-  id: str('Card id', TICKET), column: str('Target column', { enum: COLUMNS }), note: str('Why (required for blocked)', { maxLength: 2000 }), force: { type: 'boolean', description: 'Override a stage gate' },
+  id: str('Card id', TICKET), column: str('Target column', { enum: COLUMNS }), note: str('Why (required for blocked; the reason for cancelled)', { maxLength: 2000 }), force: { type: 'boolean', description: 'Override a stage gate' },
 }, ['id', 'column'], (a) => run(BIN.ticket, ['move', a.id, a.column, ...flags(a, { note: '--note', force: '--force' }), '--json']).then(json), { mutates: true })
 tool('ticket_comment', 'Add a comment to a card (wt-ticket comment).', { id: str('Card id', TICKET), text: text('The comment', { maxLength: 8000 }) }, ['id', 'text'], (a) => run(BIN.ticket, ['comment', a.id, a.text, '--json']).then(json), { mutates: true })
 
