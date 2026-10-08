@@ -47,3 +47,41 @@ test('the registered hook lets repo-rule commands through elsewhere', async ($, 
   const r: any = await $.tool.call({ tool: 'Bash', command: 'gh pr create --draft' })
   expect(r.deny).toBeUndefined()
 })
+
+test('WP-279: refuses force-push, short pkill -f patterns, branch changes in the main checkout, wt-ticket new --help', () => {
+  expect(guard('git push --force origin main')).toMatch(/force/)
+  expect(guard('git push -f')).toMatch(/force/)
+  expect(guard('git push origin +main')).toMatch(/force/)
+  expect(guard('pkill -f node')).toMatch(/pkill/)
+  expect(guard('/usr/bin/pgrep -fl "-n"')).toMatch(/pkill/)
+  expect(guard('git checkout main')).toMatch(/main checkout/)
+  expect(guard('git checkout -b wp-1-x')).toMatch(/main checkout/)
+  expect(guard('git switch wp-1-x')).toMatch(/main checkout/)
+  expect(guard('skills/wt-ticket/scripts/wt-ticket new --help')).toMatch(/--help/)
+})
+
+test('WP-279: lets the safe forms through', () => {
+  expect(guard('git push')).toBeNull()
+  expect(guard('git push --force-with-lease')).toBeNull()
+  expect(guard('git commit -m "push --force"')).toBeNull()
+  expect(guard('pkill -f "tsx src/index.ts"')).toBeNull()
+  expect(guard('kill 123')).toBeNull()
+  expect(guard('git checkout -- file')).toBeNull()
+  expect(guard('git checkout main -- file')).toBeNull()
+  expect(guard('git branch --show-current')).toBeNull()
+  expect(guard('wt-ticket new "title"')).toBeNull()
+})
+
+test('WP-279: a worktree may switch branches; the main-checkout rule needs the main checkout', () => {
+  expect(guard('git checkout main', true, false)).toBeNull()
+  expect(guard('git push -f', true, false)).toMatch(/force/)
+  expect(guard('git checkout main', false, false)).toBeNull()
+})
+
+test('WP-279: the hook asks once where the session is; exit 10 = a worktree', async ($, on) => {
+  const runs = stub(on, 10)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: 'ran' }))
+  expect(((await $.tool.call({ tool: 'Bash', command: 'git push --force' })) as any).deny).toMatch(/force/)
+  expect(((await $.tool.call({ tool: 'Bash', command: 'git checkout main' })) as any).deny).toBeUndefined()
+  expect(runs.length).toBe(1)
+})
