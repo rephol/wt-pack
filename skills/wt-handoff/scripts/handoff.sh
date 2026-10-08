@@ -258,7 +258,7 @@ candidates() {
   # WP-225: an agent already holding an open card (its assignee, or its task/ticket token names one) is never
   # a candidate. Best-effort: no board (server down, Linear key) → [] and nobody is excluded, as before.
   held=$(cd "$main_checkout" && "$(dirname "$0")/../../wt-ticket/scripts/wt-ticket" list --json 2>/dev/null \
-    | jq -c '[.tickets[]? | select(.column != "done") | {id, a: (.assignee.name // "")}]' 2>/dev/null) || held=
+    | jq -c '[.tickets[]? | select(.column != "done" and .column != "cancelled") | {id, a: (.assignee.name // "")}]' 2>/dev/null) || held=
   [ -n "$held" ] || held='[]'
   herdr agent list \
     | jq -r --arg ws "$ws" --arg persona "$persona" --arg team "$team" --argjson panes "$panes" \
