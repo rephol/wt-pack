@@ -182,21 +182,22 @@ async function postAgent(a: Agent, body: { text?: string; keys?: string[] }) {
 }
 
 // ---------- presentation maps ----------
-type Dot = 'success' | 'warning' | 'error' | 'accent' | 'neutral'
+type Dot = 'success' | 'warning' | 'error' | 'accent' | 'neutral' | 'working'
 const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'review' | 'done' }> = {
   needs_you: { label: 'Needs you', dot: 'error', group: 'active' },
   stalled: { label: 'Stalled', dot: 'warning', group: 'active' },
-  building: { label: 'Building', dot: 'accent', group: 'active' },
+  building: { label: 'Building', dot: 'working', group: 'active' },
   plan_ready: { label: 'Plan ready', dot: 'success', group: 'active' },
-  planning: { label: 'Planning', dot: 'accent', group: 'active' },
+  planning: { label: 'Planning', dot: 'working', group: 'active' },
   up_next: { label: 'Up next', dot: 'neutral', group: 'active' },
   queued: { label: 'Queued', dot: 'neutral', group: 'active' },
-  in_review: { label: 'In review', dot: 'accent', group: 'review' },
+  in_review: { label: 'In review', dot: 'working', group: 'review' },
   merged: { label: 'Merged', dot: 'success', group: 'done' },
   shipped: { label: 'Shipped', dot: 'success', group: 'done' },
   done: { label: 'Done', dot: 'neutral', group: 'done' },
 }
-const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'accent', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error' }
+// WP-277: working is violet (custom 'working' StatusDot variant, index.css): blue (accent) sat too close to the green done dot.
+const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error' }
 
 const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>

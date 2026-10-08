@@ -10,7 +10,7 @@ import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
 import type { DockAction, DockState } from './dock'
 
-export type DockMeta = { name: string; dot: 'error' | 'success' | 'warning' | 'neutral' | 'accent'; label: string; pulsing?: boolean }
+export type DockMeta = { name: string; dot: 'error' | 'success' | 'warning' | 'neutral' | 'accent' | 'working'; label: string; pulsing?: boolean }
 
 export function Dock({ state, dispatch, meta, unread, need, body, onExpand }: {
   state: DockState; need: number; dispatch: (a: DockAction) => void; meta: (key: string) => DockMeta; unread: Record<string, 'dot' | '!'>

@@ -188,3 +188,9 @@ html.hd-has-dock button[aria-label^="Agent conversations"] { display: none !impo
 .hd-pintext:hover { text-decoration: underline; }
 
 dialog[data-image-viewer]::backdrop { background: var(--color-overlay, rgba(0, 0, 0, .85)); backdrop-filter: blur(2px) }
+
+/* WP-277: the 'working' StatusDot variant (statusDot.d.ts). Astryx only paints its five known variants, so paint the plate here;
+   the doubled selector outranks the atomic StyleX background. Violet #6c3fd1 is 6.9:1 on white, #a78bfa 6.8:1 on the dark surface. */
+[role="img"][data-variant="working"][data-variant="working"] { background-color: #6c3fd1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) [role="img"][data-variant="working"][data-variant="working"] { background-color: #a78bfa; } }
+:root[data-theme="dark"] [role="img"][data-variant="working"][data-variant="working"] { background-color: #a78bfa; }
