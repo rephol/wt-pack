@@ -702,8 +702,11 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   call that runs `gh pr create --draft`, `git commit -a`/`--all`, or a commit with an overriding identity (`--author`,
   `-c user.*`, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) — these three only when the session is in a wt-pack checkout
   (`.claude-plugin/marketplace.json` at the repo root, checked once per session) — and, in any project, a
-  handoff/room/herdr/ticket/ask command carrying a `~/.claude/skills/…` path. The pkill/pgrep guard stays in
-  wt-memory. Loose shell parsing: it stops accidents only.
+  handoff/room/herdr/ticket/ask command carrying a `~/.claude/skills/…` path. WP-279 adds, in a wt-pack checkout,
+  `git push --force`/`-f`/`+ref` (`--force-with-lease` passes), `pkill`/`pgrep -f` with a pattern under 6 characters or
+  starting with `-`, and `wt-ticket new --help` (it creates a ticket titled "--help"); and, in the main checkout only
+  (a worktree may switch branches), `git switch` and `git checkout <branch>`/`-b`. The pkill/pgrep option-order guard
+  stays in wt-memory. Loose shell parsing: it stops accidents only.
 - **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
   pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
   hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a
