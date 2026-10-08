@@ -53,8 +53,12 @@ routing all read through the same lookup (`wt-shared/scripts/roles.mjs`).
 A local kanban per project (`WP-N` style keys), stored in `wt.db`. The board has its own project picker in its
 header, remembered per viewer and defaulting to the global project; picking there leaves the sidebar project alone. With the sidebar on **All projects** (and no board project remembered) the board shows a "Select a project" placeholder (WP-264).
 
-- Columns: Backlog, Ready, Planning, Building, Review, Done, Blocked. Moving to Blocked asks why (a note is
-  required). Moving to Backlog clears the assignee.
+- Columns: Backlog, Ready, Planning, Building, Review, Done, Blocked, Cancelled. Moving to Blocked asks why (a note is
+  required). Moving to Backlog clears the assignee. **Cancelled** (WP-276) is terminal like Done: Dispatch, routines, the
+  idle/stalled sweeps, stage gates, message resends and the Inbox never act on it, and its assignee's pane is released as
+  on Done. The reason is optional: `wt-ticket move <ID> cancelled [--note why]` (also the `ticket_move` tool), or on the
+  board the ticket drawer's **Cancel ticket** (or Status › Cancelled) asks for it. The Cancelled column is folded away by
+  default; the **Cancelled (N)** button in the board toolbar shows it.
 - Fields: type (bug, ux, gap, debt, feature — default feature), size (S, M, L — default none), priority
   (Urgent, High, Medium, Low, none — default none), up to 20 labels, up to 20 links, title ≤ 200 chars,
   body ≤ 20k chars. The `needs-plan` label shows as a **needs plan** badge on the card and routes Dispatch to a

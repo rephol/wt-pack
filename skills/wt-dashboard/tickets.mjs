@@ -3,7 +3,7 @@
 import { join } from 'node:path'
 import { open, tx } from './store.mjs'
 
-import { COLUMNS, TYPES, SIZES } from './contracts.mjs' // WP-254: the enums live in contracts.mjs
+import { COLUMNS, TYPES, SIZES, isClosed } from './contracts.mjs' // WP-254: the enums live in contracts.mjs
 export { COLUMNS, TYPES, SIZES }
 const DEFAULTS = { type: 'feature', size: null, priority: 0 } // create()'s defaults; Jev only fills these
 const PROJECT = /^[\w.-]{1,64}$/
@@ -176,8 +176,8 @@ export class Tickets {
       this.db.prepare('UPDATE tickets SET json = ? WHERE id = ?').run(JSON.stringify(t), old.id)
       wrote = true
       if (t.column === 'ready' && old.column !== 'ready') entered = true
-      if (t.column === 'done' && old.column !== 'done') finished = true
-      if (t.column !== 'done' && old.column === 'done') reopened = true
+      if (isClosed(t.column) && !isClosed(old.column)) finished = true
+      if (!isClosed(t.column) && isClosed(old.column)) reopened = true
       return t
     })
     if (wrote) this.changed(await this.project(t.id))
@@ -203,7 +203,7 @@ export class Tickets {
         t.history.push({ at, author: author.name, kind: 'move', from: t.column, to: column, ...(note ? { text: note } : {}) })
         t.column = column
         delete t.jev?.applied?.column // moved by hand: no longer Jev's promotion to undo
-        if (column === 'ready' || column === 'backlog') delete t.dispatch // back in the queue: dispatch starts over (held too)
+        if (column === 'ready' || column === 'backlog' || column === 'cancelled') delete t.dispatch // back in the queue: dispatch starts over (held too)
       } else if (note?.trim()) t.history.push({ at, author: author.name, kind: 'comment', text: note })
       const edited = Object.keys(rest).filter((k) => JSON.stringify(t[k]) !== JSON.stringify(rest[k]))
       if (edited.length) t.history.push({ at, author: author.name, kind: 'edit', text: edited.join(', ') })
@@ -318,7 +318,7 @@ export class Tickets {
   async leave(name) {
     for (const { id, json } of this.db.prepare('SELECT id, json FROM tickets').all()) {
       const t = JSON.parse(json)
-      if (t.assignee?.name !== name || t.column === 'done') continue
+      if (t.assignee?.name !== name || isClosed(t.column)) continue
       await this.dropAssignee(id, name, 'wt-dashboard', `returned: ${name} was removed`)
     }
   }

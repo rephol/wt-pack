@@ -1,8 +1,9 @@
 // Types for contracts.mjs, and the API response shapes the server writes and the web reads (WP-254). TypeScript
 // resolves this file for `import ... from '.../contracts.mjs'`, so the web needs no allowJs. contracts.test.mjs checks that
 // every `declare const` below equals the runtime array, so the two cannot drift.
-export declare const COLUMNS: readonly ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked']
+export declare const COLUMNS: readonly ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked', 'cancelled']
 export type Column = (typeof COLUMNS)[number]
+export declare function isClosed(column: string | undefined): boolean
 export declare const TYPES: readonly ['bug', 'ux', 'gap', 'debt', 'feature']
 export declare const SIZES: readonly ['S', 'M', 'L']
 export declare const KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'pair-gone', 'dispatch-undelivered', 'ask']

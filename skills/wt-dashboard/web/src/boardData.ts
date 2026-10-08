@@ -1,8 +1,8 @@
 // The local ticket board (docs/plans/local-kanban-plan.md, API contract). Pure, so it is unit-tested.
 // WP-254: the enums and the API shapes live in skills/wt-dashboard/contracts.mjs (+ contracts.d.mts); re-exported here.
-import { COLUMNS, TYPES, SIZES } from '../../contracts.mjs'
+import { COLUMNS, TYPES, SIZES, isClosed } from '../../contracts.mjs'
 import type { Column, HistoryEntry, TicketPair, Ticket, TicketMessages, TicketDispatch, DispatchStatus, TicketJev, Board } from '../../contracts.mjs'
-export { COLUMNS, TYPES, SIZES }
+export { COLUMNS, TYPES, SIZES, isClosed }
 export type { Column, HistoryEntry, TicketPair, Ticket, TicketMessages, TicketDispatch, DispatchStatus, TicketJev, Board }
 // The card's message badge, if any: [label, variant, tooltip]. Answered/acknowledged stay quiet-blue, a lost one is an error.
 export function messageBadge(m?: TicketMessages | null): [string, 'info' | 'warning' | 'error', string] | null {

@@ -4,6 +4,7 @@
 // routines row, but shares their cap and memory guard. The server injects every side effect, so tests need no herdr.
 import { fileURLToPath } from 'node:url'
 import { guard } from './routines.mjs'
+import { isClosed } from './contracts.mjs'
 
 // WP-122: the agent runs this pack's own handoff.sh, not a ~/.claude/skills link that a plugin install lacks.
 const HANDOFF = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import.meta.url))
@@ -24,7 +25,7 @@ export const capacity = (team) => team.members.find((m) => m.persona === stagePe
 export const teamOk = (a, team) => (a.paneTokens?.team || null) === (team || null)
 // A teamless card goes to the least-loaded team with room (load = open cards it owns); null = every team is full.
 export const pickTeam = (teams, open) => {
-  const load = (t) => open.filter((x) => x.team === t.name && x.column !== 'done').length
+  const load = (t) => open.filter((x) => x.team === t.name && !isClosed(x.column)).length
   return [...teams].filter((t) => load(t) < capacity(t)).sort((a, b) => load(a) - load(b) || (a.name < b.name ? -1 : 1))[0] ?? null
 }
 // WP-204: the first persona (filename order) whose base is the ticket's role and whose labels meet the ticket's.
@@ -187,7 +188,7 @@ export class Dispatch {
   // WP-225: an agent already holding a ticket is never picked again — it is the assignee of an open card, or its
   // pane token `ticket`/`task` (wt-handoff's "<ID> <title>") names one. Returns a predicate over a listed agent.
   busyAgents() {
-    const open = this.db.prepare('SELECT json FROM tickets').all().map((r) => JSON.parse(r.json)).filter((t) => t.column !== 'done')
+    const open = this.db.prepare('SELECT json FROM tickets').all().map((r) => JSON.parse(r.json)).filter((t) => !isClosed(t.column))
     const ids = new Set(open.map((t) => t.id)), names = new Set(open.map((t) => t.assignee?.name).filter(Boolean))
     return (a) => names.has(a.name) || ['ticket', 'task'].some((k) => ids.has(String(a.paneTokens?.[k] ?? '').split(' ')[0]))
   }
@@ -271,7 +272,7 @@ export class Dispatch {
     const local = ags?.filter((a) => a.local) ?? []
     if (!local.length) return
     for (const t of cards) {
-      if (!t.assignee?.name || t.column === 'done') continue
+      if (!t.assignee?.name || isClosed(t.column)) continue
       const a = local.find((x) => x.name === t.assignee.name)
       const g = `${t.id}|${t.assignee.name}`
       // WP-140: any open card an agent (not a human — those assignees have no pane) still holds when it's
@@ -310,7 +311,7 @@ export class Dispatch {
     }
     // WP-147: the buddy is never the assignee, so a gone buddy needs its own check (the worker's is above).
     for (const t of cards) {
-      if (!t.pair?.buddy?.pane || t.column === 'done') continue
+      if (!t.pair?.buddy?.pane || isClosed(t.column)) continue
       const buddy = t.pair.buddy
       const a = local.find((x) => x.name === buddy.name)
       const g = `pair-buddy|${t.id}|${buddy.name}`
@@ -415,7 +416,7 @@ export class Dispatch {
   // Merge commits on origin/<baseBranch> (the local base when there is no origin) since the last scan (7 days on the first); fetch at most every 5 min per repo.
   // Two strikes (returns or review send-backs) → the next handoff of this ticket runs on opus. Live routing only.
   async #escalate(project, cards) {
-    const due = cards.filter((t) => t.column !== 'done' && strikes(t) >= 2 && !escalated(t))
+    const due = cards.filter((t) => !isClosed(t.column) && strikes(t) >= 2 && !escalated(t))
     if (!due.length || (await this.deps.routeMode?.(project)) !== 'live') return
     for (const t of due) {
       await this.tickets.comment(t.id, 'routing: escalate opus (two returns or review send-backs)', { name: 'dispatch' })
