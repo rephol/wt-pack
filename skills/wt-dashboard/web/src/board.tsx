@@ -43,8 +43,8 @@ type Dot = 'neutral' | 'accent' | 'warning' | 'success' | 'error'
 export const COLUMN_META: Record<Column, { variant: Dot; tooltip: string; empty: string }> = {
   backlog: { variant: 'neutral', tooltip: 'Proposals. Not scheduled until moved to Ready.', empty: 'Filed tickets appear here.' },
   ready: { variant: 'accent', tooltip: 'Do this next: orchestrators only schedule Ready tickets.', empty: 'Move a ticket here to schedule it.' },
-  planning: { variant: 'accent', tooltip: 'Claimed; a planner is writing the plan.', empty: 'Tickets being planned appear here.' },
-  building: { variant: 'accent', tooltip: 'A worker is implementing it.', empty: 'Tickets being built appear here.' },
+  planning: { variant: 'warning', tooltip: 'Claimed; a planner is writing the plan.', empty: 'Tickets being planned appear here.' },
+  building: { variant: 'warning', tooltip: 'A worker is implementing it.', empty: 'Tickets being built appear here.' },
   review: { variant: 'warning', tooltip: 'Implemented; under review.', empty: 'Tickets in review appear here.' },
   done: { variant: 'success', tooltip: 'Merged and shipped.', empty: 'Finished tickets appear here.' },
   blocked: { variant: 'error', tooltip: 'Stuck; the history says why.', empty: 'Nothing is blocked.' },

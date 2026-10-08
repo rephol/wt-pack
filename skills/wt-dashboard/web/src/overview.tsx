@@ -75,7 +75,7 @@ export function OverviewPage({ data, onProject, onOpen }: { data: OverviewData; 
             <ClickableCard key={g.project} label={`${g.project} agents`} padding={2} variant="muted" onClick={() => { onProject(g.project === 'other' ? 'all' : g.project); location.hash = 'agents' }}>
               <Line>
                 <Text size="sm" weight="semibold" style={{ minWidth: 120 }}>{g.project}</Text>
-                <Dotted v="accent" label={`${g.working} working`} />
+                <Dotted v="warning" label={`${g.working} working`} />
                 <Dotted v="neutral" label={`${g.idle} idle`} />
                 {g.blocked > 0 && <Dotted v="error" label={`${g.blocked} blocked`} />}
               </Line>
