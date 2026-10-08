@@ -23,7 +23,7 @@ export const loadRecent = (): string[] => { try { return JSON.parse(localStorage
 export function rememberRecent(key: string) {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([key, ...loadRecent().filter((k) => k !== key)].slice(0, 5))) } catch { /* private mode */ }
 }
-const DOT = { working: 'warning', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error' } as const
+const DOT = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error' } as const
 
 // A dialog other than our own palette/sheet is open (settings, inbox drawer, agent panel on a phone, …).
 function useOtherDialogOpen(mine: boolean) {

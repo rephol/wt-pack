@@ -59,7 +59,7 @@ export interface Profile { name: string; handle: string; avatar: string | null }
 interface Suggestion { ticket: string; slug: string; title: string; agent: string | null; reason: string }
 export interface RoomSettings { profile: Profile; agentToAgent: boolean; agentsCreateRooms: boolean; maxHops: number; ticketRooms: 'off' | 'suggest' | 'auto'; rateCount: number; rateWindowMin: number; dismissedTickets: string[] }
 
-const dotOf = (a?: RoomAgent) => (!a ? 'neutral' : a.asks ? 'error' : a.status === 'working' ? 'warning' : a.status === 'done' ? 'success' : 'neutral') as 'neutral' | 'error' | 'warning' | 'success'
+const dotOf = (a?: RoomAgent) => (!a ? 'neutral' : a.asks ? 'error' : a.status === 'working' ? 'working' : a.status === 'done' ? 'success' : 'neutral') as 'neutral' | 'error' | 'working' | 'success'
 export const api = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const r = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } })
   const j = await r.json().catch(() => ({}))

@@ -18,7 +18,7 @@ import { agentsByProject, recentRooms, tileCounts } from './overviewData'
 
 // ponytail: orchestrator rule "max 2 workers"; make it a setting if it ever changes.
 const WORKER_CAP = 2
-type Dot = 'success' | 'warning' | 'error' | 'accent' | 'neutral'
+type Dot = 'success' | 'warning' | 'error' | 'accent' | 'neutral' | 'working'
 const MACHINE_DOT: Record<string, Dot> = { online: 'success', stale: 'warning', offline: 'error' }
 const PRESSURE_DOT: Record<string, Dot> = { normal: 'success', warn: 'warning', critical: 'error' }
 
@@ -75,7 +75,7 @@ export function OverviewPage({ data, onProject, onOpen }: { data: OverviewData; 
             <ClickableCard key={g.project} label={`${g.project} agents`} padding={2} variant="muted" onClick={() => { onProject(g.project === 'other' ? 'all' : g.project); location.hash = 'agents' }}>
               <Line>
                 <Text size="sm" weight="semibold" style={{ minWidth: 120 }}>{g.project}</Text>
-                <Dotted v="warning" label={`${g.working} working`} />
+                <Dotted v="working" label={`${g.working} working`} />
                 <Dotted v="neutral" label={`${g.idle} idle`} />
                 {g.blocked > 0 && <Dotted v="error" label={`${g.blocked} blocked`} />}
               </Line>
