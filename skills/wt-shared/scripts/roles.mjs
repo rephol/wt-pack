@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Project roles (WP-204): per-repo role files `<main checkout>/.wt-pack/roles/<name>.md`.
 //   roles.mjs list    [--cwd D]            JSON: every role file (name, base, meta, bytes)
+//   roles.mjs roots   [--cwd D]            JSON {in_effect: repo|user, repo, user}: the two roles/ folders (WP-289)
 //   roles.mjs resolve <name> [--cwd D]     JSON {name, base, model, effort, mcp, skills, labels}, or exit 1 (no such file)
 //   roles.mjs check   [--cwd D]            JSON [{name, level: warn|error, msg}]; exit 1 on any error
 // A file is an OVERRIDE when its name is a base role (worker.md) and a PERSONA otherwise (frontend-worker.md,
@@ -32,6 +33,9 @@ export const userRoot = (checkout) => join(process.env.WT_PACK_USER_DIR || join(
 export const settingsWhere = (checkout) => (!existsSync(join(checkout, '.wt-pack')) && existsSync(userRoot(checkout)) ? 'user' : 'repo')
 export const settingsRoot = (checkout, where = settingsWhere(checkout)) => (where === 'user' ? userRoot(checkout) : join(checkout, '.wt-pack'))
 export const rolesDir = (checkout, where) => join(settingsRoot(checkout, where), 'roles')
+// WP-289: both places a role file can live, and which one is in effect (the repo folder wins when both exist).
+export const roots = (checkout) => ({ in_effect: settingsWhere(checkout), repo: rolesDir(checkout, 'repo'), user: rolesDir(checkout, 'user') })
+export const rootsLine = (checkout) => { const r = roots(checkout); return `roots: repo ${r.repo} · user ${r.user} · in effect: ${r.in_effect} (the repo folder wins when both exist)` }
 
 // Move every settings file to `to` ('repo' | 'user'); refuses when a file would be overwritten. Returns the files moved.
 export function moveSettings(checkout, to) {
@@ -156,6 +160,7 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
   const out = (x) => console.log(JSON.stringify(x))
   if (!checkout) { console.error('not in a git repo'); process.exit(2) }
   if (cmd === 'list') out(list(checkout).map(({ name, base, meta, bytes }) => ({ name, base, meta, bytes })))
+  else if (cmd === 'roots') out(roots(checkout))
   else if (cmd === 'resolve') {
     const r = resolve(checkout, rest[0])
     if (!r) process.exit(1)
@@ -164,5 +169,5 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
     const f = check(checkout, { catalog: catalog() })
     out(f)
     if (f.some((x) => x.level === 'error')) process.exit(1)
-  } else { console.error('usage: roles.mjs list|resolve <name>|check [--cwd D]'); process.exit(2) }
+  } else { console.error('usage: roles.mjs list|roots|resolve <name>|check [--cwd D]'); process.exit(2) }
 }
