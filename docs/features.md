@@ -811,6 +811,8 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   so every agent in a repo agrees; commit them like code). They are injected after the wt-memory global, role and
   project notes as `## Project role (<name>, …)`, capped at 6 KB per file (cut at a line, with a note). With no
   files present nothing changes.
+- `wt-roles list` and `wt-roles where` print both roots (repo and user level) and which is in effect; an orchestrator's
+  injected context names them, and spawning an unknown `*-worker`-style name lists the roots searched and the known personas.
 - A file named after a base role (`worker.md`, `reviewer.md`, …) is an **override** for every agent of that role. Any
   other name is a **persona** (`frontend-worker.md`): frontmatter `base` (required), `model`, `effort`, `mcp`
   (catalog names), `skills` (hints) and `labels` (Dispatch). A persona agent gets the base override first, then its own file.
