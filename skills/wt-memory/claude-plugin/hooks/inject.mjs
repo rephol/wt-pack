@@ -2,7 +2,7 @@
 // SessionStart always injects (it also fires after /clear and compaction, which drop earlier context);
 // UserPromptSubmit only when the content hash moved since this session's last injection.
 // UserPromptSubmit with WT_JEV_MEMORY_SUGGEST on (default off): Jev judges, in parallel with the context read and
-// capped at 1.5s, whether the prompt states a standing preference; if so a one-line wt-memory remember hint is added.
+// capped at 1.5s (3s with its imports), whether the prompt states a standing preference; if so a one-line wt-memory remember hint is added.
 // Never blocks or errors a session: any failure → exit 0, no output.
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -52,7 +52,8 @@ try {
   if (event === 'SessionStart') try { mkdirSync(dirname(recalled), { recursive: true }); writeFileSync(recalled, '') } catch {}
   const [ctxOut, hint, recall] = await Promise.all([
     new Promise((res) => execFile(process.execPath, [bin, 'context', ...(input.cwd ? ['--cwd', input.cwd] : [])], { encoding: 'utf8', timeout: 2000 }, (e, out) => res(e ? null : out))),
-    event === 'UserPromptSubmit' ? suggest(bin, input.prompt).catch(() => false) : false,
+    // WP-288: the hook's 10 s limit (hooks.json) was 5 s; under load the unbounded import + judge could eat it all. Cap the hint at 3 s.
+    event === 'UserPromptSubmit' ? Promise.race([suggest(bin, input.prompt).catch(() => false), new Promise((r) => setTimeout(r, 3000, false).unref())]) : false,
     event === 'UserPromptSubmit' && input.prompt ? new Promise((res) => execFile(process.execPath, [bin, 'recall', String(input.prompt).slice(0, 4000), '--session', sess, ...(input.cwd ? ['--cwd', input.cwd] : [])], { encoding: 'utf8', timeout: 2000 }, (e, out) => res(e ? '' : out.trim()))) : '',
   ])
   if (ctxOut == null) { out(remind); process.exit(0) }

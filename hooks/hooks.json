@@ -3,10 +3,10 @@
   "modules": ["./register.ts"],
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 5 }] }
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 10 }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 5 }] }
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/inject.mjs\"", "timeout": 10 }] }
     ],
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/wt-memory/claude-plugin/hooks/pkill-guard.mjs\"", "timeout": 5 }] }
