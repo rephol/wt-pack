@@ -34,7 +34,8 @@
 #
 # A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
 # created on demand; $WT_AGENTS_WORKSPACE overrides the label. A persona (WP-204: a name with a project-role
-# file .wt-pack/roles/<name>.md) spawns into its BASE role's pool, tagged role=<base> persona=<name>. Any role name works
+# file <repo>/.wt-pack/roles/<name>.md or, at user level, ~/.config/wt-pack/projects/<repo>/roles/<name>.md; the repo
+# folder wins when both exist; `wt-roles where` prints both) spawns into its BASE role's pool, tagged role=<base> persona=<name>. Any role name works
 # ([a-z][a-z0-9-]*); workers are spawned in <cwd> (a worktree, usually), every other
 # role in the main checkout unless a cwd is given (a planner's first job is to MAKE a
 # worktree). Each new agent gets herdr pane tokens (source "wt-dashboard", display-
@@ -173,7 +174,10 @@ TEAM_MEMBERS
   lrole=${persona:-$role}
   # WP-205: `frontend-worker` with no valid role file would silently become a brand-new role and pool.
   if [ -z "$persona" ] && [ "$cmd" = spawn ]; then case "$role" in orchestrator|planner|worker|auditor|reviewer) ;;
-    *-orchestrator|*-planner|*-worker|*-auditor|*-reviewer) echo "warning: no valid .wt-pack/roles/$role.md (wt-roles check); spawning \"$role\" as a plain role with its own pool" >&2 ;; esac; fi
+    *-orchestrator|*-planner|*-worker|*-auditor|*-reviewer) echo "warning: no valid .wt-pack/roles/$role.md (wt-roles check); spawning it as a plain role with its own pool" >&2
+      # WP-289: say where personas are looked up and which exist, so a user-level persona is not mistaken for absent
+      rr=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" roots 2>/dev/null | jq -r '"searched: \(.repo) and \(.user) (in effect: \(.in_effect))"') && echo "  $rr" >&2
+      kp=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" list 2>/dev/null | jq -r '[.[] | select(.base != .name) | .name] | join(", ")') && echo "  known personas: ${kp:-none}" >&2 ;; esac; fi
   case "$model" in ''|haiku|sonnet|opus) ;; *) echo "--model: haiku, sonnet or opus" >&2; exit 2 ;; esac
   case "$effort" in ''|low|medium|high|xhigh|max) ;; *) echo "--effort: low, medium, high, xhigh or max" >&2; exit 2 ;; esac
   # Check --mcp names before anything is created.

@@ -64,3 +64,9 @@ test('WP-237 team: new from a template, list, check; refuses clobber, bad templa
   assert.equal(c.code, 1)
   assert.match(c.out, /`ghost` has no role file/)
 })
+
+test('list and where print both roots and the one in effect (WP-289)', () => {
+  const w = run('where').out
+  assert.match(w, /roots: repo .*\.wt-pack\/roles · user .*roles · in effect: repo/)
+  assert.match(run('list').out, /^roots: repo /m)
+})

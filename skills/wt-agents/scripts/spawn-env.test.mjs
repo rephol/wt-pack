@@ -241,4 +241,6 @@ test('WP-205: a *-worker name with no valid role file warns that it spawns a pla
   assert.equal(r.status, 0)
   assert.match(r.stdout, /^demo-ghost-worker-01 /)
   assert.match(r.stderr, /warning: no valid \.wt-pack\/roles\/ghost-worker\.md/)
+  assert.match(r.stderr, /searched: .*\.wt-pack\/roles and .*roles \(in effect: /)
+  assert.match(r.stderr, /known personas: /)
 })
