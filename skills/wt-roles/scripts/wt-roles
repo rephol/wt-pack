@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // wt-roles — project role files (.wt-pack/roles/<name>.md in the repo's MAIN checkout). WP-204.
-//   wt-roles list  [--cwd D]
+//   wt-roles list  [--cwd D]                 (also prints the roles/ roots searched and which one is in effect)
+//   wt-roles where [--cwd D]                 the repo and user-level roles/ folders and which is in effect (WP-289)
 //   wt-roles new <name> [--base <role>] [--from-default] [--user] [--cwd D]   (an override needs no --base; a persona does;
 //                                                       --user writes to ~/.config/wt-pack/projects/<repo>/ instead of .wt-pack/, WP-234)
 //   wt-roles check [--cwd D]                                         exit 1 on an error
@@ -9,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as teams from '../../wt-shared/scripts/teams.mjs'
-import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir, settingsWhere } from '../../wt-shared/scripts/roles.mjs'
+import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir, rootsLine, settingsWhere } from '../../wt-shared/scripts/roles.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const [cmd, ...rest] = process.argv.slice(2)
@@ -23,7 +24,7 @@ for (let i = 0; i < rest.length; i++) {
 }
 const die = (m, code = 1) => { console.error(`wt-roles: ${m}`); process.exit(code) }
 const checkout = mainCheckout(o.cwd || process.cwd(), 5000)
-if (!['list', 'new', 'check', 'team'].includes(cmd)) die('usage: wt-roles list | new <name> [--base <role>] [--from-default] [--user] | check | team list|check|new <name> [--template solo|standard|full] [--user]  [--cwd D]', 2)
+if (!['list', 'where', 'new', 'check', 'team'].includes(cmd)) die('usage: wt-roles list | where | new <name> [--base <role>] [--from-default] [--user] | check | team list|check|new <name> [--template solo|standard|full] [--user]  [--cwd D]', 2)
 if (!checkout) die('not in a git repo', 2)
 
 if (cmd === 'team') {
@@ -49,8 +50,11 @@ if (cmd === 'team') {
     writeFileSync(file, t ? teams.templateText(name, t) : teams.teamText({}, `Notes for ${name} (free-form; not injected into agents).\n`))
     console.log(`${file}\nedit it, \`wt-roles team check\`, then \`agents.sh spawn --team ${name}\``)
   } else die('usage: wt-roles team list | check | new <name> [--template solo|standard|full] [--user]', 2)
+} else if (cmd === 'where') {
+  console.log(rootsLine(checkout))
 } else if (cmd === 'list') {
   const found = list(checkout)
+  console.log(rootsLine(checkout))
   if (!found.length) console.log(`no role files in ${rolesDir(checkout)} (agents run with the pack's defaults)`)
   const bad = new Set(check(checkout, { catalog: catalog() }).filter((f) => f.level === 'error').map((f) => f.name))
   for (const r of found) {

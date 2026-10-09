@@ -1,6 +1,6 @@
 ---
 name: wt-roles
-description: Create, check and tune a project's own role instructions — per-role override files and named personas (e.g. a frontend worker, a QA reviewer) kept in the repo at .wt-pack/roles/. Use when asked to "create a role", "add a persona", "add a QA persona", "change how the worker behaves in this project", or when a role keeps getting the same project-specific correction. Not for personal preferences across projects (that is wt-memory).
+description: Create, check and tune a project's own role instructions — per-role override files and named personas (e.g. a frontend worker, a QA reviewer) kept in the repo at .wt-pack/roles/ or at user level in ~/.config/wt-pack/projects/<repo>/roles/. Use when asked to "create a role", "add a persona", "add a QA persona", "change how the worker behaves in this project", or when a role keeps getting the same project-specific correction. Not for personal preferences across projects (that is wt-memory).
 ---
 
 # wt-roles
@@ -8,12 +8,14 @@ description: Create, check and tune a project's own role instructions — per-ro
 Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
 work both from the `./setup` links and from a plugin install (WP-122).
 
-A **project role** is a markdown file in the repo — `<main checkout>/.wt-pack/roles/<name>.md` — that is
+A **project role** is a markdown file — `<main checkout>/.wt-pack/roles/<name>.md` in the repo, or
+`~/.config/wt-pack/projects/<repo dir name>/roles/<name>.md` at user level (WP-234; `new --user`) — that is
 injected into the matching agent's session, after the global, role and project preferences wt-memory already
-injects. It is versioned with the code: reviewed, branched and committed like code.
+injects. The repo folder wins when both exist. A repo file is versioned with the code; a user-level one is not. Can't find a persona? `wt-roles list` / `wt-roles where` print both roots and the one in effect.
 
 ```
-wt-roles list                                        what is in effect here (kind, base, size, status)
+wt-roles list                                        what is in effect here (roots, kind, base, size, status)
+wt-roles where                                       the repo and user-level roles/ folders, and which is in effect
 wt-roles new <name> [--base <role>] [--from-default] write a starting file
 wt-roles check                                       validate every file (exit 1 on an error)
 wt-roles team list|check|new <name> [--template solo|standard|full] [--user]   (no --template: an empty team to fill in)  team files: members (persona xN) + stage→persona map (WP-237)
