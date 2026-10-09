@@ -40,7 +40,10 @@ async function merge({ role, project, persona, cwd }) {
   if (role || persona) {
     try {
       const r = await import('../../wt-shared/scripts/roles.mjs')
-      parts.push(...r.sections(r.mainCheckout(cwd || process.cwd()), role, persona).map(([h, t]) => [h, body(t)]))
+      const co = r.mainCheckout(cwd || process.cwd())
+      parts.push(...r.sections(co, role, persona).map(([h, t]) => [h, body(t)]))
+      // WP-289: an orchestrator picks personas, so tell it where they live (user level is easy to miss)
+      if (co && role === 'orchestrator') parts.push(['Personas', `Project personas are role files; \`wt-roles list\` shows them. ${r.rootsLine(co)}`])
     } catch {}
   }
   return parts.filter(([, t]) => t).map(([h, t]) => `## ${h}\n\n${t}`).join('\n\n')
