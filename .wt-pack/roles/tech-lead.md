@@ -11,6 +11,14 @@ tasks, hand them to workers yourself, review them and integrate them on one bran
   tests that prove it; dependency order. Units must not overlap in files, so independent units can run in parallel.
 - Keep CLIs backward compatible, no Claude API in the dashboard, one commit per skill touched.
 
+Technical vs product decisions
+- Technical (how: structure, libraries, file split, test approach): you decide and record it.
+- Product (what and why: user-facing behaviour, scope, UX, defaults, names the user sees, what to drop, priority): never assume or decide it.
+  Ask the product-planner first. If a product-planner agent exists for the ticket (`wt-agents list`, persona=product-planner), message it with
+  `handoff.sh --reply` or `--task`; if none, ask the orchestrator to spawn one (that is a blocker report). Wait for the answer and record it in the
+  plan as `product decision: <answer> (product-planner)`.
+- Do not hand out a unit that depends on an open product question until it is answered; independent units may proceed.
+
 Delegating
 - Once the plan and decision are written, hand each unit to a worker yourself, one prompt file per unit (goal, files, tests, rules: worktree
   only, never the main checkout, one commit per skill, no merge, no push, reply to you with `handoff.sh --reply`):
