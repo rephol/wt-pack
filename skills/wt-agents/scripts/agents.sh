@@ -29,6 +29,12 @@
 #                                            non-member persona (exit 2) and a full seat (exit 3))
 #                                            "<name> <pane>"; `spawn <role|persona> --team <name>` adds ONE agent to a
 #                                            team. Every member pane gets the display-only `team` token.
+#   agents.sh spawn --headless <role> [cwd] [--prompt "<text>"] [--model m] [--effort e] [--name n]
+#                                            # WP-293: asks wt-dashboard ($HERDR_DASH_URL, default 127.0.0.1:7777) to
+#                                            run a headless agent (no herdr pane); prints "<name> <id> <state>" (state
+#                                            may be queued). cwd defaults to $PWD. Exit 1 on a dashboard error.
+#   agents.sh list --headless              # the dashboard's headless runs: "<name> <id> <state> <cwd>"
+#   agents.sh rm --headless <id>           # stop a headless run (the dashboard may refuse an agent pane: 403)
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
@@ -47,6 +53,44 @@
 # which is how this pool ended up with four unnamed agents. So the name is
 # always set with an explicit `agent rename` afterwards; it is idempotent.
 set -eu
+
+# WP-293: --headless goes to wt-dashboard's /api/headless, never to herdr. Prints the body; exit 1 on a non-2xx or no answer.
+hl_call() { # method path [json]
+  hl_out=$(curl -sS --max-time 10 -X "$1" ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} -H 'content-type: application/json' \
+    ${3:+--data "$3"} -w '\n%{http_code}' "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless$2" 2>/dev/null) \
+    || { echo "wt-dashboard not reachable at ${HERDR_DASH_URL:-http://127.0.0.1:7777}" >&2; exit 1; }
+  hl_code=$(printf '%s' "$hl_out" | tail -n1); hl_body=$(printf '%s' "$hl_out" | sed '$d')
+  case "$hl_code" in 2??) printf '%s' "$hl_body" ;; *)
+    err=$(printf '%s' "$hl_body" | jq -r '.error // empty' 2>/dev/null || true)
+    [ "$hl_code" = 403 ] && err="refused (403): ${err:-dashboard only} — this needs the dashboard session, not an agent pane"
+    echo "wt-dashboard: ${err:-HTTP $hl_code}" >&2; exit 1 ;; esac
+}
+case " $* " in *" --headless "*)
+  hl_cmd=$1; shift
+  case "$hl_cmd" in
+  spawn)
+    role=; cwd=; prompt=; model=; effort=; name=
+    while [ $# -gt 0 ]; do v=$1; case "$v" in
+      --headless) shift ;;
+      --prompt|--model|--effort|--name) [ $# -ge 2 ] || { echo "$v needs a value" >&2; exit 2; }
+        case "$v" in --prompt) prompt=$2 ;; --model) model=$2 ;; --effort) effort=$2 ;; --name) name=$2 ;; esac; shift 2 ;;
+      *) if [ -z "$role" ]; then role=$v; elif [ -z "$cwd" ]; then cwd=$v; else echo "spawn --headless: unexpected $v" >&2; exit 2; fi; shift ;;
+    esac; done
+    [ -n "$role" ] || { echo "spawn --headless <role> [cwd] [--prompt text] [--model m] [--effort e] [--name n]" >&2; exit 2; }
+    cwd=$(cd "${cwd:-$PWD}" 2>/dev/null && pwd) || { echo "spawn --headless: no such directory" >&2; exit 2; }
+    hl_res=$(hl_call POST "" "$(jq -n --arg role "$role" --arg cwd "$cwd" --arg prompt "$prompt" --arg model "$model" --arg effort "$effort" --arg name "$name" \
+      '{$role, $cwd} + ({$prompt, $model, $effort, $name} | with_entries(select(.value != "")))')") || exit 1
+    printf '%s' "$hl_res" | jq -r '"\(.name) \(.id) \(.state)"' ;;
+  list) hl_res=$(hl_call GET "") || exit 1; printf '%s' "$hl_res" | jq -r '.[] | "\(.name) \(.id) \(.state) \(.cwd)"' ;;
+  rm)
+    [ $# -eq 2 ] || { echo "rm --headless <id>" >&2; exit 2; }
+    id=$1; [ "$id" = --headless ] && id=$2; case "$id" in hl-*) ;; *) echo "rm --headless: not a headless id: $id" >&2; exit 2 ;; esac
+    case "$id" in *[!A-Za-z0-9_-]*) echo "rm --headless: bad id" >&2; exit 2 ;; esac
+    hl_res=$(hl_call POST "/$id/stop" '{}') || exit 1; printf '%s' "$hl_res" | jq -r '"\(.name) \(.id) \(.state)"' ;;
+  *) echo "--headless works with spawn, list and rm" >&2; exit 2 ;;
+  esac
+  exit 0 ;;
+esac
 
 command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 
