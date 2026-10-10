@@ -21,7 +21,7 @@ const TEXT_MAX = 100_000
 // Roles map to a permission mode and a tool policy. 'readonly': Read/Grep/Glob answered automatically, any other tool denied.
 // 'ask': every tool request becomes an open ask for a human. Unknown role = ask (never silently permissive).
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
-export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions']
 export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
 export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
