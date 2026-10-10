@@ -293,15 +293,23 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - It shows in the Agents list with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
   while it waits on an ask. Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
   headless run is never picked for work.
-- **Queue:** at most `WT_HEADLESS_CAP` (default 3) run at once. A spawn over the cap is `queued` and starts when a slot
+- **Queue:** at most `WT_HEADLESS_CAP` (default 2) run at once. A spawn over the cap is `queued` and starts when a slot
   frees, oldest first; a queued run can't take messages yet.
 - **Asks:** `reviewer`, `pr-watcher` and `auditor` runs are read-only: Read/Grep/Glob are allowed automatically and any
   other tool is denied. Every other role asks a human for each tool, and `AskUserQuestion` always waits for an answer
   (`POST /api/headless/:id/answer {ask, allow, message?}` or `{ask, answers: {<question>: <label>}}`).
-- **Limits:** an idle run is released after `WT_HEADLESS_IDLE_MIN` (default 30) minutes. A turn with no events for
-  `WT_HEADLESS_STUCK_MIN` (default 10) minutes is interrupted, then stopped. A crash mid-turn resumes the session
-  up to twice before the run is `failed`. When the server restarts, any run still marked live is ended and the reason
-  is recorded. Only the recorded pid is ever killed.
+- **Limits** (settings, as env vars in `~/.config/wt-dashboard/env`):
+  - `WT_HEADLESS_CAP` (default 2): runs at once.
+  - `WT_HEADLESS_IDLE_MIN` (default 30): minutes before an idle run is released.
+  - `WT_HEADLESS_STUCK_MIN` (default 10): a turn with no events for this long counts as stuck.
+  - `WT_HEADLESS_STUCK_ACTION` (`flag` | `interrupt` | `kill`, default `flag`): by default a stuck turn is only
+    flagged in the run's log, never interrupted or killed. `interrupt` interrupts it; `kill` interrupts it, then
+    stops it after the grace period.
+  - `WT_HEADLESS_GRACE_MS` (default 5000): the wait between closing stdin and SIGTERM to the recorded pid.
+  - `WT_HEADLESS_RESUMES` (default 0): how many times a run that crashes mid-turn is resumed automatically. With
+    the default it is never resumed and is marked `failed`.
+  - When the server restarts, any run still marked live is ended and the reason is recorded. Only the recorded pid
+    is ever killed.
 - **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
   again with `--resume`.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE

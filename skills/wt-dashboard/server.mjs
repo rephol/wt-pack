@@ -2893,12 +2893,14 @@ export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), ca
   } catch { return null }
 }
 // WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
-// POST /api/headless; built lazily so importing this module (tests) opens nothing. Caps/timeouts: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN.
+// POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS.
 let headless
 const hl = () => headless ??= new Headless({
   db: openDb(join(DATA, 'wt.db')), cmd: process.env.WT_HEADLESS_CMD || 'claude',
-  cap: Number(process.env.WT_HEADLESS_CAP) || 3, idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
+  cap: Number(process.env.WT_HEADLESS_CAP) || 2, idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
   graceMs: Number(process.env.WT_HEADLESS_GRACE_MS) || 5000,
+  stuckAction: ['flag', 'interrupt', 'kill'].includes(process.env.WT_HEADLESS_STUCK_ACTION) ? process.env.WT_HEADLESS_STUCK_ACTION : 'flag',
+  resumes: Number(process.env.WT_HEADLESS_RESUMES) || 0,
   onChange: (id, what) => { changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f() },
 })
 const headlessSubs = new Map() // run id → flush fns of open SSE streams
