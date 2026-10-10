@@ -2925,26 +2925,33 @@ async function headlessAgentRoute(req, res, url, parts) {
   if (sub === 'commands' && req.method === 'GET') return send(res, 200, [])
   if (req.method === 'GET' && !sub) return send(res, 200, { text: '', ...hl().get(id) })
   if (req.method === 'GET') return send(res, 404, { error: 'not found' })
+  await rooms.load()
   if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
   if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
-  const b = JSON.parse((await body(req)) || '{}')
+  const b = JSON.parse((await body(req)) || '{}') ?? {}
   if (sub === 'stop') return send(res, 200, hl().interrupt(id) && { ok: true })
   if (!sub && req.method === 'POST') return send(res, 200, hl().message(id, b.text) && { ok: true })
   if (!sub && req.method === 'DELETE') return send(res, 200, hl().stop(id, 'removed by the user') && { ok: true })
   send(res, 404, { error: 'not found for a headless agent' })
 }
 async function headlessApi(req, res, url, parts) {
-  const json = async () => { if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 }); return JSON.parse((await body(req)) || '{}') }
+  const json = async () => {
+    if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 })
+    const b = JSON.parse((await body(req)) || '{}')
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw Object.assign(new Error('body: a JSON object'), { status: 400 })
+    return b
+  }
   const id = parts[2], sub = parts[3], h = hl()
   if (req.method === 'GET') {
     if (!id) return send(res, 200, h.list())
     if (!h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
     if (!sub) return send(res, 200, h.get(id))
-    if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Number(url.searchParams.get('limit')) || 500))
+    if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Math.min(500, Number(url.searchParams.get('limit')) > 0 ? Number(url.searchParams.get('limit')) : 500)))
     if (sub === 'stream') return headlessStream(req, res, url, id)
     return send(res, 404, { error: 'not found' })
   }
   // Writes: the dashboard user, or (spawn, message) an agent pane that roomAuthor verifies.
+  await rooms.load() // roomAuthor reads the profile from rooms settings, loaded lazily
   const who = await roomAuthor(req)
   if (who.kind !== 'user' && !(req.method === 'POST' && (!id || sub === 'message'))) return send(res, 403, { error: 'dashboard only' })
   if (req.method === 'POST' && !id) {

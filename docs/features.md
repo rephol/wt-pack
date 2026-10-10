@@ -285,6 +285,29 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). `rm` of an agent whose claude exited (herdr no longer lists it) closes the bare-shell tab left under its name, and `spawn`/`respawn` close one before opening the new tab, so no shell-only tab named after an agent sits beside it (WP-222).
 - Skills: wt-agents, wt-handoff.
 
+### Headless agents (WP-293, opt-in)
+- A headless agent is a `claude -p` stream-json process that the dashboard server runs itself: no herdr pane, no
+  terminal. It runs under your own Claude login with a minimal env (no API key, no `HERDR_*`). Nothing starts until
+  something spawns one: `POST /api/headless {role, cwd, prompt?, model?, effort?, name?}` from the dashboard, or from an
+  agent pane.
+- It shows in the Agents list with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
+  while it waits on an ask. Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
+  headless run is never picked for work.
+- **Queue:** at most `WT_HEADLESS_CAP` (default 3) run at once. A spawn over the cap is `queued` and starts when a slot
+  frees, oldest first; a queued run can't take messages yet.
+- **Asks:** `reviewer`, `pr-watcher` and `auditor` runs are read-only: Read/Grep/Glob are allowed automatically and any
+  other tool is denied. Every other role asks a human for each tool, and `AskUserQuestion` always waits for an answer
+  (`POST /api/headless/:id/answer {ask, allow, message?}` or `{ask, answers: {<question>: <label>}}`).
+- **Limits:** an idle run is released after `WT_HEADLESS_IDLE_MIN` (default 30) minutes. A turn with no events for
+  `WT_HEADLESS_STUCK_MIN` (default 10) minutes is interrupted, then stopped. A crash mid-turn resumes the session
+  up to twice before the run is `failed`. When the server restarts, any run still marked live is ended and the reason
+  is recorded. Only the recorded pid is ever killed.
+- **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
+  again with `--resume`.
+- Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
+  `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
+  the dashboard session; an agent pane may only spawn and message.
+
 ## Rooms
 
 Chat rooms shared by you and agents.
