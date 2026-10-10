@@ -151,7 +151,7 @@ test('Agents list shows the run (headless:true); agents() (pane lookup) never do
   await state(r.id, 'idle')
   const ag = await json('/api/agents')
   const row = ag.find((x) => x.id === r.id)
-  assert.equal(row.headless, true); assert.equal(row.tags.role, 'reviewer'); assert.equal(row.status, 'idle')
+  assert.match(row.name, /^[a-z0-9_-]+-reviewer-\d\d$/); assert.equal(row.headless, true); assert.equal(row.tags.role, 'reviewer'); assert.equal(row.status, 'idle')
   assert.equal(row.pool, 'reviewer') // WP-303: in its role group, not Other
   assert.ok(ag.some((x) => x.id === 'w9:p1' && !x.headless))
   // agents() (roomAuthor's pane lookup, Dispatch, token sync) knows only herdr panes: the run's id is no pane identity
