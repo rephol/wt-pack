@@ -685,6 +685,19 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   respawn) resolve the tier to an explicit model id (`floor`'s own `.model` field, WP-158 — `claude --model
   <tier>` would otherwise hand Claude Code a bare alias to resolve on its own) before starting claude; pane
   tokens, reuse-matching and escalation all still work in tiers, never ids.
+- **Role ceilings and unit effort** (WP-298): `roleCeilings` (default `{ worker: 'sonnet' }`, same JSON layers as
+  `roleFloors`) caps the *tier* a role is routed to — Jev may still raise effort, not tier — unless the request
+  carries an explicit `--model` or a unit effort of `high`. `pick`/`explain` take `--effort low|medium|high`, and
+  `wt-handoff --effort` passes it (the tech-lead declares one per unit): `low` → haiku/low, `medium` → sonnet/medium,
+  `high` → opus allowed (effort clamped by the global ceiling). `low` is the one deliberate exception to the session
+  floor: it applies only on the `--session` path with an explicit `low` and no `--model` (a security-sensitive task
+  is still floored to sonnet); no effort, other roles and `floor` (spawn via `agents.sh`) keep the sonnet floor.
+  The ceiling and the unit effort are deterministic, so they hold in shadow and off too (`capTier`/`unitTier` in
+  `pick --json`); only Jev's own tier pick stays live-gated. A persona's model (its role file) may raise its base
+  role's floor via `floor --persona-model`, never lower it (a tech-lead cannot fall below opus), and is not capped.
+  Despawn: idle retirement (WP-143) only trims free, task-less workers when a card reaches Done and never touches
+  planners or team agents, so the tech-lead removes each unit worker itself (`agents.sh rm`) and the orchestrator
+  removes the tech-lead after merging its report (see `.wt-pack/roles/tech-lead.md`).
 - **Escalation**: a return or a review send-back (`routing: send-back …`) is a strike; at two, dispatch comments
   `routing: escalate opus`, adds an Inbox item and the next handoff of that ticket runs on opus (live only).
 - **Outcomes recorded automatically** (WP-159): a ticket carrying a `routing: … ref <run#i>` reaches Done with
