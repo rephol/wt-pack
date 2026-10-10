@@ -21,6 +21,7 @@ const TEXT_MAX = 100_000
 // Roles map to a permission mode and a tool policy. 'readonly': Read/Grep/Glob answered automatically, any other tool denied.
 // 'ask': every tool request becomes an open ask for a human. Unknown role = ask (never silently permissive).
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions']
 export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
 export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
@@ -57,15 +58,18 @@ export class Headless {
 
   // ---- lifecycle ----
   // Create a run and start it now, or queue it when the cap is reached.
-  spawn({ role, cwd, prompt, model, effort, name } = {}) {
+  spawn({ role, cwd, prompt, model, effort, name, permissionMode } = {}) {
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
     if (this.roles && !this.roles.includes(role)) throw err(400, `role ${role} is not enabled for headless (WT_HEADLESS_ROLES)`)
     if (typeof cwd !== 'string' || !cwd.startsWith('/')) throw err(400, 'cwd: an absolute path')
     if (prompt !== undefined && (typeof prompt !== 'string' || prompt.length > TEXT_MAX)) throw err(400, `prompt: a string up to ${TEXT_MAX} chars`)
+    // WP-300: unset = the user's own Claude Code settings decide. A read-only role stays on 'default' so every tool reaches policyOf.
+    if (permissionMode != null && !PERMISSION_MODES.includes(permissionMode)) throw err(400, `permissionMode: one of ${PERMISSION_MODES.join(', ')}`)
+    if (permissionMode && permissionMode !== 'default' && policyOf(role) === 'readonly') throw err(400, `role ${role} is read-only: permissionMode must be default`)
     const id = 'hl-' + randomBytes(5).toString('hex')
     const t = this.now()
-    this.db.prepare(`INSERT INTO headless_runs (id, name, role, cwd, model, effort, prompt, state, created, last_event, resumes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, cwd, model ?? null, effort ?? null, prompt ?? null, t, t)
+    this.db.prepare(`INSERT INTO headless_runs (id, name, role, cwd, model, effort, prompt, req_permission_mode, state, created, last_event, resumes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
     this.pump()
     return this.get(id)
@@ -88,7 +92,7 @@ export class Headless {
     const r = this.run(id)
     if (r?.state !== 'queued') return // cancelled or taken since the queue was read
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
-      '--permission-mode', 'default', ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
+      ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default'] : r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
     const env = { TERM: 'dumb', ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }

@@ -2930,7 +2930,7 @@ function headlessRows(machine) {
     status: r.asks.length ? 'blocked' : HL_STATUS[r.state] ?? 'idle', statusSince: r.last_event, lastActivity: r.last_event, cwd: r.cwd, project: projectName(r.cwd),
     recap: r.reason, context: null, background: 0, asks: r.asks.length > 0, question: r.asks[0] ? `${r.asks[0].tool}: ${JSON.stringify(r.asks[0].input).slice(0, 200)}` : null,
     picker: null, lastPrompt: null, session: r.session, model: r.init_model || r.model ? { id: r.init_model ?? null, name: r.init_model ?? r.model, effort: r.effort, source: 'headless', routed: null } : null, // WP-300: the resolved model from init wins
-    task: null, headless: true, headlessState: r.state,
+    permissionMode: r.permission_mode ?? r.req_permission_mode ?? null, task: null, headless: true, headlessState: r.state,
   }))
 }
 // The Conversation view's per-agent routes for a headless row: the run's own transcript (the same JSONL a TUI session writes)

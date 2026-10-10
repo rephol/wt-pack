@@ -318,6 +318,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Model and `/` picker (WP-300):** the stream-json `init` event's `model`, `slash_commands` and `skills` are stored on the run. The
   Conversation view shows the resolved model (plus the run's effort, when set) like a herdr agent, and the composer's `/` picker
   lists exactly those commands and skills.
+- **Permissions (WP-300):** a headless run no longer forces `--permission-mode default`: Claude Code's own settings decide. Spawn
+  takes an optional `permissionMode` (`default|acceptEdits|plan|auto|bypassPermissions`; `agents.sh spawn --headless … --permission-mode m`),
+  and the Conversation view's Model section shows the mode the run reports. Read-only roles (reviewer, pr-watcher, auditor) always run
+  `default` and reject any other mode, so their tool policy still applies (a permission rule in the user's settings can still pre-allow a tool).
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
   `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
   the dashboard session; an agent pane may only spawn and message.

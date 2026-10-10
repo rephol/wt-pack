@@ -50,7 +50,7 @@ test('spawn runs a prompt, records the session, ends idle; init facts land on th
   assert.deepEqual(results(r.id), ['echo: hello'])
   const init = events(r.id).find((e) => e.type === 'system/init').event
   assert.ok(init.argv.includes('--permission-prompt-tool') && init.argv.includes('stdio'))
-  assert.equal(init.argv[init.argv.indexOf('--permission-mode') + 1], 'default')
+  assert.ok(!init.argv.includes('--permission-mode')) // WP-300: no forced mode; the user's settings apply
   assert.equal(row.pid > 0, true)
   assert.equal(h.live().length, 1)
 })
@@ -450,4 +450,19 @@ test('roles allowlist: only listed roles spawn; * or none = any', async (t) => {
   assert.equal(h.spawn({ role: 'pr-watcher', cwd }).role, 'pr-watcher')
   const any = await setup(t, { roles: ['*'] })
   assert.equal(any.h.spawn({ role: 'worker', cwd: any.cwd }).role, 'worker')
+})
+
+test('permissionMode: passed through for a worker, validated, and a read-only role stays on default (WP-300)', async (t) => {
+  const { h, events, cwd } = await setup(t)
+  const w = h.spawn({ role: 'worker', cwd, prompt: 'hi', permissionMode: 'acceptEdits' })
+  await until(() => events(w.id).some((e) => e.type === 'system/init'), 'init')
+  const argv = events(w.id).find((e) => e.type === 'system/init').event.argv
+  assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'acceptEdits')
+  assert.equal(h.get(w.id).req_permission_mode, 'acceptEdits')
+  assert.throws(() => h.spawn({ role: 'worker', cwd, permissionMode: 'nope' }), /permissionMode/)
+  assert.throws(() => h.spawn({ role: 'reviewer', cwd, permissionMode: 'bypassPermissions' }), /read-only/)
+  const r = h.spawn({ role: 'reviewer', cwd, prompt: 'hi' })
+  await until(() => events(r.id).some((e) => e.type === 'system/init'), 'init')
+  const ra = events(r.id).find((e) => e.type === 'system/init').event.argv
+  assert.equal(ra[ra.indexOf('--permission-mode') + 1], 'default')
 })
