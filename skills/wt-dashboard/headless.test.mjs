@@ -2,11 +2,11 @@
 // no real agent. Run: node --test headless.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultName, Headless } from './headless.mjs'
+import { DEFAULT_PLUGINS, defaultName, Headless } from './headless.mjs'
 
 const FAKE = join(import.meta.dirname, 'test-fixtures', 'fake-claude.mjs')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -517,4 +517,29 @@ test('a run is told its role and persona by env (WT_ROLE/WT_PERSONA); a bad pers
   const w = h.spawn({ role: 'worker', cwd, prompt: 'hi' })
   await until(() => events(w.id).some((e) => e.type === 'system/init'), 'init')
   assert.ok(!events(w.id).find((e) => e.type === 'system/init').event.env.includes('WT_PERSONA'))
+})
+
+// WP-309: a run turns the user's other plugins off with --settings, keeping its own list (or the server default) on.
+async function pluginsRun(t, o, spawnExtra) {
+  const home = await mkdtemp(join(tmpdir(), 'hl-home-')); await mkdir(join(home, '.claude'))
+  await writeFile(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'a@x': true, 'b@y': true, 'off@z': false } }))
+  const { h, start, events } = await setup(t, { env: { HOME: home, PATH: process.env.PATH }, ...o })
+  const r = start('hi', spawnExtra)
+  await until(() => events(r.id).some((e) => e.type === 'system/init'), 'init')
+  const argv = events(r.id).find((e) => e.type === 'system/init').event.argv
+  const i = argv.indexOf('--settings')
+  return { h, r, flag: i < 0 ? null : JSON.parse(argv[i + 1]) }
+}
+test('plugins: default turns every enabled plugin off; a run list keeps its own on; * does not trim; bad input is a 400 (WP-309)', async (t) => {
+  assert.deepEqual((await pluginsRun(t)).flag, { enabledPlugins: { 'a@x': false, 'b@y': false } })
+  assert.deepEqual((await pluginsRun(t, {}, { plugins: ['a@x'] })).flag, { enabledPlugins: { 'b@y': false } })
+  assert.deepEqual((await pluginsRun(t, { plugins: ['b@y'] })).flag, { enabledPlugins: { 'a@x': false } }) // the server default
+  assert.equal((await pluginsRun(t, { plugins: ['*'] })).flag, null)
+  assert.equal(DEFAULT_PLUGINS, '') // the one value to flip for the default
+  const { h, cwd } = await setup(t)
+  for (const bad of ['a@x', [1], ['bad id!'], Array(41).fill('a@x')]) assert.throws(() => h.spawn({ role: 'worker', cwd, plugins: bad }), (e) => e.status === 400)
+})
+test('plugins: each run stores its own list is stored for a resume to rebuild (WP-309)', async (t) => {
+  const { h, r } = await pluginsRun(t, {}, { plugins: ['a@x'] })
+  assert.equal(h.get(r.id).req_plugins, '["a@x"]')
 })

@@ -12,6 +12,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { Text } from '@astryxdesign/core/Text'
 import { Selector } from '@astryxdesign/core/Selector'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
+import { CheckboxList, CheckboxListItem } from '@astryxdesign/core/CheckboxList'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -56,6 +57,8 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const [project, setProject] = useState<string>('')
   const [cwd, setCwd] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [plugs, setPlugs] = useState<string[] | null>(null) // WP-309: null = untouched, send nothing (the server default applies)
+  const hlPlugins = useQuery({ queryKey: ['headless-plugins'], queryFn: () => api<{ plugins: string[]; keep: string[] }>('/api/headless/plugins'), enabled: false })
   const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of a herdr pane
   const [pmode, setPmode] = useState('') // '' = the user's own Claude Code settings
   const [model, setModel] = useState(''), [effort, setEffort] = useState(''), [hname, setHname] = useState(''), [hcwd, setHcwd] = useState('') // WP-302: blank = the server's defaults
@@ -63,7 +66,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const proj = list.find((p) => p.name === (project || (defaultProject !== 'all' ? defaultProject : ''))) ?? list[0]
   const spawn = useMutation({
     mutationFn: () => headless
-      ? api<{ id: string }>('/api/headless', { method: 'POST', body: JSON.stringify({ role: kind, cwd: hcwd.trim() || (start === 'main' ? proj?.root : cwd || proj?.root), prompt: prompt.trim() || undefined, permissionMode: pmode || undefined, model: model || undefined, effort: effort || undefined, name: hname.trim() || undefined }) })
+      ? api<{ id: string }>('/api/headless', { method: 'POST', body: JSON.stringify({ role: kind, cwd: hcwd.trim() || (start === 'main' ? proj?.root : cwd || proj?.root), prompt: prompt.trim() || undefined, permissionMode: pmode || undefined, plugins: plugs ?? undefined, model: model || undefined, effort: effort || undefined, name: hname.trim() || undefined }) })
         .then((r) => ({ key: `${agents.find((a) => a.local)?.machine ?? 'local'}/${r.id}`, name: r.id, prompted: !!prompt.trim() }))
       : api<{ key: string; name: string; prompted: boolean }>('/api/agents/spawn', { method: 'POST', body: JSON.stringify({ kind, project: proj?.name, cwd: start === 'main' ? undefined : cwd || undefined, prompt: prompt.trim() || undefined }) }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['overview'] }); onClose(); onOpenAgent(r.key) },
@@ -111,6 +114,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
                     options={[{ value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' }, { value: 'haiku', label: 'Haiku' }, { value: 'claude-haiku-5-5', label: 'Haiku 5.5 (claude-haiku-5-5)' }]} />
                   <Selector label="Effort" width="100%" value={effort} onChange={setEffort}
                     options={[{ value: '', label: 'Default' }, ...['low', 'medium', 'high', 'xhigh', 'max'].map((v) => ({ value: v, label: v }))]} />
+                  <PluginsField plugins={hlPlugins} value={plugs} onChange={setPlugs} />
                   <TextInput label="Name (optional)" value={hname} onChange={setHname} placeholder="e.g. pr-watcher-1" />
                   <TextInput label="Working directory (optional)" value={hcwd} onChange={setHcwd} placeholder={start === 'main' ? proj?.root : 'Overrides the worktree above'} />
                 </VStack>
@@ -128,6 +132,21 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
         </ScrollableArea>
       </div>
     </Dialog>
+  )
+}
+
+// WP-309: the user's enabled plugins, none ticked = only wt-pack loads (the server default); ticking some keeps them on for this run.
+function PluginsField({ plugins, value, onChange }: { plugins: { data?: { plugins: string[]; keep: string[] }; refetch: () => unknown }; value: string[] | null; onChange: (v: string[] | null) => void }) {
+  useEffect(() => { plugins.refetch() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const d = plugins.data
+  if (!d?.plugins.length) return null
+  return (
+    <VStack gap={1}>
+      <CheckboxList label="Plugins" value={value ?? d.keep} onChange={(v: string[]) => onChange(v)}>
+        {d.plugins.map((id) => <CheckboxListItem key={id} value={id} label={id} />)}
+      </CheckboxList>
+      <Text type="supporting" size="sm">wt-pack always loads</Text>
+    </VStack>
   )
 }
 

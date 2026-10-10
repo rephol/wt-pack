@@ -20,7 +20,7 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Pins } from './pins.mjs'
-import { Headless, ROLE as ROLE_RE, defaultName } from './headless.mjs'
+import { Headless, ROLE as ROLE_RE, defaultName, enabledPlugins } from './headless.mjs'
 import { open as openDb } from './store.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
@@ -2995,6 +2995,7 @@ async function headlessApi(req, res, url, parts) {
   const id = parts[2], sub = parts[3], h = hl()
   if (req.method === 'GET') {
     if (!id) return send(res, 200, h.list())
+    if (id === 'plugins' && !sub) return send(res, 200, { plugins: enabledPlugins(process.env.HOME), keep: h.plugins }) // WP-309: before the run-id lookup
     if (!h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
     if (!sub) return send(res, 200, h.get(id))
     if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Math.min(500, Number(url.searchParams.get('limit')) > 0 ? Number(url.searchParams.get('limit')) : 500)))
