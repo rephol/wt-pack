@@ -311,8 +311,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   - `WT_HEADLESS_GRACE_MS` (default 5000): the wait between closing stdin and SIGTERM to the recorded pid.
   - `WT_HEADLESS_RESUMES` (default 3): how many times a run that crashes mid-turn is resumed automatically; after that it
     is marked `failed` (`0` = never resume).
-  - When the server restarts, any run still marked live is ended and the reason is recorded. Only the recorded pid
-    is ever killed.
+  - When the server restarts, each run still marked live is resumed by its session id (the old process is killed by its
+    recorded pid only; open asks expire) and its log says `resumed_after_restart`. A working turn is told to continue; an
+    idle run just gets its process back. It counts against `WT_HEADLESS_RESUMES` and the cap; with no session or no resumes
+    left it is marked `failed` with the reason. Runs you stopped or removed stay ended.
 - **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
   again with `--resume`.
 - **Model and `/` picker (WP-300):** the stream-json `init` event's `model`, `slash_commands` and `skills` are stored on the run. The

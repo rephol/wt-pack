@@ -301,16 +301,24 @@ export class Headless {
   // Startup: processes left by a previous server are not ours any more. Mark them ended, expire their asks, say why; kill the
   // recorded pid only when `ps` still shows a stream-json claude there (a reused pid is left alone). Returns the ids reconciled.
   async reconcile() {
-    const out = []
+    const out = [], resumedIdle = []
     for (const r of this.live()) {
       if (this.procs.has(r.id)) continue
       if (r.pid && (await commandOf(r.pid)).includes('stream-json')) try { process.kill(r.pid, 'SIGTERM') } catch { /* gone */ }
       this.#expireAsks(r.id, 'server restarted')
-      this.#end(r.id, 'ended', 'server restarted while it was running; resume by session id')
       out.push(r.id)
+      // WP-304: carry on by session id (a working turn is told to continue, an idle run just gets its process back), up to
+      // WT_HEADLESS_RESUMES times; a run with no session or no resumes left is marked failed. Stopped/removed runs are not live.
+      if (!r.session || r.resumes >= this.resumes) { this.#end(r.id, 'failed', `server restarted while it was running; ${r.session ? 'resumes exhausted' : 'no session to resume'}`); continue }
+      const working = r.state !== 'idle'
+      this.db.prepare("UPDATE headless_runs SET state = 'queued', resumes = resumes + 1, pid = NULL, prompt = ? WHERE id = ?")
+        .run(working ? 'The server restarted and your process was resumed. Continue where you left off.' : null, r.id)
+      this.#note(r.id, 'supervisor', { subtype: 'resumed_after_restart', attempt: r.resumes + 1 })
+      if (!working) resumedIdle.push(r.id)
     }
     for (const q of this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued'").all()) this.#note(q.id, 'supervisor', { subtype: 'requeued_after_restart' })
     this.pump()
+    for (const id of resumedIdle) this.db.prepare("UPDATE headless_runs SET state = 'idle' WHERE id = ? AND state = 'starting'").run(id) // no prompt: nothing is running
     return out
   }
   // Resident memory (KB) of every live process, one `ps` call.
