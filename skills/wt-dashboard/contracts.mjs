@@ -20,6 +20,8 @@ export const ACTIONABLE_KINDS = freeze(['needs-you', 'question', 'mention-user',
 const AGENT_KINDS = freeze(['agent-done', 'agent-stalled', 'ci-failed', 'room-suggestion', 'memory', 'room-created', 'pair-gone', 'dispatch-undelivered'])
 export const categoryOf = (kind) => AGENT_KINDS.includes(kind) ? 'agents' : ACTIONABLE_KINDS.includes(kind) ? 'needs-you' : 'system'
 
+export const AGENT_INFO_KINDS = freeze(['pane', 'headless'])
+
 // A value must be one of `list`; the error has the `{ status: 400 }` shape the API's routes already use.
 export function oneOf(list, v, field) {
   if (!list.includes(v)) throw Object.assign(new Error(`${field}: ${list.join(' | ')}`), { status: 400 })

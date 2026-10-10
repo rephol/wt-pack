@@ -7,7 +7,7 @@ type Question = { question: string; options?: { label: string }[] }
 // WP-310: what kind of agent a chat is for — chosen once and passed down, so pane-only controls (terminal, keys, tags, DND) and
 // headless-only ones (Stop the process, Resume, permissions) are picked in one place instead of ad-hoc `agent.headless` checks.
 export type AgentKind = 'pane' | 'headless'
-export const agentKind = (a: { headless?: boolean }): AgentKind => (a.headless ? 'headless' : 'pane')
+export const agentKind = (a: { headless?: boolean; info?: { kind: AgentKind } | null }): AgentKind => a.info?.kind ?? (a.headless ? 'headless' : 'pane')
 // Stop (kill the process; the run stays resumable) only makes sense while a process exists.
 export const canStop = (kind: AgentKind, state?: string) => kind === 'headless' && (state === 'starting' || state === 'working' || state === 'idle')
 // The list badge: queued runs say so, every other run is just "headless".

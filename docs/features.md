@@ -286,6 +286,14 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - Skills: wt-agents, wt-handoff.
 
 ### Headless agents (WP-293, opt-in)
+- **One AgentInfo (WP-313):** every row of `GET /api/agents` and every `GET /api/headless[/:id]` carries an `info` object of the same
+  type for a herdr pane and a headless run (`AgentInfo` in `skills/wt-dashboard/contracts.d.mts`, built only by `agentinfo.mjs`):
+  a discriminated `kind` (`pane` | `headless`), a common core (name, role, persona, cwd, project, state, resolved `model`, `effort`,
+  `permissionMode`, `plugins`, `sessionId`, `commands`/`skills`, `contextUsed`/`contextWindow`/`contextPct`, `costUsd`, `turns`,
+  `startedAt`, `lastActivity`) and a `pane` part (id, machine, tags, dnd, pair, routed) or a `run` part (id, state, resumes, stuck,
+  reason, pid). A value the server does not know is `null`, never invented (a pane has no cost or plugin list). Context comes from
+  the session transcript's last turn (the WP-201 rule: 200k window, 1M for a `[1m]` model or once a turn passed 200k). The existing
+  fields stay (additive); the Summary's Model section, the Agents list's model and context columns and the composer read `info`.
 - A headless agent is a `claude -p` stream-json process that the dashboard server runs itself: no herdr pane, no
   terminal. It runs under your own Claude login with a minimal env (no API key, no `HERDR_*`). Nothing starts until
   something spawns one: `POST /api/headless {role, cwd, prompt?, model?, effort?, name?}` from the dashboard, or from an

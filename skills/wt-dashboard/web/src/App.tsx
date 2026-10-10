@@ -34,6 +34,7 @@ import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
 import { HeadlessBar, HeadlessStopDialog } from './headless'
 import { agentKind, canStop, headlessBadge } from './headlessData'
+import { contextLabel, modelLabel, modelRows, type AgentInfo } from './agentInfo'
 import { tileCounts } from './overviewData'
 import { useDraft } from './draft'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
@@ -115,6 +116,7 @@ interface Agent {
   picker?: Picker | null
   task: string | null
   headless?: boolean // WP-293: a server-owned run (no pane, no tokens)
+  info?: AgentInfo // WP-313: the one typed shape (pane or headless) the views below read
   headlessState?: string
 }
 type TaskState =
@@ -615,7 +617,6 @@ export default function App() {
 // raw pane tokens fold away under Details. Only what the server already knows — rows without data vanish.
 const TOKEN_LABEL: Record<string, string> = { created: 'Created', project: 'Project', role: 'Role', persona: 'Persona', spawned_by: 'Spawned by', branch: 'Branch', handoff_at: 'Handed off' }
 // 'Sonnet 5.5 · medium' — the friendly name, then the effort when known
-const modelLabel = (m?: Agent['model']) => (m?.name ? (m.effort ? `${m.name} · ${m.effort}${m.effortSource === 'default' ? ' (default)' : ''}` : m.name) : m?.effort ?? '')
 const SHOWN = new Set(['task', 'task_state', 'ticket', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane'])
 function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -643,6 +644,8 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
   const workdir = task?.worktree ?? agent.cwd
   const plan = task?.plan && task.worktree && task.plan.startsWith(task.worktree) ? task.plan.slice(task.worktree.length + 1) : task?.plan
   const details = Object.entries(t).filter(([k]) => !SHOWN.has(k))
+  const info = agent.info // WP-313
+  const ctxText = info ? contextLabel(info) : null
   return (
     <VStack gap={5} isScrollable style={{ paddingTop: 4 }}>
       {agent.question && <Card variant="red"><VStack gap={1}><Text size="sm" weight="semibold">Waiting on you</Text><Text>{agent.question}</Text></VStack></Card>}
@@ -687,27 +690,26 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         {task?.pr && <SummaryRow label="PR"><PrCell pr={task.pr} /></SummaryRow>}
       </SummarySection>
 
-      {(agent.model || agent.permissionMode) && (
+      {info && modelRows(info).length > 0 && (
         <SummarySection title="Model">
-          {agent.permissionMode && <SummaryRow label="Permissions"><Text size="sm">{agent.permissionMode}</Text></SummaryRow>}
-          {agent.model && <SummaryRow label="Running">
-            <Tooltip content={agent.model.id ?? `from the ${agent.model.source}`}>
-              <Text size="sm">{modelLabel(agent.model)}</Text>
-            </Tooltip>
-          </SummaryRow>}
-          {agent.model?.routed && <Text size="sm" type="supporting">{`routed ${agent.model.routed}, running ${agent.model.name?.split(' ')[0].toLowerCase() ?? 'another tier'}`}</Text>}
+          {modelRows(info).map(([label, text]) => (
+            <SummaryRow key={label} label={label}>
+              {label === 'Running' ? <Tooltip content={info.model?.id ?? 'resolved model'}><Text size="sm">{text}</Text></Tooltip> : <Text size="sm">{text}</Text>}
+            </SummaryRow>
+          ))}
+          {info.kind === 'pane' && info.pane.routed && <Text size="sm" type="supporting">{`routed ${info.pane.routed}, running ${info.model?.name?.split(' ')[0].toLowerCase() ?? 'another tier'}`}</Text>}
         </SummarySection>
       )}
 
-      {(agent.recap || agent.context) && (
+      {(agent.recap || ctxText) && (
         <SummarySection title="Activity">
           {agent.recap && <Text size="sm">{agent.recap}</Text>}
-          {agent.context && (
+          {info && ctxText && (
             <SummaryRow label="Context">
               <VStack gap={1}>
-                <Text size="sm">{`${agent.context.pct}% · ${agent.context.used} / ${agent.context.total}`}</Text>
-                <ProgressBar label={`Context ${agent.context.pct}%`} isLabelHidden value={agent.context.pct}
-                  variant={agent.context.pct >= 80 ? 'error' : agent.context.pct >= 60 ? 'warning' : 'accent'} />
+                <Text size="sm">{ctxText}</Text>
+                <ProgressBar label={`Context ${info.contextPct}%`} isLabelHidden value={info.contextPct ?? 0}
+                  variant={(info.contextPct ?? 0) >= 80 ? 'error' : (info.contextPct ?? 0) >= 60 ? 'warning' : 'accent'} />
               </VStack>
             </SummaryRow>
           )}
@@ -931,7 +933,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 {rows.map((a) => {
                   const t = taskOf(a)
                   const what = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap
-                  const line2 = [needsYou(a) ? 'needs you' : a.status, taskLabel(a.tags) ?? what, a.local ? null : a.machine, a.model?.name ?? null, a.context ? `${a.context.pct}%` : null].filter(Boolean).join(' · ')
+                  const line2 = [needsYou(a) ? 'needs you' : a.status, taskLabel(a.tags) ?? what, a.local ? null : a.machine, a.info?.model?.name ?? null, a.info?.contextPct != null ? `${a.info.contextPct}%` : null].filter(Boolean).join(' · ')
                   return (
                     <div key={a.key} role="button" tabIndex={0} onClick={() => onOpen(a.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(a.key)}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px', minWidth: 0, cursor: 'pointer', borderBottom: '1px solid var(--color-border-default, rgba(128,128,128,.2))', background: selected === a.key ? 'var(--color-background-secondary, rgba(128,128,128,.12))' : undefined }}>
@@ -991,10 +993,10 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                         case 'branch': return <Text type="code" color={color} maxLines={1}>{t?.branch ?? shortPath(a.cwd) ?? '—'}</Text>
                         case 'project': return <Text type="supporting" maxLines={1}>{a.project ?? '—'}</Text>
                         case 'role': return <Text type="supporting" maxLines={1}>{roleTitle(a.pool)}</Text>
-                        case 'model': return <Text size="sm" maxLines={1}>{modelLabel(a.model)}</Text>
-                        case 'context': return a.context ? (
-                          <ProgressBar label="Context" isLabelHidden hasValueLabel value={a.context.pct}
-                            variant={a.context.pct > 80 ? 'error' : a.context.pct > 60 ? 'warning' : 'neutral'} />
+                        case 'model': return <Text size="sm" maxLines={1}>{modelLabel(a.info)}</Text>
+                        case 'context': return a.info?.contextPct != null ? (
+                          <ProgressBar label="Context" isLabelHidden hasValueLabel value={a.info.contextPct}
+                            variant={a.info.contextPct > 80 ? 'error' : a.info.contextPct > 60 ? 'warning' : 'neutral'} />
                         ) : <Text type="supporting">—</Text>
                       }
                     }
@@ -1196,9 +1198,11 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   // The pane's status line is exact (it knows the window); the transcript estimate fills in when it's hidden.
   const ctx = useMemo(() => {
     if (agent.context) return { pct: agent.context.pct, text: `${agent.context.used} / ${agent.context.total}` }
+    const i = agent.info // WP-313: the server's number (transcript tail) before the client's own estimate
+    if (i?.contextPct != null && i.contextUsed != null && i.contextWindow) return { pct: i.contextPct, text: `${fmtTokens(i.contextUsed)} / ${fmtTokens(i.contextWindow)}` }
     const c = contextUsage(msgs)
     return c && { pct: c.pct, text: `${fmtTokens(c.used)} / ${fmtTokens(c.window)}` }
-  }, [agent.context, msgs])
+  }, [agent.context, agent.info, msgs])
   const streamErr = live && stream.error
   // Sent while the agent works: Claude Code takes it at its next step. Shown as "queued" until the
   // transcript has it (matched on its first line), or 15s after the agent is idle again.

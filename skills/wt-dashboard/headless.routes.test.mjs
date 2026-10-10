@@ -161,6 +161,10 @@ test('Agents list shows the run (headless:true); agents() (pane lookup) never do
   const row = ag.find((x) => x.id === r.id)
   assert.match(row.name, /^[a-z0-9_-]+-reviewer-\d\d$/); assert.equal(row.headless, true); assert.equal(row.tags.role, 'reviewer'); assert.equal(row.status, 'idle')
   assert.equal(row.pool, 'reviewer') // WP-303: in its role group, not Other
+  // WP-313: one typed AgentInfo on every row, pane or headless
+  assert.equal(row.info.kind, 'headless'); assert.equal(row.info.run.id, r.id); assert.equal(row.info.role, 'reviewer'); assert.equal(row.info.state, 'idle')
+  assert.equal(ag.find((x) => x.id === 'w9:p1').info.kind, 'pane')
+  const hv = await json(`/api/headless/${r.id}`); assert.equal(hv.info.kind, 'headless'); assert.equal(hv.state, row.headlessState) // additive: the run row's own fields stay
   assert.ok(ag.some((x) => x.id === 'w9:p1' && !x.headless))
   // agents() (roomAuthor's pane lookup, Dispatch, token sync) knows only herdr panes: the run's id is no pane identity
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': r.id }, body: { role: 'worker', cwd: root } })).status, 403)

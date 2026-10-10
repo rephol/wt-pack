@@ -21,6 +21,7 @@ import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.m
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Pins } from './pins.mjs'
 import { Headless, ROLE as ROLE_RE, SEND_FILE, defaultName, enabledPlugins } from './headless.mjs'
+import { paneInfo, headlessInfo } from './agentinfo.mjs'
 import { open as openDb } from './store.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
@@ -577,7 +578,7 @@ async function listAgents(m) {
       ? tails.get(`stall:${k}`, p.tail, (t) => jevAsk('STALL', { pane: t }, stallJudge.questions(), (x) => ['stuck', 'looping'].includes(stallJudge.decide(x)))
         .then((x) => stallJudge.decide(x) ?? undefined))
       : undefined
-    out.push({
+    const row = {
       key: `${m.label}/${a.pane_id}`,
       id: a.pane_id,
       machine: m.label,
@@ -607,7 +608,9 @@ async function listAgents(m) {
       lastPrompt: p.lastPrompt ?? null,
       session,
       model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id), settings: m.local ? claudeSettings() : null }),
-    })
+    }
+    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null) // WP-313: the one typed shape, additive to the fields above
+    out.push(row)
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
   return out
@@ -692,6 +695,36 @@ async function transcriptModel(id) {
   } catch {}
   modelCache.set(id, { mtime: st.mtimeMs, model })
   return model
+}
+
+// WP-313: the last assistant turn's token usage in a transcript (the numbers behind the context %, WP-201's rule in agentinfo.mjs
+// contextOf) and the largest context seen in the tail. Tail-only, cached per mtime, like transcriptModel.
+const usageCache = new Map() // session id → { mtime, usage }
+async function transcriptUsage(id) {
+  const f = id && (await findTranscript(id).catch(() => null))
+  const st = f && statSync(f, { throwIfNoEntry: false })
+  if (!st) return null
+  if (usageCache.get(id)?.mtime === st.mtimeMs) return usageCache.get(id).usage
+  let usage = null
+  try {
+    const h = await fopen(f, 'r')
+    try {
+      const n = Math.min(st.size, 512 * 1024), buf = Buffer.alloc(n)
+      await h.read(buf, 0, n, st.size - n)
+      let peak = 0
+      for (const l of buf.toString('utf8').split('\n').reverse()) {
+        if (!l.includes('"usage"') || !l.includes('"assistant"')) continue
+        let u; try { u = JSON.parse(l).message?.usage } catch { continue }
+        if (!u || String(JSON.parse(l).message?.model ?? '').startsWith('<')) continue
+        const x = { in: u.input_tokens ?? 0, cr: u.cache_read_input_tokens ?? 0, cw: u.cache_creation_input_tokens ?? 0 }
+        peak = Math.max(peak, x.in + x.cr + x.cw)
+        usage ??= x
+      }
+      if (usage) usage.peak = peak
+    } finally { await h.close() }
+  } catch {}
+  usageCache.set(id, { mtime: st.mtimeMs, usage })
+  return usage
 }
 
 // ~/.claude/settings.json's model/effort defaults, re-read when the file changes.
@@ -2923,15 +2956,22 @@ const headlessSubs = new Map() // run id → flush fns of open SSE streams
 const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queued: 'idle', ended: 'exited', failed: 'exited' }
 // A headless run as a row of the Agents list (same shape as a herdr agent, plus headless:true). Not part of agents(): Dispatch,
 // token sync and the pane routes only ever see herdr agents.
-function headlessRows(machine) {
+// A run row (hl().get / list) with its AgentInfo attached (WP-313), for the /api/headless routes.
+async function withInfo(v) {
+  return { ...v, info: headlessInfo(v, { state: v.asks?.length ? 'blocked' : HL_STATUS[v.state] ?? 'idle', project: projectName(v.cwd), usage: await transcriptUsage(v.session) }) }
+}
+async function headlessRows(machine) {
   // WP-303: only live or queued runs are agents; an ended/failed/removed run stays in /api/headless history, not the list.
-  return hl().list().filter((r) => r.live || r.state === 'queued').map((r) => ({
+  const rows = hl().list().filter((r) => r.live || r.state === 'queued').map((r) => ({
     key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, ...(({ id, by }) => ({ pool: id, roleBy: by }))(resolveRole(roleStore.roles, { token: r.role, workspace: null, name: r.name })), tags: { role: r.role, ...(r.persona ? { persona: r.persona } : {}) }, paneTokens: {}, workspace: null,
     status: r.asks.length ? 'blocked' : HL_STATUS[r.state] ?? 'idle', statusSince: r.last_event, lastActivity: r.last_event, cwd: r.cwd, project: projectName(r.cwd),
     recap: r.reason, context: null, background: 0, asks: r.asks.length > 0, question: r.asks[0] ? `${r.asks[0].tool}: ${JSON.stringify(r.asks[0].input).slice(0, 200)}` : null,
     picker: null, lastPrompt: null, session: r.session, model: r.init_model || r.model ? { id: r.init_model ?? null, name: r.init_model ?? r.model, effort: r.effort, source: 'headless', routed: null } : null, // WP-300: the resolved model from init wins
     permissionMode: r.permission_mode ?? r.req_permission_mode ?? null, task: null, headless: true, headlessState: r.state,
   }))
+  // WP-313: the same typed AgentInfo as a pane agent (context from the run's own transcript), additive to the fields above
+  for (const row of rows) row.info = headlessInfo(hl().run(row.id), { key: row.key, state: row.status, project: row.project, usage: await transcriptUsage(row.session) })
+  return rows
 }
 // The Conversation view's per-agent routes for a headless row: the run's own transcript (the same JSONL a TUI session writes)
 // feeds the existing stream; send/stop/remove go to the supervisor instead of herdr.
@@ -2952,7 +2992,7 @@ async function headlessAgentRoute(req, res, url, parts) {
   if (sub === 'stream' && req.method === 'GET') return streamTranscript(req, res, r.session, url)
   if (sub === 'activity' && req.method === 'GET') return send(res, 200, {})
   if (sub === 'commands' && req.method === 'GET') return send(res, 200, await headlessCommands(r))
-  if (req.method === 'GET' && !sub) return send(res, 200, { ...hl().get(id), text: '', turns: [], runTurns: r.turns }) // WP-305: the run's `turns` count would collide with the pane view's turns[]
+  if (req.method === 'GET' && !sub) return send(res, 200, { ...(await withInfo(hl().get(id))), text: '', turns: [], runTurns: r.turns }) // WP-305: the run's `turns` count would collide with the pane view's turns[]
   if (req.method === 'GET') return send(res, 404, { error: 'not found' })
   await rooms.load()
   if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
@@ -2994,10 +3034,10 @@ async function headlessApi(req, res, url, parts) {
   }
   const id = parts[2], sub = parts[3], h = hl()
   if (req.method === 'GET') {
-    if (!id) return send(res, 200, h.list())
+    if (!id) return send(res, 200, await Promise.all(h.list().map(withInfo)))
     if (id === 'plugins' && !sub) return send(res, 200, { plugins: enabledPlugins(process.env.HOME), keep: h.plugins }) // WP-309: before the run-id lookup
     if (!h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
-    if (!sub) return send(res, 200, h.get(id))
+    if (!sub) return send(res, 200, await withInfo(h.get(id)))
     if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Math.min(500, Number(url.searchParams.get('limit')) > 0 ? Number(url.searchParams.get('limit')) : 500)))
     if (sub === 'stream') return headlessStream(req, res, url, id)
     return send(res, 404, { error: 'not found' })
@@ -3518,7 +3558,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, code, out)
       }
       if (parts[0] === 'api' && parts[1] === 'agents') {
-        if (!parts[2]) { const ag = await agents(); return send(res, 200, [...ag, ...headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label)]) }
+        if (!parts[2]) { const ag = await agents(); return send(res, 200, [...ag, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))]) }
         if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
         // /api/agents/:machine/:pane[/stream]
         const m = await machineBy(decodeURIComponent(parts[2]))
