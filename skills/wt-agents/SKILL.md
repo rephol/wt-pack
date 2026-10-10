@@ -34,6 +34,8 @@ scripts/agents.sh dnd <name|pane> off          # clear dnd
 scripts/agents.sh rm <name|pane> [--force]
 scripts/agents.sh respawn <name|pane> [--force]  # same name/role/cwd/tokens, claude --resume, in a NEW tab
 scripts/agents.sh respawn --stale [--force]      # every pool agent lacking the kill shim or plugin guard
+scripts/agents.sh spawn --headless <role> [cwd] [--prompt t] [--model m] [--effort e] [--name n]  # WP-293: a wt-dashboard headless run, no pane; prints "<name> <id> <state>"
+scripts/agents.sh list --headless | rm --headless <id>  # the dashboard's headless runs; stop one (may need the dashboard: 403 from a pane)
 ```
 
 ## DND and pairing
