@@ -20,6 +20,8 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Pins } from './pins.mjs'
+import { Headless } from './headless.mjs'
+import { open as openDb } from './store.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
 import { Changes } from './changes.mjs'
@@ -2408,6 +2410,7 @@ export const hasSession = (cookieHeader, token = SESSION) =>
   (cookieHeader ?? '').split(';').some((c) => c.trim() === `hd_session=${token}`)
 export function needsSession(method, path, headers) {
   if (method === 'GET' || method === 'HEAD' || !path.startsWith('/api/')) return false
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/headless(\/[^/]+\/message)?$/.test(path)) return false // WP-293: agents spawn/message headless runs (headlessApi checks the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/rooms\/[^/]+\/messages$/.test(path)) return false // agent post
   if (headers['x-herdr-pane'] && method === 'DELETE' && /^\/api\/rooms\/tmp-[^/]+$/.test(path)) return false // agent `room delete` (agentMayDelete checks the owner)
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
@@ -2889,6 +2892,86 @@ export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), ca
     return got
   } catch { return null }
 }
+// WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
+// POST /api/headless; built lazily so importing this module (tests) opens nothing. Caps/timeouts: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN.
+let headless
+const hl = () => headless ??= new Headless({
+  db: openDb(join(DATA, 'wt.db')), cmd: process.env.WT_HEADLESS_CMD || 'claude',
+  cap: Number(process.env.WT_HEADLESS_CAP) || 3, idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
+  graceMs: Number(process.env.WT_HEADLESS_GRACE_MS) || 5000,
+  onChange: (id, what) => { changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f() },
+})
+const headlessSubs = new Map() // run id → flush fns of open SSE streams
+const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queued: 'idle', ended: 'exited', failed: 'exited' }
+// A headless run as a row of the Agents list (same shape as a herdr agent, plus headless:true). Not part of agents(): Dispatch,
+// token sync and the pane routes only ever see herdr agents.
+function headlessRows(machine) {
+  const cut = Date.now() - 6 * 3_600_000
+  return hl().list().filter((r) => r.live || r.state === 'queued' || (r.ended ?? r.created) > cut).map((r) => ({
+    key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, pool: 'other', roleBy: 'none', tags: { role: r.role }, paneTokens: {}, workspace: null,
+    status: r.asks.length ? 'blocked' : HL_STATUS[r.state] ?? 'idle', statusSince: r.last_event, lastActivity: r.last_event, cwd: r.cwd, project: projectName(r.cwd),
+    recap: r.reason, context: null, background: 0, asks: r.asks.length > 0, question: r.asks[0] ? `${r.asks[0].tool}: ${JSON.stringify(r.asks[0].input).slice(0, 200)}` : null,
+    picker: null, lastPrompt: null, session: r.session, model: r.model ? { id: null, name: r.model, effort: r.effort, source: 'headless', routed: null } : null,
+    task: null, headless: true, headlessState: r.state,
+  }))
+}
+// The Conversation view's per-agent routes for a headless row: the run's own transcript (the same JSONL a TUI session writes)
+// feeds the existing stream; send/stop/remove go to the supervisor instead of herdr.
+async function headlessAgentRoute(req, res, url, parts) {
+  const id = decodeURIComponent(parts[3]), sub = parts[4], r = hl().run(id)
+  if (!r) return send(res, 404, { error: 'unknown headless agent' })
+  if (sub === 'stream' && req.method === 'GET') return streamTranscript(req, res, r.session, url)
+  if (sub === 'activity' && req.method === 'GET') return send(res, 200, {})
+  if (sub === 'commands' && req.method === 'GET') return send(res, 200, [])
+  if (req.method === 'GET' && !sub) return send(res, 200, { text: '', ...hl().get(id) })
+  if (req.method === 'GET') return send(res, 404, { error: 'not found' })
+  if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
+  if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
+  const b = JSON.parse((await body(req)) || '{}')
+  if (sub === 'stop') return send(res, 200, hl().interrupt(id) && { ok: true })
+  if (!sub && req.method === 'POST') return send(res, 200, hl().message(id, b.text) && { ok: true })
+  if (!sub && req.method === 'DELETE') return send(res, 200, hl().stop(id, 'removed by the user') && { ok: true })
+  send(res, 404, { error: 'not found for a headless agent' })
+}
+async function headlessApi(req, res, url, parts) {
+  const json = async () => { if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 }); return JSON.parse((await body(req)) || '{}') }
+  const id = parts[2], sub = parts[3], h = hl()
+  if (req.method === 'GET') {
+    if (!id) return send(res, 200, h.list())
+    if (!h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
+    if (!sub) return send(res, 200, h.get(id))
+    if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Number(url.searchParams.get('limit')) || 500))
+    if (sub === 'stream') return headlessStream(req, res, url, id)
+    return send(res, 404, { error: 'not found' })
+  }
+  // Writes: the dashboard user, or (spawn, message) an agent pane that roomAuthor verifies.
+  const who = await roomAuthor(req)
+  if (who.kind !== 'user' && !(req.method === 'POST' && (!id || sub === 'message'))) return send(res, 403, { error: 'dashboard only' })
+  if (req.method === 'POST' && !id) {
+    const b = await json()
+    try { if (!statSync(b.cwd).isDirectory()) throw 0 } catch { return send(res, 400, { error: 'cwd: an existing directory' }) }
+    return send(res, 200, h.spawn(b))
+  }
+  if (req.method === 'POST' && id && sub) {
+    const b = await json()
+    if (sub === 'message') return send(res, 200, h.message(id, b.text))
+    if (sub === 'interrupt') return send(res, 200, h.interrupt(id))
+    if (sub === 'answer') return send(res, 200, h.answer(id, b.ask, b))
+    if (sub === 'stop') return send(res, 200, h.stop(id, 'stopped by the user'))
+    if (sub === 'resume') return send(res, 200, h.resume(id, b.text))
+  }
+  send(res, 404, { error: 'not found' })
+}
+// Snapshot-then-stream: events after ?after= (or Last-Event-ID), then each new one. `id:` is the store's seq, so a reconnect resumes exactly.
+function headlessStream(req, res, url, id) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+  let last = Number(req.headers['last-event-id'] ?? url.searchParams.get('after')) || 0
+  const flush = () => { for (const e of hl().events(id, last, 500).events) { res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`); last = e.seq } }
+  flush()
+  const subs = headlessSubs.get(id) ?? new Set(); headlessSubs.set(id, subs); subs.add(flush)
+  const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
+  req.on('close', () => { clearInterval(beat); subs.delete(flush); if (!subs.size) headlessSubs.delete(id) })
+}
 async function roomAuthor(req) {
   if (hasSession(req.headers.cookie)) {
     const p = rooms.settings.profile
@@ -3355,6 +3438,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, headers)
         return res.end(await readFile(f))
       }
+      if (parts[0] === 'api' && parts[1] === 'headless') return await headlessApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (url.pathname === '/api/usage' && req.method === 'GET') return send(res, 200, await usageApi())
       if (url.pathname === '/api/projects' && req.method === 'GET') return send(res, 200, await projectsApi())
       if (url.pathname === '/api/projects' && req.method === 'POST') return projectMutation(req, res, async () => createProject(projectDeps(), JSON.parse((await body(req)) || '{}')))
@@ -3370,7 +3454,8 @@ const server = http.createServer(async (req, res) => {
         return send(res, code, out)
       }
       if (parts[0] === 'api' && parts[1] === 'agents') {
-        if (!parts[2]) return send(res, 200, await agents())
+        if (!parts[2]) { const ag = await agents(); return send(res, 200, [...ag, ...headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label)]) }
+        if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
         // /api/agents/:machine/:pane[/stream]
         const m = await machineBy(decodeURIComponent(parts[2]))
         if (!m) return send(res, 404, { error: 'unknown machine' })
@@ -3874,6 +3959,8 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
       setInterval(dt, 30_000)
     })
     recordStart().catch((e) => console.error('starts:', e.message))
+    hl().reconcile().then((ids) => ids.length && console.log(`headless: ${ids.length} run(s) from a previous server marked ended`)).catch((e) => console.error('headless:', e.message))
+    setInterval(() => { try { hl().tick() } catch (e) { console.error('headless:', e.message) } }, 15_000).unref()
     refreshKeys() // opens wt.db (and runs any import) only in a listening server
     inbox.add({ kind: 'server', key: `server|start|${STARTED_AT}`, title: `Server started (${MANAGED_BY === 'app' ? 'app-managed' : MANAGED_BY})`, body: `pid ${process.pid}`, target: {}, quiet: true })
   }))
