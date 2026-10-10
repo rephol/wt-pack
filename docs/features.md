@@ -689,7 +689,8 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   returns haiku for any role — every role floors to sonnet at least, planners still to opus. This applies
   only to a *spawned session's own default* tier (no explicit `--model`); subagent routing (`pick`/`explain`,
   used by wt-review's lens agents and wt-research's shards) is untouched and may still choose haiku. `floor
-  --json` adds `source` (`role-floor` or `session-floor`) showing which one set the printed tier. `pick`/
+  --json` adds `source` (`role-floor` or `session-floor`) showing which one set the printed tier (`explicit` when the caller passed `--model`: `tier` is then that tier, matching the
+  `model` id and `effort`). `pick`/
   `explain` also take a `--session` flag for a caller that routes a fresh session's own tier by task text
   rather than by role floor (`wt-handoff`'s spawn path): it applies the same sonnet floor to that pick
   (and to an explicit `--model`, unlike the unflagged case), while a call with no `--session` — every
