@@ -32,8 +32,8 @@ import { withReply } from './replyQuote'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
-import { HeadlessBar } from './headless'
-import { headlessBadge } from './headlessData'
+import { HeadlessBar, HeadlessStopDialog } from './headless'
+import { agentKind, canStop, headlessBadge } from './headlessData'
 import { tileCounts } from './overviewData'
 import { useDraft } from './draft'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
@@ -647,7 +647,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
     <VStack gap={5} isScrollable style={{ paddingTop: 4 }}>
       {agent.question && <Card variant="red"><VStack gap={1}><Text size="sm" weight="semibold">Waiting on you</Text><Text>{agent.question}</Text></VStack></Card>}
 
-      {agent.local && !agent.headless && (
+      {agent.local && agentKind(agent) === 'pane' && (
         <HStack gap={2} align="center" wrap="wrap">
           <Button label={dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb'} size="sm" variant={dnd ? 'secondary' : 'ghost'} onClick={onToggleDnd} />
           {pairTicket && <Badge variant="neutral" label={`paired · ${pairTicket}`} />}
@@ -718,7 +718,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<Text size="sm" weight="semibold">Details</Text>}>
           <VStack gap={1} style={{ paddingTop: 8 }}>
             {details.map(([k, v]) => <SummaryRow key={k} label={TOKEN_LABEL[k] ?? k.replaceAll('_', ' ')}><Text size="sm">{k === 'handoff_at' && /^\d+$/.test(v) ? new Date(Number(v) * 1000).toLocaleString() : v}</Text></SummaryRow>)}
-            <SummaryRow label={agent.headless ? 'Run' : 'Pane'}><Text size="sm" type="code">{agent.id}</Text></SummaryRow>
+            <SummaryRow label={agentKind(agent) === 'headless' ? 'Run' : 'Pane'}><Text size="sm" type="code">{agent.id}</Text></SummaryRow>
           </VStack>
         </Collapsible>
       )}
@@ -1108,6 +1108,8 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   agent: Agent; task: Task | null; onCollapse: () => void; onExpand?: () => void; onAsPanel?: () => void; mode?: 'panel' | 'page' | 'dock'; autoFocus: boolean
 }) {
   const [tab, setTab] = useState('conversation')
+  const kind = agentKind(agent) // WP-310
+  const [stopOpen, setStopOpen] = useState(false)
   useFixTriggerMenuPosition() // WP-181: the '/' skills menu, wherever this composer renders (dock/panel/page)
   const ticketChips = useTicketPlugins()
   const narrow = useNarrow()
@@ -1320,7 +1322,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   const summary = <AgentSummary agent={agent} task={task} dnd={dnd} onToggleDnd={() => dndM.mutate(!dnd)} />
   const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
-            {agent.headless && <HeadlessBar id={agent.id} />}
+            {kind === 'headless' && <HeadlessBar id={agent.id} />}
             {!live && <Text type="supporting" size="sm">no transcript · pane view</Text>}
             {remote && <Text type="supporting" size="sm">{transcript ? 'remote · transcript'
               : remote === 'unmatched' ? 'remote · transcript not matched — pane view'
@@ -1381,7 +1383,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                   sendActions={
                     <HStack gap={1}>
                       {stopping && <Text type="supporting" size="sm">Stopping…</Text>}
-                      {working && !stopping && <IconButton label="Stop" icon={<Icon icon="stop" />} size="sm" variant="secondary" tooltip="Stop the current turn (Esc)" onClick={stop} />}
+                      {working && !stopping && <IconButton label={kind === 'headless' ? 'Interrupt' : 'Stop'} icon={<Icon icon="stop" />} size="sm" variant="secondary" tooltip={kind === 'headless' ? 'Interrupt the current turn (Esc); the process stays' : 'Stop the current turn (Esc)'} onClick={stop} />}
                       <IconButton label="Nudge" icon={<NudgeIcon />} size="sm" variant="ghost" tooltip='Nudge: send "continue"' isDisabled={send.isPending} onClick={() => send.mutate({ text: 'continue' })} />
                     </HStack>
                   }
@@ -1412,6 +1414,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   if (mode === 'dock') return <VStack gap={2} height="100%" padding={2}>{conversation}</VStack>
   return (
       <VStack gap={3} height="100%" padding={page ? 0 : 4} data-agent-panel={page ? undefined : ''} data-agent-page={page ? '' : undefined}>
+        {stopOpen && <HeadlessStopDialog id={agent.id} name={agent.name} onClose={() => setStopOpen(false)} />}
         {tagsMode && <TagsDialog agent={agent} mode={tagsMode} onClose={() => setTagsMode(null)} />}
         <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
           <HStack gap={2} align="center" style={{ minWidth: 0, flex: 1 }}>
@@ -1422,7 +1425,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             <VStack gap={0.5} style={{ minWidth: 0 }}>
               <HStack gap={1} align="center" style={{ minWidth: 0 }}>
                 <Text weight="semibold" maxLines={1} style={{ minWidth: 0, flex: 1 }}>{agent.name}</Text>
-                {agent.headless && <Badge variant="neutral" label={headlessBadge(agent.headlessState)} style={{ flexShrink: 0 }} />}
+                {kind === 'headless' && <Badge variant="neutral" label={headlessBadge(agent.headlessState)} style={{ flexShrink: 0 }} />}
                 {agent.background > 0 && <Badge label={`${agent.background} background`} style={{ flexShrink: 0 }} />}
                 {agent.tags?.persona && <Badge variant="neutral" label={agent.tags.persona} style={{ flexShrink: 0 }} />}
                 {agent.tags?.pair && <Badge variant="neutral" label={`paired · ${agent.tags.pair}`} style={{ flexShrink: 0 }} />}
@@ -1438,7 +1441,8 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
           <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
-            ...(agent.local && !agent.headless ? [
+            ...(canStop(kind, agent.headlessState) ? [{ label: 'Stop agent…', description: 'End its process; it stays resumable', onClick: () => setStopOpen(true) }] : []),
+            ...(agent.local && kind === 'pane' ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
               { label: dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb', description: dnd ? undefined : 'Skip this agent for free-pick hand-offs', onClick: () => dndM.mutate(!dnd) },

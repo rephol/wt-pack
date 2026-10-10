@@ -1,6 +1,7 @@
-// WP-293: the Conversation view's bar for a headless run — state chip (+ stuck flag), Interrupt/Stop for live runs,
-// Resume for ended/failed ones, and answer controls for its open asks.
+// WP-293: the Conversation view's bar for a headless run — the stuck flag, Resume for ended/failed ones, and answer controls for its
+// open asks. WP-310: no status chip (the header has it) and no Interrupt/Stop (composer square button / header menu); empty = nothing.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -26,17 +27,18 @@ export function HeadlessBar({ id }: { id: string }) {
   const r = run.data
   if (!r) return null
   const busy = act.isPending
+  if (!r.stuck && !canResume(r.state) && !r.asks.length) return null // status lives in the header, Interrupt in the composer, Stop in the menu
   return (
     <VStack gap={2} data-headless-bar="">
-      <HStack gap={2} align="center" wrap="wrap">
-        <Badge label={stateChip(r)} variant={r.state === 'failed' ? 'error' : r.asks.length ? 'warning' : 'neutral'} />
-        {r.stuck ? <Badge label="stuck" variant="warning" /> : null}
-        <HStack gap={1} style={{ marginInlineStart: 'auto' }}>
-          {r.state === 'working' && <Button label="Interrupt" size="sm" variant="secondary" isDisabled={busy} onClick={() => act.mutate({ sub: 'interrupt' })} />}
-          {r.live && <Button label="Stop" size="sm" variant="ghost" isDisabled={busy} onClick={() => act.mutate({ sub: 'stop' })} />}
-          {canResume(r.state) && <Button label="Resume" size="sm" variant="secondary" isDisabled={busy} onClick={() => act.mutate({ sub: 'resume' })} />}
+      {(r.stuck || canResume(r.state)) && (
+        <HStack gap={2} align="center" wrap="wrap">
+          {r.stuck ? <Badge label="stuck" variant="warning" /> : null}
+          {canResume(r.state) && <>
+            <Text type="supporting" size="sm">{stateChip(r)}</Text>
+            <Button label="Resume" size="sm" variant="secondary" isDisabled={busy} onClick={() => act.mutate({ sub: 'resume' })} />
+          </>}
         </HStack>
-      </HStack>
+      )}
       {r.asks.map((a) => {
         const qs = askQuestions(a)
         return (
@@ -61,5 +63,24 @@ export function HeadlessBar({ id }: { id: string }) {
         )
       })}
     </VStack>
+  )
+}
+
+// WP-310: Stop = kill the process; the run stays resumable. In-app confirm (native dialogs are banned).
+export function HeadlessStopDialog({ id, name, onClose }: { id: string; name: string; onClose: () => void }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const stop = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/headless/${encodeURIComponent(id)}/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['headless', id] }); qc.invalidateQueries({ queryKey: ['overview'] }); onClose() },
+    onError: (e) => toast({ body: `Not stopped: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
+  return (
+    <AlertDialog isOpen onOpenChange={(o) => !o && !stop.isPending && onClose()} title={`Stop ${name}?`} actionLabel="Stop agent" actionVariant="destructive"
+      description="Ends its process. The run stays in the history and can be resumed (by messaging it); a turn in flight is lost."
+      isActionLoading={stop.isPending} onAction={() => stop.mutate()} />
   )
 }
