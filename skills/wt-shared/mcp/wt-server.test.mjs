@@ -32,12 +32,12 @@ test('initialize + tools/list: every tool has a typed schema; mutating ones take
   const init = (await s.rpc('initialize', { protocolVersion: '2025-06-18' })).result
   assert.equal(init.serverInfo.name, 'wt')
   const tools = (await s.rpc('tools/list')).result.tools
-  assert.deepEqual(tools.map((t) => t.name), ['ticket_list', 'ticket_show', 'ticket_new', 'ticket_move', 'ticket_comment', 'handoff', 'handoff_reply', 'handoff_ack', 'room_list', 'room_read', 'room_post', 'ask', 'ask_answer'])
+  assert.deepEqual(tools.map((t) => t.name), ['ticket_list', 'ticket_show', 'ticket_new', 'ticket_move', 'ticket_comment', 'handoff', 'handoff_reply', 'handoff_ack', 'room_list', 'room_read', 'room_post', 'ask', 'ask_answer', 'send_file'])
   for (const t of tools) { assert.equal(t.inputSchema.type, 'object'); assert.equal(t.inputSchema.additionalProperties, false); assert.ok(t.description.length > 20) }
   const by = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema]))
   for (const m of ['ticket_new', 'ticket_move', 'ticket_comment', 'handoff', 'handoff_reply', 'room_post', 'ask']) assert.ok(by[m].properties.idempotency_key, m)
   for (const r of ['ticket_show', 'ticket_list', 'room_read', 'handoff_ack', 'ask_answer']) assert.ok(!by[r].properties.idempotency_key, r)
-  assert.deepEqual(by.ticket_move.properties.column.enum, ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked'])
+  assert.deepEqual(by.ticket_move.properties.column.enum, ['backlog', 'ready', 'planning', 'building', 'review', 'done', 'blocked', 'cancelled'])
   s.stop()
 })
 
@@ -98,4 +98,19 @@ test('deadline: a CLI still running at WT_MCP_TIMEOUT_MS is killed and the call 
   assert.equal((await s.callTool('ask_answer', { id: 'closed' })).data.error.code, 'resolved')
   assert.equal((await s.callTool('ask_answer', { id: 'x', timeout_s: 90 })).data.error.code, 'invalid_argument') // over the MCP call limit
   s.stop()
+})
+
+test('send_file: shows valid files, refuses bad paths; WT_MCP_ONLY narrows the server (WP-308)', async () => {
+  const f = join(tmp, 'a.png'); writeFileSync(f, 'x')
+  const s = start()
+  assert.deepEqual((await s.callTool('send_file', { files: [f], caption: 'hi' })).data, { shown: ['a.png'] })
+  for (const bad of ['a.png', join(tmp, 'missing.png'), tmp]) {
+    const r = await s.callTool('send_file', { files: [f, bad] })
+    assert.equal(r.isError, true); assert.equal(r.data.error?.code ?? r.data.code, 'invalid_argument')
+  }
+  s.stop()
+  const o = start({ WT_MCP_ONLY: 'send_file' })
+  assert.deepEqual((await o.rpc('tools/list')).result.tools.map((t) => t.name), ['send_file'])
+  assert.equal((await o.callTool('ticket_list', {})).isError, true)
+  o.stop()
 })
