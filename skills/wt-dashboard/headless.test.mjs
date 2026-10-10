@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_PLUGINS, defaultName, Headless } from './headless.mjs'
+import { DEFAULT_PLUGINS, contextWindowOf, defaultName, Headless } from './headless.mjs'
 
 const FAKE = join(import.meta.dirname, 'test-fixtures', 'fake-claude.mjs')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -45,6 +45,7 @@ test('spawn runs a prompt, records the session, ends idle; init facts land on th
   assert.equal(row.turns, 1)
   assert.equal(row.cost_usd, 0.01)
   assert.deepEqual(JSON.parse(row.plugins), ['fake'])
+  assert.equal(row.context_window, 1_000_000) // WP-314: the reported window of the run's own model, not a guess
   assert.equal(row.init_model, 'claude-fake-1') // WP-300
   assert.deepEqual(JSON.parse(row.init_commands), { slash_commands: ['compact', 'wt-ask'], skills: ['wt-ask'] })
   assert.deepEqual(results(r.id), ['echo: hello'])
@@ -561,4 +562,10 @@ test('plugins: default turns every enabled plugin off; a run list keeps its own 
 test('plugins: each run stores its own list is stored for a resume to rebuild (WP-309)', async (t) => {
   const { h, r } = await pluginsRun(t, {}, { plugins: ['a@x'] })
   assert.equal(h.get(r.id).req_plugins, '["a@x"]')
+})
+
+test('contextWindowOf: the run\'s own model first, else the largest, else null (WP-314)', () => {
+  assert.equal(contextWindowOf({ a: { contextWindow: 200000 }, b: { contextWindow: 1000000 } }, 'a'), 200000)
+  assert.equal(contextWindowOf({ a: { contextWindow: 200000 }, b: { contextWindow: 1000000 } }, 'zzz'), 1000000)
+  assert.equal(contextWindowOf({ a: {} }, 'a'), null); assert.equal(contextWindowOf(undefined, 'a'), null)
 })

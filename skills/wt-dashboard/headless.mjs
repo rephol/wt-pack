@@ -29,6 +29,12 @@ export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermis
 // WP-309: THE default for which plugins stay on in a run (comma list). '' = wt-pack only; '*' = no trimming (every enabled plugin, as before).
 // Flip it here, or per server with WT_HEADLESS_PLUGINS. Not yet confirmed by the user.
 export const DEFAULT_PLUGINS = ''
+// WP-314: the context window a result event reports: modelUsage[<model>].contextWindow for the run's own model, else the largest (a subagent's model
+// may be listed too). null when the event has none.
+export function contextWindowOf(modelUsage, model) {
+  const ws = Object.entries(modelUsage ?? {}).map(([m, u]) => [m, Number(u?.contextWindow)]).filter(([, w]) => w > 0)
+  return ws.find(([m]) => m === model)?.[1] ?? (ws.length ? Math.max(...ws.map(([, w]) => w)) : null)
+}
 export const PLUGIN_ID = /^[\w.@-]{1,100}$/
 // WP-309: the user's plugins that are switched on (user settings only). ponytail: project/local `enabledPlugins` are not read; add when a repo enables plugins.
 export function enabledPlugins(home) {
@@ -184,6 +190,8 @@ export class Headless {
     } else if (e.type === 'result') {
       if (p) p.inflight = 0
       set(`state = 'idle', turns = turns + 1, cost_usd = cost_usd + ?`, Number(e.total_cost_usd) || 0)
+      const win = contextWindowOf(e.modelUsage, this.run(id)?.init_model) // WP-314: the model's own window, not a guess
+      if (win) set('context_window = ?', win)
     } else if (e.type === 'user' || e.type === 'assistant') {
       set(`state = CASE WHEN state IN ('idle','starting') THEN 'working' ELSE state END`)
     } else if (e.type === 'control_request' && e.request?.subtype === 'can_use_tool') {

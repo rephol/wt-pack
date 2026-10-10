@@ -13,7 +13,7 @@ const argv = process.argv.slice(2)
 const resume = argv.includes('--resume') ? argv[argv.indexOf('--resume') + 1] : null
 const session = resume ?? 'sess-' + Math.random().toString(16).slice(2, 10)
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n')
-const result = (text) => out({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: session, total_cost_usd: 0.01 })
+const result = (text) => out({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: session, total_cost_usd: 0.01, modelUsage: { 'claude-fake-1': { contextWindow: 1000000 }, 'claude-sub-1': { contextWindow: 200000 } } })
 let hanging = false, deaf = false, n = 0
 const pending = new Map() // request_id -> continuation
 
