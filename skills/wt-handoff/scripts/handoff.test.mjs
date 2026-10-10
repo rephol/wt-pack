@@ -477,3 +477,15 @@ test('WP-257: --reply records the envelope at /api/messages; --ack posts the sta
   assert.match(readFileSync(calls, "utf8"), /"state": "answered"[\s\S]*\/api\/messages\/ab12\/ack/)
   assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--ack', 'a b'], { env, stdio: 'pipe' }), (e) => e.status === 2)
 })
+
+test('WP-298: --effort sets the unit tier/effort in any mode (low → haiku, medium → sonnet, high → no cap); none leaves a plain worker unforced', () => {
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+  const w = (extra) => run(['--role', 'worker', '--no-goal', '--dry-run', ...extra, repo], 'implement the unit U2 per the plan')
+  assert.match(w(['--effort', 'low']), /would spawn a worker in \S+ with --model haiku --effort low/)
+  assert.match(w(['--effort', 'medium']), /would spawn a worker in \S+ with --model sonnet --effort medium/)
+  assert.match(w(['--effort', 'high']), /would spawn a worker in \S+ --effort high/)
+  assert.doesNotMatch(w(['--effort', 'high']), /--model/)
+  assert.doesNotMatch(w([]), /--model|--effort/) // no unit effort: the spawn falls to agents.sh's sonnet floor
+  const bad = spawnSync(join(here, 'handoff.sh'), ['--effort', 'xhigh', '--dry-run', repo], { input: 'x', encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: tmp } })
+  assert.equal(bad.status, 2)
+})

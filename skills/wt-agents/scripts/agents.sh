@@ -201,12 +201,13 @@ TEAM_MEMBERS
   role=${1:?role required, e.g. worker|planner}
   # WP-204: a name that is not a base role but has a project-role file (.wt-pack/roles/<name>.md) is a PERSONA: it
   # spawns into its BASE role's pool with role=<base> and a persona token, so retire, DND/pair gates and Dispatch
-  # still see it. Its model/effort/mcp are defaults (explicit flags win; model is floored below like any spawn).
-  persona=
+  # still see it. Its model/effort/mcp are defaults (explicit flags win; a persona model only raises the floor, WP-298).
+  persona= pmodel=
   case "$role" in orchestrator|planner|worker|auditor|reviewer) ;; *)
     if pj=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$role" --cwd "$(cd "${2:-$PWD}" 2>/dev/null && pwd)" 2>/dev/null); then
       persona=$role; role=$(printf '%s' "$pj" | jq -r .base)
-      [ -n "$model" ] || model=$(printf '%s' "$pj" | jq -r '.model // empty')
+      # WP-298: the persona's model is only a request to `floor` (--persona-model): it may raise its base role's floor, never lower it.
+      pmodel=$(printf '%s' "$pj" | jq -r '.model // empty')
       [ -n "$effort" ] || effort=$(printf '%s' "$pj" | jq -r '.effort // empty')
       pm=$(printf '%s' "$pj" | jq -r '.mcp | join(",")')
       if [ -n "$pm" ]; then
@@ -378,7 +379,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # what's missing, not a second `model-id` process on top.
   # --model here (when the caller already gave one) is passed through so floor computes effort/id for the
   # tier actually being spawned, not the role's own floor tier when the two diverge.
-  floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} --cwd "$main" --json 2>/dev/null || true)
+  floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} ${pmodel:+--persona-model "$pmodel"} --cwd "$main" --json 2>/dev/null || true)
   model_id=$(printf '%s' "$floor" | jq -r '.model // empty' 2>/dev/null || true)
   [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
   [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)

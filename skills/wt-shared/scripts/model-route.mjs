@@ -11,8 +11,14 @@
 //       on haiku. --reuse (WP-168, with --model set to the already-running worker's tier): logs that tier as
 //       source 'reuse' with no Jev call (nothing will be applied — the worker is already on it), so the
 //       ticket handed to it gets a ref `outcome` can later mark. A plain --model (escalation) stays unlogged.
+//       WP-298: --effort low|medium|high is the unit effort the caller declares (the tech-lead, per unit): it is
+//       the effort of the pick (clamped to G), and `high` lifts cfg.roleCeilings (default worker → sonnet) so opus
+//       is allowed; otherwise the ceiling caps the TIER of that role (Jev may still raise effort). An explicit
+//       --model is never capped. Deterministic: `capTier` and the unit effort are reported (applyEffort) in
+//       shadow and off too, only Jev's tier stays live-gated. `low` (with --session, no --model) is the one exception
+//       to the session floor: the session runs haiku/low (`unitTier`, no Jev call; security etc. floors still raise it).
 //   model-route.mjs explain …same flags… < task   the whole decision as JSON
-//   model-route.mjs floor --role R [--model M] [--cwd DIR] [--json]   the role's floor tier (planner → opus,
+//   model-route.mjs floor --role R [--model M] [--persona-model M] [--cwd DIR] [--json]   the role's floor tier (planner → opus,
 //       every other role → sonnet, WP-157: a session never spawns on haiku with no explicit tier) and its
 //       effort (spawn has no task text to route, so this is all it applies without an explicit tier). WP-160:
 //       applies in every mode, not just live — this floor never uses Jev, so there's no shadow-mode reason to
@@ -60,6 +66,10 @@ export const DEFAULTS = {
   mode: 'shadow', skills: {},
   floors: { correctness: 'sonnet', security: 'sonnet', data: 'sonnet', migration: 'sonnet' },
   roleFloors: { planner: 'opus' },
+  // WP-298: a per-role CEILING on the routed tier — Jev may raise effort for the role, not its tier — unless the
+  // request carries `effort: 'high'` (the tech-lead's per-unit effort) or an explicit model. Deterministic, so
+  // like `floor` it holds in every mode. A role without an entry is unchanged.
+  roleCeilings: { worker: 'sonnet' },
   // WP-157: a hard floor on the `floor` command only (spawn/session picks) — never haiku for a main agent,
   // whatever role or explicit tier was asked for it. Subagent routing (pick/explain) never reads this, so
   // wt-review/wt-research lens and shard picks may still choose haiku.
@@ -68,7 +78,7 @@ export const DEFAULTS = {
   effort: 'high', // the global ceiling G, same config layering as `mode`
   // WP-158: the explicit model id `claude --model` gets for each tier, so a session-level spawn pins the
   // actual model instead of handing Claude Code a bare alias to resolve on its own.
-  modelIds: { haiku: 'claude-haiku-4-5-20251001', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5' }, // WP-178
+  modelIds: { haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5' }, // WP-178
 }
 // Falls back to the bare tier name (today's alias behaviour) when a tier has no configured id.
 export const modelIdFor = (tier, cfg) => (isTier(tier) && cfg?.modelIds?.[tier]) || tier
@@ -197,6 +207,14 @@ export function localDecide(state) {
 }
 
 // Floors only ever raise the tier.
+// WP-298: the tier a role is capped at for this request, or null (no entry, an explicit model, or unit effort high).
+export function ceilingTier(cfg, role, { model = '', effort = '' } = {}) {
+  const c = cfg.roleCeilings?.[role]
+  return isTier(c) && !model && effort !== 'high' ? c : null
+}
+// A unit effort (low|medium|high) is the caller's own pick: it replaces the computed effort, still clamped to G.
+const unitEffort = (e, g) => (isEffort(e) ? emin(e, isEffort(g) ? g : DEFAULTS.effort) : null)
+
 export function applyFloors(tier, state, cfg) {
   let t = tier
   const s = state.signals
@@ -292,18 +310,24 @@ function logDecision(d) {
 // `session`: WP-157 — this call decides a SESSION's own tier (a fresh agent spawn, e.g. wt-handoff), not a
 // subagent's. Never lands below cfg.sessionFloor regardless of what picked it — explicit, pinned, local or
 // Jev. Subagent routing (wt-review/wt-research's lens/shard picks) never passes this, so it stays unaffected.
-export async function route({ skill = '', role = '', lens = '', model = '', reuse = false, description = '', task = '', cwd = process.cwd(), env = process.env, fetchImpl, timeoutMs, log = true, session = false } = {}) {
+export async function route({ skill = '', role = '', lens = '', model = '', reuse = false, description = '', task = '', cwd = process.cwd(), env = process.env, fetchImpl, timeoutMs, log = true, session = false, effort: reqEffort = '' } = {}) {
   let cfg
   try { cfg = loadConfig({ cwd, env }) } catch { cfg = { ...DEFAULTS, from: 'default' } }
   // Global off is the kill switch: a per-skill mode never overrides it.
   const mode = cfg.mode !== 'off' && MODES.includes(cfg.skills?.[skill]?.mode) ? cfg.skills[skill].mode : cfg.mode
-  if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from }
+  // WP-298: the ceiling and the unit effort are deterministic, so they are reported even when routing is off.
+  const cap = ceilingTier(cfg, role, { model, effort: reqEffort })
+  const ue = unitEffort(reqEffort, effortCeiling(cfg, cap ?? 'sonnet').effort)
   const state = buildState({ skill, role, lens, description, task })
-  const sessionFloor = session && isTier(cfg.sessionFloor) ? cfg.sessionFloor : null
+  // WP-298: the one exception to the session floor — a SESSION handed a unit of declared effort `low` may run on
+  // haiku (floors such as security still raise it). Opt-in only: --session AND effort low AND no explicit model.
+  const unitTier = session && reqEffort === 'low' && !model ? applyFloors('haiku', state, cfg) : null
+  if (mode === 'off') return { mode, apply: null, source: 'off', from: cfg.from, capTier: cap, unitTier, ...(ue ? { effort: ue, applyEffort: ue } : {}) }
+  const sessionFloor = !unitTier && session && isTier(cfg.sessionFloor) ? cfg.sessionFloor : null
   if (model) {
     const tier = sessionFloor ? max(sessionFloor, model) : model
-    const effort = computeEffort(tier, state, effortCeiling(cfg, tier).effort)
-    const out = { mode, apply: null, tier, effort, source: reuse ? 'reuse' : tier === model ? 'explicit' : 'explicit+session-floor', from: cfg.from, applyEffort: mode === 'live' ? effort : null }
+    const effort = unitEffort(reqEffort, effortCeiling(cfg, tier).effort) ?? computeEffort(tier, state, effortCeiling(cfg, tier).effort)
+    const out = { mode, apply: null, tier, effort, capTier: cap, source: reuse ? 'reuse' : tier === model ? 'explicit' : 'explicit+session-floor', from: cfg.from, applyEffort: mode === 'live' || ue ? effort : null }
     // WP-168: a hand-off reused an already-running worker, so its tier is already known and nothing new will be
     // applied — no Jev call needed. Still log it (with a `run` ref, same shape as a Jev/local/pin decision) so
     // the ticket that rode it has something `outcome` can mark; a plain explicit/escalated pick stays unlogged,
@@ -313,19 +337,22 @@ export async function route({ skill = '', role = '', lens = '', model = '', reus
   }
   let d
   const pin = cfg.skills?.[skill]?.pin
-  if (isTier(pin)) d = { tier: pin, source: 'pin' }
+  if (unitTier) d = { tier: unitTier, source: 'unit-effort' } // no Jev call: the caller declared the effort
+  else if (isTier(pin)) d = { tier: pin, source: 'pin' }
   else {
     const local = localDecide(state)
     d = local ? { tier: local, source: 'local' } : await jevDecide(state, cfg, { fetchImpl, timeoutMs })
   }
   const floored = applyFloors(d.tier, state, cfg)
   if (floored !== d.tier) d = { ...d, tier: floored, source: `${d.source}+floor` }
+  // WP-298: the ceiling caps the tier (Jev's pick stays in `choice`); the session floor below still wins over it.
+  if (cap && rank(d.tier) > rank(cap)) d = { ...d, tier: cap, source: `${d.source}+ceiling` }
   if (sessionFloor && rank(sessionFloor) > rank(d.tier)) d = { ...d, tier: sessionFloor, source: `${d.source}+session-floor` }
   const ceiling = effortCeiling(cfg, d.tier)
-  const effort = computeEffort(d.tier, state, ceiling.effort, d.jevEffort)
-  const out = { ...d, effort, mode, from: cfg.from, effortFrom: ceiling.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
+  const effort = unitEffort(reqEffort, ceiling.effort) ?? computeEffort(d.tier, state, ceiling.effort, d.jevEffort)
+  const out = { ...d, effort, capTier: cap, unitTier, mode, from: cfg.from, effortFrom: ceiling.effortFrom, run: runId(), t: d.choice === 'opus' ? cfg.thresholds?.opus : cfg.thresholds?.haiku, state }
   if (log) logDecision(out)
-  return { ...out, apply: mode === 'live' ? out.tier : null, applyEffort: mode === 'live' ? out.effort : null }
+  return { ...out, apply: mode === 'live' ? out.tier : null, applyEffort: mode === 'live' || ue ? out.effort : null }
 }
 
 // shadow-*: what the turn did on the model that ran while a shadow pick applied nothing (WP-215) — kept apart by
@@ -369,7 +396,12 @@ async function main() {
     // floor (e.g. planner → opus) only ever raises further, same as everywhere else floors are applied.
     const sessionFloor = isTier(cfg.sessionFloor) ? cfg.sessionFloor : 'sonnet'
     const roleFloor = cfg.roleFloors?.[opt('role')]
-    const t = isTier(roleFloor) ? max(sessionFloor, roleFloor) : sessionFloor
+    let t = isTier(roleFloor) ? max(sessionFloor, roleFloor) : sessionFloor
+    // WP-298: a persona's own model (its role file) may raise its base role's floor, never lower it.
+    if (isTier(opt('persona-model'))) t = max(t, opt('persona-model'))
+    // WP-298: a role ceiling caps the default tier too (never below the session floor); an explicit --model or persona model skips it.
+    const cap = ceilingTier(cfg, opt('role'), { model: opt('model') || opt('persona-model') })
+    if (cap && rank(t) > rank(cap)) t = max(sessionFloor, cap)
     const source = isTier(roleFloor) && rank(roleFloor) >= rank(sessionFloor) ? 'role-floor' : 'session-floor'
     // WP-160: unlike `pick`'s Jev-routed choice, this floor never uses Jev — it's a fixed computation from
     // cfg.sessionFloor/roleFloors, so (t and effortTier below are always a tier) it applies in every mode
@@ -390,12 +422,12 @@ async function main() {
     else console.log(t)
     return
   }
-  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--reuse] [--desc D] [--cwd DIR] [--session] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--cwd DIR] [--json] | model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
+  if (cmd !== 'pick' && cmd !== 'explain') { console.error('usage: model-route.mjs pick|explain [--skill S] [--role R] [--lens L] [--model M] [--reuse] [--desc D] [--cwd DIR] [--session] [--effort low|medium|high] [--json] < task | outcome <run#i> <what> ["why"] | usage [--days N] | floor --role R [--model M] [--persona-model M] [--cwd DIR] [--json] | model-id <haiku|sonnet|opus> [--cwd DIR]'); process.exitCode = 2; return }
   let task = ''
   if (!process.stdin.isTTY) try { task = readFileSync(0, 'utf8') } catch {}
-  const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), reuse: a.includes('--reuse'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log'), session: a.includes('--session') })
+  const d = await route({ skill: opt('skill'), role: opt('role'), lens: opt('lens'), model: opt('model'), reuse: a.includes('--reuse'), description: opt('desc'), task, cwd: opt('cwd') || process.cwd(), log: !a.includes('--no-log'), session: a.includes('--session'), effort: opt('effort') })
   if (cmd === 'explain') { const { state, ...rest } = d; console.log(JSON.stringify({ ...rest, state })); return }
-  if (a.includes('--json')) console.log(JSON.stringify({ tier: d.tier ?? null, apply: d.apply, effort: d.effort ?? null, applyEffort: d.applyEffort ?? null, mode: d.mode, source: d.source, ref: d.run ? `${d.run}#0` : null }))
+  if (a.includes('--json')) console.log(JSON.stringify({ tier: d.tier ?? null, apply: d.apply, capTier: d.capTier ?? null, unitTier: d.unitTier ?? null, effort: d.effort ?? null, applyEffort: d.applyEffort ?? null, mode: d.mode, source: d.source, ref: d.run ? `${d.run}#0` : null }))
   else if (d.apply) console.log(d.apply)
 }
 

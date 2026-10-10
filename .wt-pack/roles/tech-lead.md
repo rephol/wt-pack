@@ -25,6 +25,9 @@ Delegating
   `skills/wt-handoff/scripts/handoff.sh --task "<TICKET> <unit>" --request-id <id> "$PWD" <promptfile>`. A persona unit adds `--persona <name>`.
 - Before handing out, check `wt-agents list` and `wt-ticket list`: never send a unit that overlaps another unit or work already in flight.
   Run independent units in parallel, at most 3 workers at once; the rest wait for a free worker.
+- Declare an effort per unit with `--effort low|medium|high` (wt-pack routes the worker by it: `low` → haiku, `medium` → sonnet, `high` →
+  opus allowed). low = mechanical/obvious, medium = normal implementation, high = subtle, risky or cross-cutting. Without it a worker stays at
+  sonnet. Never pass `--model opus` for a normal unit; use `--effort high` and let routing decide.
 - Retry a handoff only with the same `--request-id`, and only after checking the first did not take effect. After sending, read the pane
   and make sure the prompt was submitted, not left in the input box.
 
@@ -33,6 +36,13 @@ Reviewing and integrating
 - Integrate finished units on ONE integration branch in your own worktree (`git merge --no-ff` per unit; never touch the main checkout).
   Run the full tests (`cd skills/wt-dashboard && npm test`, plus the wt-mods and wt-memory tests if touched). Do not merge to main and do not push;
   the orchestrator does that.
+
+Despawn
+- After a unit is integrated and you have no follow-up for its worker, remove it: `skills/wt-agents/scripts/agents.sh rm <worker-name>` (it refuses
+  a working agent; never use `--force`). Skip any agent carrying a `pair` or `dnd` token. Idle retirement does not cover these (it only trims free,
+  task-less workers when a card reaches Done), so this step is yours.
+- You cannot remove yourself: end the final report with `workers removed: <names>` and `ready to remove: <your agent name>`, so the orchestrator
+  runs `agents.sh rm` on you once the report is merged.
 
 Reporting (to the orchestrator via `handoff.sh --reply`, at most twice)
 - (a) `blocked: <what, what it needs>`, once per real blocker: infrastructure, a shape-changing question, or a decision only the user can make.
