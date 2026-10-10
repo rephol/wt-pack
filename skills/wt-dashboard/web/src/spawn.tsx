@@ -58,11 +58,12 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const [prompt, setPrompt] = useState('')
   const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of a herdr pane
   const [pmode, setPmode] = useState('') // '' = the user's own Claude Code settings
+  const [model, setModel] = useState(''), [effort, setEffort] = useState(''), [hname, setHname] = useState(''), [hcwd, setHcwd] = useState('') // WP-302: blank = the server's defaults
   const list = projects.data ?? []
   const proj = list.find((p) => p.name === (project || (defaultProject !== 'all' ? defaultProject : ''))) ?? list[0]
   const spawn = useMutation({
     mutationFn: () => headless
-      ? api<{ id: string }>('/api/headless', { method: 'POST', body: JSON.stringify({ role: kind, cwd: start === 'main' ? proj?.root : cwd || proj?.root, prompt: prompt.trim() || undefined, permissionMode: pmode || undefined }) })
+      ? api<{ id: string }>('/api/headless', { method: 'POST', body: JSON.stringify({ role: kind, cwd: hcwd.trim() || (start === 'main' ? proj?.root : cwd || proj?.root), prompt: prompt.trim() || undefined, permissionMode: pmode || undefined, model: model || undefined, effort: effort || undefined, name: hname.trim() || undefined }) })
         .then((r) => ({ key: `${agents.find((a) => a.local)?.machine ?? 'local'}/${r.id}`, name: r.id, prompted: !!prompt.trim() }))
       : api<{ key: string; name: string; prompted: boolean }>('/api/agents/spawn', { method: 'POST', body: JSON.stringify({ kind, project: proj?.name, cwd: start === 'main' ? undefined : cwd || undefined, prompt: prompt.trim() || undefined }) }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['overview'] }); onClose(); onOpenAgent(r.key) },
@@ -103,8 +104,16 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
                 <SegmentedControlItem value="pane" label="Pane" /><SegmentedControlItem value="headless" label="Headless" />
               </SegmentedControl>
               {headless && (
-                <Selector label="Permissions" width="100%" value={pmode} onChange={setPmode}
-                  options={[{ value: '', label: 'Your Claude Code settings' }, { value: 'default', label: 'Default (ask)' }, { value: 'acceptEdits', label: 'Accept edits' }, { value: 'plan', label: 'Plan' }, { value: 'bypassPermissions', label: 'Bypass permissions' }]} />
+                <VStack gap={3}>
+                  <Selector label="Permissions" width="100%" value={pmode} onChange={setPmode}
+                    options={[{ value: '', label: 'Your Claude Code settings' }, { value: 'default', label: 'Default (ask)' }, { value: 'acceptEdits', label: 'Accept edits' }, { value: 'plan', label: 'Plan' }, { value: 'bypassPermissions', label: 'Bypass permissions' }]} />
+                  <Selector label="Model" width="100%" value={model} onChange={setModel}
+                    options={[{ value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' }, { value: 'haiku', label: 'Haiku' }, { value: 'claude-haiku-5-5', label: 'Haiku 5.5 (claude-haiku-5-5)' }]} />
+                  <Selector label="Effort" width="100%" value={effort} onChange={setEffort}
+                    options={[{ value: '', label: 'Default' }, ...['low', 'medium', 'high', 'xhigh', 'max'].map((v) => ({ value: v, label: v }))]} />
+                  <TextInput label="Name (optional)" value={hname} onChange={setHname} placeholder="e.g. pr-watcher-1" />
+                  <TextInput label="Working directory (optional)" value={hcwd} onChange={setHcwd} placeholder={start === 'main' ? proj?.root : 'Overrides the worktree above'} />
+                </VStack>
               )}
             </VStack>
             <TextArea label="First prompt (optional)" value={prompt} onChange={setPrompt} placeholder="Optional" rows={3} />
