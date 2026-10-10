@@ -505,3 +505,16 @@ test('defaultName: <repo>-<role>-NN, lowest unused, slugged and kept within 32 c
   const long = defaultName('a-very-long-repository-name', 'frontend-engineer', [])
   assert.ok(long.length <= 32 && long.endsWith('-frontend-engineer-01'), long)
 })
+
+test('a run is told its role and persona by env (WT_ROLE/WT_PERSONA); a bad persona is refused (WP-307)', async (t) => {
+  const { h, cwd, events } = await setup(t)
+  const r = h.spawn({ role: 'planner', persona: 'frontend', cwd, prompt: 'hi' })
+  await until(() => events(r.id).some((e) => e.type === 'system/init'), 'init')
+  const env = events(r.id).find((e) => e.type === 'system/init').event.env
+  assert.ok(env.includes('WT_ROLE') && env.includes('WT_PERSONA'))
+  assert.equal(h.get(r.id).persona, 'frontend')
+  assert.throws(() => h.spawn({ role: 'planner', persona: 'Bad Name', cwd }), /persona/)
+  const w = h.spawn({ role: 'worker', cwd, prompt: 'hi' })
+  await until(() => events(w.id).some((e) => e.type === 'system/init'), 'init')
+  assert.ok(!events(w.id).find((e) => e.type === 'system/init').event.env.includes('WT_PERSONA'))
+})

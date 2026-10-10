@@ -2926,7 +2926,7 @@ const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queue
 function headlessRows(machine) {
   // WP-303: only live or queued runs are agents; an ended/failed/removed run stays in /api/headless history, not the list.
   return hl().list().filter((r) => r.live || r.state === 'queued').map((r) => ({
-    key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, ...(({ id, by }) => ({ pool: id, roleBy: by }))(resolveRole(roleStore.roles, { token: r.role, workspace: null, name: r.name })), tags: { role: r.role }, paneTokens: {}, workspace: null,
+    key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, ...(({ id, by }) => ({ pool: id, roleBy: by }))(resolveRole(roleStore.roles, { token: r.role, workspace: null, name: r.name })), tags: { role: r.role, ...(r.persona ? { persona: r.persona } : {}) }, paneTokens: {}, workspace: null,
     status: r.asks.length ? 'blocked' : HL_STATUS[r.state] ?? 'idle', statusSince: r.last_event, lastActivity: r.last_event, cwd: r.cwd, project: projectName(r.cwd),
     recap: r.reason, context: null, background: 0, asks: r.asks.length > 0, question: r.asks[0] ? `${r.asks[0].tool}: ${JSON.stringify(r.asks[0].input).slice(0, 200)}` : null,
     picker: null, lastPrompt: null, session: r.session, model: r.init_model || r.model ? { id: r.init_model ?? null, name: r.init_model ?? r.model, effort: r.effort, source: 'headless', routed: null } : null, // WP-300: the resolved model from init wins
@@ -2963,6 +2963,29 @@ async function headlessAgentRoute(req, res, url, parts) {
   if (!sub && req.method === 'DELETE') return send(res, 200, hl().stop(id, 'removed by the user') && { ok: true })
   send(res, 404, { error: 'not found for a headless agent' })
 }
+// WP-307: a persona name as `role` becomes its base role + persona (like agents.sh spawn <persona>), and the spawn gets the role's model
+// floor as an explicit --model/--effort (model-route.mjs floor, as agents.sh does), so a headless run keeps one tier instead of Claude
+// Code's default. An explicit model/effort wins but is still floored. Best effort: a failed lookup spawns as asked.
+async function headlessRole(b) {
+  if (typeof b.role !== 'string' || typeof b.cwd !== 'string') return
+  const shared = (f) => new URL(`../wt-shared/scripts/${f}`, import.meta.url).pathname
+  let pmodel
+  try {
+    const roles = await import('../wt-shared/scripts/roles.mjs')
+    if (!roles.BASES.includes(b.role) && roles.NAME.test(b.role)) {
+      const top = roles.mainCheckout(b.cwd, 3000)
+      const p = top && roles.personas(top).find((x) => x.name === b.role)
+      if (p) { b.persona = p.name; b.role = p.base; pmodel = roles.resolve(top, p.name)?.model }
+    }
+  } catch { /* wt-shared absent: spawn as asked */ }
+  try {
+    const out = await run(process.execPath, [shared('model-route.mjs'), 'floor', '--role', b.role, ...(b.model ? ['--model', b.model] : []), ...(pmodel ? ['--persona-model', pmodel] : []), '--cwd', b.cwd, '--json'], b.cwd, 5000)
+    const f = JSON.parse(out)
+    // floor returns the id of the tier ASKED for even when it floored the tier up (--model haiku -> tier sonnet, id haiku): then use the tier.
+    b.model = ['opus', 'sonnet', 'haiku'].includes(b.model) && f.tier !== b.model ? f.tier : f.model || f.tier || b.model
+    b.effort ||= f.effort
+  } catch { /* no router: Claude Code's own default */ }
+}
 async function headlessApi(req, res, url, parts) {
   const json = async () => {
     if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 })
@@ -2986,6 +3009,7 @@ async function headlessApi(req, res, url, parts) {
   if (req.method === 'POST' && !id) {
     const b = await json()
     try { if (!statSync(b.cwd).isDirectory()) throw 0 } catch { return send(res, 400, { error: 'cwd: an existing directory' }) }
+    await headlessRole(b) // WP-307: persona → base role, model floor
     if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) {
       const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
       b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306

@@ -14,7 +14,7 @@ const FAKE_CLAUDE = `#!/usr/bin/env node
 // anything else gets a result. A control_response or an interrupt ends the turn. Exits on stdin EOF.
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 const result = () => out({ type: 'result', subtype: 'success', total_cost_usd: 0.01 })
-out({ type: 'system', subtype: 'init', session_id: 'sess-' + process.pid, plugins: [], permissionMode: 'default', apiKeySource: 'none' })
+out({ type: 'system', subtype: 'init', session_id: 'sess-' + process.pid, plugins: [], permissionMode: 'default', apiKeySource: 'none', argv: process.argv.slice(2), env: Object.keys(process.env) })
 result()
 let buf = '', n = 0
 process.stdin.on('data', (d) => {
@@ -179,4 +179,17 @@ test('auth: an agent pane may only spawn and message; no cookie is refused; Host
   assert.equal(host, 403)
   await json(`/api/headless/${r.id}/stop`, { method: 'POST', body: {} })
   await state(r.id, 'ended')
+})
+
+test('spawn without a model gets the role floor as an explicit --model and a role env (WP-307)', async () => {
+  const p = await json('/api/headless', { method: 'POST', body: { role: 'planner', cwd: root, prompt: 'hi' } })
+  const init = await until(async () => (await json(`/api/headless/${p.id}/events`)).events.find((e) => e.type === 'system/init'), 'init')
+  const argv = init.event.argv
+  assert.match(argv[argv.indexOf('--model') + 1], /opus/) // planner floor
+  assert.ok(init.event.env.includes('WT_ROLE'))
+  await json(`/api/headless/${p.id}/stop`, { method: 'POST', body: {} }); await state(p.id, 'ended') // cap 1
+  const h = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, model: 'haiku', prompt: 'hi' } })
+  const hi = await until(async () => (await json(`/api/headless/${h.id}/events`)).events.find((e) => e.type === 'system/init'), 'init')
+  assert.doesNotMatch(hi.event.argv[hi.event.argv.indexOf('--model') + 1], /haiku/) // an explicit haiku is floored for a main agent
+  await json(`/api/headless/${h.id}/stop`, { method: 'POST', body: {} }); await state(h.id, 'ended')
 })
