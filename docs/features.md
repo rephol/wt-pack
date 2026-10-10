@@ -293,6 +293,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - It shows in the Agents list, in its role's group, with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
   while it waits on an ask. Only live or queued runs are listed: an ended, failed or removed run leaves the list (it stays in `GET /api/headless`). Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
   headless run is never picked for work.
+- **Files:** a headless run shows a file in its Conversation view with the `send_file` tool (wt MCP; `SendUserFile` does not exist in `claude -p`).
+  Read-only roles get only that one MCP tool (`mcp__wt-files__send_file`), never the ticket/room/handoff tools, and it needs no ask.
 - **Queue:** with `WT_HEADLESS_CAP` set (default 0 = unlimited), at most that many run at once. A spawn over the cap is `queued` and starts when a slot
   frees, oldest first; a queued run can't take messages yet.
 - **Asks:** `reviewer`, `pr-watcher` and `auditor` runs are read-only: Read/Grep/Glob are allowed automatically and any

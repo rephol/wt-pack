@@ -46,7 +46,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     process.stdout.write(b.subarray(0, cut)); setTimeout(() => { process.stdout.write(b.subarray(cut)); result('split') }, 20)
   }
   else if (text.includes('ASK')) ask('AskUserQuestion', { questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] }).then((r) => result('asked: ' + JSON.stringify(r)))
-  else if (/TOOL:(\w+)/.test(text)) { const tool = text.match(/TOOL:(\w+)/)[1]; ask(tool, { command: 'echo hi', file_path: '/tmp/x' }).then((r) => result(`${tool} -> ${r.behavior}`)) }
+  else if (/TOOL:([\w-]+)/.test(text)) { const tool = text.match(/TOOL:([\w-]+)/)[1]; ask(tool, { command: 'echo hi', file_path: '/tmp/x' }).then((r) => result(`${tool} -> ${r.behavior}`)) }
   else result('echo: ' + text)
 })
 process.stdin.on('end', () => { if (!hanging && !deaf) process.exit(0) }) // EOF = clean exit, like claude; a hung turn ignores it (SIGTERM path)

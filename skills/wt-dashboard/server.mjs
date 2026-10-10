@@ -20,7 +20,7 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Pins } from './pins.mjs'
-import { Headless, ROLE as ROLE_RE, defaultName, enabledPlugins } from './headless.mjs'
+import { Headless, ROLE as ROLE_RE, SEND_FILE, defaultName, enabledPlugins } from './headless.mjs'
 import { open as openDb } from './store.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
@@ -766,7 +766,7 @@ export function normalizeEntry(e, asks = new Set()) {
         answers: r && typeof r === 'object' ? r.answers ?? {} : {}, cancelled: Boolean(b.is_error), ts, update: true }]
     }
     if (b.type === 'tool_use' && b.name === 'Read' && IMG_EXT.test(b.input?.file_path ?? '')) allowFile(b.input.file_path)
-    if (b.type === 'tool_use' && b.name === 'SendUserFile' && Array.isArray(b.input?.files)) {
+    if (b.type === 'tool_use' && (b.name === 'SendUserFile' || SEND_FILE.test(b.name)) && Array.isArray(b.input?.files)) {
       // A file the agent delivered to the user: an attachment card per file, outside the tool group.
       const files = b.input.files.filter((f) => typeof f === 'string').map((f) => ({ path: f, name: basename(f), size: allowFile(f) }))
       return [{ id: `f:${b.id}`, role: 'assistant', text: '', files, caption: b.input.caption ?? null, ts }]

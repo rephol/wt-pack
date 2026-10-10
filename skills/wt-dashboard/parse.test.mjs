@@ -152,6 +152,8 @@ test('normalizeEntry: tool_result images surface as assistant rows; SendUserFile
   assert.equal(f[0].role, 'assistant')
   assert.deepEqual(f[0].files.map((x) => [x.name, x.size === null]), [['package.json', false], ['missing.html', true]])
   assert.equal(f[0].caption, 'c')
+  const m = normalizeEntry({ type: 'assistant', uuid: 'a', message: { content: [{ type: 'tool_use', id: 'y', name: 'mcp__wt-files__send_file', input: { files: [new URL('./package.json', import.meta.url).pathname] } }] } }) // WP-308
+  assert.equal(m[0].id, 'f:y'); assert.deepEqual(m[0].files.map((x) => x.name), ['package.json'])
 })
 
 test('rooms: mentions, @all, agent→agent gating, hop limit, rate limit, idle-only delivery, ticket rooms', async () => {

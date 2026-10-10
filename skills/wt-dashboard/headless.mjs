@@ -8,11 +8,14 @@
 import { spawn as nodeSpawn, execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { open } from './store.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
 export const ROLE = /^[\w.-]{1,40}$/
 export const READ_ONLY = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead'])
+// WP-308: the wt MCP server's send_file (any server name): it only names files to the user, so it is allowed for every policy.
+export const SEND_FILE = /^mcp__.+__send_file$/
 const LIVE = ['starting', 'working', 'idle'] // a process exists
 const LINE_MAX = 256 * 1024 // an event bigger than this is stored as a stub
 const KEEP_EVENTS = 2000 // per run; older rows are dropped, seq keeps counting
@@ -128,7 +131,8 @@ export class Headless {
     const r = this.run(id)
     if (r?.state !== 'queued') return // cancelled or taken since the queue was read
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
-      ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default', '--tools', [...READ_ONLY, 'AskUserQuestion'].join(','), '--strict-mcp-config'] : // WP-300: only read tools exist, so no allow-rule in the user's settings can open a write/exec/MCP tool
+      ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default', '--tools', [...READ_ONLY, 'AskUserQuestion'].join(','), '--strict-mcp-config',
+        '--mcp-config', JSON.stringify({ mcpServers: { 'wt-files': { command: process.execPath, args: [fileURLToPath(new URL('../wt-shared/mcp/wt-server.mjs', import.meta.url))], env: { WT_MCP_ONLY: 'send_file' } } } })] : // WP-300: only read tools exist, so no allow-rule in the user's settings can open a write/exec/MCP tool
          r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...this.#pluginArgs(r), ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
@@ -193,6 +197,7 @@ export class Headless {
   #toolRequest(id, e) {
     const r = this.run(id), { tool_name: tool, input = {} } = e.request
     const rid = e.request_id
+    if (SEND_FILE.test(tool)) return this.#reply(id, rid, { behavior: 'allow', updatedInput: input })
     if (tool !== 'AskUserQuestion' && policyOf(r.role) === 'readonly') {
       const ok = READ_ONLY.has(tool)
       return this.#reply(id, rid, ok ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: `${tool} is not allowed for a ${r.role} agent` })
