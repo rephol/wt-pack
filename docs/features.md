@@ -825,6 +825,8 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   Persona agents are also skipped by a routine's role-based pick and as a ticket's reviewer buddy, and the
   `WT_WORKERS_MAX` cap counts per kind (a plain handoff counts plain workers, `--persona P` counts persona P). Spawning
   a `*-worker`-style name with no valid role file warns that it becomes a plain role.
+- This repo ships two planner personas in `.wt-pack/roles/`: `product-planner` (WP ticket → short plan in `docs/plans/` with scope, DoD and
+  how each item is verified) and `tech-lead` (code change → recorded technical decision plus non-overlapping unit tasks). Both stop at the plan.
 - Settings › Projects › **Roles** lists the files with their check findings, edits them (writes the main checkout,
   never commits; shows `git status` for the folder) and creates new ones.
 - The `wt-roles` skill is the guide and CLI: `wt-roles list | new <name> [--base <role>] [--from-default] | check`.
