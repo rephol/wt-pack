@@ -6,9 +6,9 @@ export type Column = (typeof COLUMNS)[number]
 export declare function isClosed(column: string | undefined): boolean
 export declare const TYPES: readonly ['bug', 'ux', 'gap', 'debt', 'feature']
 export declare const SIZES: readonly ['S', 'M', 'L']
-export declare const KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'pair-gone', 'dispatch-undelivered', 'ask']
+export declare const KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'pair-gone', 'dispatch-undelivered', 'ask', 'headless-ask']
 export type Kind = (typeof KINDS)[number]
-export declare const ACTIONABLE_KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask']
+export declare const ACTIONABLE_KINDS: readonly ['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask', 'headless-ask']
 export type Category = 'needs-you' | 'agents' | 'system'
 export declare function categoryOf(kind: string): Category
 

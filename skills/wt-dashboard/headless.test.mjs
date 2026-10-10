@@ -441,3 +441,11 @@ test('rss reports resident memory of live processes', async (t) => {
   const m = await h.rss()
   assert.ok(m[h.get(r.id).pid] > 0)
 })
+
+test('roles allowlist: only listed roles spawn; * or none = any', async (t) => {
+  const { h, cwd } = await setup(t, { roles: ['pr-watcher'] })
+  assert.throws(() => h.spawn({ role: 'worker', cwd }), (e) => e.status === 400 && /not enabled for headless/.test(e.message))
+  assert.equal(h.spawn({ role: 'pr-watcher', cwd }).role, 'pr-watcher')
+  const any = await setup(t, { roles: ['*'] })
+  assert.equal(any.h.spawn({ role: 'worker', cwd: any.cwd }).role, 'worker')
+})

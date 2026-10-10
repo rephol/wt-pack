@@ -28,7 +28,7 @@ export type InboxFilter = 'all' | Kind | `cat:${Category}`
 export const openInbox = (filter: InboxFilter = 'all') => dispatchEvent(new CustomEvent('open-inbox', { detail: filter }))
 const LABEL: Record<Kind, string> = {
   question: 'Question', 'mention-user': '@you', 'needs-you': 'Needs you', 'room-suggestion': 'Suggestion',
-  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage', 'room-created': 'New room', memory: 'Memory', 'memory-proposal': 'Proposal', watchdog: 'Watchdog', 'pr-held': 'Held PR', 'routing-escalation': 'Escalated', 'jev-auth': 'Jev key rejected', 'pair-gone': 'Pair gone', 'dispatch-undelivered': 'Undelivered', ask: 'Question',
+  'agent-done': 'Done', 'agent-stalled': 'Stalled', 'ci-failed': 'CI', server: 'Server', usage: 'Usage', 'room-created': 'New room', memory: 'Memory', 'memory-proposal': 'Proposal', watchdog: 'Watchdog', 'pr-held': 'Held PR', 'routing-escalation': 'Escalated', 'jev-auth': 'Jev key rejected', 'pair-gone': 'Pair gone', 'dispatch-undelivered': 'Undelivered', ask: 'Question', 'headless-ask': 'Headless ask',
 }
 
 export function useInbox() {
@@ -87,7 +87,7 @@ const HOVER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and
 const tip = (t: string) => (HOVER ? t : undefined) // no hover tooltips on touch: they stick open after a tap
 const COLOR: Record<Kind, string> = {
   question: 'var(--hd-red)', 'mention-user': 'var(--hd-red)', 'needs-you': 'var(--hd-red)', 'room-suggestion': 'var(--hd-blue)',
-  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)', usage: 'var(--hd-amber)', 'room-created': 'var(--hd-blue)', memory: 'var(--hd-muted)', 'memory-proposal': 'var(--hd-blue)', watchdog: 'var(--hd-amber)', 'pr-held': 'var(--hd-amber)', 'routing-escalation': 'var(--hd-amber)', 'jev-auth': 'var(--hd-red)', 'pair-gone': 'var(--hd-amber)', 'dispatch-undelivered': 'var(--hd-red)', ask: 'var(--hd-red)',
+  'agent-done': 'var(--hd-green)', 'agent-stalled': 'var(--hd-amber)', 'ci-failed': 'var(--hd-red)', server: 'var(--hd-muted)', usage: 'var(--hd-amber)', 'room-created': 'var(--hd-blue)', memory: 'var(--hd-muted)', 'memory-proposal': 'var(--hd-blue)', watchdog: 'var(--hd-amber)', 'pr-held': 'var(--hd-amber)', 'routing-escalation': 'var(--hd-amber)', 'jev-auth': 'var(--hd-red)', 'pair-gone': 'var(--hd-amber)', 'dispatch-undelivered': 'var(--hd-red)', ask: 'var(--hd-red)', 'headless-ask': 'var(--hd-red)',
 }
 const sv = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
 const I = {
@@ -105,7 +105,7 @@ const I = {
 }
 const ICON: Record<Kind, React.ReactNode> = {
   question: I.q, 'mention-user': I.at, 'needs-you': I.q, 'room-suggestion': I.bulb, 'agent-done': I.check,
-  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus, memory: I.bulb, 'memory-proposal': I.bulb, watchdog: I.server, 'pr-held': I.clock, 'routing-escalation': I.bulb, 'jev-auth': I.x, 'pair-gone': I.clock, 'dispatch-undelivered': I.x, ask: I.q,
+  'agent-stalled': I.clock, 'ci-failed': I.x, server: I.server, usage: I.clock, 'room-created': I.plus, memory: I.bulb, 'memory-proposal': I.bulb, watchdog: I.server, 'pr-held': I.clock, 'routing-escalation': I.bulb, 'jev-auth': I.x, 'pair-gone': I.clock, 'dispatch-undelivered': I.x, ask: I.q, 'headless-ask': I.q,
 }
 
 function InboxPanel({ filter, setFilter, onClose, onOpenAgent, openQuestion }: { filter: InboxFilter; setFilter: (f: InboxFilter) => void; onClose: () => void; onOpenAgent: (key: string) => void; openQuestion: (t: PopupTarget) => void }) {

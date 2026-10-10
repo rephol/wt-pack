@@ -2897,10 +2897,9 @@ export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), ca
 let headless
 const hl = () => headless ??= new Headless({
   db: openDb(join(DATA, 'wt.db')), cmd: process.env.WT_HEADLESS_CMD || 'claude',
-  cap: Number(process.env.WT_HEADLESS_CAP) || 2, idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
+  // cap / stuckAction / resumes: Headless reads WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES itself (defaults 2, flag, 0).
+  idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
   graceMs: Number(process.env.WT_HEADLESS_GRACE_MS) || 5000,
-  stuckAction: ['flag', 'interrupt', 'kill'].includes(process.env.WT_HEADLESS_STUCK_ACTION) ? process.env.WT_HEADLESS_STUCK_ACTION : 'flag',
-  resumes: Number(process.env.WT_HEADLESS_RESUMES) || 0,
   roles: (process.env.WT_HEADLESS_ROLES ?? 'pr-watcher').split(',').map((x) => x.trim()).filter(Boolean),
   onChange: (id, what) => {
     changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f()
@@ -2908,7 +2907,7 @@ const hl = () => headless ??= new Headless({
   },
 })
 // Open asks of a run mirror into the Inbox (WT_HEADLESS_INBOX, default on): one 'headless-ask' item per ask, resolved once it
-// is answered or expired. Not an ACTIONABLE kind, so the tick's toResolve leaves it to this function.
+// is answered or expired. ACTIONABLE (counts as needs-you), but toResolve skips it: only this function resolves it.
 async function headlessInbox(id) {
   const r = hl().get(id)
   if (!r) return

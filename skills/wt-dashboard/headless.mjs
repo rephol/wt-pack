@@ -28,14 +28,15 @@ export class Headless {
   // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, stuckAction, db, onChange(run id, what), log, now.
   // Product defaults are settings (WP-293): cap 2, stuckAction 'flag' (no automatic interrupt/kill), resumes 0 (a crash mid-turn
   // fails the run; resume stays manual). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
-  constructor({ db, cmd = 'claude', cap, idleMs = 30 * 60_000, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction,
+  constructor({ db, cmd = 'claude', cap, idleMs = 30 * 60_000, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles,
     onChange = () => {}, log = console.error, now = Date.now, env = process.env } = {}) {
     const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v))
     cap = Math.max(1, num(cap ?? env.WT_HEADLESS_CAP, 2))
     resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 0)
     stuckAction = stuckAction ?? env.WT_HEADLESS_STUCK_ACTION ?? 'flag'
     if (!STUCK_ACTIONS.includes(stuckAction)) throw new Error(`stuckAction: one of ${STUCK_ACTIONS.join(', ')}`)
-    Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, onChange, log, now, env, procs: new Map() })
+    // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default pr-watcher); undefined or '*' = any.
+    Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }
 
@@ -58,6 +59,7 @@ export class Headless {
   // Create a run and start it now, or queue it when the cap is reached.
   spawn({ role, cwd, prompt, model, effort, name } = {}) {
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
+    if (this.roles && !this.roles.includes(role)) throw err(400, `role ${role} is not enabled for headless (WT_HEADLESS_ROLES)`)
     if (typeof cwd !== 'string' || !cwd.startsWith('/')) throw err(400, 'cwd: an absolute path')
     if (prompt !== undefined && (typeof prompt !== 'string' || prompt.length > TEXT_MAX)) throw err(400, `prompt: a string up to ${TEXT_MAX} chars`)
     const id = 'hl-' + randomBytes(5).toString('hex')
