@@ -427,7 +427,7 @@ test('global off beats a per-skill live mode (kill switch)', async () => {
 test('modelIdFor: default map, a partial config override, and an unknown tier falls back to itself', () => {
   assert.equal(modelIdFor('opus', DEFAULTS), 'claude-opus-5-5')
   assert.equal(modelIdFor('sonnet', DEFAULTS), 'claude-sonnet-5-5')
-  assert.equal(modelIdFor('haiku', DEFAULTS), 'claude-haiku-4-5-20251001')
+  assert.equal(modelIdFor('haiku', DEFAULTS), 'claude-haiku-5-5')
   assert.equal(modelIdFor('opus', { modelIds: { opus: 'claude-opus-6' } }), 'claude-opus-6')
   assert.equal(modelIdFor('sonnet', {}), 'sonnet') // no map at all: the pre-WP-158 alias behaviour
   assert.equal(modelIdFor('nope', DEFAULTS), 'nope')
