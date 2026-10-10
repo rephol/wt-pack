@@ -211,7 +211,7 @@ export const MIGRATIONS = [
   { sql: `CREATE TABLE headless_runs (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, cwd TEXT NOT NULL, model TEXT, effort TEXT,
             prompt TEXT, session TEXT, pid INTEGER, state TEXT NOT NULL, reason TEXT, created INTEGER NOT NULL, started INTEGER, ended INTEGER,
             last_event INTEGER NOT NULL, events INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, resumes INTEGER NOT NULL DEFAULT 0,
-            cost_usd REAL NOT NULL DEFAULT 0, plugins TEXT, permission_mode TEXT, api_key_source TEXT);
+            cost_usd REAL NOT NULL DEFAULT 0, plugins TEXT, permission_mode TEXT, api_key_source TEXT, stuck INTEGER);
           CREATE TABLE headless_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, json TEXT NOT NULL);
           CREATE INDEX headless_events_run ON headless_events (run_id, seq);
           CREATE TABLE headless_asks (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, tool TEXT NOT NULL, input TEXT NOT NULL, state TEXT NOT NULL, note TEXT, created INTEGER NOT NULL);`,
