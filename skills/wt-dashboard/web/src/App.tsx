@@ -32,6 +32,8 @@ import { withReply } from './replyQuote'
 import { composerEnter } from './keys'
 import { commandSource, type Command } from './commands'
 import { OverviewPage } from './overview'
+import { HeadlessBar } from './headless'
+import { headlessBadge } from './headlessData'
 import { tileCounts } from './overviewData'
 import { useDraft } from './draft'
 import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
@@ -111,6 +113,8 @@ interface Agent {
   lastActivity?: number
   picker?: Picker | null
   task: string | null
+  headless?: boolean // WP-293: a server-owned run (no pane, no tokens)
+  headlessState?: string
 }
 type TaskState =
   | 'needs_you' | 'stalled' | 'shipped' | 'merged' | 'in_review'
@@ -344,7 +348,12 @@ export default function App() {
 
   const q = useQuery({
     queryKey: ['overview'],
-    queryFn: () => getJSON<Overview>('/api/overview'),
+    // WP-293: headless runs are appended to /api/agents only, not /api/overview; merged here (deduped by key).
+    queryFn: async () => {
+      const [o, hl] = await Promise.all([getJSON<Overview>('/api/overview'), getJSON<Agent[]>('/api/agents').then((l) => l.filter((a) => a.headless)).catch(() => [])])
+      const have = new Set(o.agents.map((a) => a.key))
+      return { ...o, agents: [...o.agents, ...hl.filter((a) => !have.has(a.key))] }
+    },
     refetchInterval: 4000,
     placeholderData: keepPreviousData,
   })
@@ -637,7 +646,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
     <VStack gap={5} isScrollable style={{ paddingTop: 4 }}>
       {agent.question && <Card variant="red"><VStack gap={1}><Text size="sm" weight="semibold">Waiting on you</Text><Text>{agent.question}</Text></VStack></Card>}
 
-      {agent.local && (
+      {agent.local && !agent.headless && (
         <HStack gap={2} align="center" wrap="wrap">
           <Button label={dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb'} size="sm" variant={dnd ? 'secondary' : 'ghost'} onClick={onToggleDnd} />
           {pairTicket && <Badge variant="neutral" label={`paired · ${pairTicket}`} />}
@@ -707,7 +716,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<Text size="sm" weight="semibold">Details</Text>}>
           <VStack gap={1} style={{ paddingTop: 8 }}>
             {details.map(([k, v]) => <SummaryRow key={k} label={TOKEN_LABEL[k] ?? k.replaceAll('_', ' ')}><Text size="sm">{k === 'handoff_at' && /^\d+$/.test(v) ? new Date(Number(v) * 1000).toLocaleString() : v}</Text></SummaryRow>)}
-            <SummaryRow label="Pane"><Text size="sm" type="code">{agent.id}</Text></SummaryRow>
+            <SummaryRow label={agent.headless ? 'Run' : 'Pane'}><Text size="sm" type="code">{agent.id}</Text></SummaryRow>
           </VStack>
         </Collapsible>
       )}
@@ -928,6 +937,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                         <HStack gap={2} align="center">
                           <StatusDot variant={needsYou(a) ? 'error' : AGENT_DOT[a.status]} label={a.status} isPulsing={a.status === 'working' || needsYou(a)} />
                           <Text weight="medium" maxLines={1}>{a.name}</Text>
+                          {a.headless && <Badge variant="neutral" label={headlessBadge(a.headlessState)} />}
                           <Text type="supporting" size="sm" style={{ marginInlineStart: 'auto', flexShrink: 0 }}>{shortAgo(new Date(activityOf(a)).toISOString())}</Text>
                         </HStack>
                         <Text type="supporting" size="sm" maxLines={1} hasTruncateTooltip={false}>{line2}</Text>
@@ -992,6 +1002,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                           <HStack gap={2} align="center">
                             <StatusDot variant={needsYou(a) ? 'error' : AGENT_DOT[a.status]} label={a.status} isPulsing={a.status === 'working' || needsYou(a)} />
                             <Button label={a.name} variant={selected === a.key ? "secondary" : "ghost"} size="sm" onClick={(e) => { e.stopPropagation(); onOpen(a.key) }} />
+                            {a.headless && <Badge variant="neutral" label={headlessBadge(a.headlessState)} />}
                             {needsYou(a) && <Badge variant="error" label="Needs you" />}
                             {a.background > 0 && <Badge label={`${a.background} background`} />}
                           </HStack>
@@ -1307,6 +1318,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   const summary = <AgentSummary agent={agent} task={task} dnd={dnd} onToggleDnd={() => dndM.mutate(!dnd)} />
   const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
+            {agent.headless && <HeadlessBar id={agent.id} />}
             {!live && <Text type="supporting" size="sm">no transcript · pane view</Text>}
             {remote && <Text type="supporting" size="sm">{transcript ? 'remote · transcript'
               : remote === 'unmatched' ? 'remote · transcript not matched — pane view'
@@ -1408,6 +1420,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             <VStack gap={0.5} style={{ minWidth: 0 }}>
               <HStack gap={1} align="center" style={{ minWidth: 0 }}>
                 <Text weight="semibold" maxLines={1} style={{ minWidth: 0, flex: 1 }}>{agent.name}</Text>
+                {agent.headless && <Badge variant="neutral" label={headlessBadge(agent.headlessState)} style={{ flexShrink: 0 }} />}
                 {agent.background > 0 && <Badge label={`${agent.background} background`} style={{ flexShrink: 0 }} />}
                 {agent.tags?.persona && <Badge variant="neutral" label={agent.tags.persona} style={{ flexShrink: 0 }} />}
                 {agent.tags?.pair && <Badge variant="neutral" label={`paired · ${agent.tags.pair}`} style={{ flexShrink: 0 }} />}
@@ -1423,7 +1436,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
           <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
-            ...(agent.local ? [
+            ...(agent.local && !agent.headless ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
               { label: dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb', description: dnd ? undefined : 'Skip this agent for free-pick hand-offs', onClick: () => dndM.mutate(!dnd) },
