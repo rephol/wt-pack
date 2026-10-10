@@ -11,6 +11,8 @@
 // Identity is the pane the CLIs read from $HERDR_PANE_ID, inherited from the agent's own env.
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { statSync } from 'node:fs'
+import { isAbsolute, basename } from 'node:path'
 import { once as receiptOnce } from '../scripts/receipts.mjs'
 
 const here = (p) => new URL(p, import.meta.url).pathname
@@ -146,9 +148,22 @@ tool('ask_answer', 'Wait for the answer to an ask, up to timeout_s (max 45, unde
     catch (e) { if (e.exit === 3 && /no answer/.test(e.message)) return { answered: false }; if (e.exit === 3) throw new ToolError('resolved', e.message, { exit: 3 }); throw e }
   })
 
+tool('send_file', 'Show files to the user in the dashboard\'s Conversation view. Use when SendUserFile is not available (headless runs).', {
+  files: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 5, description: 'Absolute paths of regular files up to 20 MB' }, caption: str('Caption', { maxLength: 500 }),
+}, ['files'], (a) => {
+  for (const f of a.files) {
+    let st; try { st = statSync(f) } catch { /* missing */ }
+    if (!isAbsolute(f) || !st?.isFile() || st.size > 20 * 1024 * 1024) throw new ToolError('invalid_argument', `${f}: must be an absolute path to an existing regular file up to 20 MB`)
+  }
+  return { shown: a.files.map((f) => basename(f)) } // the dashboard reads the paths from the transcript's tool_use
+})
+
 // ---- dispatch -------------------------------------------------------------------------------------------------
+// WT_MCP_ONLY (comma list): expose only these tools (WP-308: a read-only headless run gets send_file and nothing else).
+const only = process.env.WT_MCP_ONLY?.split(',').filter(Boolean)
+const allowed = (n) => !only || only.includes(n)
 export async function call(name, a = {}) {
-  const t = T[name]
+  const t = allowed(name) ? T[name] : null
   if (!t) throw new ToolError('unknown_tool', `unknown tool ${name}`)
   check({ properties: t.props, required: t.required }, a)
   const k = a.idempotency_key
@@ -158,7 +173,7 @@ export async function call(name, a = {}) {
   if (!(t.mutates && k) || t.keyIsRequestId) return exec()
   return json(await receiptOnce(`wt-mcp:${name}:${k}`, async () => JSON.stringify(await exec())))
 }
-export const tools = () => Object.entries(T).map(([name, t]) => ({ name, description: t.description, inputSchema: { type: 'object', properties: t.props, required: t.required, additionalProperties: false } }))
+export const tools = () => Object.entries(T).filter(([n]) => allowed(n)).map(([name, t]) => ({ name, description: t.description, inputSchema: { type: 'object', properties: t.props, required: t.required, additionalProperties: false } }))
 
 async function toolResult(name, a) {
   try {

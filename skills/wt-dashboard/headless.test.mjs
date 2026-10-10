@@ -316,6 +316,25 @@ test('readonly role: Read allowed automatically, Bash denied, no human ask; AskU
   assert.equal(ask.tool, 'AskUserQuestion')
 })
 
+test('send_file (WP-308): a read-only run gets only the wt-files MCP server; its tool is allowed, other MCP tools stay denied', async (t) => {
+  const { h, events, state, results, cwd } = await setup(t, { cap: 3 })
+  const r = h.spawn({ role: 'reviewer', cwd, prompt: 'TOOL:mcp__wt-files__send_file' })
+  await until(() => state(r.id) === 'idle', 'idle')
+  assert.deepEqual(results(r.id), ['mcp__wt-files__send_file -> allow'])
+  const argv = events(r.id).find((e) => e.type === 'system/init').event.argv
+  assert.ok(argv.includes('--strict-mcp-config'))
+  const cfg = JSON.parse(argv[argv.indexOf('--mcp-config') + 1])
+  assert.deepEqual(Object.keys(cfg.mcpServers), ['wt-files'])
+  assert.equal(cfg.mcpServers['wt-files'].env.WT_MCP_ONLY, 'send_file')
+  const d = h.spawn({ role: 'reviewer', cwd, prompt: 'TOOL:mcp__wt-files__ticket_list' })
+  await until(() => state(d.id) === 'idle', 'idle')
+  assert.deepEqual(results(d.id), ['mcp__wt-files__ticket_list -> deny'])
+  const w = h.spawn({ role: 'worker', cwd, prompt: 'TOOL:mcp__wt__send_file' }) // an ask-policy role needs no human for it either
+  await until(() => state(w.id) === 'idle', 'idle')
+  assert.deepEqual(results(w.id), ['mcp__wt__send_file -> allow'])
+  assert.equal(h.get(w.id).asks.length, 0)
+})
+
 test('events: store-assigned seq is unique and increasing; the after cursor pages without gaps', async (t) => {
   const { h, start, state } = await setup(t)
   const a = start('one'), b = start('two')
