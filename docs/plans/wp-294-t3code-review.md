@@ -1,8 +1,8 @@
 # WP-294 — T3 Code review: what to copy, adapt or avoid for wt-pack
 
 Point-in-time read-only review (2026-10-10). Repo: `github.com/pingdotgg/t3code` (MIT, "T3 Tools Inc."), shallow
-clone of commit `57b3780770a8` (2026-10-09). The clone lived in a temp dir and was deleted afterwards; nothing was
-run. Paths below are relative to that repo. Claims marked *(not found)* mean a targeted grep returned nothing, so they
+clone at commit `57b3780770a829ff81e62d8dc658683bf51d5155` (2026-10-09), read only; nothing was run or modified. The
+same commit is HEAD of the local clone at `~/Work/projects/t3code`, which was left untouched. Paths below are relative to that repo. Claims marked *(not found)* mean a targeted grep returned nothing, so they
 are absence-of-evidence, not proof.
 
 ## What it is
