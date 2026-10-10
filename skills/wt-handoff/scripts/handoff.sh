@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--effort low|medium|high] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh ... [--request-id <id>] ...               # WP-251: a repeat of the same id prints the first run's output and sends nothing
 #   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
 #   handoff.sh --cancel <pane|name> ["why"]               # stop an agent: escape, end its /goal if any,
@@ -38,6 +38,11 @@
 # planner from "<repo>-planners" (reused if free, else spawned in the main checkout), and "route: planner (p=…)"
 # is printed after the target lines. A prompt starting "Use wt-work" (wt-plan's own handoff) is never re-routed.
 # --role worker|planner forces the role (also with --new). --pane and --list are untouched.
+#
+# --effort low|medium|high (WP-298) declares the effort of a unit of work (the tech-lead sets it per unit): the spawned
+# worker runs at that effort (clamped by the global effort ceiling); low runs on haiku, medium on the role's tier
+# ceiling (roleCeilings, worker → sonnet), high lets routing pick opus. Without it a worker stays at sonnet. A persona's own
+# model/effort still outranks it, and an explicit escalation (`routing: escalate`) is never capped.
 #
 # --skill names the caller's own skill for model routing (WP-129: routing/tuning stats key
 # on this, not a guess scraped from the task text); without it, routing sees "wt-handoff".
@@ -78,6 +83,7 @@ mcp=
 pr=
 sha=
 skill=
+unit_effort=
 dry=0
 buddy_arg=
 request_id=
@@ -122,6 +128,8 @@ while :; do
     --sha)   sha=$2; shift 2 ;;
     --mcp)   mcp=$2; shift 2 ;;
     --skill) skill=$2; shift 2 ;;   # WP-129: the caller's own skill name, for routing/tuning stats
+    --effort) unit_effort=$2; shift 2   # WP-298: the unit's effort (tech-lead): low → haiku (the one exception to the session floor), medium → sonnet, high → opus allowed
+             case "$unit_effort" in low|medium|high) ;; *) echo "--effort: low, medium or high" >&2; exit 2 ;; esac ;;
     --dry-run) dry=1; shift ;;
     --request-id) request_id=$2; shift 2 ;;   # WP-251
     --buddy) buddy_arg=$2; shift 2 ;;   # WP-147: pane id, or "self" for the sending pane
@@ -468,11 +476,13 @@ if [ "$mode" != pane ]; then
   esc=$( [ -n "$local_ticket" ] && [ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null \
     | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
   r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" --session \
-    ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
+    ${unit_effort:+--effort "$unit_effort"} ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
   rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
   [ "$rmode" = live ] || esc= # an escalation applies only while routing is live
   route_tier=${esc:-$(printf '%s' "$r" | jq -r '.apply // empty' 2>/dev/null || true)}
-  [ "$rmode" = live ] && route_effort=$(printf '%s' "$r" | jq -r '.applyEffort // empty' 2>/dev/null || true)
+  # WP-298: the role's tier ceiling and a declared unit effort are deterministic, so they hold in shadow and off too.
+  [ -z "$unit_effort" ] || [ -n "$route_tier" ] || route_tier=$(printf '%s' "$r" | jq -r '.unitTier // .capTier // empty' 2>/dev/null || true)
+  if [ "$rmode" = live ] || [ -n "$unit_effort" ]; then route_effort=$(printf '%s' "$r" | jq -r '.applyEffort // empty' 2>/dev/null || true); fi
   [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
   [ -z "$esc" ] || route_line="routing: $esc (escalated)"
 else
