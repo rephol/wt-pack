@@ -340,7 +340,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Plugins (WP-309):** a run loads only wt-pack by default. The supervisor passes `--settings '{"enabledPlugins":{<id>:false,…}}'` for every
   plugin your `~/.claude/settings.json` enables, so their hooks, skills and MCP servers (most of a run's start-up tokens) stay out;
   wt-pack loads through the plugin dir and is never in that list. `WT_HEADLESS_PLUGINS` (comma list of plugin ids that stay on, default
-  none, `*` = no trimming, the old behaviour) sets the default; `POST /api/headless {plugins: [ids]}` (≤40 ids) replaces it for one
+  none, `*` = no trimming, the old behaviour) sets the default (the code default is the one constant `DEFAULT_PLUGINS` in `headless.mjs`); `POST /api/headless {plugins: [ids]}` (≤40 ids) replaces it for one
   run and is kept for its resumes. `GET /api/headless/plugins` returns `{plugins, keep}` for the New agent dialog's Plugins field (none
   ticked = the default). Only user settings are read: a project's or local `enabledPlugins` are not trimmed.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE

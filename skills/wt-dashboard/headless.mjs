@@ -23,6 +23,9 @@ const TEXT_MAX = 100_000
 // 'ask': every tool request becomes an open ask for a human. Unknown role = ask (never silently permissive).
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions']
+// WP-309: THE default for which plugins stay on in a run (comma list). '' = wt-pack only; '*' = no trimming (every enabled plugin, as before).
+// Flip it here, or per server with WT_HEADLESS_PLUGINS. Not yet confirmed by the user.
+export const DEFAULT_PLUGINS = ''
 export const PLUGIN_ID = /^[\w.@-]{1,100}$/
 // WP-309: the user's plugins that are switched on (user settings only). ponytail: project/local `enabledPlugins` are not read; add when a repo enables plugins.
 export function enabledPlugins(home) {
@@ -58,7 +61,7 @@ export class Headless {
     // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default '*'); undefined or '*' = any.
     // plugins: ids that stay on in a run (server: WT_HEADLESS_PLUGINS, default none = every enabled plugin but wt-pack, which loads through
     // CLAUDE_CODE_PLUGIN_DIRS, is switched off); '*' = no trimming. Each run's own list (spawn `plugins`) replaces it.
-    plugins = Array.isArray(plugins) ? plugins : (plugins ?? env.WT_HEADLESS_PLUGINS ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    plugins = Array.isArray(plugins) ? plugins : (plugins ?? env.WT_HEADLESS_PLUGINS ?? DEFAULT_PLUGINS).split(',').map((x) => x.trim()).filter(Boolean)
     Object.assign(this, { plugins, db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }

@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultName, Headless } from './headless.mjs'
+import { DEFAULT_PLUGINS, defaultName, Headless } from './headless.mjs'
 
 const FAKE = join(import.meta.dirname, 'test-fixtures', 'fake-claude.mjs')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -535,6 +535,7 @@ test('plugins: default turns every enabled plugin off; a run list keeps its own 
   assert.deepEqual((await pluginsRun(t, {}, { plugins: ['a@x'] })).flag, { enabledPlugins: { 'b@y': false } })
   assert.deepEqual((await pluginsRun(t, { plugins: ['b@y'] })).flag, { enabledPlugins: { 'a@x': false } }) // the server default
   assert.equal((await pluginsRun(t, { plugins: ['*'] })).flag, null)
+  assert.equal(DEFAULT_PLUGINS, '') // the one value to flip for the default
   const { h, cwd } = await setup(t)
   for (const bad of ['a@x', [1], ['bad id!'], Array(41).fill('a@x')]) assert.throws(() => h.spawn({ role: 'worker', cwd, plugins: bad }), (e) => e.status === 400)
 })
