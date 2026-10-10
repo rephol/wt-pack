@@ -331,7 +331,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Role and model (WP-307):** a run has no herdr pane token, so the supervisor puts `WT_ROLE` (and `WT_PERSONA`) in its env and
   wt-memory's `context` reads them: a headless planner gets the same role rules, persona text and wt-message section as a herdr
   planner. A persona name as `role` (`POST /api/headless {role: "frontend"}`) becomes its base role + persona. The spawn also applies
-  the role's `model-route.mjs floor` as an explicit `--model` id and `--effort` (an explicit model/effort wins but is floored), so a run
+  the role's `model-route.mjs floor` as an explicit `--model` id and `--effort` (an explicit model/effort wins, as in `agents.sh spawn`), so a run
   keeps one model for its life instead of Claude Code's default.
 - **Conversation controls (WP-310):** the chat is told its kind (`pane` | `headless`) once and shows only what fits. A headless run has
   no toolbar row: its status is in the header, the composer's square button is **Interrupt** (the turn only; the process stays), and

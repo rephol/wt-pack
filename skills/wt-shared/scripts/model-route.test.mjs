@@ -355,6 +355,10 @@ test('CLI: pick --json and floor --json carry effort', () => {
   // to its id regardless of routing mode).
   const div = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(div.tier, 'opus'); assert.equal(div.effort, 'medium'); assert.equal(div.model, 'claude-sonnet-5-5') // sonnet's own base, not opus's
+  assert.equal(div.spawnTier, 'sonnet') // WP-311: which tier the id/effort are for
+  const hk = JSON.parse(run(['floor', '--role', 'worker', '--model', 'haiku', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
+  assert.deepEqual([hk.tier, hk.spawnTier, hk.model], ['sonnet', 'haiku', 'claude-haiku-5-5'])
+  assert.equal(JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' })).spawnTier, 'opus')
   const shadowDiv = JSON.parse(run(['floor', '--role', 'planner', '--model', 'sonnet', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'shadow' }))
   assert.equal(shadowDiv.tier, 'opus'); assert.equal(shadowDiv.effort, 'medium'); assert.equal(shadowDiv.model, 'claude-sonnet-5-5')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')

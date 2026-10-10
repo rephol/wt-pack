@@ -190,6 +190,6 @@ test('spawn without a model gets the role floor as an explicit --model and a rol
   await json(`/api/headless/${p.id}/stop`, { method: 'POST', body: {} }); await state(p.id, 'ended') // cap 1
   const h = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, model: 'haiku', prompt: 'hi' } })
   const hi = await until(async () => (await json(`/api/headless/${h.id}/events`)).events.find((e) => e.type === 'system/init'), 'init')
-  assert.doesNotMatch(hi.event.argv[hi.event.argv.indexOf('--model') + 1], /haiku/) // an explicit haiku is floored for a main agent
+  assert.match(hi.event.argv[hi.event.argv.indexOf('--model') + 1], /haiku/) // an explicit tier is kept, as agents.sh spawn does (WP-311)
   await json(`/api/headless/${h.id}/stop`, { method: 'POST', body: {} }); await state(h.id, 'ended')
 })

@@ -2981,8 +2981,7 @@ async function headlessRole(b) {
   try {
     const out = await run(process.execPath, [shared('model-route.mjs'), 'floor', '--role', b.role, ...(b.model ? ['--model', b.model] : []), ...(pmodel ? ['--persona-model', pmodel] : []), '--cwd', b.cwd, '--json'], b.cwd, 5000)
     const f = JSON.parse(out)
-    // floor returns the id of the tier ASKED for even when it floored the tier up (--model haiku -> tier sonnet, id haiku): then use the tier.
-    b.model = ['opus', 'sonnet', 'haiku'].includes(b.model) && f.tier !== b.model ? f.tier : f.model || f.tier || b.model
+    b.model = f.model || f.tier || b.model // an explicit model is kept (as agents.sh spawn does); floor only fills the gap
     b.effort ||= f.effort
   } catch { /* no router: Claude Code's own default */ }
 }
