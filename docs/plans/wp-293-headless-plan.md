@@ -25,7 +25,14 @@ Risks: a headless session does not load the TUI mods (to be measured); `claude` 
 resuming a session another process holds interleaves silently (WP-290) — the supervisor only resumes its own runs.
 
 ## Product decisions
-Filled in from the product-planner (see the end of this file).
+Pending the user; built as settings with interim defaults (product-planner and orchestrator, 2026-10-10):
+- product decision: headless roles allowlist `WT_HEADLESS_ROLES`, default `pr-watcher` (product-planner)
+- product decision: cap `WT_HEADLESS_CAP` 2 with a FIFO queue (product-planner; the ticket said 3)
+- product decision: idle release 30 min `WT_HEADLESS_IDLE_MIN` (product-planner)
+- product decision: prompting permission mode (`--permission-mode default`), asks in the Conversation view AND the Inbox (`WT_HEADLESS_INBOX`, default on; kind `headless-ask`) (orchestrator)
+- product decision: stuck turn (10 min, `WT_HEADLESS_STUCK_MIN`) flagged only; `WT_HEADLESS_STUCK_ACTION=interrupt|kill` opt-in (product-planner)
+- product decision: no automatic resume after a crash or restart (`WT_HEADLESS_RESUMES` 0); resume is a manual action (product-planner)
+- product decision: "headless" badge, ids `hl-…`, ended rows kept 6 h, trial jobs as listed (product-planner)
 
 ## Units (non-overlapping files)
 
