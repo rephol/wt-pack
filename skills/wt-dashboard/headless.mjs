@@ -7,6 +7,7 @@
 // watchdog, startup reconcile, kill by the RECORDED pid only (never pkill), bounded event retention.
 import { spawn as nodeSpawn, execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { open } from './store.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
@@ -22,6 +23,14 @@ const TEXT_MAX = 100_000
 // 'ask': every tool request becomes an open ask for a human. Unknown role = ask (never silently permissive).
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions']
+export const PLUGIN_ID = /^[\w.@-]{1,100}$/
+// WP-309: the user's plugins that are switched on (user settings only). ponytail: project/local `enabledPlugins` are not read; add when a repo enables plugins.
+export function enabledPlugins(home) {
+  try {
+    const e = JSON.parse(readFileSync(`${home}/.claude/settings.json`, 'utf8')).enabledPlugins
+    return Object.keys(e ?? {}).filter((k) => e[k] === true)
+  } catch { return [] }
+}
 export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
 // WP-306: the herdr scheme (agents.sh spawn): <repo slug>-<role>-<lowest unused NN>. The slug is lowercase [a-z0-9_-], cut to 20, and
 // shortened further for a long role so the whole name stays <= 32. `taken` = names of live herdr agents and non-ended headless runs.
@@ -39,7 +48,7 @@ export class Headless {
   // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, stuckAction, db, onChange(run id, what), log, now.
   // Product defaults are settings (WP-293): cap 0 (unlimited), idle release off (idleMs 0), stuckAction 'flag' (no automatic interrupt/kill), resumes 3 (a crash
   // mid-turn is resumed up to 3 times, then fails). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
-  constructor({ db, cmd = 'claude', cap, idleMs = 0, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles,
+  constructor({ db, cmd = 'claude', cap, idleMs = 0, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles, plugins,
     onChange = () => {}, log = console.error, now = Date.now, env = process.env } = {}) {
     const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v))
     cap = num(cap ?? env.WT_HEADLESS_CAP, 0) // 0 = unlimited
@@ -47,7 +56,10 @@ export class Headless {
     stuckAction = stuckAction ?? env.WT_HEADLESS_STUCK_ACTION ?? 'flag'
     if (!STUCK_ACTIONS.includes(stuckAction)) throw new Error(`stuckAction: one of ${STUCK_ACTIONS.join(', ')}`)
     // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default '*'); undefined or '*' = any.
-    Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
+    // plugins: ids that stay on in a run (server: WT_HEADLESS_PLUGINS, default none = every enabled plugin but wt-pack, which loads through
+    // CLAUDE_CODE_PLUGIN_DIRS, is switched off); '*' = no trimming. Each run's own list (spawn `plugins`) replaces it.
+    plugins = Array.isArray(plugins) ? plugins : (plugins ?? env.WT_HEADLESS_PLUGINS ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    Object.assign(this, { plugins, db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }
 
@@ -68,7 +80,8 @@ export class Headless {
 
   // ---- lifecycle ----
   // Create a run and start it now, or queue it when the cap is reached.
-  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona } = {}) {
+  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona, plugins } = {}) {
+    if (plugins != null && !(Array.isArray(plugins) && plugins.length <= 40 && plugins.every((x) => typeof x === 'string' && PLUGIN_ID.test(x)))) throw err(400, 'plugins: an array of up to 40 plugin ids')
     if (persona != null && !/^[a-z][a-z0-9-]{0,23}$/.test(persona)) throw err(400, 'persona: a role file name (lowercase, digits, -)')
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
     if (this.roles && !this.roles.includes(role)) throw err(400, `role ${role} is not enabled for headless (WT_HEADLESS_ROLES)`)
@@ -79,8 +92,8 @@ export class Headless {
     if (permissionMode && permissionMode !== 'default' && policyOf(role) === 'readonly') throw err(400, `role ${role} is read-only: permissionMode must be default`)
     const id = 'hl-' + randomBytes(5).toString('hex')
     const t = this.now()
-    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, state, created, last_event, resumes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, t, t)
+    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, req_plugins, state, created, last_event, resumes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, plugins ? JSON.stringify(plugins) : null, t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
     this.pump()
     return this.get(id)
@@ -99,13 +112,22 @@ export class Headless {
       } while (this.again)
     } finally { this.pumping = false }
   }
+  // WP-309: `--settings {"enabledPlugins":{id:false}}` turns the user's other plugins off for this run only (their hooks, skills and MCP
+  // are most of a run's start-up tokens); the run's own list, else the server default, stays on. A resume rebuilds the same flag.
+  #pluginArgs(r) {
+    let keep = this.plugins
+    try { if (r.req_plugins) keep = JSON.parse(r.req_plugins) } catch { /* keep the default */ }
+    if (keep.includes('*')) return []
+    const off = Object.fromEntries(enabledPlugins(this.env.HOME).filter((k) => !keep.includes(k)).map((k) => [k, false]))
+    return Object.keys(off).length ? ['--settings', JSON.stringify({ enabledPlugins: off })] : []
+  }
   #start(id) {
     const r = this.run(id)
     if (r?.state !== 'queued') return // cancelled or taken since the queue was read
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
       ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default', '--tools', [...READ_ONLY, 'AskUserQuestion'].join(','), '--strict-mcp-config'] : // WP-300: only read tools exist, so no allow-rule in the user's settings can open a write/exec/MCP tool
          r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
-      ...(r.session ? ['--resume', r.session] : [])]
+      ...this.#pluginArgs(r), ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
     // WT_ROLE / WT_PERSONA (WP-307): a herdr pane's role comes from its pane token, which a headless run has not got; wt-memory's context
     // and the role files read these instead, so it is briefed exactly like a herdr agent of that role.

@@ -146,6 +146,14 @@ test('message, events?after=, SSE replay from Last-Event-ID, interrupt, tool + A
   await state(r.id, 'ended')
 })
 
+test('GET /api/headless/plugins lists the enabled plugins and the server default (WP-309)', async () => {
+  mkdirSync(join(root, '.claude'), { recursive: true }) // the server's HOME is root
+  writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'a@x': true, 'off@z': false } }))
+  assert.deepEqual(await json('/api/headless/plugins'), { plugins: ['a@x'], keep: [] })
+  assert.equal((await call('/api/headless/plugins/x')).status, 404)
+  assert.equal((await call('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, plugins: 'nope' } })).status, 400)
+})
+
 test('Agents list shows the run (headless:true); agents() (pane lookup) never does', async () => {
   const r = await json('/api/headless', { method: 'POST', body: { role: 'reviewer', cwd: root } })
   await state(r.id, 'idle')
