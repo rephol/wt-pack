@@ -328,6 +328,11 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   `starting`. A render error in the web app now shows an error panel with a Reload button instead of a blank page.
 - **Names (WP-306):** without `name`, a run is called `<repo>-<role>-NN` like a herdr agent (repo slug of the cwd's project, lowest
   unused number across live herdr agents and non-ended headless runs; an ended run frees its number). An explicit `name` wins.
+- **Role and model (WP-307):** a run has no herdr pane token, so the supervisor puts `WT_ROLE` (and `WT_PERSONA`) in its env and
+  wt-memory's `context` reads them: a headless planner gets the same role rules, persona text and wt-message section as a herdr
+  planner. A persona name as `role` (`POST /api/headless {role: "frontend"}`) becomes its base role + persona. The spawn also applies
+  the role's `model-route.mjs floor` as an explicit `--model` id and `--effort` (an explicit model/effort wins but is floored), so a run
+  keeps one model for its life instead of Claude Code's default.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
   `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
   the dashboard session; an agent pane may only spawn and message.

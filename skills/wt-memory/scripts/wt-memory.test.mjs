@@ -39,6 +39,9 @@ test('infers role and project from the herdr pane tokens', () => {
   const out = run(['context'], { HERDR_PANE_ID: 'w1:p1', PATH: `${fakeBin}:${process.env.PATH}` })
   assert.match(out, /\(planner\)[\s\S]*\(demo\)/)
 })
+test('WT_ROLE (a headless run, no pane) selects the role context (WP-307)', () => {
+  assert.match(run(['context', '--cwd', '/'], { WT_ROLE: 'planner' }), /Role preferences \(planner\)\n\nP1/)
+})
 test('falls back to the git repo name of the cwd', () => {
   const repo = join(home, 'demo')
   mkdirSync(repo)

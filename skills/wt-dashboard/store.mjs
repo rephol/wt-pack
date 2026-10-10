@@ -220,6 +220,8 @@ export const MIGRATIONS = [
   { sql: `ALTER TABLE headless_runs ADD COLUMN init_model TEXT; ALTER TABLE headless_runs ADD COLUMN init_commands TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
   // WP-300: the permission mode asked for at spawn (null = the user's own Claude Code settings decide).
   { sql: `ALTER TABLE headless_runs ADD COLUMN req_permission_mode TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
+  // WP-307: the persona (a .wt-pack/roles file) the run was started as; its `role` is then the persona's base role.
+  { sql: `ALTER TABLE headless_runs ADD COLUMN persona TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

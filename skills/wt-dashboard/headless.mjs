@@ -68,7 +68,8 @@ export class Headless {
 
   // ---- lifecycle ----
   // Create a run and start it now, or queue it when the cap is reached.
-  spawn({ role, cwd, prompt, model, effort, name, permissionMode } = {}) {
+  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona } = {}) {
+    if (persona != null && !/^[a-z][a-z0-9-]{0,23}$/.test(persona)) throw err(400, 'persona: a role file name (lowercase, digits, -)')
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
     if (this.roles && !this.roles.includes(role)) throw err(400, `role ${role} is not enabled for headless (WT_HEADLESS_ROLES)`)
     if (typeof cwd !== 'string' || !cwd.startsWith('/')) throw err(400, 'cwd: an absolute path')
@@ -78,8 +79,8 @@ export class Headless {
     if (permissionMode && permissionMode !== 'default' && policyOf(role) === 'readonly') throw err(400, `role ${role} is read-only: permissionMode must be default`)
     const id = 'hl-' + randomBytes(5).toString('hex')
     const t = this.now()
-    this.db.prepare(`INSERT INTO headless_runs (id, name, role, cwd, model, effort, prompt, req_permission_mode, state, created, last_event, resumes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, t, t)
+    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, state, created, last_event, resumes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
     this.pump()
     return this.get(id)
@@ -106,7 +107,10 @@ export class Headless {
          r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
-    const env = { TERM: 'dumb', ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
+    // WT_ROLE / WT_PERSONA (WP-307): a herdr pane's role comes from its pane token, which a headless run has not got; wt-memory's context
+    // and the role files read these instead, so it is briefed exactly like a herdr agent of that role.
+    const env = { TERM: 'dumb', WT_ROLE: r.role, ...(r.persona ? { WT_PERSONA: r.persona } : {}),
+      ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
     let child
     try { child = nodeSpawn(this.cmd, args, { cwd: r.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] }) } catch (e) { return this.#end(id, 'failed', `spawn: ${e.message}`) }
     const p = { child, buf: '', skip: false, done: false, exited: false, killing: false, inflight: 0 }
