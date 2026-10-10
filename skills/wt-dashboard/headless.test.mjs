@@ -389,7 +389,7 @@ test('interrupt goes over a control_request and ends the turn; not-working runs 
   assert.throws(() => h.interrupt('hl-nope'), (e) => e.status === 404)
 })
 
-test('reconcile: runs left live by a previous server end with a reason, their asks expire, the recorded pid is signalled', async (t) => {
+test('reconcile: runs left live by a previous server are resumed,  their asks expire, the recorded pid is signalled', async (t) => {
   const first = await setup(t)
   const r = first.start('TOOL:Bash')
   const ask = await until(() => first.h.get(r.id).asks[0], 'open ask')
@@ -399,12 +399,14 @@ test('reconcile: runs left live by a previous server end with a reason, their as
   const out = await second.reconcile()
   assert.deepEqual(out, [r.id])
   const row = second.get(r.id)
-  assert.equal(row.state, 'ended')
-  assert.match(row.reason, /server restarted/)
+  assert.match(row.reason ?? 'server restarted', /server restarted/)
+  assert.ok(['queued', 'starting', 'working', 'idle'].includes(row.state)) // WP-304: resumed, not ended
   assert.equal(row.asks.length, 0)
   const a = first.h.db.prepare('SELECT state, note FROM headless_asks WHERE id = ?').get(ask.id)
   assert.equal(a.state, 'expired'); assert.match(a.note, /server restarted/)
   await until(() => { try { process.kill(pid, 0); return false } catch { return true } }, 'old child terminated') // it was a stream-json claude
+  for (const p of second.procs.values()) p.child.kill() // the resumed child; shutdown() would skip it if first's exit handler ended the row
+  await until(() => second.procs.size === 0, 'resumed child gone')
 })
 
 test('reconcile leaves a reused pid alone (a process that is not a stream-json claude)', async (t) => {
@@ -415,7 +417,7 @@ test('reconcile leaves a reused pid alone (a process that is not a stream-json c
   const id = 'hl-reused'
   h.db.prepare(`INSERT INTO headless_runs (id, name, role, cwd, state, pid, created, last_event) VALUES (?, 'x', 'worker', '/tmp', 'working', ?, 1, 1)`).run(id, bystander.pid)
   assert.deepEqual(await h.reconcile(), [id])
-  assert.equal(h.get(id).state, 'ended')
+  assert.equal(h.get(id).state, 'failed') // no session to resume
   process.kill(bystander.pid, 0) // still alive: throws otherwise
   assert.equal(bystander.exitCode, null)
 })
@@ -473,4 +475,25 @@ test('cap 0 is unlimited: every spawn starts at once (WP-301)', async (t) => {
   const { h, start, state } = await setup(t)
   const ids = [start('a'), start('b'), start('c')].map((r) => r.id)
   await until(() => ids.every((id) => state(id) !== 'queued'), 'none queued')
+})
+
+test('reconcile resumes live runs with --resume (working and idle), fails one with no session or no resumes left (WP-304)', async (t) => {
+  const first = await setup(t)
+  const w = first.start('HANG'), i = first.start('hi')
+  await until(() => first.state(i.id) === 'idle' && first.h.get(w.id).session, 'idle + working')
+  const second = new Headless({ db: first.h.db, cmd: FAKE, log: () => {}, now: () => first.clock.v, graceMs: 80, resumes: 1 })
+  first.h.db.prepare("INSERT INTO headless_runs (id, name, role, cwd, state, created, last_event) VALUES ('hl-nosess', 'n', 'worker', ?, 'working', 1, 1)").run(first.cwd)
+  first.h.db.prepare("INSERT INTO headless_runs (id, name, role, cwd, session, state, resumes, created, last_event) VALUES ('hl-spent', 's', 'worker', ?, 'sess-x', 'idle', 1, 1, 1)").run(first.cwd)
+  const wasWorking = first.h.get(w.id).session
+  await second.reconcile()
+  assert.match(second.get('hl-nosess').reason, /no session/); assert.equal(second.get('hl-nosess').state, 'failed')
+  assert.match(second.get('hl-spent').reason, /resumes exhausted/); assert.equal(second.get('hl-spent').state, 'failed')
+  await until(() => second.get(i.id).state === 'idle' && second.get(i.id).resumes === 1, 'idle run back with its process')
+  for (const id of [w.id, i.id]) {
+    const ev = second.events(id, 0, 2000).events
+    assert.ok(ev.some((e) => e.type === 'supervisor' && e.event.subtype === 'resumed_after_restart'), 'run log says it resumed')
+    assert.equal(ev.filter((e) => e.type === 'supervisor' && e.event.subtype === 'started').at(-1).event.resume, second.get(id).session ?? wasWorking)
+  }
+  for (const p of second.procs.values()) p.child.kill()
+  await until(() => second.procs.size === 0, 'children gone')
 })
