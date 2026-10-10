@@ -285,6 +285,40 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). `rm` of an agent whose claude exited (herdr no longer lists it) closes the bare-shell tab left under its name, and `spawn`/`respawn` close one before opening the new tab, so no shell-only tab named after an agent sits beside it (WP-222).
 - Skills: wt-agents, wt-handoff.
 
+### Headless agents (WP-293, opt-in)
+- A headless agent is a `claude -p` stream-json process that the dashboard server runs itself: no herdr pane, no
+  terminal. It runs under your own Claude login with a minimal env (no API key, no `HERDR_*`). Nothing starts until
+  something spawns one: `POST /api/headless {role, cwd, prompt?, model?, effort?, name?}` from the dashboard, or from an
+  agent pane.
+- It shows in the Agents list with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
+  while it waits on an ask. Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
+  headless run is never picked for work.
+- **Queue:** at most `WT_HEADLESS_CAP` (default 2) run at once. A spawn over the cap is `queued` and starts when a slot
+  frees, oldest first; a queued run can't take messages yet.
+- **Asks:** `reviewer`, `pr-watcher` and `auditor` runs are read-only: Read/Grep/Glob are allowed automatically and any
+  other tool is denied. Every other role asks a human for each tool, and `AskUserQuestion` always waits for an answer
+  (`POST /api/headless/:id/answer {ask, allow, message?}` or `{ask, answers: {<question>: <label>}}`).
+- **Limits** (settings, as env vars in `~/.config/wt-dashboard/env`):
+  - `WT_HEADLESS_ROLES` (comma list, default `pr-watcher`, `*` = any role): which roles may be spawned headless.
+  - `WT_HEADLESS_INBOX` (default on, `0` = off): each open ask also lands in the Inbox as a card linking to the
+    agent's Conversation view, resolved once it is answered or expired.
+  - `WT_HEADLESS_CAP` (default 2): runs at once.
+  - `WT_HEADLESS_IDLE_MIN` (default 30): minutes before an idle run is released.
+  - `WT_HEADLESS_STUCK_MIN` (default 10): a turn with no events for this long counts as stuck.
+  - `WT_HEADLESS_STUCK_ACTION` (`flag` | `interrupt` | `kill`, default `flag`): by default a stuck turn is only
+    flagged in the run's log, never interrupted or killed. `interrupt` interrupts it; `kill` interrupts it, then
+    stops it after the grace period.
+  - `WT_HEADLESS_GRACE_MS` (default 5000): the wait between closing stdin and SIGTERM to the recorded pid.
+  - `WT_HEADLESS_RESUMES` (default 0): how many times a run that crashes mid-turn is resumed automatically. With
+    the default it is never resumed and is marked `failed`.
+  - When the server restarts, any run still marked live is ended and the reason is recorded. Only the recorded pid
+    is ever killed.
+- **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
+  again with `--resume`.
+- Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
+  `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
+  the dashboard session; an agent pane may only spawn and message.
+
 ## Rooms
 
 Chat rooms shared by you and agents.

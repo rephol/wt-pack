@@ -11,9 +11,9 @@ export const isClosed = (column) => column === 'done' || column === 'cancelled'
 export const TYPES = freeze(['bug', 'ux', 'gap', 'debt', 'feature'])
 export const SIZES = freeze(['S', 'M', 'L'])
 
-export const KINDS = freeze(['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'pair-gone', 'dispatch-undelivered', 'ask'])
+export const KINDS = freeze(['needs-you', 'question', 'mention-user', 'room-suggestion', 'agent-done', 'agent-stalled', 'ci-failed', 'server', 'usage', 'room-created', 'memory', 'memory-proposal', 'watchdog', 'pr-held', 'routing-escalation', 'jev-auth', 'pair-gone', 'dispatch-undelivered', 'ask', 'headless-ask'])
 // The kinds that need the user (badge, Inbox "Needs you", Overview tile).
-export const ACTIONABLE_KINDS = freeze(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask'])
+export const ACTIONABLE_KINDS = freeze(['needs-you', 'question', 'mention-user', 'room-suggestion', 'memory-proposal', 'pr-held', 'routing-escalation', 'ask', 'headless-ask'])
 
 // WP-271: the Settings > Notifications sections. A kind is "Agents" if listed here, else "Needs you" when actionable,
 // else "System", so a new kind needs no change in the push code (only here, if it belongs under Agents).

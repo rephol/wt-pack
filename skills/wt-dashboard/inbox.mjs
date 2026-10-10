@@ -31,6 +31,7 @@ export function toResolve(items, needs, suggested, proposals = null, holds = nul
   return items.filter((it) => !it.resolvedAt && ACTIONABLE.has(it.kind) && (
     it.kind === 'memory-proposal' ? proposals !== null && !proposals.has(it.target.memory)
     : it.kind === 'pr-held' ? holds !== null && !holds.has(it.key)
+    : it.kind === 'headless-ask' ? false // WP-293: server.mjs headlessInbox() resolves it
     : it.kind === 'ask' ? openAsks !== null && !openAsks.has(it.target.ask)
     : it.kind === 'room-suggestion' ? !suggested.has(it.target.task)
       : it.kind === 'mention-user' ? !needs.has(`room:${it.target.room}`)
