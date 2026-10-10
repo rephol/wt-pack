@@ -51,6 +51,8 @@ async function merge({ role, project, persona, cwd }) {
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] })
 function infer({ role, project, cwd, persona }) {
+  // WT_ROLE / WT_PERSONA: set by a headless run (WP-307), which has no herdr pane token to read them from.
+  role ||= process.env.WT_ROLE; persona ||= process.env.WT_PERSONA
   if ((!role || !project) && process.env.HERDR_PANE_ID) {
     try {
       const p = JSON.parse(sh('herdr', ['pane', 'get', process.env.HERDR_PANE_ID])).result?.pane ?? {}
