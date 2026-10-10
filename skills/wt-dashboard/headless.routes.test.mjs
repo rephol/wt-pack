@@ -156,7 +156,8 @@ test('Agents list shows the run (headless:true); agents() (pane lookup) never do
   assert.ok(ag.some((x) => x.id === 'w9:p1' && !x.headless))
   // agents() (roomAuthor's pane lookup, Dispatch, token sync) knows only herdr panes: the run's id is no pane identity
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': r.id }, body: { role: 'worker', cwd: root } })).status, 403)
-  assert.equal((await call(`/api/agents/${encodeURIComponent(row.machine)}/${r.id}`)).status, 200)
+  const view = await json(`/api/agents/${encodeURIComponent(row.machine)}/${r.id}`) // WP-305: the Conversation view maps view.turns
+  assert.ok(Array.isArray(view.turns), 'turns is a list, not the run\'s counter')
   await json(`/api/headless/${r.id}/stop`, { method: 'POST', body: {} })
   await state(r.id, 'ended')
   assert.ok(!(await json('/api/agents')).some((x) => x.id === r.id), 'an ended run leaves the Agents list') // WP-303

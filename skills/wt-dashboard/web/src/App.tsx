@@ -1186,7 +1186,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   })
   // No parsed turns (a narrow remote pane with no prompt on screen): its last lines, as-is, rather than nothing.
   const paneMsgs = useMemo(() => {
-    const turns = pane.data?.turns ?? []
+    const turns = Array.isArray(pane.data?.turns) ? pane.data.turns : []
     if (!turns.length && pane.data?.tail?.trim()) return [{ id: 'pane:tail', role: 'assistant', text: '```\n' + pane.data.tail.trim() + '\n```', ts: '' } as Msg]
     return turns.map((t, i): Msg => ({ id: `pane:${i}`, role: t.role, text: t.text, ts: '' }))
   }, [pane.data])
