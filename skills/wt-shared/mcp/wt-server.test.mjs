@@ -32,7 +32,7 @@ test('initialize + tools/list: every tool has a typed schema; mutating ones take
   const init = (await s.rpc('initialize', { protocolVersion: '2025-06-18' })).result
   assert.equal(init.serverInfo.name, 'wt')
   const tools = (await s.rpc('tools/list')).result.tools
-  assert.deepEqual(tools.map((t) => t.name), ['ticket_list', 'ticket_show', 'ticket_new', 'ticket_move', 'ticket_comment', 'handoff', 'handoff_reply', 'handoff_ack', 'room_list', 'room_read', 'room_post', 'ask', 'ask_answer', 'send_file'])
+  assert.deepEqual(tools.map((t) => t.name), ['ticket_list', 'ticket_show', 'ticket_new', 'ticket_move', 'ticket_comment', 'handoff', 'handoff_reply', 'handoff_ack', 'room_list', 'room_read', 'room_post', 'ask', 'ask_answer', 'send_file', 'context_usage'])
   for (const t of tools) { assert.equal(t.inputSchema.type, 'object'); assert.equal(t.inputSchema.additionalProperties, false); assert.ok(t.description.length > 20) }
   const by = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema]))
   for (const m of ['ticket_new', 'ticket_move', 'ticket_comment', 'handoff', 'handoff_reply', 'room_post', 'ask']) assert.ok(by[m].properties.idempotency_key, m)
@@ -113,4 +113,12 @@ test('send_file: shows valid files, refuses bad paths; WT_MCP_ONLY narrows the s
   assert.deepEqual((await o.rpc('tools/list')).result.tools.map((t) => t.name), ['send_file'])
   assert.equal((await o.callTool('ticket_list', {})).isError, true)
   o.stop()
+})
+
+test('context_usage: read-only, runs `wt-agents context` and returns its JSON (WP-312)', async () => {
+  const agents = stub('agents.sh', `echo '{"used":1000,"window":200000,"pct":1,"model":"claude-opus-5-5"}'`)
+  const s = start({ WT_MCP_AGENTS: agents })
+  assert.deepEqual((await s.callTool('context_usage', {})).data, { used: 1000, window: 200000, pct: 1, model: 'claude-opus-5-5' })
+  assert.ok(calls().includes('agents.sh context|'))
+  s.stop()
 })

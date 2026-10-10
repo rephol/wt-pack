@@ -144,7 +144,7 @@ export class Headless {
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
     // WT_ROLE / WT_PERSONA (WP-307): a herdr pane's role comes from its pane token, which a headless run has not got; wt-memory's context
     // and the role files read these instead, so it is briefed exactly like a herdr agent of that role.
-    const env = { TERM: 'dumb', WT_ROLE: r.role, ...(r.persona ? { WT_PERSONA: r.persona } : {}),
+    const env = { TERM: 'dumb', WT_ROLE: r.role, WT_HEADLESS_ID: id, ...(r.persona ? { WT_PERSONA: r.persona } : {}),
       ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
     let child
     try { child = nodeSpawn(this.cmd, args, { cwd: r.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] }) } catch (e) { return this.#end(id, 'failed', `spawn: ${e.message}`) }

@@ -20,6 +20,7 @@ const BIN = {
   ticket: process.env.WT_MCP_TICKET || here('../../wt-ticket/scripts/wt-ticket'),
   handoff: process.env.WT_MCP_HANDOFF || here('../../wt-handoff/scripts/handoff.sh'),
   room: process.env.WT_MCP_ROOM || here('../../wt-room/scripts/room'),
+  agents: process.env.WT_MCP_AGENTS || here('../../wt-agents/scripts/agents.sh'),
   ask: process.env.WT_MCP_ASK || here('../../wt-ask/scripts/wt-ask'),
 }
 const TIMEOUT_MS = Number(process.env.WT_MCP_TIMEOUT_MS) || 50_000
@@ -157,6 +158,9 @@ tool('send_file', 'Show files to the user in the dashboard\'s Conversation view.
   }
   return { shown: a.files.map((f) => basename(f)) } // the dashboard reads the paths from the transcript's tool_use
 })
+
+tool('context_usage', 'Your own context-window usage: { used, window, pct, model } (tokens of the last turn vs the model window). Read-only.', {}, [],
+  async () => json(await run(BIN.agents, ['context'])))
 
 // ---- dispatch -------------------------------------------------------------------------------------------------
 // WT_MCP_ONLY (comma list): expose only these tools (WP-308: a read-only headless run gets send_file and nothing else).

@@ -283,6 +283,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - `wt-agents list` (plain and `--json`) shows DND (with its expiry, when set) and `pair` per agent — `--json`
   adds structured `dnd:{on,until}` and `pair` fields alongside the existing raw pane `tokens` map.
 - CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). `rm` of an agent whose claude exited (herdr no longer lists it) closes the bare-shell tab left under its name, and `spawn`/`respawn` close one before opening the new tab, so no shell-only tab named after an agent sits beside it (WP-222).
+- **Own context usage (WP-312):** an agent reads its own context window with the wt MCP tool `context_usage` or `wt-agents context`:
+  `{used, window, pct, model}` for a pane agent (`$HERDR_PANE_ID`) or a headless run (`$WT_HEADLESS_ID`, set by the dashboard).
+  It reads the dashboard's `AgentInfo` (WP-313, the WP-201 rule), so there is no transcript parsing in the CLI and no API call;
+  exit 1 when the dashboard is unreachable or the agent has no assistant turn yet.
 - Skills: wt-agents, wt-handoff.
 
 ### Headless agents (WP-293, opt-in)

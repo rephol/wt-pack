@@ -394,7 +394,8 @@ test('the child gets a minimal env: no API key, no HERDR_*', async (t) => {
   const keys = events(r.id).find((e) => e.type === 'system/init').event.env
   assert.ok(keys.includes('PATH') && keys.includes('HOME'))
   assert.deepEqual(keys.filter((k) => /^(ANTHROPIC|HERDR|SECRET)/.test(k)), [])
-  assert.ok(keys.length <= 6, keys.join(','))
+  assert.ok(keys.includes('WT_HEADLESS_ID')) // WP-312: how context_usage finds its own run
+  assert.ok(keys.length <= 7, keys.join(','))
 })
 
 test('interrupt goes over a control_request and ends the turn; not-working runs refuse', async (t) => {
