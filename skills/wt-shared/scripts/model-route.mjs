@@ -418,7 +418,9 @@ async function main() {
     // already needs floor's tier/effort doesn't pay for loadConfig()'s git/project-setting shell-outs twice.
     const model = modelIdFor(effortTier, cfg)
     const effort = computeEffort(effortTier, buildState({ role: opt('role') }), effortCeiling(cfg, effortTier).effort)
-    if (a.includes('--json')) console.log(JSON.stringify({ tier: t, source, effort, model }))
+    // WP-311: `tier`/`source` stay the role's floor, so with an explicit --model they sit next to the id of ANOTHER tier (tier sonnet, model
+    // claude-haiku-5-5 for --model haiku, by design: an explicit tier is the caller's choice). `spawnTier` names the tier that id and effort are for.
+    if (a.includes('--json')) console.log(JSON.stringify({ tier: t, source, effort, model, spawnTier: effortTier }))
     else console.log(t)
     return
   }
