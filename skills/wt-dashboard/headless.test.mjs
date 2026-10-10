@@ -465,6 +465,8 @@ test('permissionMode: passed through for a worker, validated, and a read-only ro
   await until(() => events(r.id).some((e) => e.type === 'system/init'), 'init')
   const ra = events(r.id).find((e) => e.type === 'system/init').event.argv
   assert.equal(ra[ra.indexOf('--permission-mode') + 1], 'default')
+  assert.equal(ra[ra.indexOf('--tools') + 1], 'Read,Grep,Glob,LS,NotebookRead,AskUserQuestion')
+  assert.ok(ra.includes('--strict-mcp-config') && !argv.includes('--tools'))
 })
 
 test('cap 0 is unlimited: every spawn starts at once (WP-301)', async (t) => {

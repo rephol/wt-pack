@@ -92,7 +92,8 @@ export class Headless {
     const r = this.run(id)
     if (r?.state !== 'queued') return // cancelled or taken since the queue was read
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
-      ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default'] : r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
+      ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default', '--tools', [...READ_ONLY, 'AskUserQuestion'].join(','), '--strict-mcp-config'] : // WP-300: only read tools exist, so no allow-rule in the user's settings can open a write/exec/MCP tool
+         r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
     const env = { TERM: 'dumb', ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
