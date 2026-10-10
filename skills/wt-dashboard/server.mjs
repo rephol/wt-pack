@@ -2893,14 +2893,33 @@ export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), ca
   } catch { return null }
 }
 // WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
-// POST /api/headless; built lazily so importing this module (tests) opens nothing. Caps/timeouts: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN.
+// POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS.
 let headless
 const hl = () => headless ??= new Headless({
   db: openDb(join(DATA, 'wt.db')), cmd: process.env.WT_HEADLESS_CMD || 'claude',
-  cap: Number(process.env.WT_HEADLESS_CAP) || 3, idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
+  cap: Number(process.env.WT_HEADLESS_CAP) || 2, idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
   graceMs: Number(process.env.WT_HEADLESS_GRACE_MS) || 5000,
-  onChange: (id, what) => { changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f() },
+  stuckAction: ['flag', 'interrupt', 'kill'].includes(process.env.WT_HEADLESS_STUCK_ACTION) ? process.env.WT_HEADLESS_STUCK_ACTION : 'flag',
+  resumes: Number(process.env.WT_HEADLESS_RESUMES) || 0,
+  roles: (process.env.WT_HEADLESS_ROLES ?? 'pr-watcher').split(',').map((x) => x.trim()).filter(Boolean),
+  onChange: (id, what) => {
+    changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f()
+    if (what === 'ask' && process.env.WT_HEADLESS_INBOX !== '0') headlessInbox(id).catch((e) => console.error('headless inbox:', e.message))
+  },
 })
+// Open asks of a run mirror into the Inbox (WT_HEADLESS_INBOX, default on): one 'headless-ask' item per ask, resolved once it
+// is answered or expired. Not an ACTIONABLE kind, so the tick's toResolve leaves it to this function.
+async function headlessInbox(id) {
+  const r = hl().get(id)
+  if (!r) return
+  await inbox.load()
+  const open = new Set(r.asks.map((a) => a.id)), agent = `${LOCAL_LABEL}/${id}`
+  for (const a of r.asks) await inbox.add({ kind: 'headless-ask', key: `headless-ask|${id}|${a.id}`, title: `${r.name} asks: ${a.tool}`,
+    body: JSON.stringify(a.input).slice(0, 300), target: { agent, ask: a.id } })
+  const done = inbox.items.filter((it) => it.kind === 'headless-ask' && !it.resolvedAt && it.target?.agent === agent && !open.has(it.target.ask)).map((it) => it.id)
+  if (done.length) await inbox.resolve(done)
+  broadcastEvent('inbox', { changed: true })
+}
 const headlessSubs = new Map() // run id → flush fns of open SSE streams
 const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queued: 'idle', ended: 'exited', failed: 'exited' }
 // A headless run as a row of the Agents list (same shape as a herdr agent, plus headless:true). Not part of agents(): Dispatch,
@@ -2925,26 +2944,33 @@ async function headlessAgentRoute(req, res, url, parts) {
   if (sub === 'commands' && req.method === 'GET') return send(res, 200, [])
   if (req.method === 'GET' && !sub) return send(res, 200, { text: '', ...hl().get(id) })
   if (req.method === 'GET') return send(res, 404, { error: 'not found' })
+  await rooms.load()
   if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
   if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
-  const b = JSON.parse((await body(req)) || '{}')
+  const b = JSON.parse((await body(req)) || '{}') ?? {}
   if (sub === 'stop') return send(res, 200, hl().interrupt(id) && { ok: true })
   if (!sub && req.method === 'POST') return send(res, 200, hl().message(id, b.text) && { ok: true })
   if (!sub && req.method === 'DELETE') return send(res, 200, hl().stop(id, 'removed by the user') && { ok: true })
   send(res, 404, { error: 'not found for a headless agent' })
 }
 async function headlessApi(req, res, url, parts) {
-  const json = async () => { if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 }); return JSON.parse((await body(req)) || '{}') }
+  const json = async () => {
+    if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 })
+    const b = JSON.parse((await body(req)) || '{}')
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw Object.assign(new Error('body: a JSON object'), { status: 400 })
+    return b
+  }
   const id = parts[2], sub = parts[3], h = hl()
   if (req.method === 'GET') {
     if (!id) return send(res, 200, h.list())
     if (!h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
     if (!sub) return send(res, 200, h.get(id))
-    if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Number(url.searchParams.get('limit')) || 500))
+    if (sub === 'events') return send(res, 200, h.events(id, url.searchParams.get('after'), Math.min(500, Number(url.searchParams.get('limit')) > 0 ? Number(url.searchParams.get('limit')) : 500)))
     if (sub === 'stream') return headlessStream(req, res, url, id)
     return send(res, 404, { error: 'not found' })
   }
   // Writes: the dashboard user, or (spawn, message) an agent pane that roomAuthor verifies.
+  await rooms.load() // roomAuthor reads the profile from rooms settings, loaded lazily
   const who = await roomAuthor(req)
   if (who.kind !== 'user' && !(req.method === 'POST' && (!id || sub === 'message'))) return send(res, 403, { error: 'dashboard only' })
   if (req.method === 'POST' && !id) {
