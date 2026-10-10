@@ -333,6 +333,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   planner. A persona name as `role` (`POST /api/headless {role: "frontend"}`) becomes its base role + persona. The spawn also applies
   the role's `model-route.mjs floor` as an explicit `--model` id and `--effort` (an explicit model/effort wins but is floored), so a run
   keeps one model for its life instead of Claude Code's default.
+- **Conversation controls (WP-310):** the chat is told its kind (`pane` | `headless`) once and shows only what fits. A headless run has
+  no toolbar row: its status is in the header, the composer's square button is **Interrupt** (the turn only; the process stays), and
+  **Stop agent…** in the header menu ends the process (in-app confirm; the run stays resumable). The bar under the header appears only
+  for a stuck flag, Resume (ended/failed) or an open ask.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
   `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
   the dashboard session; an agent pane may only spawn and message.

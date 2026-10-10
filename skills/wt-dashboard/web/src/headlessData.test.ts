@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { headlessBadge, stateChip, canResume, askQuestions, askAnswerBody } from './headlessData.ts'
+import { headlessBadge, stateChip, canResume, askQuestions, askAnswerBody, agentKind, canStop } from './headlessData.ts'
 
 test('headlessBadge / stateChip / canResume', () => {
   assert.equal(headlessBadge('queued'), 'queued')
@@ -19,4 +19,10 @@ test('askAnswerBody: tool allow/deny, AskUserQuestion answers', () => {
   assert.equal(askQuestions(q)[0].question, 'Pick?')
   assert.deepEqual(askQuestions(tool), [])
   assert.deepEqual(askAnswerBody(q, { question: 'Pick?', label: 'A' }), { ask: 'a2', answers: { 'Pick?': 'A' } })
+})
+
+test('agentKind / canStop (WP-310)', () => {
+  assert.equal(agentKind({ headless: true }), 'headless'); assert.equal(agentKind({}), 'pane')
+  assert.deepEqual(['starting', 'working', 'idle', 'queued', 'ended', 'failed', undefined].map((s) => canStop('headless', s)), [true, true, true, false, false, false, false])
+  assert.equal(canStop('pane', 'working'), false)
 })
