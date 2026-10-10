@@ -2952,7 +2952,7 @@ async function headlessAgentRoute(req, res, url, parts) {
   if (sub === 'stream' && req.method === 'GET') return streamTranscript(req, res, r.session, url)
   if (sub === 'activity' && req.method === 'GET') return send(res, 200, {})
   if (sub === 'commands' && req.method === 'GET') return send(res, 200, await headlessCommands(r))
-  if (req.method === 'GET' && !sub) return send(res, 200, { text: '', ...hl().get(id) })
+  if (req.method === 'GET' && !sub) return send(res, 200, { ...hl().get(id), text: '', turns: [], runTurns: r.turns }) // WP-305: the run's `turns` count would collide with the pane view's turns[]
   if (req.method === 'GET') return send(res, 404, { error: 'not found' })
   await rooms.load()
   if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })

@@ -24,13 +24,14 @@ window.fetch = async (...args: Parameters<typeof fetch>) => {
   return r
 }
 import App from './App.tsx'
+import { ErrorBoundary } from './errorBoundary'
 
 const qc = new QueryClient()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
-      <App />
+      <ErrorBoundary><App /></ErrorBoundary>
     </QueryClientProvider>
   </StrictMode>,
 )

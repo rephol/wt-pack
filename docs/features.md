@@ -324,6 +324,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   takes an optional `permissionMode` (`default|acceptEdits|plan|bypassPermissions`; `agents.sh spawn --headless … --permission-mode m`),
   and the Conversation view's Model section shows the mode the run reports. The New agent dialog has a **Run as: Headless** option with Permissions, Model, Effort, Name and Working directory fields (blank = the server's defaults) beside the first prompt. Read-only roles (reviewer, pr-watcher, auditor) always run
   `default` and reject any other mode, so their tool policy still applies and only get the read tools (`--tools`, no MCP servers), so no allow-rule in the user's settings can open a write tool.
+- A run started without a first prompt is `idle` as soon as its process is up (claude only emits `init` on its first turn), not
+  `starting`. A render error in the web app now shows an error panel with a Reload button instead of a blank page.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
   `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
   the dashboard session; an agent pane may only spawn and message.

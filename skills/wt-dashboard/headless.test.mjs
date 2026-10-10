@@ -58,7 +58,7 @@ test('spawn runs a prompt, records the session, ends idle; init facts land on th
 test('a run with no prompt idles after nothing; a message then works it', async (t) => {
   const { h, start, results } = await setup(t)
   const r = start(undefined)
-  await until(() => h.get(r.id).state === 'starting', 'starting') // no init until a turn
+  await until(() => h.get(r.id).state === 'idle' && h.get(r.id).pid, 'idle') // WP-305: no init until a turn, but not 'starting' forever
   h.message(r.id, 'first')
   await until(() => h.get(r.id).state === 'idle', 'idle')
   h.message(r.id, 'second')
