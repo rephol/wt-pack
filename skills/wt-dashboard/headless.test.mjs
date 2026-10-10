@@ -45,6 +45,8 @@ test('spawn runs a prompt, records the session, ends idle; init facts land on th
   assert.equal(row.turns, 1)
   assert.equal(row.cost_usd, 0.01)
   assert.deepEqual(JSON.parse(row.plugins), ['fake'])
+  assert.equal(row.init_model, 'claude-fake-1') // WP-300
+  assert.deepEqual(JSON.parse(row.init_commands), { slash_commands: ['compact', 'wt-ask'], skills: ['wt-ask'] })
   assert.deepEqual(results(r.id), ['echo: hello'])
   const init = events(r.id).find((e) => e.type === 'system/init').event
   assert.ok(init.argv.includes('--permission-prompt-tool') && init.argv.includes('stdio'))

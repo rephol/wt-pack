@@ -128,8 +128,9 @@ export class Headless {
     this.#append(id, type, line.length > LINE_MAX ? JSON.stringify({ type: e.type, subtype: e.subtype, truncated: line.length }) : line, this.now())
     const set = (sql, ...a) => this.db.prepare(`UPDATE headless_runs SET ${sql} WHERE id = ?`).run(...a, id)
     if (e.type === 'system' && e.subtype === 'init') {
-      set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, state = CASE WHEN state = 'starting' THEN '${p?.inflight ? 'working' : 'idle'}' ELSE state END`,
-        e.session_id ?? null, JSON.stringify((e.plugins ?? []).map((x) => x.name ?? x)), e.permissionMode ?? null, e.apiKeySource ?? null)
+      set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, init_model = ?, init_commands = ?, state = CASE WHEN state = 'starting' THEN '${p?.inflight ? 'working' : 'idle'}' ELSE state END`,
+        e.session_id ?? null, JSON.stringify((e.plugins ?? []).map((x) => x.name ?? x)), e.permissionMode ?? null, e.apiKeySource ?? null,
+        e.model ?? null, JSON.stringify({ slash_commands: e.slash_commands ?? [], skills: e.skills ?? [] }))
     } else if (e.type === 'result') {
       if (p) p.inflight = 0
       set(`state = 'idle', turns = turns + 1, cost_usd = cost_usd + ?`, Number(e.total_cost_usd) || 0)

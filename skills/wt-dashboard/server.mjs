@@ -2929,18 +2929,29 @@ function headlessRows(machine) {
     key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, pool: 'other', roleBy: 'none', tags: { role: r.role }, paneTokens: {}, workspace: null,
     status: r.asks.length ? 'blocked' : HL_STATUS[r.state] ?? 'idle', statusSince: r.last_event, lastActivity: r.last_event, cwd: r.cwd, project: projectName(r.cwd),
     recap: r.reason, context: null, background: 0, asks: r.asks.length > 0, question: r.asks[0] ? `${r.asks[0].tool}: ${JSON.stringify(r.asks[0].input).slice(0, 200)}` : null,
-    picker: null, lastPrompt: null, session: r.session, model: r.model ? { id: null, name: r.model, effort: r.effort, source: 'headless', routed: null } : null,
+    picker: null, lastPrompt: null, session: r.session, model: r.init_model || r.model ? { id: r.init_model ?? null, name: r.init_model ?? r.model, effort: r.effort, source: 'headless', routed: null } : null, // WP-300: the resolved model from init wins
     task: null, headless: true, headlessState: r.state,
   }))
 }
 // The Conversation view's per-agent routes for a headless row: the run's own transcript (the same JSONL a TUI session writes)
 // feeds the existing stream; send/stop/remove go to the supervisor instead of herdr.
+// WP-300: the picker for a headless run = what its init event listed (slash_commands + skills), described from the same sources
+// as a herdr agent's; before init (or an old run) all of them. A name init knows but we cannot describe still shows, as Built-in.
+async function headlessCommands(r) {
+  const all = await commandsFor({ local: true, cwd: r.cwd })
+  let init = null
+  try { init = JSON.parse(r.init_commands) } catch {}
+  const names = init && [...init.slash_commands, ...init.skills]
+  if (!names?.length) return all
+  const by = new Map(all.map((c) => [c.name, c]))
+  return [...new Set(names)].map((n) => by.get(n.replace(/^\//, '')) ?? { name: n.replace(/^\//, ''), description: '', source: 'Built-in' })
+}
 async function headlessAgentRoute(req, res, url, parts) {
   const id = decodeURIComponent(parts[3]), sub = parts[4], r = hl().run(id)
   if (!r) return send(res, 404, { error: 'unknown headless agent' })
   if (sub === 'stream' && req.method === 'GET') return streamTranscript(req, res, r.session, url)
   if (sub === 'activity' && req.method === 'GET') return send(res, 200, {})
-  if (sub === 'commands' && req.method === 'GET') return send(res, 200, [])
+  if (sub === 'commands' && req.method === 'GET') return send(res, 200, await headlessCommands(r))
   if (req.method === 'GET' && !sub) return send(res, 200, { text: '', ...hl().get(id) })
   if (req.method === 'GET') return send(res, 404, { error: 'not found' })
   await rooms.load()

@@ -216,6 +216,8 @@ export const MIGRATIONS = [
           CREATE INDEX headless_events_run ON headless_events (run_id, seq);
           CREATE TABLE headless_asks (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, tool TEXT NOT NULL, input TEXT NOT NULL, state TEXT NOT NULL, note TEXT, created INTEGER NOT NULL);`,
     legacy: () => [], import: () => {}, export: () => {} },
+  // WP-300: what the stream-json init event reports: the resolved model and the slash commands / skills (JSON), for the Conversation view.
+  { sql: `ALTER TABLE headless_runs ADD COLUMN init_model TEXT; ALTER TABLE headless_runs ADD COLUMN init_commands TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

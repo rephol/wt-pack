@@ -315,6 +315,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     is ever killed.
 - **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
   again with `--resume`.
+- **Model and `/` picker (WP-300):** the stream-json `init` event's `model`, `slash_commands` and `skills` are stored on the run. The
+  Conversation view shows the resolved model (plus the run's effort, when set) like a herdr agent, and the composer's `/` picker
+  lists exactly those commands and skills.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
   `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
   the dashboard session; an agent pane may only spawn and message.
