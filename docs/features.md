@@ -290,8 +290,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   terminal. It runs under your own Claude login with a minimal env (no API key, no `HERDR_*`). Nothing starts until
   something spawns one: `POST /api/headless {role, cwd, prompt?, model?, effort?, name?}` from the dashboard, or from an
   agent pane.
-- It shows in the Agents list with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
-  while it waits on an ask. Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
+- It shows in the Agents list, in its role's group, with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
+  while it waits on an ask. Only live or queued runs are listed: an ended, failed or removed run leaves the list (it stays in `GET /api/headless`). Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
   headless run is never picked for work.
 - **Queue:** with `WT_HEADLESS_CAP` set (default 0 = unlimited), at most that many run at once. A spawn over the cap is `queued` and starts when a slot
   frees, oldest first; a queued run can't take messages yet.
