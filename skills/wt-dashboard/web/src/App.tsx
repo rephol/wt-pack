@@ -105,6 +105,7 @@ interface Agent {
   cwd: string
   recap: string | null
   context: { used: string; total: string; pct: number } | null
+  permissionMode?: string | null // WP-300: headless runs
   model?: { id: string | null; name: string | null; effort: string | null; effortSource?: string | null; source: string; routed: string | null } | null // WP-198
   asks: boolean
   question: string | null
@@ -686,14 +687,15 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         {task?.pr && <SummaryRow label="PR"><PrCell pr={task.pr} /></SummaryRow>}
       </SummarySection>
 
-      {agent.model && (
+      {(agent.model || agent.permissionMode) && (
         <SummarySection title="Model">
-          <SummaryRow label="Running">
+          {agent.permissionMode && <SummaryRow label="Permissions"><Text size="sm">{agent.permissionMode}</Text></SummaryRow>}
+          {agent.model && <SummaryRow label="Running">
             <Tooltip content={agent.model.id ?? `from the ${agent.model.source}`}>
               <Text size="sm">{modelLabel(agent.model)}</Text>
             </Tooltip>
-          </SummaryRow>
-          {agent.model.routed && <Text size="sm" type="supporting">{`routed ${agent.model.routed}, running ${agent.model.name?.split(' ')[0].toLowerCase() ?? 'another tier'}`}</Text>}
+          </SummaryRow>}
+          {agent.model?.routed && <Text size="sm" type="supporting">{`routed ${agent.model.routed}, running ${agent.model.name?.split(' ')[0].toLowerCase() ?? 'another tier'}`}</Text>}
         </SummarySection>
       )}
 

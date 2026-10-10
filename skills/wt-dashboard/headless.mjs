@@ -21,21 +21,22 @@ const TEXT_MAX = 100_000
 // Roles map to a permission mode and a tool policy. 'readonly': Read/Grep/Glob answered automatically, any other tool denied.
 // 'ask': every tool request becomes an open ask for a human. Unknown role = ask (never silently permissive).
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions']
 export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
 export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
 export class Headless {
   // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, stuckAction, db, onChange(run id, what), log, now.
-  // Product defaults are settings (WP-293): cap 2, stuckAction 'flag' (no automatic interrupt/kill), resumes 0 (a crash mid-turn
-  // fails the run; resume stays manual). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
-  constructor({ db, cmd = 'claude', cap, idleMs = 30 * 60_000, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles,
+  // Product defaults are settings (WP-293): cap 0 (unlimited), idle release off (idleMs 0), stuckAction 'flag' (no automatic interrupt/kill), resumes 3 (a crash
+  // mid-turn is resumed up to 3 times, then fails). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
+  constructor({ db, cmd = 'claude', cap, idleMs = 0, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles,
     onChange = () => {}, log = console.error, now = Date.now, env = process.env } = {}) {
     const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v))
-    cap = Math.max(1, num(cap ?? env.WT_HEADLESS_CAP, 2))
-    resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 0)
+    cap = num(cap ?? env.WT_HEADLESS_CAP, 0) // 0 = unlimited
+    resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 3)
     stuckAction = stuckAction ?? env.WT_HEADLESS_STUCK_ACTION ?? 'flag'
     if (!STUCK_ACTIONS.includes(stuckAction)) throw new Error(`stuckAction: one of ${STUCK_ACTIONS.join(', ')}`)
-    // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default pr-watcher); undefined or '*' = any.
+    // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default '*'); undefined or '*' = any.
     Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }
@@ -57,15 +58,18 @@ export class Headless {
 
   // ---- lifecycle ----
   // Create a run and start it now, or queue it when the cap is reached.
-  spawn({ role, cwd, prompt, model, effort, name } = {}) {
+  spawn({ role, cwd, prompt, model, effort, name, permissionMode } = {}) {
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
     if (this.roles && !this.roles.includes(role)) throw err(400, `role ${role} is not enabled for headless (WT_HEADLESS_ROLES)`)
     if (typeof cwd !== 'string' || !cwd.startsWith('/')) throw err(400, 'cwd: an absolute path')
     if (prompt !== undefined && (typeof prompt !== 'string' || prompt.length > TEXT_MAX)) throw err(400, `prompt: a string up to ${TEXT_MAX} chars`)
+    // WP-300: unset = the user's own Claude Code settings decide. A read-only role stays on 'default' so every tool reaches policyOf.
+    if (permissionMode != null && !PERMISSION_MODES.includes(permissionMode)) throw err(400, `permissionMode: one of ${PERMISSION_MODES.join(', ')}`)
+    if (permissionMode && permissionMode !== 'default' && policyOf(role) === 'readonly') throw err(400, `role ${role} is read-only: permissionMode must be default`)
     const id = 'hl-' + randomBytes(5).toString('hex')
     const t = this.now()
-    this.db.prepare(`INSERT INTO headless_runs (id, name, role, cwd, model, effort, prompt, state, created, last_event, resumes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, cwd, model ?? null, effort ?? null, prompt ?? null, t, t)
+    this.db.prepare(`INSERT INTO headless_runs (id, name, role, cwd, model, effort, prompt, req_permission_mode, state, created, last_event, resumes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
     this.pump()
     return this.get(id)
@@ -78,8 +82,8 @@ export class Headless {
     try {
       do {
         this.again = false
-        const room = this.cap - this.live().length
-        const queued = this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued' ORDER BY created, rowid LIMIT ?").all(Math.max(0, room))
+        const room = this.cap ? this.cap - this.live().length : -1 // LIMIT -1 = no limit
+        const queued = this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued' ORDER BY created, rowid LIMIT ?").all(room < 0 && this.cap ? 0 : room)
         for (const q of queued) this.#start(q.id)
       } while (this.again)
     } finally { this.pumping = false }
@@ -88,7 +92,8 @@ export class Headless {
     const r = this.run(id)
     if (r?.state !== 'queued') return // cancelled or taken since the queue was read
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
-      '--permission-mode', 'default', ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
+      ...(policyOf(r.role) === 'readonly' ? ['--permission-mode', 'default', '--tools', [...READ_ONLY, 'AskUserQuestion'].join(','), '--strict-mcp-config'] : // WP-300: only read tools exist, so no allow-rule in the user's settings can open a write/exec/MCP tool
+         r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
     const env = { TERM: 'dumb', ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
@@ -128,8 +133,9 @@ export class Headless {
     this.#append(id, type, line.length > LINE_MAX ? JSON.stringify({ type: e.type, subtype: e.subtype, truncated: line.length }) : line, this.now())
     const set = (sql, ...a) => this.db.prepare(`UPDATE headless_runs SET ${sql} WHERE id = ?`).run(...a, id)
     if (e.type === 'system' && e.subtype === 'init') {
-      set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, state = CASE WHEN state = 'starting' THEN '${p?.inflight ? 'working' : 'idle'}' ELSE state END`,
-        e.session_id ?? null, JSON.stringify((e.plugins ?? []).map((x) => x.name ?? x)), e.permissionMode ?? null, e.apiKeySource ?? null)
+      set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, init_model = ?, init_commands = ?, state = CASE WHEN state = 'starting' THEN '${p?.inflight ? 'working' : 'idle'}' ELSE state END`,
+        e.session_id ?? null, JSON.stringify((e.plugins ?? []).map((x) => x.name ?? x)), e.permissionMode ?? null, e.apiKeySource ?? null,
+        e.model ?? null, JSON.stringify({ slash_commands: e.slash_commands ?? [], skills: e.skills ?? [] }))
     } else if (e.type === 'result') {
       if (p) p.inflight = 0
       set(`state = 'idle', turns = turns + 1, cost_usd = cost_usd + ?`, Number(e.total_cost_usd) || 0)
@@ -272,7 +278,7 @@ export class Headless {
     const t = this.now(), did = []
     for (const r of this.live()) {
       const quiet = t - r.last_event
-      if (r.state === 'idle' && quiet > this.idleMs) { this.stop(r.id, `idle release (${Math.round(quiet / 60_000)} min quiet)`); did.push(['idle', r.id]) }
+      if (r.state === 'idle' && this.idleMs && quiet > this.idleMs) { this.stop(r.id, `idle release (${Math.round(quiet / 60_000)} min quiet)`); did.push(['idle', r.id]) }
       else if (r.state === 'working' && quiet > this.stuckMs) {
         // Flag first (a 'stuck' event + the row's `stuck` time, shown by get()); 'interrupt'/'kill' also interrupt; 'kill' then
         // stops the run once graceMs passes without output. Any output clears the flag (#event).

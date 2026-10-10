@@ -29,7 +29,7 @@
 #                                            non-member persona (exit 2) and a full seat (exit 3))
 #                                            "<name> <pane>"; `spawn <role|persona> --team <name>` adds ONE agent to a
 #                                            team. Every member pane gets the display-only `team` token.
-#   agents.sh spawn --headless <role> [cwd] [--prompt "<text>"] [--model m] [--effort e] [--name n]
+#   agents.sh spawn --headless <role> [cwd] [--prompt "<text>"] [--model m] [--effort e] [--name n] [--permission-mode m]
 #                                            # WP-293: asks wt-dashboard ($HERDR_DASH_URL, default 127.0.0.1:7777) to
 #                                            run a headless agent (no herdr pane); prints "<name> <id> <state>" (state
 #                                            may be queued). cwd defaults to $PWD. Exit 1 on a dashboard error.
@@ -69,17 +69,17 @@ case " $* " in *" --headless "*)
   hl_cmd=$1; shift
   case "$hl_cmd" in
   spawn)
-    role=; cwd=; prompt=; model=; effort=; name=
+    role=; cwd=; prompt=; model=; effort=; name=; pmode=
     while [ $# -gt 0 ]; do v=$1; case "$v" in
       --headless) shift ;;
-      --prompt|--model|--effort|--name) [ $# -ge 2 ] || { echo "$v needs a value" >&2; exit 2; }
-        case "$v" in --prompt) prompt=$2 ;; --model) model=$2 ;; --effort) effort=$2 ;; --name) name=$2 ;; esac; shift 2 ;;
+      --prompt|--model|--effort|--name|--permission-mode) [ $# -ge 2 ] || { echo "$v needs a value" >&2; exit 2; }
+        case "$v" in --prompt) prompt=$2 ;; --model) model=$2 ;; --effort) effort=$2 ;; --name) name=$2 ;; --permission-mode) pmode=$2 ;; esac; shift 2 ;;
       *) if [ -z "$role" ]; then role=$v; elif [ -z "$cwd" ]; then cwd=$v; else echo "spawn --headless: unexpected $v" >&2; exit 2; fi; shift ;;
     esac; done
-    [ -n "$role" ] || { echo "spawn --headless <role> [cwd] [--prompt text] [--model m] [--effort e] [--name n]" >&2; exit 2; }
+    [ -n "$role" ] || { echo "spawn --headless <role> [cwd] [--prompt text] [--model m] [--effort e] [--name n] [--permission-mode m]" >&2; exit 2; }
     cwd=$(cd "${cwd:-$PWD}" 2>/dev/null && pwd) || { echo "spawn --headless: no such directory" >&2; exit 2; }
-    hl_res=$(hl_call POST "" "$(jq -n --arg role "$role" --arg cwd "$cwd" --arg prompt "$prompt" --arg model "$model" --arg effort "$effort" --arg name "$name" \
-      '{$role, $cwd} + ({$prompt, $model, $effort, $name} | with_entries(select(.value != "")))')") || exit 1
+    hl_res=$(hl_call POST "" "$(jq -n --arg role "$role" --arg cwd "$cwd" --arg prompt "$prompt" --arg model "$model" --arg effort "$effort" --arg name "$name" --arg permissionMode "$pmode" \
+      '{$role, $cwd} + ({$prompt, $model, $effort, $name, $permissionMode} | with_entries(select(.value != "")))')") || exit 1
     printf '%s' "$hl_res" | jq -r '"\(.name) \(.id) \(.state)"' ;;
   list) hl_res=$(hl_call GET "") || exit 1; printf '%s' "$hl_res" | jq -r '.[] | "\(.name) \(.id) \(.state) \(.cwd)"' ;;
   rm)

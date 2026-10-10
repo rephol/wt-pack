@@ -28,7 +28,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (m.type === 'control_response') { pending.get(m.response?.request_id)?.(m.response.response); pending.delete(m.response?.request_id); return }
   if (m.type !== 'user') return
   const text = typeof m.message?.content === 'string' ? m.message.content : JSON.stringify(m.message?.content)
-  out({ type: 'system', subtype: 'init', session_id: session, plugins: [{ name: 'fake' }], permissionMode: 'default', apiKeySource: 'none',
+  out({ type: 'system', subtype: 'init', session_id: session, plugins: [{ name: 'fake' }], model: 'claude-fake-1', slash_commands: ['compact', 'wt-ask'], skills: ['wt-ask'], permissionMode: 'default', apiKeySource: 'none',
     argv, env: Object.keys(process.env).sort(), resumed: !!resume, turn: ++n })
   out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working on: ' + text.slice(0, 40) }] } })
   const ask = (tool, input) => new Promise((res) => {

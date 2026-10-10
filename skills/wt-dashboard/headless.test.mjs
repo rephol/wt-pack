@@ -45,10 +45,12 @@ test('spawn runs a prompt, records the session, ends idle; init facts land on th
   assert.equal(row.turns, 1)
   assert.equal(row.cost_usd, 0.01)
   assert.deepEqual(JSON.parse(row.plugins), ['fake'])
+  assert.equal(row.init_model, 'claude-fake-1') // WP-300
+  assert.deepEqual(JSON.parse(row.init_commands), { slash_commands: ['compact', 'wt-ask'], skills: ['wt-ask'] })
   assert.deepEqual(results(r.id), ['echo: hello'])
   const init = events(r.id).find((e) => e.type === 'system/init').event
   assert.ok(init.argv.includes('--permission-prompt-tool') && init.argv.includes('stdio'))
-  assert.equal(init.argv[init.argv.indexOf('--permission-mode') + 1], 'default')
+  assert.ok(!init.argv.includes('--permission-mode')) // WP-300: no forced mode; the user's settings apply
   assert.equal(row.pid > 0, true)
   assert.equal(h.live().length, 1)
 })
@@ -113,16 +115,16 @@ test('idle release stops an idle run after idleMs, never a working one', async (
   assert.equal(state(busy.id), 'working')
 })
 
-test('defaults are settings: cap 2, stuckAction flag, resumes 0; env overrides; options win', async (t) => {
+test('defaults are settings: cap 0 (unlimited), idle off, stuckAction flag, resumes 3; env overrides; options win', async (t) => {
   const { h } = await setup(t)
-  assert.deepEqual([h.cap, h.stuckAction, h.resumes, h.idleMs], [2, 'flag', 0, 30 * 60_000])
+  assert.deepEqual([h.cap, h.stuckAction, h.resumes, h.idleMs], [0, 'flag', 3, 0])
   const env = { WT_HEADLESS_CAP: '4', WT_HEADLESS_STUCK_ACTION: 'kill', WT_HEADLESS_RESUMES: '3' }
   const e = new Headless({ db: h.db, env })
   assert.deepEqual([e.cap, e.stuckAction, e.resumes], [4, 'kill', 3])
   const o = new Headless({ db: h.db, env, cap: 1, stuckAction: 'interrupt', resumes: 0 })
   assert.deepEqual([o.cap, o.stuckAction, o.resumes], [1, 'interrupt', 0])
   assert.throws(() => new Headless({ db: h.db, env: {}, stuckAction: 'nuke' }), /stuckAction/)
-  assert.equal(new Headless({ db: h.db, env: { WT_HEADLESS_CAP: 'x' } }).cap, 2)
+  assert.equal(new Headless({ db: h.db, env: { WT_HEADLESS_CAP: 'x' } }).cap, 0)
 })
 
 test('stuckAction flag (default): a stuck turn is flagged only, never interrupted or killed; output clears the flag', async (t) => {
@@ -209,8 +211,8 @@ test('resumes N: crash mid-turn resumes by session id; after N resumes the run f
   assert.equal(c.h.live().length, 0)
 })
 
-test('resumes 0 (default): a crash mid-turn fails the run with the reason; resume stays manual', async (t) => {
-  const { h, start, state, events, results } = await setup(t)
+test('resumes 0: a crash mid-turn fails the run with the reason; resume stays manual', async (t) => {
+  const { h, start, state, events, results } = await setup(t, { resumes: 0 })
   assert.equal(h.resumes, 0)
   const r = start('CRASH now')
   await until(() => state(r.id) === 'failed', 'failed')
@@ -448,4 +450,27 @@ test('roles allowlist: only listed roles spawn; * or none = any', async (t) => {
   assert.equal(h.spawn({ role: 'pr-watcher', cwd }).role, 'pr-watcher')
   const any = await setup(t, { roles: ['*'] })
   assert.equal(any.h.spawn({ role: 'worker', cwd: any.cwd }).role, 'worker')
+})
+
+test('permissionMode: passed through for a worker, validated, and a read-only role stays on default (WP-300)', async (t) => {
+  const { h, events, cwd } = await setup(t)
+  const w = h.spawn({ role: 'worker', cwd, prompt: 'hi', permissionMode: 'acceptEdits' })
+  await until(() => events(w.id).some((e) => e.type === 'system/init'), 'init')
+  const argv = events(w.id).find((e) => e.type === 'system/init').event.argv
+  assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'acceptEdits')
+  assert.equal(h.get(w.id).req_permission_mode, 'acceptEdits')
+  assert.throws(() => h.spawn({ role: 'worker', cwd, permissionMode: 'nope' }), /permissionMode/)
+  assert.throws(() => h.spawn({ role: 'reviewer', cwd, permissionMode: 'bypassPermissions' }), /read-only/)
+  const r = h.spawn({ role: 'reviewer', cwd, prompt: 'hi' })
+  await until(() => events(r.id).some((e) => e.type === 'system/init'), 'init')
+  const ra = events(r.id).find((e) => e.type === 'system/init').event.argv
+  assert.equal(ra[ra.indexOf('--permission-mode') + 1], 'default')
+  assert.equal(ra[ra.indexOf('--tools') + 1], 'Read,Grep,Glob,LS,NotebookRead,AskUserQuestion')
+  assert.ok(ra.includes('--strict-mcp-config') && !argv.includes('--tools'))
+})
+
+test('cap 0 is unlimited: every spawn starts at once (WP-301)', async (t) => {
+  const { h, start, state } = await setup(t)
+  const ids = [start('a'), start('b'), start('c')].map((r) => r.id)
+  await until(() => ids.every((id) => state(id) !== 'queued'), 'none queued')
 })

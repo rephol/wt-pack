@@ -56,10 +56,15 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const [project, setProject] = useState<string>('')
   const [cwd, setCwd] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of a herdr pane
+  const [pmode, setPmode] = useState('') // '' = the user's own Claude Code settings
   const list = projects.data ?? []
   const proj = list.find((p) => p.name === (project || (defaultProject !== 'all' ? defaultProject : ''))) ?? list[0]
   const spawn = useMutation({
-    mutationFn: () => api<{ key: string; name: string; prompted: boolean }>('/api/agents/spawn', { method: 'POST', body: JSON.stringify({ kind, project: proj?.name, cwd: start === 'main' ? undefined : cwd || undefined, prompt: prompt.trim() || undefined }) }),
+    mutationFn: () => headless
+      ? api<{ id: string }>('/api/headless', { method: 'POST', body: JSON.stringify({ role: kind, cwd: start === 'main' ? proj?.root : cwd || proj?.root, prompt: prompt.trim() || undefined, permissionMode: pmode || undefined }) })
+        .then((r) => ({ key: `${agents.find((a) => a.local)?.machine ?? 'local'}/${r.id}`, name: r.id, prompted: !!prompt.trim() }))
+      : api<{ key: string; name: string; prompted: boolean }>('/api/agents/spawn', { method: 'POST', body: JSON.stringify({ kind, project: proj?.name, cwd: start === 'main' ? undefined : cwd || undefined, prompt: prompt.trim() || undefined }) }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['overview'] }); onClose(); onOpenAgent(r.key) },
   })
   // Reuse before spawning: a free agent of this kind (idle/done, no question; a planner sitting in the main checkout).
@@ -93,6 +98,15 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
                   description: w.agents.length ? `occupied by ${w.agents.join(', ')}` : short(w.path) }))}
                 onChange={setCwd} />
             )}
+            <VStack gap={1}>
+              <SegmentedControl label="Run as" value={headless ? 'headless' : 'pane'} onChange={(v) => setHeadless(v === 'headless')}>
+                <SegmentedControlItem value="pane" label="Pane" /><SegmentedControlItem value="headless" label="Headless" />
+              </SegmentedControl>
+              {headless && (
+                <Selector label="Permissions" width="100%" value={pmode} onChange={setPmode}
+                  options={[{ value: '', label: 'Your Claude Code settings' }, { value: 'default', label: 'Default (ask)' }, { value: 'acceptEdits', label: 'Accept edits' }, { value: 'plan', label: 'Plan' }, { value: 'bypassPermissions', label: 'Bypass permissions' }]} />
+              )}
+            </VStack>
             <TextArea label="First prompt (optional)" value={prompt} onChange={setPrompt} placeholder="Optional" rows={3} />
             {free && (
               <Banner status="info" title={`${free.name} is free — use it instead?`} description="Panes pile up and nothing reaps them; reuse a free agent when you can."
