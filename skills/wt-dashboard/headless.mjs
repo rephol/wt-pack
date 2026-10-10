@@ -7,7 +7,7 @@
 // watchdog, startup reconcile, kill by the RECORDED pid only (never pkill), bounded event retention.
 import { spawn as nodeSpawn, execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { open, tx } from './store.mjs'
+import { open } from './store.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
 export const ROLE = /^[\w.-]{1,40}$/
@@ -15,18 +15,27 @@ export const READ_ONLY = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead'])
 const LIVE = ['starting', 'working', 'idle'] // a process exists
 const LINE_MAX = 256 * 1024 // an event bigger than this is stored as a stub
 const KEEP_EVENTS = 2000 // per run; older rows are dropped, seq keeps counting
+const PRUNE_EVERY = 100
 const TEXT_MAX = 100_000
 
 // Roles map to a permission mode and a tool policy. 'readonly': Read/Grep/Glob answered automatically, any other tool denied.
 // 'ask': every tool request becomes an open ask for a human. Unknown role = ask (never silently permissive).
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
+export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
 export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
 export class Headless {
-  // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, db, onChange(run id, what), log, now
-  constructor({ db, cmd = 'claude', cap = 3, idleMs = 30 * 60_000, stuckMs = 10 * 60_000, graceMs = 5_000, resumes = 2,
+  // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, stuckAction, db, onChange(run id, what), log, now.
+  // Product defaults are settings (WP-293): cap 2, stuckAction 'flag' (no automatic interrupt/kill), resumes 0 (a crash mid-turn
+  // fails the run; resume stays manual). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
+  constructor({ db, cmd = 'claude', cap, idleMs = 30 * 60_000, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction,
     onChange = () => {}, log = console.error, now = Date.now, env = process.env } = {}) {
-    Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, onChange, log, now, env, procs: new Map() })
+    const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v))
+    cap = Math.max(1, num(cap ?? env.WT_HEADLESS_CAP, 2))
+    resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 0)
+    stuckAction = stuckAction ?? env.WT_HEADLESS_STUCK_ACTION ?? 'flag'
+    if (!STUCK_ACTIONS.includes(stuckAction)) throw new Error(`stuckAction: one of ${STUCK_ACTIONS.join(', ')}`)
+    Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }
 
@@ -60,30 +69,40 @@ export class Headless {
     return this.get(id)
   }
   // Start queued runs while under the cap, oldest first.
+  // Re-entrant calls (#start failing -> #end -> pump) only ask for another pass, so the cap is never overshot.
   pump() {
-    const active = this.live().length
-    const queued = this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued' ORDER BY created").all()
-    for (const q of queued.slice(0, Math.max(0, this.cap - active))) this.#start(q.id)
+    if (this.pumping) { this.again = true; return }
+    this.pumping = true
+    try {
+      do {
+        this.again = false
+        const room = this.cap - this.live().length
+        const queued = this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued' ORDER BY created, rowid LIMIT ?").all(Math.max(0, room))
+        for (const q of queued) this.#start(q.id)
+      } while (this.again)
+    } finally { this.pumping = false }
   }
   #start(id) {
     const r = this.run(id)
+    if (r?.state !== 'queued') return // cancelled or taken since the queue was read
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--permission-prompt-tool', 'stdio',
       '--permission-mode', 'default', ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...(r.session ? ['--resume', r.session] : [])]
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
-    const env = { HOME: this.env.HOME, PATH: this.env.PATH, TERM: 'dumb', ...(this.env.USER ? { USER: this.env.USER } : {}) }
+    const env = { TERM: 'dumb', ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
     let child
     try { child = nodeSpawn(this.cmd, args, { cwd: r.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] }) } catch (e) { return this.#end(id, 'failed', `spawn: ${e.message}`) }
-    const p = { child, buf: '', done: false, killing: false }
+    const p = { child, buf: '', skip: false, done: false, exited: false, killing: false, inflight: 0 }
     this.procs.set(id, p)
     this.db.prepare("UPDATE headless_runs SET state = 'starting', pid = ?, started = ?, last_event = ?, reason = NULL WHERE id = ?").run(child.pid ?? null, this.now(), this.now(), id)
     this.#note(id, 'supervisor', { subtype: 'started', pid: child.pid, resume: r.session ?? null })
-    child.on('error', (e) => { this.#note(id, 'supervisor', { subtype: 'spawn_error', message: e.message }); p.done = true; this.#exit(id, p, null, null, `spawn: ${e.message}`) })
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8') // a multi-byte char split across chunks stays whole
+    child.on('error', (e) => { this.#note(id, 'supervisor', { subtype: 'spawn_error', message: e.message }); p.spawnFailed = true; this.#exit(id, p, null, null, `spawn: ${e.message}`) })
     child.stdin.on('error', () => {}) // EPIPE after exit is handled by 'close'
     child.stdout.on('data', (d) => this.#data(id, p, d))
     child.stderr.on('data', (d) => this.#note(id, 'stderr', { text: String(d).slice(0, 2000) }, false))
     child.on('close', (code, sig) => this.#exit(id, p, code, sig))
-    if (r.prompt) { this.#write(id, userLine(r.prompt)); this.db.prepare('UPDATE headless_runs SET prompt = NULL WHERE id = ?').run(id) }
+    if (r.prompt) { this.#send(id, r.prompt); this.db.prepare('UPDATE headless_runs SET prompt = NULL WHERE id = ?').run(id) }
     this.onChange(id, 'run')
   }
   #data(id, p, d) {
@@ -91,26 +110,33 @@ export class Headless {
     let i
     while ((i = p.buf.indexOf('\n')) >= 0) {
       const line = p.buf.slice(0, i); p.buf = p.buf.slice(i + 1)
-      if (line.trim()) this.#event(id, line)
+      if (p.skip) p.skip = false // the tail of a line already stubbed
+      else if (line.trim()) this.#event(id, line)
     }
-    if (p.buf.length > LINE_MAX) { this.#note(id, 'supervisor', { subtype: 'oversized_line', bytes: p.buf.length }); p.buf = '' }
+    // A line still growing past the limit: stub it now and drop the rest of it up to the next newline (memory stays bounded).
+    if (p.buf.length > LINE_MAX && !p.skip) { this.#note(id, 'supervisor', { subtype: 'oversized_line', bytes: p.buf.length }); p.skip = true }
+    if (p.skip) p.buf = ''
   }
   #event(id, line) {
     let e
     try { e = JSON.parse(line) } catch { return this.#note(id, 'stdout', { text: line.slice(0, 2000) }) }
     const type = e.type + (e.subtype ? '/' + e.subtype : '')
-    const t = this.now()
-    this.#store(id, type, line.length > LINE_MAX ? JSON.stringify({ type: e.type, subtype: e.subtype, truncated: line.length }) : line, t)
+    const p = this.procs.get(id)
+    this.db.prepare('UPDATE headless_runs SET stuck = NULL WHERE id = ? AND stuck IS NOT NULL').run(id) // output = the turn is alive
+    this.#append(id, type, line.length > LINE_MAX ? JSON.stringify({ type: e.type, subtype: e.subtype, truncated: line.length }) : line, this.now())
     const set = (sql, ...a) => this.db.prepare(`UPDATE headless_runs SET ${sql} WHERE id = ?`).run(...a, id)
     if (e.type === 'system' && e.subtype === 'init') {
-      set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, state = CASE WHEN state = 'starting' THEN 'working' ELSE state END`,
+      set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, state = CASE WHEN state = 'starting' THEN '${p?.inflight ? 'working' : 'idle'}' ELSE state END`,
         e.session_id ?? null, JSON.stringify((e.plugins ?? []).map((x) => x.name ?? x)), e.permissionMode ?? null, e.apiKeySource ?? null)
     } else if (e.type === 'result') {
+      if (p) p.inflight = 0
       set(`state = 'idle', turns = turns + 1, cost_usd = cost_usd + ?`, Number(e.total_cost_usd) || 0)
     } else if (e.type === 'user' || e.type === 'assistant') {
       set(`state = CASE WHEN state IN ('idle','starting') THEN 'working' ELSE state END`)
     } else if (e.type === 'control_request' && e.request?.subtype === 'can_use_tool') {
       this.#toolRequest(id, e)
+    } else if (e.type === 'control_cancel_request' && e.request_id) { // claude gave up waiting on a tool decision
+      if (this.db.prepare("UPDATE headless_asks SET state = 'expired', note = 'cancelled by the agent' WHERE id = ? AND run_id = ? AND state = 'open'").run(e.request_id, id).changes) this.onChange(id, 'ask')
     }
     this.onChange(id, 'event')
   }
@@ -131,20 +157,20 @@ export class Headless {
     if (!p || p.done || !p.child.stdin.writable) throw err(409, 'the agent process is not running')
     p.child.stdin.write(line + '\n')
   }
-  #store(id, type, json, t) {
-    const seq = this.db.prepare('INSERT INTO headless_events (run_id, at, type, json) VALUES (?, ?, ?, ?)').run(id, t, type, json).lastInsertRowid
-    this.db.prepare('UPDATE headless_runs SET last_event = ?, events = events + 1 WHERE id = ?').run(t, id)
-    if (Number(seq) % 200 === 0) this.db.prepare('DELETE FROM headless_events WHERE run_id = ? AND seq <= (SELECT MAX(seq) - ? FROM headless_events WHERE run_id = ?)').run(id, KEEP_EVENTS, id)
+  #send(id, text) { this.#write(id, userLine(text)); const p = this.procs.get(id); if (p) p.inflight++ }
+  // The one writer of the event log. seq is store-assigned (AUTOINCREMENT, never reused); `touch` false = the row must not reset
+  // the idle/stuck clocks. Retention is per run: every PRUNE_EVERY events, rows older than the newest KEEP_EVENTS go.
+  #append(id, type, json, t, touch = true) {
+    this.db.prepare('INSERT INTO headless_events (run_id, at, type, json) VALUES (?, ?, ?, ?)').run(id, t, type, json)
+    const n = this.db.prepare(`UPDATE headless_runs SET events = events + 1${touch ? ', last_event = ' + Number(t) : ''} WHERE id = ? RETURNING events`).get(id)?.events
+    if (n && n % PRUNE_EVERY === 0) this.db.prepare('DELETE FROM headless_events WHERE run_id = ? AND seq <= (SELECT MAX(seq) FROM headless_events WHERE run_id = ?) - ?').run(id, id, KEEP_EVENTS)
   }
-  // A supervisor/diagnostic event in the same log; `touch` false = it must not reset the idle/stuck clocks.
-  #note(id, type, data, touch = true) {
-    const t = this.now()
-    this.db.prepare('INSERT INTO headless_events (run_id, at, type, json) VALUES (?, ?, ?, ?)').run(id, t, type, JSON.stringify({ type, ...data }))
-    if (touch) this.db.prepare('UPDATE headless_runs SET last_event = ? WHERE id = ?').run(t, id)
-  }
+  #note(id, type, data, touch = true) { this.#append(id, type, JSON.stringify({ type, ...data }), this.now(), touch) }
   #exit(id, p, code, sig, why) {
+    if (p.exited) return // 'error' then 'close' for the same child
+    p.exited = p.done = true
     if (this.procs.get(id) === p) this.procs.delete(id)
-    p.done = true
+    if (p.buf.trim() && !p.skip) this.#event(id, p.buf) // a last line without its newline
     const r = this.run(id)
     if (!r || !LIVE.includes(r.state)) return this.pump()
     // The process went away on its own while a turn was in flight: resume by session id, a couple of times.
@@ -156,7 +182,7 @@ export class Headless {
       this.#note(id, 'supervisor', { subtype: 'crash_resume', reason, attempt: r.resumes + 1 })
       return this.pump()
     }
-    this.#end(id, crashed && r.state === 'working' ? 'failed' : 'ended', p.reason || (crashed ? `process ended: ${reason}` : reason))
+    this.#end(id, crashed && (r.state === 'working' || r.state === 'starting') ? 'failed' : 'ended', p.reason || (crashed ? `process ended: ${reason}` : reason))
   }
   #end(id, state, reason) {
     this.db.prepare('UPDATE headless_runs SET state = ?, reason = ?, ended = ?, pid = NULL WHERE id = ?').run(state, reason, this.now(), id)
@@ -174,10 +200,12 @@ export class Headless {
     const p = this.procs.get(id), r = this.run(id)
     if (!r) throw err(404, 'unknown headless agent')
     if (r.state === 'queued') { this.#end(id, 'ended', 'cancelled while queued'); return this.get(id) }
-    if (!p || p.done) return this.get(id)
+    if (!LIVE.includes(r.state)) return this.get(id) // already ended/failed: nothing to stop
+    if (!p || p.done) { if (!p) this.#end(id, 'ended', reason); return this.get(id) } // a live row with no process of ours
+    if (p.killing) return this.get(id)
     Object.assign(p, { killing: true, reason })
     try { p.child.stdin.end() } catch { /* already closed */ }
-    const t = setTimeout(() => { if (!p.done && p.child.pid === r.pid) try { process.kill(r.pid, 'SIGTERM') } catch { /* gone */ } }, this.graceMs)
+    const t = setTimeout(() => { if (!p.done) try { process.kill(p.child.pid, 'SIGTERM') } catch { /* gone */ } }, this.graceMs)
     t.unref?.()
     p.child.once('close', () => clearTimeout(t))
     return this.get(id)
@@ -190,7 +218,7 @@ export class Headless {
     if (!r) throw err(404, 'unknown headless agent')
     if (r.state === 'queued') throw err(409, 'queued behind the cap; send once it starts')
     if (!LIVE.includes(r.state)) return this.resume(id, text)
-    this.#write(id, userLine(text))
+    this.#send(id, text)
     this.db.prepare("UPDATE headless_runs SET state = 'working', last_event = ? WHERE id = ? AND state = 'idle'").run(this.now(), id)
     this.#note(id, 'supervisor', { subtype: 'message', chars: text.length })
     this.onChange(id, 'run')
@@ -211,7 +239,7 @@ export class Headless {
     if (!r) throw err(404, 'unknown headless agent')
     if (r.state !== 'working') throw err(409, `the agent is ${r.state}, not working`)
     this.#write(id, JSON.stringify({ type: 'control_request', request_id: 'int-' + randomBytes(4).toString('hex'), request: { subtype: 'interrupt' } }))
-    this.#note(id, 'supervisor', { subtype: 'interrupt' })
+    this.#note(id, 'supervisor', { subtype: 'interrupt' }, false) // must not reset the stuck clock
     return this.get(id)
   }
   // Answer an open ask. body: { allow: bool, message? } for a tool; { answers: {question: label} } for AskUserQuestion.
@@ -244,13 +272,17 @@ export class Headless {
       const quiet = t - r.last_event
       if (r.state === 'idle' && quiet > this.idleMs) { this.stop(r.id, `idle release (${Math.round(quiet / 60_000)} min quiet)`); did.push(['idle', r.id]) }
       else if (r.state === 'working' && quiet > this.stuckMs) {
+        // Flag first (a 'stuck' event + the row's `stuck` time, shown by get()); 'interrupt'/'kill' also interrupt; 'kill' then
+        // stops the run once graceMs passes without output. Any output clears the flag (#event).
         const p = this.procs.get(r.id)
-        if (p && !p.stuck) {
-          p.stuck = t
-          this.#note(r.id, 'supervisor', { subtype: 'stuck', quietMs: quiet }, false)
+        if (!r.stuck) {
+          this.db.prepare('UPDATE headless_runs SET stuck = ? WHERE id = ?').run(t, r.id)
+          this.#note(r.id, 'supervisor', { subtype: 'stuck', quietMs: quiet, action: this.stuckAction }, false)
+          this.onChange(r.id, 'run')
+          if (this.stuckAction === 'flag') { did.push(['stuck-flag', r.id]); continue }
           try { this.interrupt(r.id) } catch { /* process gone: exit handler runs */ }
           did.push(['stuck-interrupt', r.id])
-        } else if (p && t - p.stuck > this.graceMs) {
+        } else if (this.stuckAction === 'kill' && p && t - r.stuck > this.graceMs) {
           this.stop(r.id, `stuck turn: no events for ${Math.round(quiet / 60_000)} min`)
           did.push(['stuck-kill', r.id])
         }
