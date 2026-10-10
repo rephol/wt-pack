@@ -119,7 +119,7 @@ test('WP-122: spawn points WT_MEMORY_MCP at the sibling wt-memory server (plugin
 
 test('WP-128/158/160: --model is passed to claude as its explicit id, not the bare tier; the role floor applies in every mode, not just live', () => {
   const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
-  assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /--model claude-haiku-4-5-20251001/)
+  assert.match(start(spawn(['spawn', 'worker', '--model', 'haiku'])), /--model claude-haiku-5-5/)
   // WP-160: the floor is a fixed computation, not Jev, so it applies with no explicit --model in every mode —
   // a worker gets its session floor (sonnet) even in shadow (default).
   assert.match(start(spawn()), /--model claude-sonnet-5-5/) // WP-178
