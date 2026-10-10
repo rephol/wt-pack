@@ -27,16 +27,16 @@ export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
 export class Headless {
   // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, stuckAction, db, onChange(run id, what), log, now.
-  // Product defaults are settings (WP-293): cap 2, stuckAction 'flag' (no automatic interrupt/kill), resumes 0 (a crash mid-turn
-  // fails the run; resume stays manual). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
-  constructor({ db, cmd = 'claude', cap, idleMs = 30 * 60_000, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles,
+  // Product defaults are settings (WP-293): cap 0 (unlimited), idle release off (idleMs 0), stuckAction 'flag' (no automatic interrupt/kill), resumes 3 (a crash
+  // mid-turn is resumed up to 3 times, then fails). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
+  constructor({ db, cmd = 'claude', cap, idleMs = 0, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles,
     onChange = () => {}, log = console.error, now = Date.now, env = process.env } = {}) {
     const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v))
-    cap = Math.max(1, num(cap ?? env.WT_HEADLESS_CAP, 2))
-    resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 0)
+    cap = num(cap ?? env.WT_HEADLESS_CAP, 0) // 0 = unlimited
+    resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 3)
     stuckAction = stuckAction ?? env.WT_HEADLESS_STUCK_ACTION ?? 'flag'
     if (!STUCK_ACTIONS.includes(stuckAction)) throw new Error(`stuckAction: one of ${STUCK_ACTIONS.join(', ')}`)
-    // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default pr-watcher); undefined or '*' = any.
+    // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default '*'); undefined or '*' = any.
     Object.assign(this, { db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }
@@ -82,8 +82,8 @@ export class Headless {
     try {
       do {
         this.again = false
-        const room = this.cap - this.live().length
-        const queued = this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued' ORDER BY created, rowid LIMIT ?").all(Math.max(0, room))
+        const room = this.cap ? this.cap - this.live().length : -1 // LIMIT -1 = no limit
+        const queued = this.db.prepare("SELECT id FROM headless_runs WHERE state = 'queued' ORDER BY created, rowid LIMIT ?").all(room < 0 && this.cap ? 0 : room)
         for (const q of queued) this.#start(q.id)
       } while (this.again)
     } finally { this.pumping = false }
@@ -277,7 +277,7 @@ export class Headless {
     const t = this.now(), did = []
     for (const r of this.live()) {
       const quiet = t - r.last_event
-      if (r.state === 'idle' && quiet > this.idleMs) { this.stop(r.id, `idle release (${Math.round(quiet / 60_000)} min quiet)`); did.push(['idle', r.id]) }
+      if (r.state === 'idle' && this.idleMs && quiet > this.idleMs) { this.stop(r.id, `idle release (${Math.round(quiet / 60_000)} min quiet)`); did.push(['idle', r.id]) }
       else if (r.state === 'working' && quiet > this.stuckMs) {
         // Flag first (a 'stuck' event + the row's `stuck` time, shown by get()); 'interrupt'/'kill' also interrupt; 'kill' then
         // stops the run once graceMs passes without output. Any output clears the flag (#event).

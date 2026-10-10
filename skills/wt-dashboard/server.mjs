@@ -2897,10 +2897,10 @@ export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), ca
 let headless
 const hl = () => headless ??= new Headless({
   db: openDb(join(DATA, 'wt.db')), cmd: process.env.WT_HEADLESS_CMD || 'claude',
-  // cap / stuckAction / resumes: Headless reads WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES itself (defaults 2, flag, 0).
-  idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 30) * 60_000, stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
+  // cap / stuckAction / resumes: Headless reads WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES itself (defaults 0 = unlimited, flag, 3).
+  idleMs: (Number(process.env.WT_HEADLESS_IDLE_MIN) || 0) * 60_000, // 0 = no idle release stuckMs: (Number(process.env.WT_HEADLESS_STUCK_MIN) || 10) * 60_000,
   graceMs: Number(process.env.WT_HEADLESS_GRACE_MS) || 5000,
-  roles: (process.env.WT_HEADLESS_ROLES ?? 'pr-watcher').split(',').map((x) => x.trim()).filter(Boolean),
+  roles: (process.env.WT_HEADLESS_ROLES ?? '*').split(',').map((x) => x.trim()).filter(Boolean),
   onChange: (id, what) => {
     changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f()
     if (what === 'ask' && process.env.WT_HEADLESS_INBOX !== '0') headlessInbox(id).catch((e) => console.error('headless inbox:', e.message))

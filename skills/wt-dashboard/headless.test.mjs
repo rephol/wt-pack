@@ -115,16 +115,16 @@ test('idle release stops an idle run after idleMs, never a working one', async (
   assert.equal(state(busy.id), 'working')
 })
 
-test('defaults are settings: cap 2, stuckAction flag, resumes 0; env overrides; options win', async (t) => {
+test('defaults are settings: cap 0 (unlimited), idle off, stuckAction flag, resumes 3; env overrides; options win', async (t) => {
   const { h } = await setup(t)
-  assert.deepEqual([h.cap, h.stuckAction, h.resumes, h.idleMs], [2, 'flag', 0, 30 * 60_000])
+  assert.deepEqual([h.cap, h.stuckAction, h.resumes, h.idleMs], [0, 'flag', 3, 0])
   const env = { WT_HEADLESS_CAP: '4', WT_HEADLESS_STUCK_ACTION: 'kill', WT_HEADLESS_RESUMES: '3' }
   const e = new Headless({ db: h.db, env })
   assert.deepEqual([e.cap, e.stuckAction, e.resumes], [4, 'kill', 3])
   const o = new Headless({ db: h.db, env, cap: 1, stuckAction: 'interrupt', resumes: 0 })
   assert.deepEqual([o.cap, o.stuckAction, o.resumes], [1, 'interrupt', 0])
   assert.throws(() => new Headless({ db: h.db, env: {}, stuckAction: 'nuke' }), /stuckAction/)
-  assert.equal(new Headless({ db: h.db, env: { WT_HEADLESS_CAP: 'x' } }).cap, 2)
+  assert.equal(new Headless({ db: h.db, env: { WT_HEADLESS_CAP: 'x' } }).cap, 0)
 })
 
 test('stuckAction flag (default): a stuck turn is flagged only, never interrupted or killed; output clears the flag', async (t) => {
@@ -211,8 +211,8 @@ test('resumes N: crash mid-turn resumes by session id; after N resumes the run f
   assert.equal(c.h.live().length, 0)
 })
 
-test('resumes 0 (default): a crash mid-turn fails the run with the reason; resume stays manual', async (t) => {
-  const { h, start, state, events, results } = await setup(t)
+test('resumes 0: a crash mid-turn fails the run with the reason; resume stays manual', async (t) => {
+  const { h, start, state, events, results } = await setup(t, { resumes: 0 })
   assert.equal(h.resumes, 0)
   const r = start('CRASH now')
   await until(() => state(r.id) === 'failed', 'failed')
@@ -465,4 +465,10 @@ test('permissionMode: passed through for a worker, validated, and a read-only ro
   await until(() => events(r.id).some((e) => e.type === 'system/init'), 'init')
   const ra = events(r.id).find((e) => e.type === 'system/init').event.argv
   assert.equal(ra[ra.indexOf('--permission-mode') + 1], 'default')
+})
+
+test('cap 0 is unlimited: every spawn starts at once (WP-301)', async (t) => {
+  const { h, start, state } = await setup(t)
+  const ids = [start('a'), start('b'), start('c')].map((r) => r.id)
+  await until(() => ids.every((id) => state(id) !== 'queued'), 'none queued')
 })
