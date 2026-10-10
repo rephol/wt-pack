@@ -152,12 +152,15 @@ test('Agents list shows the run (headless:true); agents() (pane lookup) never do
   const ag = await json('/api/agents')
   const row = ag.find((x) => x.id === r.id)
   assert.equal(row.headless, true); assert.equal(row.tags.role, 'reviewer'); assert.equal(row.status, 'idle')
+  assert.equal(row.pool, 'reviewer') // WP-303: in its role group, not Other
   assert.ok(ag.some((x) => x.id === 'w9:p1' && !x.headless))
   // agents() (roomAuthor's pane lookup, Dispatch, token sync) knows only herdr panes: the run's id is no pane identity
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': r.id }, body: { role: 'worker', cwd: root } })).status, 403)
   assert.equal((await call(`/api/agents/${encodeURIComponent(row.machine)}/${r.id}`)).status, 200)
   await json(`/api/headless/${r.id}/stop`, { method: 'POST', body: {} })
   await state(r.id, 'ended')
+  assert.ok(!(await json('/api/agents')).some((x) => x.id === r.id), 'an ended run leaves the Agents list') // WP-303
+  assert.equal((await call(`/api/headless/${r.id}`)).status, 200) // history stays in the API
 })
 
 test('auth: an agent pane may only spawn and message; no cookie is refused; Host/Origin allowlist applies', async () => {

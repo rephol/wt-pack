@@ -2924,9 +2924,9 @@ const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queue
 // A headless run as a row of the Agents list (same shape as a herdr agent, plus headless:true). Not part of agents(): Dispatch,
 // token sync and the pane routes only ever see herdr agents.
 function headlessRows(machine) {
-  const cut = Date.now() - 6 * 3_600_000
-  return hl().list().filter((r) => r.live || r.state === 'queued' || (r.ended ?? r.created) > cut).map((r) => ({
-    key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, pool: 'other', roleBy: 'none', tags: { role: r.role }, paneTokens: {}, workspace: null,
+  // WP-303: only live or queued runs are agents; an ended/failed/removed run stays in /api/headless history, not the list.
+  return hl().list().filter((r) => r.live || r.state === 'queued').map((r) => ({
+    key: `${machine}/${r.id}`, id: r.id, machine, local: true, name: r.name, ...(({ id, by }) => ({ pool: id, roleBy: by }))(resolveRole(roleStore.roles, { token: r.role, workspace: null, name: r.name })), tags: { role: r.role }, paneTokens: {}, workspace: null,
     status: r.asks.length ? 'blocked' : HL_STATUS[r.state] ?? 'idle', statusSince: r.last_event, lastActivity: r.last_event, cwd: r.cwd, project: projectName(r.cwd),
     recap: r.reason, context: null, background: 0, asks: r.asks.length > 0, question: r.asks[0] ? `${r.asks[0].tool}: ${JSON.stringify(r.asks[0].input).slice(0, 200)}` : null,
     picker: null, lastPrompt: null, session: r.session, model: r.init_model || r.model ? { id: r.init_model ?? null, name: r.init_model ?? r.model, effort: r.effort, source: 'headless', routed: null } : null, // WP-300: the resolved model from init wins
