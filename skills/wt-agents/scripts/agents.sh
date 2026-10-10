@@ -35,6 +35,9 @@
 #                                            may be queued). cwd defaults to $PWD. Exit 1 on a dashboard error.
 #   agents.sh list --headless              # the dashboard's headless runs: "<name> <id> <state> <cwd>"
 #   agents.sh rm --headless <id>           # stop a headless run (the dashboard may refuse an agent pane: 403)
+#   agents.sh context                      # WP-312: the caller's own context window as JSON {used,window,pct,model}: a pane agent
+#                                            ($HERDR_PANE_ID) or a headless run ($WT_HEADLESS_ID) looked up in the dashboard's
+#                                            /api/agents `info` (the WP-201 rule); exit 1 when the dashboard or the row is missing
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
@@ -91,6 +94,21 @@ case " $* " in *" --headless "*)
   esac
   exit 0 ;;
 esac
+
+# WP-312: the caller's own context usage, from the dashboard's AgentInfo (no transcript parsing here).
+if [ "${1:-}" = context ]; then
+  me=${WT_HEADLESS_ID:-}
+  if [ -z "$me" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+    me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty'); me=${me:-$HERDR_PANE_ID}
+  fi
+  [ -n "$me" ] || { echo "context: not a herdr pane or headless run (no HERDR_PANE_ID / WT_HEADLESS_ID)" >&2; exit 1; }
+  rows=$(curl -sS --max-time 10 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null) \
+    || { echo "wt-dashboard not reachable at ${HERDR_DASH_URL:-http://127.0.0.1:7777}" >&2; exit 1; }
+  printf '%s' "$rows" | jq -e --arg me "$me" '[.[]? | select(.info.pane.id == $me or .info.run.id == $me or .id == $me)][0] // empty
+    | select(.info.contextUsed != null) | {used: .info.contextUsed, window: .info.contextWindow, pct: .info.contextPct, model: (.info.model.id // .info.model.name)}' \
+    || { echo "context: no usage known for $me yet (no assistant turn in its transcript)" >&2; exit 1; }
+  exit 0
+fi
 
 command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 

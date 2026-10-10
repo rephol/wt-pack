@@ -73,3 +73,15 @@ test('list --headless prints rows; rm --headless POSTs stop', async () => {
   r = await run(['rm', '--headless', 'w1:p2'])
   assert.equal(r.code, 2)
 })
+
+test('context (WP-312): the caller\'s AgentInfo context for a headless run or a pane; exit 1 when unknown', async () => {
+  const row = (id, kind, extra, used) => ({ id, info: { kind, ...extra, contextUsed: used, contextWindow: 200000, contextPct: 50, model: { id: 'claude-opus-5-5', name: 'Opus 5.5' } } })
+  reply = () => [200, [row('w9:p9', 'pane', { pane: { id: 'w9:p9' } }, 100000), row('hl-aa', 'headless', { run: { id: 'hl-aa' } }, 100000), row('hl-bb', 'headless', { run: { id: 'hl-bb' } }, null)]]
+  const want = { used: 100000, window: 200000, pct: 50, model: 'claude-opus-5-5' }
+  for (const env of [{ WT_HEADLESS_ID: 'hl-aa' }, { HERDR_PANE_ID: 'w9:p9' }]) {
+    const r = await run(['context'], env)
+    assert.equal(r.code, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), want)
+  }
+  assert.equal((await run(['context'], { WT_HEADLESS_ID: 'hl-bb' })).code, 1) // no turn yet
+  assert.equal((await run(['context'], {})).code, 1) // neither a pane nor a run
+})
