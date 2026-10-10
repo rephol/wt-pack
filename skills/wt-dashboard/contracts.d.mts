@@ -64,3 +64,33 @@ export interface RoomMsg {
   command?: { text: string; target: string }; agentKey?: string
   replyTo?: { id: string; name: string; text: string }
 }
+
+// ---- agents (agentinfo.mjs; `info` on every GET /api/agents row and GET /api/headless[/:id], WP-313) ----
+export type AgentKind = 'pane' | 'headless'
+export type AgentState = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
+// What an agent is and runs on, the same for a herdr pane and a headless run. Unknown = null (never invented): a pane has no
+// cost, plugin list or command list; a run has no tags.
+export interface AgentInfoCore {
+  key: string; name: string; role: string | null; persona: string | null; cwd: string | null; project: string | null
+  state: AgentState
+  model: { id: string | null; name: string | null } | null // the resolved model
+  effort: string | null
+  effortSource: string | null // 'footer' | 'token' | 'default' (a configured default, not what the session reports); null = unknown
+  permissionMode: string | null
+  plugins: string[] | null
+  sessionId: string | null
+  commands: string[] | null; skills: string[] | null
+  contextUsed: number | null; contextWindow: number | null; contextPct: number | null
+  costUsd: number | null; turns: number | null
+  startedAt: number | null; lastActivity: number | null
+}
+export interface PaneAgentInfo extends AgentInfoCore {
+  kind: 'pane'
+  pane: { id: string; machine: string; local: boolean; tags: Record<string, string>; dnd: boolean; pair: string | null; workspace: string | null; routed: string | null /* the tier asked for when it differs from what runs */ }
+}
+export interface HeadlessAgentInfo extends AgentInfoCore {
+  kind: 'headless'
+  run: { id: string; state: string; resumes: number; stuck: number | null; reason: string | null; pid: number | null }
+}
+export type AgentInfo = PaneAgentInfo | HeadlessAgentInfo
+export declare const AGENT_INFO_KINDS: readonly ['pane', 'headless']

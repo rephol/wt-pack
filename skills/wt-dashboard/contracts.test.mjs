@@ -12,7 +12,7 @@ const dts = readFileSync(join(here, 'contracts.d.mts'), 'utf8')
 
 test('every `declare const X: readonly [...]` in contracts.d.mts equals the runtime array', () => {
   const decl = [...dts.matchAll(/export declare const (\w+): readonly \[([^\]]*)\]/g)].map((m) => [m[1], [...m[2].matchAll(/'([^']*)'/g)].map((x) => x[1])])
-  assert.deepEqual(decl.map(([n]) => n).sort(), ['ACTIONABLE_KINDS', 'COLUMNS', 'KINDS', 'SIZES', 'TYPES'])
+  assert.deepEqual(decl.map(([n]) => n).sort(), ['ACTIONABLE_KINDS', 'AGENT_INFO_KINDS', 'COLUMNS', 'KINDS', 'SIZES', 'TYPES'])
   for (const [name, values] of decl) assert.deepEqual([...c[name]], values, name)
   // and every exported array has a declaration (a new list cannot ship without its types)
   for (const [name, v] of Object.entries(c)) if (Array.isArray(v)) assert.ok(decl.some(([n]) => n === name), `${name} has no declaration`)
