@@ -59,7 +59,7 @@ before(async () => {
   chmodSync(join(bin, 'fake-claude'), 0o755); chmodSync(join(bin, 'herdr'), 0o755)
   child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: {
     ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root, PATH: `${bin}:${process.env.PATH}`,
-    WT_HEADLESS_CMD: join(bin, 'fake-claude'), WT_HEADLESS_CAP: '1', WT_HEADLESS_GRACE_MS: '500' } })
+    WT_HEADLESS_CMD: join(bin, 'fake-claude'), WT_HEADLESS_CAP: '1', WT_HEADLESS_ROLES: '*', WT_HEADLESS_GRACE_MS: '500' } })
   base = `http://127.0.0.1:${PORT}`
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
   cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
@@ -120,7 +120,11 @@ test('message, events?after=, SSE replay from Last-Event-ID, interrupt, tool + A
   assert.equal(ask.tool, 'Bash')
   const row = (await json('/api/agents')).find((x) => x.id === r.id)
   assert.equal(row.status, 'blocked')
+  const inboxItem = async () => (await json('/api/notifications')).items.find((it) => it.kind === 'headless-ask' && it.target.ask === ask.id)
+  const item = await until(inboxItem, 'inbox item for the ask')
+  assert.equal(item.target.agent, `${row.machine}/${r.id}`); assert.equal(item.resolvedAt, null)
   await json(`/api/headless/${r.id}/answer`, { method: 'POST', body: { ask: ask.id, allow: false, message: 'no' } })
+  await until(async () => (await inboxItem()).resolvedAt, 'inbox item resolved after the answer')
   await until(async () => (await json(`/api/headless/${r.id}/events`)).events.some((e) => /"behavior":"deny"/.test(JSON.stringify(e.event))), 'deny reached the child')
 
   await json(`/api/headless/${r.id}/message`, { method: 'POST', body: { text: 'ASK' } })

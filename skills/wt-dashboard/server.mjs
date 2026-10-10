@@ -2901,8 +2901,25 @@ const hl = () => headless ??= new Headless({
   graceMs: Number(process.env.WT_HEADLESS_GRACE_MS) || 5000,
   stuckAction: ['flag', 'interrupt', 'kill'].includes(process.env.WT_HEADLESS_STUCK_ACTION) ? process.env.WT_HEADLESS_STUCK_ACTION : 'flag',
   resumes: Number(process.env.WT_HEADLESS_RESUMES) || 0,
-  onChange: (id, what) => { changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f() },
+  roles: (process.env.WT_HEADLESS_ROLES ?? 'pr-watcher').split(',').map((x) => x.trim()).filter(Boolean),
+  onChange: (id, what) => {
+    changes.add('headless', { id, what }); for (const f of headlessSubs.get(id) ?? []) f()
+    if (what === 'ask' && process.env.WT_HEADLESS_INBOX !== '0') headlessInbox(id).catch((e) => console.error('headless inbox:', e.message))
+  },
 })
+// Open asks of a run mirror into the Inbox (WT_HEADLESS_INBOX, default on): one 'headless-ask' item per ask, resolved once it
+// is answered or expired. Not an ACTIONABLE kind, so the tick's toResolve leaves it to this function.
+async function headlessInbox(id) {
+  const r = hl().get(id)
+  if (!r) return
+  await inbox.load()
+  const open = new Set(r.asks.map((a) => a.id)), agent = `${LOCAL_LABEL}/${id}`
+  for (const a of r.asks) await inbox.add({ kind: 'headless-ask', key: `headless-ask|${id}|${a.id}`, title: `${r.name} asks: ${a.tool}`,
+    body: JSON.stringify(a.input).slice(0, 300), target: { agent, ask: a.id } })
+  const done = inbox.items.filter((it) => it.kind === 'headless-ask' && !it.resolvedAt && it.target?.agent === agent && !open.has(it.target.ask)).map((it) => it.id)
+  if (done.length) await inbox.resolve(done)
+  broadcastEvent('inbox', { changed: true })
+}
 const headlessSubs = new Map() // run id → flush fns of open SSE streams
 const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queued: 'idle', ended: 'exited', failed: 'exited' }
 // A headless run as a row of the Agents list (same shape as a herdr agent, plus headless:true). Not part of agents(): Dispatch,

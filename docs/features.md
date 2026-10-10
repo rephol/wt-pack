@@ -299,6 +299,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   other tool is denied. Every other role asks a human for each tool, and `AskUserQuestion` always waits for an answer
   (`POST /api/headless/:id/answer {ask, allow, message?}` or `{ask, answers: {<question>: <label>}}`).
 - **Limits** (settings, as env vars in `~/.config/wt-dashboard/env`):
+  - `WT_HEADLESS_ROLES` (comma list, default `pr-watcher`, `*` = any role): which roles may be spawned headless.
+  - `WT_HEADLESS_INBOX` (default on, `0` = off): each open ask also lands in the Inbox as a card linking to the
+    agent's Conversation view, resolved once it is answered or expired.
   - `WT_HEADLESS_CAP` (default 2): runs at once.
   - `WT_HEADLESS_IDLE_MIN` (default 30): minutes before an idle run is released.
   - `WT_HEADLESS_STUCK_MIN` (default 10): a turn with no events for this long counts as stuck.
