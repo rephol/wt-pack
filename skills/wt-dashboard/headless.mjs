@@ -23,6 +23,16 @@ const TEXT_MAX = 100_000
 export const POLICIES = { reviewer: 'readonly', 'pr-watcher': 'readonly', auditor: 'readonly' }
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions']
 export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
+// WP-306: the herdr scheme (agents.sh spawn): <repo slug>-<role>-<lowest unused NN>. The slug is lowercase [a-z0-9_-], cut to 20, and
+// shortened further for a long role so the whole name stays <= 32. `taken` = names of live herdr agents and non-ended headless runs.
+export function defaultName(repo, role, taken) {
+  const lrole = String(role).toLowerCase().replace(/[^a-z0-9_-]/g, '-')
+  const slug = String(repo).toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, Math.min(20, Math.max(1, 28 - lrole.length)))
+  const used = new Set([...taken].map((n) => n.startsWith(`${slug}-${lrole}-`) ? Number(n.slice(slug.length + lrole.length + 2)) : NaN))
+  let n = 1
+  while (used.has(n)) n++
+  return `${slug}-${lrole}-${String(n).padStart(2, '0')}`
+}
 export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
 export class Headless {

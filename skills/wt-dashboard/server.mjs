@@ -20,7 +20,7 @@ import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
 import { Pins } from './pins.mjs'
-import { Headless } from './headless.mjs'
+import { Headless, ROLE as ROLE_RE, defaultName } from './headless.mjs'
 import { open as openDb } from './store.mjs'
 import { Deliveries } from './deliveries.mjs'
 import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
@@ -2986,6 +2986,10 @@ async function headlessApi(req, res, url, parts) {
   if (req.method === 'POST' && !id) {
     const b = await json()
     try { if (!statSync(b.cwd).isDirectory()) throw 0 } catch { return send(res, 400, { error: 'cwd: an existing directory' }) }
+    if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) {
+      const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
+      b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
+    }
     return send(res, 200, h.spawn(b))
   }
   if (req.method === 'POST' && id && sub) {

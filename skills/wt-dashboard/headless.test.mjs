@@ -6,7 +6,7 @@ import { mkdtemp, mkdir } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Headless } from './headless.mjs'
+import { defaultName, Headless } from './headless.mjs'
 
 const FAKE = join(import.meta.dirname, 'test-fixtures', 'fake-claude.mjs')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -496,4 +496,12 @@ test('reconcile resumes live runs with --resume (working and idle), fails one wi
   }
   for (const p of second.procs.values()) p.child.kill()
   await until(() => second.procs.size === 0, 'children gone')
+})
+
+test('defaultName: <repo>-<role>-NN, lowest unused, slugged and kept within 32 chars (WP-306)', () => {
+  assert.equal(defaultName('wt-pack', 'worker', []), 'wt-pack-worker-01')
+  assert.equal(defaultName('wt-pack', 'worker', ['wt-pack-worker-01', 'wt-pack-worker-03', 'other-worker-02']), 'wt-pack-worker-02')
+  assert.equal(defaultName('My App.v2', 'Planner', []), 'my-app-v2-planner-01')
+  const long = defaultName('a-very-long-repository-name', 'frontend-engineer', [])
+  assert.ok(long.length <= 32 && long.endsWith('-frontend-engineer-01'), long)
 })

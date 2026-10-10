@@ -326,6 +326,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   `default` and reject any other mode, so their tool policy still applies and only get the read tools (`--tools`, no MCP servers), so no allow-rule in the user's settings can open a write tool.
 - A run started without a first prompt is `idle` as soon as its process is up (claude only emits `init` on its first turn), not
   `starting`. A render error in the web app now shows an error panel with a Reload button instead of a blank page.
+- **Names (WP-306):** without `name`, a run is called `<repo>-<role>-NN` like a herdr agent (repo slug of the cwd's project, lowest
+  unused number across live herdr agents and non-ended headless runs; an ended run frees its number). An explicit `name` wins.
 - Routes: `GET /api/headless[/:id]`, `GET /api/headless/:id/events?after=<seq>&limit=` (≤500), SSE
   `/api/headless/:id/stream` (resumes from `Last-Event-ID`), `POST …/message|interrupt|answer|stop|resume`. Writes need
   the dashboard session; an agent pane may only spawn and message.
