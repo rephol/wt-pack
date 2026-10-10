@@ -403,7 +403,7 @@ test('WP-157: session: true (wt-handoff spawning a fresh agent) floors a Jev hai
   const explicit = await route({ skill: 'wt-handoff', role: 'worker', model: 'haiku', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, session: true })
   assert.equal(explicit.tier, 'sonnet'); assert.equal(explicit.source, 'explicit+session-floor')
   // session: true never lowers an already-adequate pick (distinct state so it doesn't hit an earlier test's cache).
-  const already = await route({ skill: 'wt-handoff', role: 'worker', task: 'design a new auth flow', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99), session: true })
+  const already = await route({ skill: 'wt-handoff', role: 'reviewer', task: 'design a new auth flow', env: { WT_MODEL_ROUTING: 'live' }, cwd: repo, fetchImpl: jev('opus', 0.99), session: true })
   assert.equal(already.tier, 'opus')
 })
 
@@ -440,4 +440,50 @@ test('CLI: model-id prints the configured id, a repo override wins over the defa
   assert.equal(run(['model-id', 'opus', '--cwd', repo]).trim(), 'claude-opus-6')
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), '{}')
   assert.throws(() => execFileSync(process.execPath, [cli, 'model-id', 'nope'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
+})
+
+// WP-298: roleCeilings caps a role's TIER (worker → sonnet) unless the unit effort is high or a model is explicit;
+// unit effort low is the one opt-in exception to the session floor (haiku), only on --session.
+test('WP-298: worker ceiling holds, unit effort high lifts it, other roles and explicit models are unaffected', async () => {
+  const live = { WT_MODEL_ROUTING: 'live' }
+  const go = (o) => route({ skill: 'wt-handoff', task: 'design a new auth flow', env: live, cwd: repo, fetchImpl: jev('opus', 0.99, 'high'), session: true, log: false, ...o })
+  const w = await go({ role: 'worker' })
+  assert.equal(w.tier, 'sonnet'); assert.equal(w.source, 'jev+ceiling'); assert.equal(w.capTier, 'sonnet'); assert.equal(w.effort, 'high') // Jev may raise effort, not tier
+  assert.equal((await go({ role: 'worker', effort: 'medium' })).effort, 'medium')
+  assert.equal((await go({ role: 'worker', effort: 'medium' })).tier, 'sonnet')
+  const hi = await go({ role: 'worker', effort: 'high' })
+  assert.equal(hi.tier, 'opus'); assert.equal(hi.capTier, null); assert.equal(hi.effort, 'high')
+  assert.equal((await go({ role: 'reviewer' })).tier, 'opus')
+  assert.equal((await go({ role: 'planner' })).tier, 'opus')
+  const ex = await route({ skill: 'wt-handoff', role: 'worker', model: 'opus', env: live, cwd: repo, session: true, log: false })
+  assert.equal(ex.tier, 'opus'); assert.equal(ex.capTier, null) // no ceiling when --model is explicit
+})
+
+test('WP-298: the ceiling and unit effort are not mode-gated (shadow and off still report them)', async () => {
+  for (const mode of ['shadow', 'off']) {
+    const d = await route({ skill: 'wt-handoff', role: 'worker', task: TASK, env: { WT_MODEL_ROUTING: mode }, cwd: repo, fetchImpl: jev('opus', 0.99), session: true, log: false, effort: 'medium' })
+    assert.equal(d.capTier, 'sonnet'); assert.equal(d.applyEffort, 'medium'); assert.equal(d.apply ?? null, null)
+  }
+})
+
+test('WP-298: unit effort low → haiku/low on --session only; no effort keeps the sonnet floor; security still raises', async () => {
+  const live = { WT_MODEL_ROUTING: 'live' }
+  const low = await route({ skill: 'wt-handoff', role: 'worker', task: TASK, env: live, cwd: repo, fetchImpl: jev('opus', 0.99), session: true, log: false, effort: 'low' })
+  assert.equal(low.tier, 'haiku'); assert.equal(low.apply, 'haiku'); assert.equal(low.effort, 'low'); assert.equal(low.source, 'unit-effort')
+  const off = await route({ skill: 'wt-handoff', role: 'worker', task: TASK, env: { WT_MODEL_ROUTING: 'off' }, cwd: repo, session: true, log: false, effort: 'low' })
+  assert.equal(off.unitTier, 'haiku')
+  const none = await route({ skill: 'wt-handoff', role: 'worker', task: 'rename a variable', env: live, cwd: repo, fetchImpl: jev('haiku', 0.99, 'low'), session: true, log: false })
+  assert.equal(none.tier, 'sonnet') // session floor holds without a unit effort
+  const noSession = await route({ skill: 'wt-handoff', role: 'worker', task: TASK, env: live, cwd: repo, fetchImpl: jev('sonnet', 0.99), log: false, effort: 'low' })
+  assert.notEqual(noSession.source, 'unit-effort') // opt-in is the --session path only
+  const sec = await route({ skill: 'wt-handoff', role: 'worker', task: 'edit the session cookie auth token handling', env: live, cwd: repo, session: true, log: false, effort: 'low' })
+  assert.equal(sec.tier, 'sonnet') // a security floor still raises it
+  const explicit = await route({ skill: 'wt-handoff', role: 'worker', model: 'sonnet', env: live, cwd: repo, session: true, log: false, effort: 'low' })
+  assert.equal(explicit.tier, 'sonnet'); assert.equal(explicit.effort, 'low')
+  // the `floor` command (agents.sh spawn) is unchanged: worker → sonnet, planner → opus; persona model raises, never lowers
+  const f = (...a) => JSON.parse(execFileSync('node', [cli, 'floor', '--cwd', repo, '--json', ...a], { encoding: 'utf8', env: { ...process.env, HOME: tmp } }))
+  assert.equal(f('--role', 'worker').tier, 'sonnet'); assert.equal(f('--role', 'planner').tier, 'opus')
+  assert.equal(f('--role', 'planner', '--persona-model', 'haiku').tier, 'opus')
+  assert.equal(f('--role', 'worker', '--persona-model', 'opus').tier, 'opus')
+  assert.equal(f('--role', 'worker', '--persona-model', 'haiku').tier, 'sonnet')
 })
