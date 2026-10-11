@@ -106,3 +106,13 @@ test('WP-332 (c): replyAllowed only for the current assignee\'s reply, to the or
   card('WT-1', { name: 'demo-worker-02', pane: 'w9:p3' })
   assert.equal((await verify('w9:p2', await send('w9:p1', 'w9:p2', { kind: 'reply', body: 'late', ticket: 'WT-1' }), 'demo-worker-01')).replyAllowed, false)
 })
+
+test('WP-344: a server-sent reply from the user is replyAllowed; the same row with a sender pane is not', async () => {
+  const verify = (id) => fetch(`${base}/api/messages/${id}/verify?kind=reply&from=user`, { headers: as('w9:p2') }).then((r) => r.json())
+  const db = new DatabaseSync(join(root, 'data', 'wt.db'))
+  const ins = db.prepare("INSERT INTO wt_messages (id, sender, sender_pane, target, kind, body, state, created, updated) VALUES (?, 'user', ?, 'w9:p2', 'reply', 'x', 'delivered', 'n', 'n')")
+  ins.run('usr1', null); ins.run('usr2', 'w9:p1')
+  db.close()
+  assert.deepEqual(await verify('usr1').then((r) => [r.verified, r.replyAllowed]), [true, true])
+  assert.equal((await verify('usr2')).replyAllowed, false)
+})

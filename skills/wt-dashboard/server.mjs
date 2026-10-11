@@ -2969,7 +2969,8 @@ async function messagesApi(req, res, url, parts) {
     const sp = row.sender_pane ? (await agents().catch(() => [])).find((x) => x.local && x.id === row.sender_pane) : null
     // WP-332 (c): a verified REPLY to an orchestrator is as good as the user's word when it is the current assignee's report on a
     // ticket this orchestrator handed off. All three facts come from the server's records, never from the message text.
-    let replyAllowed = false
+    // WP-344: a server-sent reply from the user (their "Gate: Allow once" answer relayed by the dashboard: server token, no sender pane) is the user's own word.
+    let replyAllowed = !rid && row.kind === 'reply' && row.sender === 'user' && !row.sender_pane
     if (!rid && row.kind === 'reply' && row.ticket && row.sender_pane) {
       const me = (await agents().catch(() => [])).find((x) => x.local && x.id === author.pane)
       const handed = messages.db.prepare("SELECT 1 FROM wt_messages WHERE ticket = ? AND kind IN ('handoff', 'dispatch') AND sender_pane = ? LIMIT 1").get(row.ticket, author.pane)
