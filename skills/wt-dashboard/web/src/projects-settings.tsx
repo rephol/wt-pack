@@ -29,9 +29,10 @@ const ABOUT: Record<string, string> = {
   maxWorking: 'Dispatch hands out work only while fewer agents than this are working.',
   maxReviewers: 'wt-watch-prs dispatch spawns a new reviewer only while fewer than this are live; at the cap a PR head waits.',
   WT_JEV_TICKET_TRIAGE: 'Jev suggests type, size, priority and role for new tickets on this board.',
+  trustRepoRoles: 'on: agents read this repo\u2019s .wt-pack/roles files (a cloned repo can plant them, so only turn it on for code you trust). off: base roles apply.',
   WT_MODEL_ROUTING: 'Which Claude model agents run on. shadow: log the pick only; live: spawn on it (haiku/sonnet/opus); off: never route. Unset: the repo or user config decides (default shadow).',
 }
-const CHOICES: Record<string, string[]> = { WT_AGENTS_MCP: ['full', 'lean'], WT_JEV_TICKET_TRIAGE: ['on', 'off'], WT_MODEL_ROUTING: ['off', 'shadow', 'live'] }
+const CHOICES: Record<string, string[]> = { WT_AGENTS_MCP: ['full', 'lean'], WT_JEV_TICKET_TRIAGE: ['on', 'off'], WT_MODEL_ROUTING: ['off', 'shadow', 'live'], trustRepoRoles: ['off', 'on'] }
 
 // The project Settings › Projects shows; set by openProjectSettings and by the picker.
 let wanted: string | null = null
