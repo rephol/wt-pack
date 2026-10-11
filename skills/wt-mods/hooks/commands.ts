@@ -25,6 +25,7 @@ export const COMMANDS: Record<string, Cmd> = {
   ticket: { description: 'wt-ticket: show|move|list|comment … (e.g. show WP-12)', hint: '<show|move|list|…> …', script: 'wt-ticket/scripts/wt-ticket', argv: a => (a.length ? a : ['list', '--mine']) },
   dnd: { description: 'Do-not-disturb for this agent: on [--for 2h] | off | (status)', hint: '[on|off]', script: 'wt-agents/scripts/agents.sh', argv: (a, pane) => ['dnd', pane, ...a] },
   herd: { description: 'List the herdr agents (wt-agents list; /agents is built in)', hint: '[role] [--json]', script: 'wt-agents/scripts/agents.sh', argv: a => ['list', ...a] },
+  keepwarm: { description: 'Prompt-cache keepwarm for this agent: status | off (arm it in the dashboard)', hint: '[status|off]', script: 'wt-mods/scripts/wt-keepwarm', argv: a => (a.length === 0 || a[0] === 'status' ? ['status'] : a[0] === 'off' ? ['off'] : 'usage: /wt keepwarm [status|off]') },
   watch: { description: 'PR poller status (wt-watch-prs poller-status)', hint: 'status', script: 'wt-watch-prs/scripts/watch-prs.sh', argv: a => (a.length === 0 || a[0] === 'status' ? ['poller-status', ...a.slice(1)] : 'usage: /wt watch status') },
 }
 
@@ -54,7 +55,7 @@ async function run($: Ctx, skills: SkillsDir, name: string, args: string) {
 
 export const commandsHooks = (): Hooks => ({
   'session.start': async (ctx, e, next) => {
-    await ctx.registerCommand({ name: 'wt', description: 'wt-pack: room | ticket | dnd | herd | watch (runs the script, no model turn)', argumentHint: '<room|ticket|dnd|herd|watch> …', immediate: true }).catch(() => null) // one mod failing must not skip the others' session.start
+    await ctx.registerCommand({ name: 'wt', description: 'wt-pack: room | ticket | dnd | herd | keepwarm | watch (runs the script, no model turn)', argumentHint: '<room|ticket|dnd|herd|keepwarm|watch> …', immediate: true }).catch(() => null) // one mod failing must not skip the others' session.start
     return next(e)
   },
 })

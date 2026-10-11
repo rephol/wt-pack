@@ -154,8 +154,8 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   in the same file (never across an import, never as a value), `on` is only passed to plain functions, and the hook must
   be a function literal — so shared-event handlers in a mod's file get a narrow `ctx` built in `register.ts` from literal
   `$.noun.event(...)` calls. A mod's non-shared hooks (`on('tool.call', {tool}, …)`, `turn.step`) stay in its own file as
-  `registerX(on, …)`. Mods have no Node and no env access: gate through a CLI (`wt-ask --ping`), never by reading
-  `HERDR_PANE_ID` in the module. They reach other skills as `<root>/skills/<name>/…` (the plugin root is the repo).
+  `registerX(on, …)`. Mods have no Node, and no env access beyond `$.env.get` (`commands.ts` reads `HERDR_PANE_ID` with it): identify a pane through a CLI (`wt-ask --ping`, `wt-keepwarm`), not by reading
+  `HERDR_PANE_ID` in a shared-event handler. They reach other skills as `<root>/skills/<name>/…` (the plugin root is the repo).
   `claude plugin test .` also picks up every `*.test.ts` under the tree, including the dashboard's `node:test` web
   tests, which it cannot load — use `skills/wt-mods/scripts/test`, which fails only on the mods' own tests.
   Earlier shapes that failed: a marketplace copy of a skill-dir mod loses its sibling scripts (cache copy = its
