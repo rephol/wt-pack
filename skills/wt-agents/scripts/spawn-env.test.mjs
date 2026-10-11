@@ -244,3 +244,26 @@ test('WP-205: a *-worker name with no valid role file warns that it spawns a pla
   assert.match(r.stderr, /searched: .*\.wt-pack\/roles and .*roles \(in effect: /)
   assert.match(r.stderr, /known personas: /)
 })
+
+test('WP-319: agent start that never succeeds → herdr error in message, 8 tries, orphan tab closed, tokens cleared', () => {
+  const failing = join(tmp, 'bin-fail'); mkdirSync(failing)
+  const fl = join(tmp, 'fail.log')
+  writeFileSync(join(failing, 'herdr'), `#!/bin/sh
+echo "herdr $*" >> ${fl}
+case "$1 $2" in
+  "workspace list") echo '{"result":{"workspaces":[{"label":"demo-workers","workspace_id":"w1"}]}}' ;;
+  "agent list") echo '{"result":{"agents":[]}}' ;;
+  "tab create") echo '{"result":{"root_pane":{"pane_id":"w1:p9"},"tab":{"tab_id":"w1:t9"}}}' ;;
+  "agent start") echo "boom: shell not ready" >&2; exit 1 ;;
+esac`)
+  chmodSync(join(failing, 'herdr'), 0o755)
+  rmSync(fl, { force: true })
+  const r = spawnSync(join(here, 'agents.sh'), ['spawn', 'worker'], { cwd: repo, encoding: 'utf8',
+    env: { PATH: `${failing}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env'), WT_AGENTS_START_SLEEP: '0' } })
+  const calls = readFileSync(fl, 'utf8').split('\n')
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /claude did not come up in demo-worker-\d+ .*after 8 tries: boom: shell not ready/)
+  assert.equal(calls.filter((l) => l.startsWith('herdr agent start')).length, 8)
+  assert.ok(calls.some((l) => l === 'herdr tab close w1:t9'))
+  assert.ok(calls.some((l) => /--clear-token role/.test(l)))
+})
