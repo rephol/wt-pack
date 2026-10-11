@@ -489,3 +489,34 @@ test('WP-298: --effort sets the unit tier/effort in any mode (low → haiku, med
   const bad = spawnSync(join(here, 'handoff.sh'), ['--effort', 'xhigh', '--dry-run', repo], { input: 'x', encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: tmp } })
   assert.equal(bad.status, 2)
 })
+
+test('WP-317: --pane and --reply take a live headless run by name, id or prefix; an ended run of the same name never wins', () => {
+  const curlBin = join(tmp, 'curlbin317'), clog = join(tmp, 'curl317.log')
+  mkdirSync(curlBin, { recursive: true })
+  const rows = [{ id: 'hl-old1', name: 'umk-planner-01', state: 'ended' }, { id: 'hl-new2', name: 'umk-planner-01', state: 'idle' }, { id: 'hl-new3', name: 'other', state: 'working' }]
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+body=$(cat); echo "curl $* :: $body" >> ${clog}
+case " $* " in *" POST "*) case " $* " in *hl-new3/message*) printf '%s' '{"error":"the agent is queued"}' ;; *) printf '%s' '{"ok":true}' ;; esac ;; *) printf '%s' '${JSON.stringify(rows)}' ;; esac\n`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  writeFileSync(join(tmp, 'pane-wW_p5.json'), '{"result":{"pane":{"pane_id":"wW:p5","tokens":{}}}}')
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[{"name":"me","pane_id":"wW:p5"}]}}')
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5', HERDR_DASH_URL: 'http://x' }
+  const go = (args, input = 'do it') => spawnSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8', env })
+  let r = go(['--pane', 'umk-planner-01', '--no-goal', '--request-id', 'r317', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /reused headless umk-planner-01 \(hl-new2\)/); assert.match(r.stdout, /--reply hl-new2/)
+  const calls = readFileSync(clog, 'utf8')
+  assert.match(calls, /-H x-herdr-pane: wW:p5.*http:\/\/x\/api\/headless\/hl-new2\/message :: \{\s*"text": "<wt-message[^]*do it/)
+  assert.match(calls, /To reply: \S+handoff.sh --reply wW:p5/) // the usual reply footer rides along
+  assert.doesNotMatch(calls, /hl-old1\/message/)
+  assert.equal(go(['--pane', 'umk-planner-01', '--no-goal', '--request-id', 'r317', repo]).stdout, r.stdout) // idempotent: a repeat sends nothing
+  assert.equal(readFileSync(clog, 'utf8').split('hl-new2/message').length, 2)
+  const n = (readFileSync(clog, 'utf8').match(/hl-new\d\/message/g) ?? []).length
+  go(['--reply', 'hl-new', 'thanks']) // prefix matches hl-new2 and hl-new3: ambiguous, so not delivered to either (it falls through to the pane path)
+  assert.equal((readFileSync(clog, 'utf8').match(/hl-new\d\/message/g) ?? []).length, n)
+  r = go(['--reply', 'hl-new2', 'thanks'])
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /replied hl-new2 \(headless umk-planner-01\)/)
+  assert.match(readFileSync(clog, 'utf8'), /hl-new2\/message :: \{\s*"text": "<wt-message[^]*kind=reply/)
+  r = go(['--pane', 'other', '--no-goal', repo]); assert.equal(r.status, 1); assert.match(r.stderr, /the agent is queued/)
+  assert.match(go(['--pane', 'umk-planner-01', '--no-goal', '--dry-run', repo]).stdout, /would hand to headless umk-planner-01 \(hl-new2\)/)
+})

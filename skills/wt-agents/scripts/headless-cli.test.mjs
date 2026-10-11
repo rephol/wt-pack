@@ -64,7 +64,7 @@ test('a server error is printed and exits 1; 403 says it needs the dashboard; un
 test('list --headless prints rows; rm --headless POSTs stop', async () => {
   reqs = []; reply = () => [200, [{ name: 'a', id: 'hl-1', state: 'idle', cwd: '/x' }, { name: 'b', id: 'hl-2', state: 'queued', cwd: '/y' }]]
   let r = await run(['list', '--headless'])
-  assert.equal(r.stdout, 'a hl-1 idle /x\nb hl-2 queued /y\n')
+  assert.equal(r.stdout, 'a hl-1 idle /x -\nb hl-2 queued /y -\n')
   assert.deepEqual([reqs[0].method, reqs[0].path], ['GET', '/api/headless'])
   reqs = []; reply = () => [200, { name: 'a', id: 'hl-1', state: 'ended' }]
   r = await run(['rm', '--headless', 'hl-1'])
@@ -84,4 +84,36 @@ test('context (WP-312): the caller\'s AgentInfo context for a headless run or a 
   }
   assert.equal((await run(['context'], { WT_HEADLESS_ID: 'hl-bb' })).code, 1) // no turn yet
   assert.equal((await run(['context'], {})).code, 1) // neither a pane nor a run
+})
+
+test('send --headless (WP-317): a live run by name beats the ended one sharing it; id prefix; ambiguity and no live run exit 1', async () => {
+  const rows = [{ name: 'p-01', id: 'hl-old1', state: 'ended', cwd: '/x', role: 'planner' }, { name: 'p-01', id: 'hl-new2', state: 'idle', cwd: '/x', role: 'planner' },
+    { name: 'q', id: 'hl-new3', state: 'working', cwd: '/x', role: 'worker' }]
+  reply = (req) => (req.method === 'GET' ? [200, rows] : [200, { ok: true }])
+  reqs = []
+  let r = await run(['send', '--headless', 'p-01', 'next "task"'], { HERDR_PANE_ID: 'w1:p2' })
+  assert.equal(r.code, 0, r.stderr); assert.equal(r.stdout, 'sent hl-new2\n')
+  assert.deepEqual([reqs[1].method, reqs[1].path, reqs[1].pane, reqs[1].body], ['POST', '/api/headless/hl-new2/message', 'w1:p2', { text: 'next "task"' }])
+  reqs = []; r = await run(['send', '--headless', 'hl-new3', 'x'])
+  assert.equal(r.stdout, 'sent hl-new3\n')
+  r = await run(['send', '--headless', 'hl-new', 'x']) // prefix matches two live runs
+  assert.equal(r.code, 1); assert.match(r.stderr, /no live headless run \(or ambiguous\)/)
+  r = await run(['send', '--headless', 'hl-old1', 'x']); assert.equal(r.code, 1) // ended
+  assert.equal((await run(['send', '--headless'])).code, 2)
+  reply = (req) => (req.method === 'GET' ? [200, rows] : [409, { error: 'the agent is queued' }])
+  r = await run(['send', '--headless', 'q', 'x']); assert.equal(r.code, 1); assert.match(r.stderr, /the agent is queued/)
+})
+
+test('spawn --headless --reuse (WP-317): an idle run of the same role + cwd gets the prompt; otherwise a new run is spawned', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wt-hlreuse-'))
+  const cwd = (await promisify(execFile)('sh', ['-c', `cd '${dir}' && pwd`])).stdout.trim()
+  const rows = [{ name: 'busy', id: 'hl-b', state: 'working', cwd, role: 'worker' }, { name: 'other', id: 'hl-o', state: 'idle', cwd: '/elsewhere', role: 'worker' },
+    { name: 'free', id: 'hl-f', state: 'idle', cwd, role: 'worker' }]
+  reply = (req) => (req.method === 'GET' ? [200, rows] : [200, { name: 'fresh', id: 'hl-n', state: 'queued' }])
+  reqs = []
+  let r = await run(['spawn', '--headless', 'worker', dir, '--reuse', '--prompt', 'again'])
+  assert.equal(r.stdout, 'free hl-f idle reused\n')
+  assert.deepEqual([reqs[1].path, reqs[1].body], ['/api/headless/hl-f/message', { text: 'again' }]); assert.equal(reqs.length, 2)
+  reqs = []; r = await run(['spawn', '--headless', 'planner', dir, '--reuse', '--prompt', 'p']) // no idle planner there
+  assert.equal(r.stdout, 'fresh hl-n queued\n'); assert.equal(reqs[1].method, 'POST'); assert.equal(reqs[1].path, '/api/headless')
 })

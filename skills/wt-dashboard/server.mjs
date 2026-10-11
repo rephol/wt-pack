@@ -3050,10 +3050,9 @@ async function headlessApi(req, res, url, parts) {
     const b = await json()
     try { if (!statSync(b.cwd).isDirectory()) throw 0 } catch { return send(res, 400, { error: 'cwd: an existing directory' }) }
     await headlessRole(b) // WP-307: persona → base role, model floor
-    if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) {
-      const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
-      b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
-    }
+    const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
+    if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
+    else if (b.name && taken.includes(b.name)) return send(res, 409, { error: `name ${b.name} is taken by a live agent` }) // WP-317: a live name is never duplicated (an ended run's is reusable)
     return send(res, 200, h.spawn(b))
   }
   if (req.method === 'POST' && id && sub) {

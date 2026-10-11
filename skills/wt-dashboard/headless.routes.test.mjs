@@ -74,6 +74,7 @@ test('spawn validates role and cwd; cap 1 queues the second run until the first 
   const a = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, name: 'hl-a' } })
   assert.match(a.id, /^hl-/)
   await state(a.id, 'idle')
+  assert.equal((await call('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, name: 'hl-a' } })).status, 409) // WP-317: a live name is never duplicated
   const b = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root } })
   assert.equal(b.state, 'queued')
   assert.equal((await call(`/api/headless/${b.id}/message`, { method: 'POST', body: { text: 'hi' } })).status, 409)

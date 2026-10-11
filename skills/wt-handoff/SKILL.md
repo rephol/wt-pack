@@ -40,6 +40,9 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   Prints one line: `cancelled <name> (<pane>): <goal cleared|goal clear unverified, sent /clear>[, cleared
   task="…"][, returned <ID> to ready]`. Dispatch and reconcile use it when they withdraw a hand-off.
 
+- `--pane <name|id>` (and `--reply <name|id>`) also take a live **headless run** (WP-317): the message is delivered through
+  `POST /api/headless/:id/message` with the same envelope, reply footer and `--request-id` idempotency. A live name wins over an
+  ended run that shares it; an id prefix must be unique.
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. No `/goal` by default (WP-272): when the
   target's delivery mod is live the message is queued and the target pulls it between turns (if not pulled within
