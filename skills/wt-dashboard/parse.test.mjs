@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, projectName } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, planUsageFromLimits, projectName } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -1698,4 +1698,12 @@ test('WP-336: stale idle-pane footers (Reset: 0m, lower %) never win over live o
   notePlanUsage(live, now, 'L|w1M:p2'); notePlanUsage(other, now, 'L|w1:p1'); notePlanUsage(idle, now + 1000, 'L|w7:p2') // idle parsed last
   const b = planUsageSnapshot(now + 2000)
   assert.deepEqual([b.session.pct, b.weekly.pct], [9, 21])
+})
+
+test('WP-339: sidebar planUsage follows the picked limits (a fresh pane reading shows even when the cache file is old)', () => {
+  const now = Date.now(), iso = (ms) => new Date(now + ms).toISOString()
+  const l = { session: 10, sessionResetAt: iso(2 * 3600_000), weekly: 21, weeklyResetAt: iso(5 * 86400_000), source: 'pane', stale: false }
+  assert.deepEqual(planUsageFromLimits(l, now), { session: { pct: 10, reset: '2h0m' }, weekly: { pct: 21, reset: '5d 0hr 0m' }, at: now })
+  assert.equal(planUsageFromLimits({ ...l, stale: true }, now), null)
+  assert.equal(planUsageFromLimits(null, now), null)
 })
