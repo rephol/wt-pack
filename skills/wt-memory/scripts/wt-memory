@@ -42,6 +42,7 @@ async function merge({ role, project, persona, cwd }) {
       const r = await import('../../wt-shared/scripts/roles.mjs')
       const co = r.mainCheckout(cwd || process.cwd())
       parts.push(...r.sections(co, role, persona).map(([h, t]) => [h, body(t)]))
+      if (co) parts.push(['Project roles', r.untrustedNotice(co)]) // WP-334: repo role files not trusted → one line, base roles apply
       // WP-289: an orchestrator picks personas, so tell it where they live (user level is easy to miss)
       if (co && role === 'orchestrator') parts.push(['Personas', `Project personas are role files; \`wt-roles list\` shows them. ${r.rootsLine(co)}`])
     } catch {}
