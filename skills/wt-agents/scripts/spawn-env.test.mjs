@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync, statSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -22,6 +22,7 @@ stub('herdr', `case "$1 $2" in
 esac`)
 stub('gh', `[ "$1 $2 $3 $4" = "auth token --user rephol" ] && { echo tok123; exit 0; }; exit 1`)
 execFileSync('git', ['-C', repo, 'init', '-q'])
+writeFileSync(join(tmp, 'trusted-projects.json'), JSON.stringify({ demo: realpathSync(repo) })) // WP-334: repo role files load for trusted projects only (WT_DASHBOARD_DATA = tmp)
 const db = new DatabaseSync(join(tmp, 'data', 'wt.db'))
 db.exec('CREATE TABLE project_settings (project TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project, key))')
 const setAccount = (a) => { db.exec('DELETE FROM project_settings'); if (a) db.prepare("INSERT INTO project_settings VALUES ('demo', 'githubAccount', ?)").run(a) }
@@ -184,6 +185,17 @@ test('WP-204: a persona spawns into its base pool with role=<base> persona=<name
   assert.ok(s.calls.some((l) => /^herdr agent start .*--mcp-config /.test(l)))
   // an unknown name with no file is still just a role name
   assert.match(spawn(['spawn', 'nofile', repo]).out, /^demo-nofile-01 /)
+})
+
+test('WP-334: an untrusted repo persona is not found and the warning says why', () => {
+  const file = join(tmp, 'trusted-projects.json')
+  const saved = readFileSync(file, 'utf8')
+  writeFileSync(file, '{}')
+  try {
+    const r = spawnSync(join(here, 'agents.sh'), ['spawn', 'frontend-worker', repo], { encoding: 'utf8',
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
+    assert.match(r.stderr, /not trusted; base roles apply\. Trust it in wt-dashboard Settings › demo\./)
+  } finally { writeFileSync(file, saved) }
 })
 
 test('WP-237: spawn --team spawns every member x count with the team token; --team on one spawn tags it; a bad team fails', () => {

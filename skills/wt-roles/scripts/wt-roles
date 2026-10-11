@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as teams from '../../wt-shared/scripts/teams.mjs'
-import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir, rootsLine, settingsWhere } from '../../wt-shared/scripts/roles.mjs'
+import { BASES, CAP, NAME, catalog, check, list, mainCheckout, rolesDir, rootsLine, settingsWhere, untrustedNotice } from '../../wt-shared/scripts/roles.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const [cmd, ...rest] = process.argv.slice(2)
@@ -55,6 +55,7 @@ if (cmd === 'team') {
 } else if (cmd === 'list') {
   const found = list(checkout)
   console.log(rootsLine(checkout))
+  if (untrustedNotice(checkout)) console.log(untrustedNotice(checkout)) // WP-334
   if (!found.length) console.log(`no role files in ${rolesDir(checkout)} (agents run with the pack's defaults)`)
   const bad = new Set(check(checkout, { catalog: catalog() }).filter((f) => f.level === 'error').map((f) => f.name))
   for (const r of found) {
@@ -64,6 +65,7 @@ if (cmd === 'team') {
   }
 } else if (cmd === 'check') {
   const f = check(checkout, { catalog: catalog() })
+  if (untrustedNotice(checkout)) console.log(untrustedNotice(checkout)) // WP-334
   if (!f.length) console.log('ok')
   for (const x of f) console.log(`${x.level.padEnd(5)} ${x.name}: ${x.msg}`)
   process.exit(f.some((x) => x.level === 'error') ? 1 : 0)

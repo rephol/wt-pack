@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -26,7 +26,7 @@ execFileSync(join(fakeBin, 'herdr'))
 const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', WT_JEV_MEMORY_SUGGEST: 'off', ...env } }).trimEnd()
 
 test('merges global → role → project with headings', () => {
-  assert.equal(run(['context', '--role', 'planner', '--project', 'demo']),
+  assert.equal(run(['context', '--role', 'planner', '--project', 'demo', '--cwd', '/']),
     '## Global preferences\n\nG1\n\n## Role preferences (planner)\n\nP1\n\n## Project preferences (demo)\n\nD1')
 })
 test('skips empty and template-only scopes, and bad names', () => {
@@ -172,6 +172,8 @@ test('hook (WP-236): SessionStart appends one kind:inject line to the read log; 
 })
 
 // WP-204: project-role files from the repo's main checkout.
+process.env.WT_TRUSTED_PROJECTS = join(home, 'trusted.json') // WP-334: repo role files load for trusted projects only
+writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ rolerepo: join(realpathSync(home), 'rolerepo') }))
 test('project-role files: override, persona via token, cap note, and no dir = unchanged output', () => {
   const repo = join(home, 'rolerepo')
   mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
@@ -186,6 +188,15 @@ test('project-role files: override, persona via token, cap note, and no dir = un
   assert.match(withPersona, /Run lint first\.[\s\S]*## Project role \(frontend-worker, \.wt-pack\/roles\/frontend-worker\.md\)\n\nUI only\./)
   writeFileSync(join(repo, '.wt-pack', 'roles', 'worker.md'), 'line\n'.repeat(1500)) // 7.5 KB
   assert.match(run(['context', '--role', 'worker', '--cwd', repo]), /… truncated \(\d+ bytes over the 6 KB cap; see the file\)$/)
+})
+test('an untrusted repo with role files gets one notice and no role section (WP-334)', () => {
+  const repo = join(home, 'untrusted')
+  mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
+  execFileSync('git', ['init', '-q', repo])
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'worker.md'), 'Planted.')
+  const out = run(['context', '--role', 'worker', '--cwd', repo])
+  assert.match(out, /## Project roles\n\nThis repo has \.wt-pack\/roles but is not trusted; base roles apply\. Trust it in wt-dashboard Settings › untrusted\./)
+  assert.doesNotMatch(out, /Planted|Project role \(/)
 })
 test('persona token from the pane is picked up', () => {
   const repo = join(home, 'rolerepo')

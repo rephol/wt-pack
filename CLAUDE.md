@@ -47,7 +47,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 | wt-ticket | local kanban board CLI (`WP-N`): new/list/show/move/comment/claim/assign/keys |
 | wt-room | rooms CLI: list/read/post/--attach/create |
 | wt-ask | post an agent question as a room chip + Inbox card (WP-164); `--resolve` closes it without an answer |
-| wt-roles | project role files `.wt-pack/roles/<name>.md` (override = base-role name, else persona): `list`/`new`/`check`; read by `wt-shared/scripts/roles.mjs`, injected by wt-memory `context`, spawned by `agents.sh spawn <persona>`, routed by Dispatch `personaFor` (WP-204) |
+| wt-roles | project role files `.wt-pack/roles/<name>.md` (override = base-role name, else persona): `list`/`new`/`check`; repo files load only for a project with the Settings trust toggle on (WP-334); read by `wt-shared/scripts/roles.mjs`, injected by wt-memory `context`, spawned by `agents.sh spawn <persona>`, routed by Dispatch `personaFor` (WP-204) |
 | wt-memory | store `~/.config/wt-memory`; its hooks and MCP ship in the one wt-pack plugin |
 | wt-shared | shared helpers; `model-route.mjs` (WP-128 model routing: explain/pick/outcome, WP-130 `usage`) + `routing-eval.mjs` |
 | wt-setup | runs `./setup` at repo root |

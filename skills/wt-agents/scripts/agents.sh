@@ -268,7 +268,8 @@ TEAM_MEMBERS
     *-orchestrator|*-planner|*-worker|*-auditor|*-reviewer) echo "warning: no valid .wt-pack/roles/$role.md (wt-roles check); spawning it as a plain role with its own pool" >&2
       # WP-289: say where personas are looked up and which exist, so a user-level persona is not mistaken for absent
       rr=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" roots 2>/dev/null | jq -r '"searched: \(.repo) and \(.user) (in effect: \(.in_effect))"') && echo "  $rr" >&2
-      kp=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" list 2>/dev/null | jq -r '[.[] | select(.base != .name) | .name] | join(", ")') && echo "  known personas: ${kp:-none}" >&2 ;; esac; fi
+      kp=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" list 2>/dev/null | jq -r '[.[] | select(.base != .name) | .name] | join(", ")') && echo "  known personas: ${kp:-none}" >&2
+      tn=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" notice 2>/dev/null) ; [ -n "$tn" ] && echo "  $tn" >&2 ;; esac; fi # WP-334: why a repo persona is not found
   case "$model" in ''|haiku|sonnet|opus) ;; *) echo "--model: haiku, sonnet or opus" >&2; exit 2 ;; esac
   case "$effort" in ''|low|medium|high|xhigh|max) ;; *) echo "--effort: low, medium, high, xhigh or max" >&2; exit 2 ;; esac
   # Check --mcp names before anything is created.

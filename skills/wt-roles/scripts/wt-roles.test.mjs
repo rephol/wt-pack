@@ -9,6 +9,8 @@ import { join } from 'node:path'
 const BIN = new URL('./wt-roles', import.meta.url).pathname
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'wt-roles-')))
 execFileSync('git', ['init', '-q', repo])
+process.env.WT_TRUSTED_PROJECTS = join(repo, '..', `wt-roles-trust-${process.pid}.json`) // WP-334: repo role files load for trusted projects only
+writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ r: repo }))
 const run = (...a) => { try { return { out: execFileSync(BIN, [...a, '--cwd', repo], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), code: 0 } } catch (e) { return { out: e.stdout + e.stderr, code: e.status } } }
 const f = (n) => join(repo, '.wt-pack', 'roles', `${n}.md`)
 
@@ -69,4 +71,15 @@ test('list and where print both roots and the one in effect (WP-289)', () => {
   const w = run('where').out
   assert.match(w, /roots: repo .*\.wt-pack\/roles · user .*roles · in effect: repo/)
   assert.match(run('list').out, /^roots: repo /m)
+})
+
+test('an untrusted repo: list and check print the trust notice (WP-334)', () => {
+  const r3 = realpathSync(mkdtempSync(join(tmpdir(), 'wt-roles-untrusted-')))
+  execFileSync('git', ['init', '-q', r3])
+  execFileSync('mkdir', ['-p', join(r3, '.wt-pack', 'roles')])
+  writeFileSync(join(r3, '.wt-pack', 'roles', 'worker.md'), 'x')
+  for (const c of ['list', 'check']) {
+    const out = execFileSync(BIN, [c, '--cwd', r3], { encoding: 'utf8' })
+    assert.match(out, /not trusted; base roles apply\. Trust it in wt-dashboard Settings › /)
+  }
 })

@@ -2,13 +2,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, realpathSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { rolesState, writeRole } from './project-roles.mjs'
 
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'proles-')))
 execFileSync('git', ['init', '-q', repo])
+process.env.WT_TRUSTED_PROJECTS = join(repo, '..', `proles-trust-${process.pid}.json`) // WP-334: repo role files load for trusted projects only
+writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ r: repo }))
 const git = async (r, ...a) => execFileSync('git', ['-C', r, ...a], { encoding: 'utf8' })
 
 test('write then list: a persona with an unknown MCP shows its finding, and git status shows the new file', async () => {

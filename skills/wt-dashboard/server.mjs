@@ -40,6 +40,7 @@ import { ccBlock } from './ccusage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
 import { ProjectSettings, PKEYS } from './project-settings.mjs'
+import { syncTrusted, grandfather, KEY as TRUST_KEY } from './trusted-projects.mjs'
 import { createProject, hideProject } from './projects.mjs'
 import { Config, KEYS, LOOPBACK_HOST, isLoopbackRequest, parseEnvFile, parseTeams, bindCheck, bindHostHeader } from './config.mjs'
 import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
@@ -3500,6 +3501,7 @@ async function projectSettingsApi(req, res, parts) {
   if (req.method === 'PUT') psettings.set(project, key, b.value)
   else psettings.reset(project, key)
   const root = (await projectRoots()).get(project)
+  if (key === TRUST_KEY) syncTrusted({ dataRoot: DATA_ROOT, db: psettings.db, roots: await projectRoots() }) // WP-334
   if (key === 'githubAccount' && root) {
     const acct = psettings.get(project, key)
     await (acct ? git(root, 'config', 'credential.https://github.com.username', acct)
@@ -4202,6 +4204,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     // Background loops run only in a listening server (never when parse.test.mjs imports this module).
     process.on('uncaughtException', crashed('uncaughtException'))
     process.on('unhandledRejection', crashed('unhandledRejection'))
+    projectRoots().then((roots) => { grandfather({ dataRoot: DATA_ROOT, psettings, roots }); syncTrusted({ dataRoot: DATA_ROOT, db: psettings.db, roots }) }).catch((e) => console.error('trust:', e.message)) // WP-334
     ensureHerdr().catch((e) => console.error('herdr:', e.message)) // WP-218: after a reboot nobody has opened herdr yet
     setInterval(roomsLoop, 4000)
     setInterval(() => agents().then((ag) => { const live = new Set(ag.filter((a) => a.local).map((a) => a.id)); return live.size && asks.expire(live) }).catch((e) => console.error('asks expire:', e.message)), 60_000).unref() // WP-209

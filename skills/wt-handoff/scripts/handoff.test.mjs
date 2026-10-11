@@ -25,6 +25,8 @@ writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$
 esac\n`)
 chmodSync(join(bin, 'herdr'), 0o755)
 execFileSync('git', ['-C', repo, 'init', '-q'])
+mkdirSync(join(tmp, '.local', 'share', 'wt-dashboard'), { recursive: true }) // WP-334: HOME = tmp, so the repo's role files need a trust entry here
+writeFileSync(join(tmp, '.local', 'share', 'wt-dashboard', 'trusted-projects.json'), JSON.stringify({ demo: repo }))
 const run = (args, input = 'review it') => execFileSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8',
   env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' } })
 
