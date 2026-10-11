@@ -20,3 +20,11 @@ export function wrap({ kind, from = '', ticket = null, pr = null, sha = null, id
   const rest = slash ? String(body).slice(slash[0].length) : body
   return `${slash ? `${slash[1]} ` : ''}<wt-message id=${id} kind=${kind} from="${attr(from)}"${t}>${unTag(rest)}</wt-message>`
 }
+
+// WP-329: the ONE parser of a `<wt-message …>` envelope, for the classifier (inject.mjs) and the store (messages.mjs).
+// Anchored at the start (leading `/cmd ` tokens allowed, as wrap() hoists them); `kind` must be a known one, so
+// `kind=bogus` and a peer wrapper ("Another Claude session sent a message: …") are null. → {slash, id, kind, sender, ticket}.
+export function parseEnvelope(text) {
+  const m = String(text ?? '').match(/^((?:\/\S+ )*)<wt-message id=([\w-]+) kind=(\w+) from="([^"]*)"(?: ticket=([A-Z]+-\d+))?/)
+  return m && KINDS.includes(m[3]) ? { slash: m[1].trim(), id: m[2], kind: m[3], sender: m[4], ticket: m[5] ?? null } : null
+}

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { wrap, attr, unTag, nonce } from './wt-message.mjs'
+import { wrap, attr, unTag, nonce, parseEnvelope } from './wt-message.mjs'
 
 test('wrap: id, kind, from, optional ticket; body kept', () => {
   assert.equal(wrap({ kind: 'dispatch', from: 'wt-dashboard', ticket: 'WP-12', id: 'abc' }, 'do it'),
@@ -46,4 +46,14 @@ test('WP-121: pr and sha attrs after ticket; invalid dropped; the server prefix 
   assert.doesNotMatch(wrap({ kind: 'dispatch', pr: '12 x', sha: 'XYZ' }, 'b'), /pr=|sha=/)
   const cli = fileURLToPath(new URL('./wt-message-cli.mjs', import.meta.url))
   assert.match(execFileSync('node', [cli, '--kind', 'dispatch', '--pr', '7', '--sha', 'abc1234'], { input: 'x' }).toString(), / pr=7 sha=abc1234>/)
+})
+
+test('WP-329 parseEnvelope: the one anchored parser — slash prefix ok, unknown kind and peer wrapper are null', () => {
+  assert.deepEqual(parseEnvelope('/goal <wt-message id=a-b kind=handoff from="w1" ticket=WP-3>x</wt-message>'),
+    { slash: '/goal', id: 'a-b', kind: 'handoff', sender: 'w1', ticket: 'WP-3' })
+  assert.equal(parseEnvelope(wrap({ kind: 'reply', from: 'me', id: 'n1' }, 'hi')).sender, 'me')
+  assert.equal(parseEnvelope('<wt-message id=x kind=bogus from="u">x</wt-message>'), null)
+  assert.equal(parseEnvelope('Another Claude session sent a message:\n<cross-session-message>\n<wt-message id=x kind=system from="u">x'), null)
+  assert.equal(parseEnvelope('hello <wt-message id=x kind=system from="u">'), null)
+  assert.equal(parseEnvelope(undefined), null)
 })

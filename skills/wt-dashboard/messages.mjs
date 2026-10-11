@@ -7,6 +7,7 @@
 import { isClosed } from './contracts.mjs'
 import { join } from 'node:path'
 import { open } from './store.mjs'
+import { parseEnvelope as parseWt } from '../wt-shared/scripts/wt-message.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
 export const STATES = ['queued', 'delivered', 'acknowledged', 'answered', 'expired', 'failed']
@@ -20,11 +21,8 @@ export const MAX_ATTEMPTS = 3
 export const NUDGE_MS = 4 * 60_000 // WP-272
 const OPEN = ['queued', 'delivered']
 
-// Envelope fields of a `<wt-message id=… kind=… from="…" [ticket=…]>` (after a slash command), or null.
-export function parseEnvelope(text) {
-  const m = String(text).match(/^(?:\/\S+ )*<wt-message id=([\w-]+) kind=(\w+) from="([^"]*)"(?: ticket=([A-Z]+-\d+))?/)
-  return m ? { id: m[1], kind: m[2], sender: m[3], ticket: m[4] ?? null } : null
-}
+// Envelope fields of a `<wt-message …>` (after a slash command), or null: the one parser lives in wt-shared (WP-329).
+export const parseEnvelope = (text) => { const e = parseWt(text); return e && { id: e.id, kind: e.kind, sender: e.sender, ticket: e.ticket } }
 
 // A room delivery `<room-message id=… room=… from="…" kind=…>` (context-only tags are not messages).
 const roomTag = (t) => { const m = String(t).match(/^<room-message id=([\w-]+) room=\S+ from="([^"]*)" kind=(\w+)/); return m && m[3] !== 'context' ? { id: m[1], kind: 'room', sender: m[2], ticket: null } : null }
@@ -61,14 +59,14 @@ export class Messages {
   get(id) { return this.db.prepare('SELECT * FROM wt_messages WHERE id = ?').get(id) ?? null }
 
   // → { row, duplicate }. A known id or request_id returns the existing row untouched.
-  record({ id, sender, target, kind, ticket = null, requestId = null, body, state = 'queued' }) {
+  record({ id, sender, target, kind, ticket = null, requestId = null, body, state = 'queued', senderPane = null }) {
     if (!id || !target || !kind || typeof body !== 'string') throw err(400, 'id, target, kind, body required')
     if (!STATES.includes(state)) throw err(400, `state: ${STATES.join('|')}`)
     const dup = this.get(id) ?? (requestId ? this.db.prepare('SELECT * FROM wt_messages WHERE request_id = ?').get(requestId) : null)
     if (dup) return { row: dup, duplicate: true }
     const at = this.#at()
-    this.db.prepare(`INSERT INTO wt_messages (id, sender, target, kind, ticket, request_id, body, state, created, updated, delivered_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, String(sender ?? ''), target, kind, ticket, requestId, body.slice(0, 100_000), state, at, at, state === 'delivered' ? at : null)
+    this.db.prepare(`INSERT INTO wt_messages (id, sender, target, kind, ticket, request_id, body, state, created, updated, delivered_at, sender_pane)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, String(sender ?? ''), target, kind, ticket, requestId, body.slice(0, 100_000), state, at, at, state === 'delivered' ? at : null, senderPane)
     return { row: this.get(id), duplicate: false }
   }
 
