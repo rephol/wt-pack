@@ -33,8 +33,10 @@
 #                                            # WP-293: asks wt-dashboard ($HERDR_DASH_URL, default 127.0.0.1:7777) to
 #                                            run a headless agent (no herdr pane); prints "<name> <id> <state>" (state
 #                                            may be queued). cwd defaults to $PWD. Exit 1 on a dashboard error.
-#   agents.sh list --headless              # the dashboard's headless runs: "<name> <id> <state> <cwd>"
-#   agents.sh rm --headless <id>           # stop a headless run (the dashboard may refuse an agent pane: 403)
+#   agents.sh list --headless              # the dashboard's headless runs: "<name> <id> <state> <cwd> <role>"
+#   agents.sh send --headless <name|id> '<text>'   # WP-317: the run's next user message (text or stdin); live run wins over an ended one of the same name
+#   agents.sh spawn --headless <role> [cwd] --reuse ...   # an idle run of the same role + cwd gets --prompt instead of a new run: prints "<name> <id> idle reused"
+#   agents.sh rm|stop --headless <id>      # stop a headless run (WP-317: an agent pane may stop the runs it spawned, an orchestrator any; else 403)
 #   agents.sh context                      # WP-312: the caller's own context window as JSON {used,window,pct,model}: a pane agent
 #                                            ($HERDR_PANE_ID) or a headless run ($WT_HEADLESS_ID) looked up in the dashboard's
 #                                            /api/agents `info` (the WP-201 rule); exit 1 when the dashboard or the row is missing
@@ -65,32 +67,51 @@ hl_call() { # method path [json]
   hl_code=$(printf '%s' "$hl_out" | tail -n1); hl_body=$(printf '%s' "$hl_out" | sed '$d')
   case "$hl_code" in 2??) printf '%s' "$hl_body" ;; *)
     err=$(printf '%s' "$hl_body" | jq -r '.error // empty' 2>/dev/null || true)
-    [ "$hl_code" = 403 ] && err="refused (403): ${err:-dashboard only} — this needs the dashboard session, not an agent pane"
+    [ "$hl_code" = 403 ] && err="refused (403): ${err:-dashboard only} — only the pane that spawned the run (or an orchestrator) may stop it, else the dashboard"
     echo "wt-dashboard: ${err:-HTTP $hl_code}" >&2; exit 1 ;; esac
 }
 case " $* " in *" --headless "*)
   hl_cmd=$1; shift
   case "$hl_cmd" in
   spawn)
-    role=; cwd=; prompt=; model=; effort=; name=; pmode=
+    role=; cwd=; prompt=; model=; effort=; name=; pmode=; reuse=0
     while [ $# -gt 0 ]; do v=$1; case "$v" in
       --headless) shift ;;
+      --reuse) reuse=1; shift ;;
       --prompt|--model|--effort|--name|--permission-mode) [ $# -ge 2 ] || { echo "$v needs a value" >&2; exit 2; }
         case "$v" in --prompt) prompt=$2 ;; --model) model=$2 ;; --effort) effort=$2 ;; --name) name=$2 ;; --permission-mode) pmode=$2 ;; esac; shift 2 ;;
       *) if [ -z "$role" ]; then role=$v; elif [ -z "$cwd" ]; then cwd=$v; else echo "spawn --headless: unexpected $v" >&2; exit 2; fi; shift ;;
     esac; done
     [ -n "$role" ] || { echo "spawn --headless <role> [cwd] [--prompt text] [--model m] [--effort e] [--name n] [--permission-mode m]" >&2; exit 2; }
     cwd=$(cd "${cwd:-$PWD}" 2>/dev/null && pwd) || { echo "spawn --headless: no such directory" >&2; exit 2; }
+    if [ "$reuse" = 1 ]; then # WP-317: an idle run of the same role + cwd takes the prompt instead of a duplicate being spawned
+      hl_res=$(hl_call GET "") || exit 1
+      hl_hit=$(printf '%s' "$hl_res" | jq -r --arg r "$role" --arg c "$cwd" '[.[] | select(.role == $r and .cwd == $c and .state == "idle")][0] | if . then "\(.id) \(.name)" else empty end')
+      if [ -n "$hl_hit" ]; then
+        [ -z "$prompt" ] || hl_call POST "/${hl_hit%% *}/message" "$(jq -n --arg text "$prompt" '{$text}')" >/dev/null || exit 1
+        echo "${hl_hit#* } ${hl_hit%% *} idle reused"; exit 0
+      fi
+    fi
     hl_res=$(hl_call POST "" "$(jq -n --arg role "$role" --arg cwd "$cwd" --arg prompt "$prompt" --arg model "$model" --arg effort "$effort" --arg name "$name" --arg permissionMode "$pmode" \
       '{$role, $cwd} + ({$prompt, $model, $effort, $name, $permissionMode} | with_entries(select(.value != "")))')") || exit 1
     printf '%s' "$hl_res" | jq -r '"\(.name) \(.id) \(.state)"' ;;
-  list) hl_res=$(hl_call GET "") || exit 1; printf '%s' "$hl_res" | jq -r '.[] | "\(.name) \(.id) \(.state) \(.cwd)"' ;;
-  rm)
+  list) hl_res=$(hl_call GET "") || exit 1; printf '%s' "$hl_res" | jq -r '.[] | "\(.name) \(.id) \(.state) \(.cwd) \(.role // "-")"' ;; # state: idle = free to reuse, working = busy (WP-317: role is the 5th column)
+  send) # WP-317: send --headless <name|id> '<text>' (or text on stdin) → the run's next user message; a live run beats an ended one of the same name
+    [ "$1" = --headless ] && shift
+    [ $# -ge 1 ] || { echo "send --headless <name|id> '<text>'" >&2; exit 2; }
+    to=$1; shift; text=${1:-}; [ -n "$text" ] || { [ -t 0 ] && { echo "send --headless: no text" >&2; exit 2; }; text=$(cat); }
+    [ -n "$text" ] || { echo "send --headless: no text" >&2; exit 2; }
+    hl_res=$(hl_call GET "") || exit 1
+    hl_id=$(printf '%s' "$hl_res" | jq -r --arg t "$to" '[.[] | select(.state != "ended" and .state != "failed")] as $l | ([$l[] | select(.id == $t or .name == $t)] | if length > 0 then . else [$l[] | select(.id | startswith($t))] end) | if length == 1 then .[0].id else empty end')
+    [ -n "$hl_id" ] || { echo "send --headless: no live headless run (or ambiguous): $to" >&2; exit 1; }
+    hl_call POST "/$hl_id/message" "$(jq -n --arg text "$text" '{$text}')" >/dev/null || exit 1
+    echo "sent $hl_id" ;;
+  rm|stop)
     [ $# -eq 2 ] || { echo "rm --headless <id>" >&2; exit 2; }
     id=$1; [ "$id" = --headless ] && id=$2; case "$id" in hl-*) ;; *) echo "rm --headless: not a headless id: $id" >&2; exit 2 ;; esac
     case "$id" in *[!A-Za-z0-9_-]*) echo "rm --headless: bad id" >&2; exit 2 ;; esac
     hl_res=$(hl_call POST "/$id/stop" '{}') || exit 1; printf '%s' "$hl_res" | jq -r '"\(.name) \(.id) \(.state)"' ;;
-  *) echo "--headless works with spawn, list and rm" >&2; exit 2 ;;
+  *) echo "--headless works with spawn, list, send and rm" >&2; exit 2 ;;
   esac
   exit 0 ;;
 esac

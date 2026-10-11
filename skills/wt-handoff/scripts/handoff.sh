@@ -151,6 +151,23 @@ pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // emp
 name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
 pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | select(.name == $n) | .pane_id' | head -1; }
 
+# WP-317: a live headless run (no herdr pane) by id, name or a unique id prefix → "<id> <name>"; a pane id has a ':' so is never one.
+# Ended/failed rows are skipped, so a name an ended run left behind never wins over the live run that reuses it.
+HL_URL="${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless"
+hl_resolve() { # <target>
+  case "$1" in *:*|'') return 1 ;; esac
+  r=$(curl -sS --max-time 3 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} "$HL_URL" 2>/dev/null | jq -r --arg t "$1" \
+    '[.[]? | select(.state != "ended" and .state != "failed")] as $l | ($l | map(select(.id == $t or .name == $t))) as $x
+     | ($x | if length > 0 then . else ($l | map(select(.id | startswith($t)))) end) | if length == 1 then "\(.[0].id) \(.[0].name)" else empty end' 2>/dev/null) || return 1
+  [ -n "$r" ] && printf '%s\n' "$r"
+}
+hl_post() { # <id> <text>: deliver as the run's next user message (an agent pane may; the server says 409 if it is not live)
+  o=$(jq -n --arg t "$2" '{text:$t}' | curl -sS --max-time 10 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} -H 'content-type: application/json' \
+    --data @- "$HL_URL/$1/message" 2>/dev/null) || { echo "wt-dashboard not reachable" >&2; return 1; }
+  e=$(printf '%s' "$o" | jq -r '.error // empty' 2>/dev/null || true)
+  [ -z "$e" ] || { echo "headless $1: $e" >&2; return 1; }
+}
+
 # --ack <id> [--answered]: tell the dashboard this agent has the message (WP-257). Needs a pane (HERDR_PANE_ID).
 if [ -n "$ack_id" ]; then
   case "$ack_id" in *[!A-Za-z0-9_-]*) echo "--ack: bad id" >&2; exit 2 ;; esac
@@ -169,6 +186,12 @@ if [ -n "$reply" ]; then
   nm=$( [ -n "$me" ] && name_of "$me" || true)
   msg=$(printf '%s' "$text" | node "$WTMSG" --kind reply --from "${from_arg:-${nm:-${me:-wt-handoff}}}") || { echo "wt-message wrap failed" >&2; exit 1; }
   [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
+  if hl=$(hl_resolve "$reply"); then # WP-317: the sender is a headless run
+    hl_post "${hl%% *}" "$msg" || exit 1
+    record_message "${hl%% *}" "$msg" delivered
+    echo "replied ${hl%% *} (headless ${hl#* })"
+    exit 0
+  fi
   # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
   # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
   if [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
@@ -592,6 +615,16 @@ dry() {  # <what would happen>
 # persona agent is reused by persona, never by tier.
 [ -z "$persona" ] || { route_tier=; route_effort=; }
 
+if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id>
+  [ "$dry" -eq 1 ] && dry "would hand to headless ${hl#* } (${hl%% *})"
+  hl_post "${hl%% *}" "$send" || exit 1
+  record_message "${hl%% *}" "$send" delivered
+  out="reused headless ${hl#* } (${hl%% *})${task:+ — $task}
+reach: $SELF --reply ${hl%% *} \"...\""
+  printf '%s\n' "$out"
+  [ -z "$request_id" ] || printf '%s\n' "$out" | node "$RECEIPTS" put "$request_id" 2>/dev/null || true
+  exit 0
+fi
 if [ "$mode" = pane ]; then
   # WP-247: a card belongs to one team (or none); its work goes to that team's agents (or a teamless one). Same rule and
   # wording as the dashboard's buddy route. No board reachable (server down, Linear key) → no check, as for the pair lookup.

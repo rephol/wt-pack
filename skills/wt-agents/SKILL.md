@@ -35,7 +35,10 @@ scripts/agents.sh rm <name|pane> [--force]
 scripts/agents.sh respawn <name|pane> [--force]  # same name/role/cwd/tokens, claude --resume, in a NEW tab
 scripts/agents.sh respawn --stale [--force]      # every pool agent lacking the kill shim or plugin guard
 scripts/agents.sh spawn --headless <role> [cwd] [--prompt t] [--model m] [--effort e] [--name n]  # WP-293: a wt-dashboard headless run, no pane; prints "<name> <id> <state>"
-scripts/agents.sh list --headless | rm --headless <id>  # the dashboard's headless runs; stop one (may need the dashboard: 403 from a pane)
+scripts/agents.sh list --headless   # the dashboard's headless runs: "<name> <id> <state> <cwd> <role>" (idle = free to reuse, working = busy)
+scripts/agents.sh send --headless <name|id> '<text>'   # WP-317: the run's next user message; a live run beats an ended one of the same name
+scripts/agents.sh spawn --headless <role> [cwd] --reuse --prompt t   # an idle run of the same role + cwd takes the prompt: "<name> <id> idle reused"
+scripts/agents.sh rm|stop --headless <id>   # stop one: allowed for the pane that spawned it (headless_runs.spawner) and for an orchestrator pane; any other pane gets 403 (answers/resume stay the user's)
 ```
 
 ## DND and pairing

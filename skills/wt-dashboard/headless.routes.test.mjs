@@ -36,8 +36,9 @@ process.stdin.on('end', () => process.exit(0))
 `
 const FAKE_HERDR = `#!/usr/bin/env node
 const a = process.argv.slice(2).join(' ')
-if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [{ pane_id: 'w9:p1', agent_status: 'working', cwd: '/tmp', state_change_seq: 1 }] } }))
-else if (a === 'pane get w9:p1') console.log(JSON.stringify({ result: { pane: { pane_id: 'w9:p1' } } }))
+const P = (id, name) => ({ pane_id: id, name, agent_status: 'working', cwd: '/tmp', state_change_seq: 1 })
+if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [P('w9:p1', 'demo-worker-01'), P('w9:p2', 'demo-orchestrator-01'), P('w9:p3', 'demo-worker-02')] } }))
+else if (/^pane get w9:p[123]$/.test(a)) console.log(JSON.stringify({ result: { pane: { pane_id: a.slice(-5) } } }))
 else if (a === 'machine list') console.log('')
 else process.exit(1)
 `
@@ -74,6 +75,7 @@ test('spawn validates role and cwd; cap 1 queues the second run until the first 
   const a = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, name: 'hl-a' } })
   assert.match(a.id, /^hl-/)
   await state(a.id, 'idle')
+  assert.equal((await call('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, name: 'hl-a' } })).status, 409) // WP-317: a live name is never duplicated
   const b = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root } })
   assert.equal(b.state, 'queued')
   assert.equal((await call(`/api/headless/${b.id}/message`, { method: 'POST', body: { text: 'hi' } })).status, 409)
@@ -180,8 +182,22 @@ test('auth: an agent pane may only spawn and message; no cookie is refused; Host
   const r = await json('/api/headless', { method: 'POST', auth: false, headers: PANE, body: { role: 'worker', cwd: root } })
   await state(r.id, 'idle')
   await json(`/api/headless/${r.id}/message`, { method: 'POST', auth: false, headers: PANE, body: { text: 'from a pane' } })
-  for (const sub of ['interrupt', 'stop', 'resume', 'answer'])
-    assert.equal((await call(`/api/headless/${r.id}/${sub}`, { method: 'POST', auth: false, headers: PANE, body: {} })).status, 403, sub)
+  // WP-317: resume/answer stay the user's; stop/interrupt only for the spawner pane (p1 here) or an orchestrator (p2), never another pane (p3)
+  const as = (pane) => ({ method: 'POST', auth: false, headers: { 'x-herdr-pane': pane }, body: {} })
+  for (const sub of ['resume', 'answer']) for (const pane of ['w9:p1', 'w9:p2']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as(pane))).status, 403, sub)
+  for (const sub of ['interrupt', 'stop']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as('w9:p3'))).status, 403, `other pane ${sub}`)
+  assert.equal((await call(`/api/headless/${r.id}/interrupt`, as('w9:p1'))).status, 409) // its own run: allowed, but it is idle, not working
+  const mine = await json('/api/headless', { method: 'POST', auth: false, headers: { ...PANE, 'x-herdr-pane': 'w9:p1' }, body: { role: 'worker', cwd: root, name: 'mine' } })
+  assert.equal((await json('/api/headless')).find((x) => x.id === mine.id).spawner, 'w9:p1')
+  const spoof = await json('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': 'w9:p3' }, body: { role: 'worker', cwd: root, name: 'spoof', spawner: 'w9:p1' } })
+  assert.equal((await json('/api/headless')).find((x) => x.id === spoof.id).spawner, 'w9:p3') // never taken from the body
+  const user = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, name: 'byuser' } }) // no spawner
+  assert.equal((await call(`/api/headless/${user.id}/stop`, as('w9:p1'))).status, 403)
+  assert.equal((await call(`/api/headless/${user.id}/stop`, as('w9:p2'))).status, 200) // the orchestrator may stop any run
+  assert.equal((await call(`/api/headless/${spoof.id}/stop`, as('w9:p1'))).status, 403)
+  assert.equal((await call(`/api/headless/${spoof.id}/stop`, as('w9:p3'))).status, 200)
+  assert.equal((await call(`/api/headless/${mine.id}/stop`, as('w9:p1'))).status, 200)
+  assert.equal((await call('/api/headless/hl-nope/stop', as('w9:p2'))).status, 404)
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': 'w9:p404' }, body: { role: 'worker', cwd: root } })).status, 403)
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, body: { role: 'worker', cwd: root } })).status, 403)
   assert.equal((await call(`/api/headless/${r.id}/message`, { method: 'POST', auth: false, body: { text: 'x' } })).status, 403)

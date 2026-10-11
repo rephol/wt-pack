@@ -228,6 +228,8 @@ export const MIGRATIONS = [
   { sql: `ALTER TABLE headless_runs ADD COLUMN context_window INTEGER;`, legacy: () => [], import: () => {}, export: () => {} },
   // WP-315: 'cli' | 'sdk' (NULL = cli) the run was started with; context_used = tokens in the context after the last turn (SDK driver's getContextUsage).
   { sql: `ALTER TABLE headless_runs ADD COLUMN driver TEXT; ALTER TABLE headless_runs ADD COLUMN context_used INTEGER;`, legacy: () => [], import: () => {}, export: () => {} },
+  // WP-317: the canonical pane id of the agent that spawned the run (NULL = the user, or spawned before this): that pane may stop its own runs.
+  { sql: `ALTER TABLE headless_runs ADD COLUMN spawner TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

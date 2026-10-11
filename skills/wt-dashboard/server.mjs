@@ -2443,7 +2443,7 @@ export const hasSession = (cookieHeader, token = SESSION) =>
   (cookieHeader ?? '').split(';').some((c) => c.trim() === `hd_session=${token}`)
 export function needsSession(method, path, headers) {
   if (method === 'GET' || method === 'HEAD' || !path.startsWith('/api/')) return false
-  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/headless(\/[^/]+\/message)?$/.test(path)) return false // WP-293: agents spawn/message headless runs (headlessApi checks the pane)
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/headless(\/[^/]+\/(message|stop|interrupt))?$/.test(path)) return false // WP-293: agents spawn/message headless runs (headlessApi checks the pane; stop/interrupt only for the spawner or an orchestrator, WP-317)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/rooms\/[^/]+\/messages$/.test(path)) return false // agent post
   if (headers['x-herdr-pane'] && method === 'DELETE' && /^\/api\/rooms\/tmp-[^/]+$/.test(path)) return false // agent `room delete` (agentMayDelete checks the owner)
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/rooms') return false // agent `room create` (gated by a setting)
@@ -3045,23 +3045,28 @@ async function headlessApi(req, res, url, parts) {
   // Writes: the dashboard user, or (spawn, message) an agent pane that roomAuthor verifies.
   await rooms.load() // roomAuthor reads the profile from rooms settings, loaded lazily
   const who = await roomAuthor(req)
-  if (who.kind !== 'user' && !(req.method === 'POST' && (!id || sub === 'message'))) return send(res, 403, { error: 'dashboard only' })
+  if (who.kind !== 'user' && !(req.method === 'POST' && (!id || sub === 'message'))) {
+    // WP-317: an agent pane may also stop/interrupt a run IT spawned; an orchestrator-role pane any run. Answers and resume stay the user's.
+    const run = id && (sub === 'stop' || sub === 'interrupt') && req.method === 'POST' ? h.get(id) : null
+    if (id && (sub === 'stop' || sub === 'interrupt') && !h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
+    const me = run && (await agents()).find((x) => x.local && x.id === who.pane)
+    if (!run || !((run.spawner && run.spawner === who.pane) || (me && (me.tags?.role || me.pool) === 'orchestrator'))) return send(res, 403, { error: 'dashboard only (an agent may stop the runs it spawned; an orchestrator any)' })
+  }
   if (req.method === 'POST' && !id) {
     const b = await json()
     try { if (!statSync(b.cwd).isDirectory()) throw 0 } catch { return send(res, 400, { error: 'cwd: an existing directory' }) }
     await headlessRole(b) // WP-307: persona → base role, model floor
-    if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) {
-      const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
-      b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
-    }
-    return send(res, 200, h.spawn(b))
+    const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
+    if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
+    else if (b.name && taken.includes(b.name)) return send(res, 409, { error: `name ${b.name} is taken by a live agent` }) // WP-317: a live name is never duplicated (an ended run's is reusable)
+    return send(res, 200, h.spawn({ ...b, spawner: who.kind === 'agent' ? who.pane : null })) // never from the body
   }
   if (req.method === 'POST' && id && sub) {
     const b = await json()
     if (sub === 'message') return send(res, 200, h.message(id, b.text))
     if (sub === 'interrupt') return send(res, 200, h.interrupt(id))
     if (sub === 'answer') return send(res, 200, h.answer(id, b.ask, b))
-    if (sub === 'stop') return send(res, 200, h.stop(id, 'stopped by the user'))
+    if (sub === 'stop') return send(res, 200, h.stop(id, who.kind === 'user' ? 'stopped by the user' : `stopped by ${who.name}`))
     if (sub === 'resume') return send(res, 200, h.resume(id, b.text))
   }
   send(res, 404, { error: 'not found' })
