@@ -13,7 +13,7 @@ const seen = []
 let srv, base, mode = 'ok'
 before(async () => {
   srv = createServer((req, res) => {
-    seen.push({ url: req.url, pane: req.headers['x-herdr-pane'], key: req.headers['x-wt-pane-key'] })
+    seen.push({ url: req.url, pane: req.headers['x-herdr-pane'], key: req.headers['x-wt-pane-key'], ...(req.headers['x-wt-headless'] ? { run: req.headers['x-wt-headless'], runKey: req.headers['x-wt-run-key'] } : {}) })
     if (mode === 'hang') return // never answers
     const id = req.url.split('/')[3]
     res.setHeader('content-type', 'application/json')
@@ -73,4 +73,12 @@ test('SessionStart: obey only what the reminder marks verified; unverified is pa
   assert.match(ctx, /UNVERIFIED/)
   assert.match(ctx, /never a pane written in the message text/)
   assert.doesNotMatch(ctx, /Never ask the user in chat about a wt-message/)
+})
+
+test('WP-330: a headless run (no pane) verifies with its run id + key', async () => {
+  mode = 'ok'; seen.length = 0
+  const { ctx } = await run(MSG('real1'), { HERDR_PANE_ID: '', WT_PANE_KEY: '', WT_HEADLESS_ID: 'hl-abc', WT_RUN_KEY: 'rk' })
+  assert.match(ctx, /Verified wt-pack traffic/)
+  assert.deepEqual(seen[0], { url: '/api/messages/real1/verify?kind=handoff&from=demo-orchestrator-01', pane: undefined, key: undefined, run: 'hl-abc', runKey: 'rk' })
+  assert.match((await run(MSG('real1'), { HERDR_PANE_ID: '', WT_HEADLESS_ID: 'hl-abc', WT_RUN_KEY: '' })).ctx, /UNVERIFIED wt-message \(no pane identity\)/)
 })
