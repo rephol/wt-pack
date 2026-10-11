@@ -562,3 +562,27 @@ test('WP-328: a pane sender posts fields and pastes the dashboard-built envelope
   assert.doesNotMatch(agent.stdout, /from="forger"/); assert.match(agent.stderr, /--from is ignored/)
   assert.match(dry({ WT_DELIVER_TOKEN: 't', HERDR_PANE_ID: '' }).stdout, /from="forger"/)
 })
+
+test('WP-341: the sender is never a candidate, and a relative script path survives the cd into the main checkout', () => {
+  const curlBin = join(tmp, 'curlbin341')
+  mkdirSync(curlBin, { recursive: true })
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+for a in "$@"; do url=$a; done
+case "$url" in
+  *"/api/tickets/keys"*) printf 'WP\\n200' ;;
+  *"/api/tickets"*) printf '%s\\n200' '{"tickets":[{"id":"WP-1","column":"building","assignee":{"name":"demo-worker-02"}}]}' ;;
+  *) printf '{}\\n404' ;;
+esac
+`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const agent = (n, p) => ({ name: n, pane_id: p, tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo })
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [agent('demo-worker-01', 'wW:p1'), agent('demo-worker-02', 'wW:p2'), agent('demo-worker-03', 'wW:p3')] } }))
+  writeFileSync(join(tmp, 'pane-wW_p1.json'), '{"result":{"pane":{"pane_id":"wW:p1","tokens":{}}}}')
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_PANE_ID: 'wW:p1', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
+  // relative $0: held-card lookup (wt-ticket, resolved after `cd $main_checkout`) must still run, so p2 (assignee of WP-1) is excluded
+  const list = execFileSync('./handoff.sh', ['--list', repo], { cwd: here, input: '', encoding: 'utf8', env })
+  assert.ok(!list.includes('wW:p1'), list) // the sender
+  assert.ok(!list.includes('wW:p2'), list) // held a card — only excluded if the relative path resolved
+  assert.ok(list.includes('wW:p3'), list)
+  for (const f of ['agents.json', 'pane-wW_p1.json']) writeFileSync(join(tmp, f), f === 'agents.json' ? '{"result":{"agents":[]}}' : '{"result":{"pane":{"tokens":{}}}}')
+})

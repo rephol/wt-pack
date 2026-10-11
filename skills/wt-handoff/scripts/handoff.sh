@@ -74,9 +74,11 @@ from_arg=
 reply=
 cancel=
 PANE_RE='^[A-Za-z0-9:_][A-Za-z0-9:_-]*$'
-WTMSG="$(cd "$(dirname "$0")" && pwd)/../../wt-shared/scripts/wt-message-cli.mjs"
+# WP-341: absolute at start — a later `cd` (spawn does one) would break a relative $0.
+SELFDIR="$(cd "$(dirname "$0")" && pwd)"
+WTMSG="$SELFDIR/../../wt-shared/scripts/wt-message-cli.mjs"
 # WP-122: the path the target runs to reply — this install's own handoff.sh (symlinks or the plugin cache).
-SELF="$(cd "$(dirname "$0")" && pwd -P)/handoff.sh"
+SELF="$(cd "$SELFDIR" && pwd -P)/handoff.sh"
 goal=0 # WP-272: no /goal by default (--goal opts in)
 task=
 mcp=
@@ -87,7 +89,7 @@ unit_effort=
 dry=0
 buddy_arg=
 request_id=
-RECEIPTS="$(dirname "$0")/../../wt-shared/scripts/receipts.mjs"
+RECEIPTS="$SELFDIR/../../wt-shared/scripts/receipts.mjs"
 ack_id=; ack_state=acknowledged
 # WP-257: write the envelope to the dashboard's message record (best effort: never blocks or fails a send).
 # A server-run handoff proves itself with its token, an agent with its pane id (like /api/deliveries).
@@ -275,7 +277,7 @@ if [ -n "$cancel" ]; then
 
   herdr pane report-metadata "$pane" --source wt-dashboard --clear-token task --clear-token ticket >/dev/null 2>&1 || true
 
-  T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+  T="$SELFDIR/../../wt-ticket/scripts/wt-ticket"
   board=
   if [ -n "$ticket" ]; then
     if [ -x "$T" ]; then
@@ -325,10 +327,12 @@ candidates() {
   [ -n "$main_checkout" ] || return 0
   tab=$(printf '\t')
   ws=$(worker_ws)
+  # WP-341: the sender is never its own target.
+  me=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
   panes=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')
   # WP-225: an agent already holding an open card (its assignee, or its task/ticket token names one) is never
   # a candidate. Best-effort: no board (server down, Linear key) → [] and nobody is excluded, as before.
-  held=$(cd "$main_checkout" && "$(dirname "$0")/../../wt-ticket/scripts/wt-ticket" list --json 2>/dev/null \
+  held=$(cd "$main_checkout" && "$SELFDIR/../../wt-ticket/scripts/wt-ticket" list --json 2>/dev/null \
     | jq -c '[.tickets[]? | select(.column != "done" and .column != "cancelled") | {id, a: (.assignee.name // "")}]' 2>/dev/null) || held=
   [ -n "$held" ] || held='[]'
   herdr agent list \
@@ -343,6 +347,7 @@ candidates() {
         # `herdr agent start <name>` has an empty name, and most do.
         [ -n "$id" ] && [ -n "$acwd" ] || continue
         [ -d "$acwd" ] || continue
+        [ -z "$me" ] || [ "$id" != "$me" ] || continue
         tk=$(printf '%s' "$panes" | jq -r --arg p "$id" '(.[$p].task // .[$p].ticket // "") | split(" ")[0]')
         nm=$(name_of "$id")
         printf '%s' "$held" | jq -e --arg tk "$tk" --arg nm "$nm" \
@@ -364,16 +369,16 @@ candidates() {
 jev=
 # Only in lean mode: a full-set worker already has every server, so there is nothing to pick.
 if [ -z "$mcp" ] && [ "$mode" != pane ] && [ "${WT_HANDOFF_JEV:-on}" != off ] && [ "${role:-worker}" = worker ] \
-  && [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh" --cwd "${main_checkout:-$cwd}")" = lean ]; then
-  jev=$(printf '%s' "$prompt" | node "$(dirname "$0")/jev-mcp.mjs" 2>/dev/null || true)
+  && [ "$("$SELFDIR/../../wt-shared/scripts/mcp-mode.sh" --cwd "${main_checkout:-$cwd}")" = lean ]; then
+  jev=$(printf '%s' "$prompt" | node "$SELFDIR/jev-mcp.mjs" 2>/dev/null || true)
   mcp=$(printf '%s' "$jev" | jq -r '(.picks // []) | join(",")' 2>/dev/null || true)
 fi
 # WP-204: a persona's base role comes from its project-role file when --role is not given.
 if [ -n "$persona" ] && [ -z "$role" ]; then
-  role=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
+  role=$(node "$SELFDIR/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
   case "$role" in worker|planner|reviewer) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner or reviewer base" >&2; exit 2 ;; esac
 elif [ -n "$persona" ]; then
-  pbase=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
+  pbase=$(node "$SELFDIR/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
   [ -z "$pbase" ] || [ "$pbase" = "$role" ] || { echo "--persona $persona is a $pbase, not a $role" >&2; exit 2; }
 fi
 # Worker or planner? Decided before the footer (Jev judges the request, not the routing) and before any reuse,
@@ -382,7 +387,7 @@ routed=
 if [ -z "$role" ] && [ "$mode" = auto ]; then
   case "$prompt" in
     "Use wt-work"*|"/goal Use wt-work"*) role=worker ;;
-    *) r=$(printf "%s" "$prompt" | node "$(dirname "$0")/jev-route.mjs" 2>/dev/null || true)
+    *) r=$(printf "%s" "$prompt" | node "$SELFDIR/jev-route.mjs" 2>/dev/null || true)
        role=$(printf '%s' "$r" | jq -r '.role // "worker"' 2>/dev/null || echo worker)
        p=$(printf '%s' "$r" | jq -r '.p // empty' 2>/dev/null || true)
        [ -n "$p" ] && routed="route: $role (p=$p)" ;;
@@ -406,7 +411,7 @@ has_picks() {
 # WP-248: a session that has just spawned is still loading its start-up context and drops typed input, so wait until
 # it is registered and idle before typing (a missed registration is nudged once with a rename), and after typing
 # check the text left the input box (Enter again if not). Env knobs: WT_READY_TIMEOUT s, WT_SUBMIT_SETTLE_MS.
-PANE_SUBMIT="$(dirname "$0")/../../wt-shared/scripts/pane-submit.mjs"
+PANE_SUBMIT="$SELFDIR/../../wt-shared/scripts/pane-submit.mjs"
 fresh=0; fresh_label=
 wait_ready() { # <pane>
   node "$PANE_SUBMIT" ready "$1" --timeout "${WT_READY_TIMEOUT:-60}" 2>/dev/null && return 0
@@ -514,7 +519,7 @@ Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: $SELF --repl
 # The task label starts with the ticket when there is one, and is cut to herdr's 80 characters here.
 # A ticket is <TEAM>-N for a Linear team in WT_LINEAR_TEAMS (~/.config/wt-dashboard/env) or <KEY>-N for a local
 # board key (wt-ticket keys; empty when the server is down).
-T="$(cd "$(dirname "$0")" && pwd)/../../wt-ticket/scripts/wt-ticket"
+T="$SELFDIR/../../wt-ticket/scripts/wt-ticket"
 teams=$(sed -n 's/^[[:space:]]*WT_LINEAR_TEAMS=//p' "$HOME/.config/wt-dashboard/env" 2>/dev/null | tail -1 | tr -d '"' | tr ',' '\n' \
   | sed 's/=.*//; s/[[:space:]]//g' | grep -E '^[A-Za-z][A-Za-z0-9]*$' | tr '\n' '|' || true)
 keys=$( [ -x "$T" ] && "$T" keys 2>/dev/null | tr '\n' '|' || true)
@@ -551,7 +556,7 @@ route_tier=; route_effort=; route_line=
 if [ "$mode" != pane ]; then
   esc=$( [ -n "$local_ticket" ] && [ -x "$T" ] && "$T" show "$local_ticket" --json 2>/dev/null \
     | jq -r '[.history[]? | .text // "" | capture("^routing: escalate (?<t>haiku|sonnet|opus)").t] | last // empty' 2>/dev/null || true)
-  r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" --session \
+  r=$(printf '%s' "$task_text" | node "$SELFDIR/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" --session \
     ${unit_effort:+--effort "$unit_effort"} ${esc:+--model "$esc"} $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
   rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
   [ "$rmode" = live ] || esc= # an escalation applies only while routing is live
@@ -570,7 +575,7 @@ else
   pmodel=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.model // empty')
   case "$pmodel" in
     haiku|sonnet|opus)
-      r=$(printf '%s' "$task_text" | node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
+      r=$(printf '%s' "$task_text" | node "$SELFDIR/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
         --model "$pmodel" --reuse $([ "$dry" -eq 1 ] && echo --no-log) --cwd "${main_checkout:-$cwd}" 2>/dev/null || true)
       rmode=$(printf '%s' "$r" | jq -r '.mode // "off"' 2>/dev/null || echo off)
       [ "$rmode" = off ] || route_line=$(printf '%s' "$r" | jq -r '"routing: \(.tier // "none") (\(.mode), \(.source)\(if .ref then ", ref " + .ref else "" end))"' 2>/dev/null || true)
@@ -725,7 +730,7 @@ fi
 # retries it on its next pass (dispatch.mjs's existing 3-strikes rule applies here too — a pool that stays full
 # for ~3 backoff cycles holds the card for a manual retry, same as any other repeated dispatch failure).
 if [ "$role" = worker ] && [ -z "$team" ]; then # a team is capped by its roster below, not by the plain pool cap
-  cap=${WT_WORKERS_MAX:-$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get WT_WORKERS_MAX --cwd "${main_checkout:-$cwd}" 2>/dev/null)}
+  cap=${WT_WORKERS_MAX:-$(node "$SELFDIR/../../wt-shared/scripts/project-setting.mjs" get WT_WORKERS_MAX --cwd "${main_checkout:-$cwd}" 2>/dev/null)}
   case "$cap" in ''|*[!0-9]*) cap= ;; esac
   if [ -n "$cap" ]; then
     # WP-205: the cap counts the agents this handoff could otherwise have reused — the same persona token (none for
@@ -749,7 +754,7 @@ fi
 # WP-238: a team never grows past its roster — the spawn below would add a member beyond the team file's count for this persona.
 if [ -n "$team" ]; then
   want=${persona:-$role}
-  seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "${main_checkout:-$cwd}" 2>/dev/null) || seats=0
+  seats=$(node "$SELFDIR/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "${main_checkout:-$cwd}" 2>/dev/null) || seats=0
   [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
   have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
   if [ "${have:-0}" -ge "$seats" ]; then
@@ -763,7 +768,7 @@ fi
 [ "$dry" -eq 1 ] && dry "would spawn a ${persona:+$persona }$role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
-created=$(cd "$spawn_cwd" && "$(cd "$(dirname "$0")" && pwd)/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"} ${team:+--team "$team"})
+created=$(cd "$spawn_cwd" && "$SELFDIR/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"} ${team:+--team "$team"})
 label=${created%% *}
 pane=${created##* }
 
