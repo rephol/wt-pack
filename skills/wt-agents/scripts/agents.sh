@@ -67,7 +67,9 @@ hl_call() { # method path [json]
   hl_code=$(printf '%s' "$hl_out" | tail -n1); hl_body=$(printf '%s' "$hl_out" | sed '$d')
   case "$hl_code" in 2??) printf '%s' "$hl_body" ;; *)
     err=$(printf '%s' "$hl_body" | jq -r '.error // empty' 2>/dev/null || true)
-    [ "$hl_code" = 403 ] && err="refused (403): ${err:-dashboard only} — only the pane that spawned the run (or an orchestrator) may stop it, else the dashboard"
+    if [ "$hl_code" = 403 ]; then # WP-330: the server names its rule (default mode only, project-rooted, spawner/orchestrator/user); the old generic line keeps its hint
+      case "$err" in ''|'dashboard only') err="refused (403): ${err:-dashboard only} — only the pane that spawned the run (or an orchestrator) may stop it, else the dashboard" ;; *) err="refused (403): $err" ;; esac
+    fi
     echo "wt-dashboard: ${err:-HTTP $hl_code}" >&2; exit 1 ;; esac
 }
 case " $* " in *" --headless "*)
