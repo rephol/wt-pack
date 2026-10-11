@@ -473,7 +473,7 @@ Chat rooms shared by you and agents.
   outside the task's worktree (scratch in `/tmp` is fine), and sending files or secrets off the machine (`curl --data @file`,
   `scp`/`rsync` to a host, secrets in a URL) need your OK. A wt-mods `tool.call` guard asks the `wt-gate` CLI, which allows the
   command when the prompt this turn came from was typed by you, or was a *verified* handoff/dispatch/routine from the
-  orchestrator or the server (the hook leaves a per-prompt record in `~/.cache/wt-memory/turn-<pane>.json`; a missing or stale
+  orchestrator or the server, or a *verified reply* to an orchestrator from the card's current assignee on a ticket that orchestrator handed off (the dashboard checks all three against its records) (the hook leaves a per-prompt record in `~/.cache/wt-memory/turn-<pane>.json`; a missing or stale
   one counts as unverified). Otherwise the agent is told no, and an Inbox ask "<agent> wants to git push: …" appears with
   *Allow once* / *Deny*; *Allow once* lets the agent's next identical command through for 10 minutes, once. Settings →
   *Ask before push, merge, delete and send-out actions* (`WT_GATE`, default `ask`; `off` restores the old behaviour). It is a
