@@ -21,6 +21,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 ## Build and test
 - wt-dashboard (`skills/wt-dashboard`): `npm test` (server + web unit tests + web typecheck, `npm run typecheck:web`).
 - Web (`skills/wt-dashboard/web`): `npx tsc --noEmit -p tsconfig.app.json` (`-p .` checks nothing: the root tsconfig is `files: []` + references); web-only change: `npm run build` (no restart).
+- Everything outside the dashboard (every other `*.test.mjs`): `npm test` at the repo root (WP-343; slow, runs serially).
 - wt-memory: `node --test skills/wt-memory/scripts/*.test.mjs`; wt-agents: `node --test skills/wt-agents/scripts/mcp.test.mjs`.
 - Pack health: `./setup doctor`.
 
