@@ -76,4 +76,5 @@ Peers `spike321-s/-r/-b` and the duplicate `spike321-r` killed by recorded pid; 
 ## Follow-ups
 - WP-324: adopt `claude agents --json` as a discovery cross-check (the one GO piece).
 - WP-325: decide whether to match `<wt-message>` inside the peer wrapper (only if agent→agent `--reply` moves).
+  **Decision (WP-325): no change.** `--reply` stays on `handoff.sh` (dashboard queue + `wt-deliver`), so no `<wt-message>` ever arrives inside a peer wrapper; widening `inject.mjs`'s `^` anchor would only let any peer session claim wt-pack traffic status. Revisit together with a move of `--reply` to `SendMessage`; then match `^(?:Another Claude session sent a message:\n<cross-session-message[^>]*>\n)?(?:\/\S+ )*<wt-message …` in `reminderFor` and `suggest`.
 (Two stray cards from filing, WP-323 and XX-1/XX-2, are cancelled.)
