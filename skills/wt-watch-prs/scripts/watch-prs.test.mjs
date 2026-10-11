@@ -66,7 +66,7 @@ const sd = join(wh, 'acme-demo'), stateFile = join(sd, 'state.json')
 const run = (args, env = {}) => {
   const r = spawnSync(script, args, { cwd: repo, encoding: 'utf8', env: {
     PATH: `${bin}:${process.env.PATH}`, HOME: home, WT_DASHBOARD_DATA: join(tmp, 'data'),
-    GH_REVIEWER_TOKEN_FILE: tokFile, WATCH_PRS_SLEEP: '0', ...env } })
+    GH_REVIEWER_TOKEN_FILE: tokFile, WATCH_PRS_SLEEP: '0', HERDR_DASH_URL: 'http://127.0.0.1:1', ...env } })
   for (const s of [r.stdout, r.stderr]) assert.ok(!s.includes(SECRET), `token leaked: ${s}`)
   return r
 }
@@ -234,7 +234,7 @@ test('WP-187: serve delivers a new-commits event via handoff --kind system --pan
   const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff })
   assert.equal(r.status, 0, r.stderr)
   const calls = readFileSync(join(fx, 'handoff-calls'), 'utf8').trim().split('\n')
-  assert.equal(calls.length, 1)
+  assert.equal(calls.filter((l) => l.startsWith('CALL')).length, 1)
   assert.match(calls[0], /--pane wR:p9 --kind system --no-goal --from wt-watch-prs/)
   assert.match(readFileSync(join(fx, 'handoff'), 'utf8'), /BODY PR #30 — new commits/)
   assert.ok(existsSync(join(wh, 'poller.beat')), 'heartbeat touched')
@@ -546,4 +546,24 @@ test('WP-331/337 (d): the dispatch loop hands to the reviewer with a kind a pane
   // by /api/deliveries and arrive as an unrecorded (UNVERIFIED) paste. The poller (serve) has neither pane nor server token, so its
   // `--kind system` lines are unauthenticated by design (documented in docs/features.md).
   assert.doesNotMatch(readFileSync(new URL('./watch-prs.sh', import.meta.url), 'utf8'), /--role reviewer --kind dispatch/)
+})
+
+test('WP-337: serve posts each event to the dashboard route (no token, no file); handoff.sh only when the post fails', () => {
+  const cbin = join(tmp, 'curlbin337'); mkdirSync(cbin, { recursive: true })
+  const posted = join(tmp, 'posted337')
+  writeFileSync(join(cbin, 'curl'), `#!/bin/sh\n[ -f ${tmp}/curl-fail ] && exit 22\necho "$*" >> ${posted}\ncat >/dev/null\nexit 0\n`); chmodSync(join(cbin, 'curl'), 0o755)
+  const go = () => { reset(); rmSync(join(fx, 'handoff-calls'), { force: true }); rmSync(posted, { force: true }); fixture('pane.json', { result: { pane: { pane_id: 'wR:p9' } } })
+    run(['register', '--session', 'sess-p'], { HERDR_PANE_ID: 'wR:p9' }); fixture('list.1.json', [pr(31, sha('4'))])
+    const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff, PATH: `${cbin}:${bin}:${process.env.PATH}`, HERDR_DASH_URL: 'http://127.0.0.1:7' }); assert.equal(r.status, 0, r.stderr) }
+  go()
+  const p = readFileSync(posted, 'utf8')
+  assert.match(p, /x-wt-poller: 1/); assert.match(p, /\/api\/watch-prs\/event/); assert.match(p, /"pane":"wR:p9"/)
+  const body = JSON.parse(p.slice(p.indexOf('{'), p.lastIndexOf('}') + 1))
+  assert.deepEqual(Object.keys(body).sort(), ['event', 'login', 'pane', 'pr', 'repo', 'sha']) // structured fields only: no text, no PR title
+  assert.deepEqual([body.event, body.pr, body.sha], ['new-commits', '31', sha('4')])
+  assert.doesNotMatch(p, /"text"/)
+  assert.equal(existsSync(join(fx, 'handoff-calls')), false) // the dashboard took it: no handoff.sh
+  writeFileSync(join(tmp, 'curl-fail'), '')
+  go(); rmSync(join(tmp, 'curl-fail'))
+  assert.match(readFileSync(join(fx, 'handoff-calls'), 'utf8'), /--pane wR:p9 --kind system --no-goal --from wt-watch-prs/) // fallback
 })

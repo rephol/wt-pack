@@ -397,6 +397,25 @@ serve)
     jq --arg repo "$repo" --arg reason "$reason" --arg at "$at" --arg nudge "$nudge" '(. + [{repo:$repo, reason:$reason, at:$at} + (if $nudge != "" then {nudge:true} else {} end)]) | .[-50:]' "$UW" > "$UW.tmp" 2>/dev/null && mv "$UW.tmp" "$UW"
     rmdir "$L2" 2>/dev/null
   }
+  # WP-337: the poller has no pane and no server parent, and no credential may sit on disk where panes read it. So it posts STRUCTURED
+  # fields to the dashboard (event, repo, pr, sha, login, id …), which validates them and writes the kind=system sentence itself from a
+  # fixed template — free text never travels, so nothing a PR author wrote can reach an agent as a verified message. A line that
+  # does not parse, or a dashboard that is down or older (no route), takes the old handoff.sh path (the envelope arrives UNVERIFIED).
+  event_fields() { # one event line on stdin; $1 = repo ($wrepo) → JSON fields, or nothing when the line is not one of ours
+    jq -Rc --arg repo "$1" '
+      (capture("^PR #(?<pr>[0-9]+) — new commits (?<sha>[0-9a-f]{7,40}) — @(?<login>[A-Za-z0-9-]+)") | {event:"new-commits", repo:$repo} + .)
+      // (capture("^PR #(?<pr>[0-9]+) — REPLY on a held PR — @(?<login>[A-Za-z0-9-]+) \\(comment (?<id>[0-9]+)\\)") | {event:"comment", repo:$repo} + .)
+      // (capture("^PR #(?<pr>[0-9]+) — REVIEW(?: \\((?<state>[A-Z_]+)\\))? on a held PR — @(?<login>[A-Za-z0-9-]+) \\(review (?<id>[0-9]+)\\)") | {event:"review", repo:$repo} + (. | with_entries(select(.value != null))))
+      // (capture("^wt-watch-prs: PR #(?<pr>[0-9]+) head (?<sha>[0-9a-f]{7,40}) was delivered 30\\+ min ago") | {event:"unclaimed", repo:$repo} + .)
+      // (capture("^wt-watch-prs: poller resumed after (?<minutes>[0-9]+)m;") | {event:"resumed"} + .)' 2>/dev/null
+  }
+  hs() { # --pane <p> --kind system --no-goal --from wt-watch-prs <cwd>   (the event line on stdin)
+    local pane=$2 text f; text=$(cat)
+    f=$(printf '%s' "$text" | event_fields "${wrepo:-}")
+    [ -z "$f" ] || curl -fsS --max-time 30 -X POST -H 'x-wt-poller: 1' -H 'content-type: application/json' --data "$(printf '%s' "$f" | jq -c --arg p "$pane" '. + {pane:$p}')" \
+      "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/watch-prs/event" >/dev/null 2>&1 && return 0
+    printf '%s' "$text" | "$HANDOFF" "$@"
+  }
   stale_nudge() { # per watcher, from the serve loop's vars; must run even in a round with no events
     # decision 5 (3/3), WP-202: a delivered "new commits" event still neither claimed nor recorded 30 min later.
     # The pane passed the liveness check above, so it is NOT dropped (a session waiting on CI looks exactly like
@@ -413,7 +432,7 @@ serve)
       nm="$wsd/poll/nudged.$fn.$fs"; [ -f "$nm" ] && continue
       : > "$nm"
       printf 'wt-watch-prs: PR #%s head %s was delivered 30+ min ago and is still unclaimed — claim it now (watch-prs.sh claim %s <session>); if it is waiting on CI, claim first and wait on the gate.' "$fn" "${fs:0:12}" "$fn" \
-        | "$HANDOFF" --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1 || true
+        | hs --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1 || true
       mark_unwatched "$wrepo" "PR #$fn's new-commits event from 30+ min ago is still unclaimed (pane $wpane alive; re-delivered once, still registered)" nudge
     done < "$wsd/poll/shas.fired"
   }
@@ -465,7 +484,7 @@ $out}"
       [ -n "$out" ] || { stale_nudge; continue; }
       printf '%s\n' "$out" | while IFS= read -r line; do
         [ -z "$line" ] && continue
-        if printf '%s' "$line" | "$HANDOFF" --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1; then
+        if printf '%s' "$line" | hs --pane "$wpane" --kind system --no-goal --from wt-watch-prs "$wcwd" >/dev/null 2>&1; then
           rm -f "$FC/$wpane"
         else
           n=$(( $(cat "$FC/$wpane" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FC/$wpane"
