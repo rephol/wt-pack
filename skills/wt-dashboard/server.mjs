@@ -2835,12 +2835,26 @@ async function deliveriesApi(req, res, url, parts) {
   if (req.method === 'POST' && parts.length === 2) {
     const pane = await canonicalPane(String(b.pane ?? ''))
     if (!pane) return send(res, 404, { error: `unknown pane ${b.pane}` })
-    if (!deliveries.live(pane) || String(b.text ?? '').startsWith('/')) return send(res, 200, { queued: false })
-    // Agent-supplied text must be pack traffic (the mod submits it verbatim as a prompt), never bare text.
-    if (!/^\s*<(wt|room)-message[ >]/.test(String(b.text ?? ''))) return send(res, 200, { queued: false })
-    const row = deliveries.enqueue(pane, b.text)
-    broadcastEvent('deliveries', { pane })
-    return send(res, 200, { queued: true, id: row.id })
+    let text = String(b.text ?? ''), env = null
+    if (author.kind === 'agent') {
+      // WP-328: a pane sends fields, the server builds the envelope and stamps `from=` with the verified sender.
+      if (b.text !== undefined) return send(res, 400, { error: 'send fields (kind, body), not an envelope (WP-328)' })
+      if (b.kind !== 'handoff' && b.kind !== 'reply') return send(res, 400, { error: 'a pane sends kind handoff or reply (WP-328)' })
+      // Only /goal may lead a pane's text as a slash command; any other leading `/` gets a zero-width space so wrap() leaves it alone.
+      let inner = String(b.body ?? '') // wrap() defuses inner tags
+      if (/^\/\S/.test(inner)) inner = `\u200b${inner}`
+      if (b.goal === true) inner = `/goal ${inner}`
+      text = wrap({ kind: b.kind, from: author.name, ticket: b.ticket, pr: b.pr, sha: b.sha }, inner)
+      env = envelopeOf(text)
+    }
+    const live = deliveries.live(pane) && !text.startsWith('/') && /^\s*<(wt|room)-message[ >]/.test(text)
+    const row = live ? deliveries.enqueue(pane, text) : null
+    if (row) broadcastEvent('deliveries', { pane })
+    if (env) {
+      msgSafe(() => messages.record({ ...env, target: pane, requestId: b.requestId ?? null, body: text, state: row ? 'queued' : 'delivered' }))
+      broadcastEvent('messages', { target: pane })
+    }
+    return send(res, 200, { queued: Boolean(row), ...(row ? { id: row.id } : {}), ...(env ? { text } : {}) })
   }
   send(res, 404, { error: 'not found' })
 }
@@ -2876,9 +2890,11 @@ async function messagesApi(req, res, url, parts) {
     const row = messages.get(parts[2])
     if (!row) return send(res, 404, { error: `no message ${parts[2]}` })
     const mine = (await canonicalPane(row.target).catch(() => null)) === (await canonicalPane(author.pane).catch(() => author.pane))
-    return send(res, 200, messages.ack(parts[2], mine ? row.target : author.pane, b.state ?? 'acknowledged'))
+    if (!mine) return send(res, 403, { error: 'only the addressed pane acks (WP-328)' }) // finding 7
+    return send(res, 200, messages.ack(parts[2], row.target, b.state ?? 'acknowledged'))
   }
   if (parts.length !== 2) return send(res, 404, { error: 'not found' })
+  if (!srv) return send(res, 403, { error: 'pane callers record through /api/deliveries (WP-328)' })
   const target = await canonicalPane(String(b.target ?? '')).catch(() => null)
   if (!target) return send(res, 404, { error: `unknown pane ${b.target}` })
   const env = envelopeOf(String(b.body ?? ''))
