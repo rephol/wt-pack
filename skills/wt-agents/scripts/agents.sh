@@ -61,7 +61,7 @@ set -eu
 
 # WP-293: --headless goes to wt-dashboard's /api/headless, never to herdr. Prints the body; exit 1 on a non-2xx or no answer.
 hl_call() { # method path [json]
-  hl_out=$(curl -sS --max-time 10 -X "$1" ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} -H 'content-type: application/json' \
+  hl_out=$(curl -sS --max-time 10 -X "$1" ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} -w '\n%{http_code}' "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless$2" 2>/dev/null) \
     || { echo "wt-dashboard not reachable at ${HERDR_DASH_URL:-http://127.0.0.1:7777}" >&2; exit 1; }
   hl_code=$(printf '%s' "$hl_out" | tail -n1); hl_body=$(printf '%s' "$hl_out" | sed '$d')
@@ -123,7 +123,7 @@ if [ "${1:-}" = context ]; then
     me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty'); me=${me:-$HERDR_PANE_ID}
   fi
   [ -n "$me" ] || { echo "context: not a herdr pane or headless run (no HERDR_PANE_ID / WT_HEADLESS_ID)" >&2; exit 1; }
-  rows=$(curl -sS --max-time 10 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null) \
+  rows=$(curl -sS --max-time 10 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null) \
     || { echo "wt-dashboard not reachable at ${HERDR_DASH_URL:-http://127.0.0.1:7777}" >&2; exit 1; }
   printf '%s' "$rows" | jq -e --arg me "$me" '[.[]? | select(.info.pane.id == $me or .info.run.id == $me or .id == $me)][0] // empty
     | select(.info.contextUsed != null) | {used: .info.contextUsed, window: .info.contextWindow, pct: .info.contextPct, model: (.info.model.id // .info.model.name)}' \
@@ -396,10 +396,17 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   set -- "$@" --env "PATH=$shim:$PATH" --env "WT_KILL_SHIM_DIR=$shim" --env "CLAUDE_ENV_FILE=$envf"
   # WP-122: mcp/<role>.json run ${WT_MEMORY_MCP:-~/.claude/skills/…}; a plugin-only install has no such link.
   set -- "$@" --env "WT_MEMORY_MCP=$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs"
+  # WP-327: a per-pane key (env + a 0600 file the dashboard reads) so x-herdr-pane alone is not identity. Never a pane token.
+  pane_key=$(openssl rand -hex 32)
+  set -- "$@" --env "WT_PANE_KEY=$pane_key"
   close_bare_tabs "$label" "$ws"
   created=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@")
   pane=$(printf '%s' "$created" | jq -r .result.root_pane.pane_id)
   new_tab=$(printf '%s' "$created" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)
+  keydir="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys"
+  keyid=$(herdr pane get "$pane" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null || true)
+  (umask 077; mkdir -p "$keydir" && chmod 700 "$keydir" && printf '%s\n' "$pane_key" > "$keydir/.tmp.$$" && mv "$keydir/.tmp.$$" "$keydir/${keyid:-$pane}") \
+    || echo "warning: could not write the pane key for $pane (it will run in grace mode)" >&2
   # Close that default tab once the agent's tab exists — only while it is still an idle shell (no agent in it).
   [ -z "$fresh_tab" ] || [ "$(herdr tab get "$fresh_tab" 2>/dev/null | jq -r '.result.tab | "\(.pane_count) \(.agent_status)"')" != "1 unknown" ] \
     || herdr tab close "$fresh_tab" >/dev/null 2>&1 || true
