@@ -36,7 +36,7 @@
 #   agents.sh list --headless              # the dashboard's headless runs: "<name> <id> <state> <cwd> <role>"
 #   agents.sh send --headless <name|id> '<text>'   # WP-317: the run's next user message (text or stdin); live run wins over an ended one of the same name
 #   agents.sh spawn --headless <role> [cwd] --reuse ...   # an idle run of the same role + cwd gets --prompt instead of a new run: prints "<name> <id> idle reused"
-#   agents.sh rm --headless <id>           # stop a headless run (an agent pane is refused, 403, by design: stopping needs the dashboard user session)
+#   agents.sh rm|stop --headless <id>      # stop a headless run (WP-317: an agent pane may stop the runs it spawned, an orchestrator any; else 403)
 #   agents.sh context                      # WP-312: the caller's own context window as JSON {used,window,pct,model}: a pane agent
 #                                            ($HERDR_PANE_ID) or a headless run ($WT_HEADLESS_ID) looked up in the dashboard's
 #                                            /api/agents `info` (the WP-201 rule); exit 1 when the dashboard or the row is missing
@@ -67,7 +67,7 @@ hl_call() { # method path [json]
   hl_code=$(printf '%s' "$hl_out" | tail -n1); hl_body=$(printf '%s' "$hl_out" | sed '$d')
   case "$hl_code" in 2??) printf '%s' "$hl_body" ;; *)
     err=$(printf '%s' "$hl_body" | jq -r '.error // empty' 2>/dev/null || true)
-    [ "$hl_code" = 403 ] && err="refused (403): ${err:-dashboard only} — this needs the dashboard session, not an agent pane"
+    [ "$hl_code" = 403 ] && err="refused (403): ${err:-dashboard only} — only the pane that spawned the run (or an orchestrator) may stop it, else the dashboard"
     echo "wt-dashboard: ${err:-HTTP $hl_code}" >&2; exit 1 ;; esac
 }
 case " $* " in *" --headless "*)
@@ -106,7 +106,7 @@ case " $* " in *" --headless "*)
     [ -n "$hl_id" ] || { echo "send --headless: no live headless run (or ambiguous): $to" >&2; exit 1; }
     hl_call POST "/$hl_id/message" "$(jq -n --arg text "$text" '{$text}')" >/dev/null || exit 1
     echo "sent $hl_id" ;;
-  rm)
+  rm|stop)
     [ $# -eq 2 ] || { echo "rm --headless <id>" >&2; exit 2; }
     id=$1; [ "$id" = --headless ] && id=$2; case "$id" in hl-*) ;; *) echo "rm --headless: not a headless id: $id" >&2; exit 2 ;; esac
     case "$id" in *[!A-Za-z0-9_-]*) echo "rm --headless: bad id" >&2; exit 2 ;; esac

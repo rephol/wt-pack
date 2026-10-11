@@ -343,12 +343,11 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Model and `/` picker (WP-300):** the stream-json `init` event's `model`, `slash_commands` and `skills` are stored on the run. The
   Conversation view shows the resolved model (plus the run's effort, when set) like a herdr agent, and the composer's `/` picker
   lists exactly those commands and skills.
-- **Permissions (WP-300):** a headless run no longer forces `--permission-mode default`: Claude Code's own settings decide. Spawn
-  agents reach a run by name or id: `agents.sh send --headless <name|id> '<text>'`, `handoff.sh --pane <name|id>` and `--reply <name|id>`
+- **Messaging a headless run (WP-317):** Agents reach a run by name or id: `agents.sh send --headless <name|id> '<text>'`, `handoff.sh --pane <name|id>` and `--reply <name|id>`
   (envelope, reply footer and `--request-id` as for a pane); `agents.sh list --headless` shows state (idle = reusable) and role, `spawn --headless --reuse`
   hands the prompt to an idle run of the same role + cwd instead of spawning a duplicate; an explicit `--name` already used by a live agent is refused (409),
-  an ended run's name is reusable. `rm --headless` from an agent pane is refused (403) by design: stopping needs the dashboard user session (WP-317).
-  Spawn takes an optional `permissionMode` (`default|acceptEdits|plan|bypassPermissions`; `agents.sh spawn --headless … --permission-mode m`),
+  an ended run's name is reusable. Cleanup: the server records the spawning pane (`headless_runs.spawner`, taken from the verified pane, never the body); `agents.sh rm|stop --headless` (`POST …/stop|interrupt`) works for that pane on its own runs and for an orchestrator-role pane on any run (runs without a spawner: orchestrator only); every other pane gets 403, and answer/resume stay the dashboard user's.
+- **Permissions (WP-300):** a headless run no longer forces `--permission-mode default`: Claude Code's own settings decide. Spawn takes an optional `permissionMode` (`default|acceptEdits|plan|bypassPermissions`; `agents.sh spawn --headless … --permission-mode m`),
   and the Conversation view's Model section shows the mode the run reports. The New agent dialog has a **Run as: Headless** option with Permissions, Model, Effort, Name and Working directory fields (blank = the server's defaults) beside the first prompt. Read-only roles (reviewer, pr-watcher, auditor) always run
   `default` and reject any other mode, so their tool policy still applies and only get the read tools (`--tools`, no MCP servers), so no allow-rule in the user's settings can open a write tool.
 - A run started without a first prompt is `idle` as soon as its process is up (claude only emits `init` on its first turn), not

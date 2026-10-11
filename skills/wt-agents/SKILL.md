@@ -38,7 +38,7 @@ scripts/agents.sh spawn --headless <role> [cwd] [--prompt t] [--model m] [--effo
 scripts/agents.sh list --headless   # the dashboard's headless runs: "<name> <id> <state> <cwd> <role>" (idle = free to reuse, working = busy)
 scripts/agents.sh send --headless <name|id> '<text>'   # WP-317: the run's next user message; a live run beats an ended one of the same name
 scripts/agents.sh spawn --headless <role> [cwd] --reuse --prompt t   # an idle run of the same role + cwd takes the prompt: "<name> <id> idle reused"
-scripts/agents.sh rm --headless <id>   # stop one: refused (403) from an agent pane by design — stopping needs the dashboard user session
+scripts/agents.sh rm|stop --headless <id>   # stop one: allowed for the pane that spawned it (headless_runs.spawner) and for an orchestrator pane; any other pane gets 403 (answers/resume stay the user's)
 ```
 
 ## DND and pairing

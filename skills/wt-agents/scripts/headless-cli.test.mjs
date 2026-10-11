@@ -54,7 +54,7 @@ test('a server error is printed and exits 1; 403 says it needs the dashboard; un
   assert.equal(r.code, 1); assert.match(r.stderr, /role: 1-40 chars/)
   reply = () => [403, { error: 'dashboard only' }]
   r = await run(['rm', '--headless', 'hl-abc'])
-  assert.equal(r.code, 1); assert.match(r.stderr, /403.*dashboard only.*dashboard session/)
+  assert.equal(r.code, 1); assert.match(r.stderr, /403.*dashboard only.*spawned the run.*orchestrator/)
   r = await run(['list', '--headless'], { HERDR_DASH_URL: 'http://127.0.0.1:1' })
   assert.equal(r.code, 1); assert.match(r.stderr, /wt-dashboard not reachable/)
   r = await run(['spawn', '--headless'])
@@ -70,6 +70,8 @@ test('list --headless prints rows; rm --headless POSTs stop', async () => {
   r = await run(['rm', '--headless', 'hl-1'])
   assert.equal(r.stdout, 'a hl-1 ended\n')
   assert.deepEqual([reqs[0].method, reqs[0].path], ['POST', '/api/headless/hl-1/stop'])
+  r = await run(['stop', '--headless', 'hl-1'], { HERDR_PANE_ID: 'w1:p2' }) // stop is rm
+  assert.equal(r.stdout, 'a hl-1 ended\n'); assert.deepEqual([reqs.at(-1).path, reqs.at(-1).pane], ['/api/headless/hl-1/stop', 'w1:p2'])
   r = await run(['rm', '--headless', 'w1:p2'])
   assert.equal(r.code, 2)
 })
