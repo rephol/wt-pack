@@ -88,3 +88,16 @@ test('(f)(g) a pane cannot create message rows, nor ack one addressed to another
   assert.equal((await post(`/api/messages/${id}/ack`, as('w9:p1', K1), { state: 'answered' })).status, 403)
   assert.equal((await post(`/api/messages/${id}/ack`, as('w9:p2', K2), { state: 'acknowledged' })).status, 200)
 })
+
+// WP-340: a retry carrying the same requestId re-sends the recorded envelope (same id), never a fresh unrecorded one.
+test('(h) a retry with the same requestId delivers the recorded id; a different requestId records a new message', async () => {
+  const idOf = (t) => /^<wt-message id=(\S+)/.exec(t)[1]
+  const first = await (await sendP1({ kind: 'handoff', body: 'retry me', requestId: 'rid-340' })).json()
+  const again = await (await sendP1({ kind: 'handoff', body: 'retry me', requestId: 'rid-340' })).json()
+  assert.equal(idOf(again.text), idOf(first.text))
+  assert.equal(again.text, first.text)
+  const other = await (await sendP1({ kind: 'handoff', body: 'retry me', requestId: 'rid-340b' })).json()
+  assert.notEqual(idOf(other.text), idOf(first.text))
+  const ids = new Set((await rows()).map?.((m) => m.id) ?? (await rows()).messages?.map((m) => m.id))
+  assert.ok(ids.has(idOf(first.text)) && ids.has(idOf(other.text)))
+})

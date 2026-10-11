@@ -146,15 +146,28 @@ deliver_token=${WT_DELIVER_TOKEN:-}; unset WT_DELIVER_TOKEN
 
 # WP-328: a pane sends FIELDS and the dashboard builds the envelope (from= is the caller it verified), records the message and
 # queues it when the target's mod is live. Prints the JSON answer, which carries `text` (the envelope, to paste if not queued).
-# Empty output = no pane sender / server unreachable or too old: the caller falls back to wrapping locally.
+# Empty output (exit 0) = not a pane sender (a server-token run, no curl/jq): the caller wraps locally as before.
+# WP-340: a pane sender NEVER wraps locally (an envelope the dashboard did not record arrives UNVERIFIED and is refused): a
+# failed or slow post is retried, then fails loudly (exit 3) so the caller retries with the same --request-id, which the
+# dashboard answers with the id it already recorded.
 pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
   [ -n "${HERDR_PANE_ID:-}" ] && [ -z "$deliver_token" ] && command -v curl >/dev/null && command -v jq >/dev/null || return 0
-  jq -n --arg p "$1" --arg k "$2" --arg b "$3" --arg t "$4" --arg g "$5" --arg r "$request_id" --arg pr "$pr" --arg sh "$sha" \
+  payload=$(jq -n --arg p "$1" --arg k "$2" --arg b "$3" --arg t "$4" --arg g "$5" --arg r "$request_id" --arg pr "$pr" --arg sh "$sha" \
     '{pane:$p,kind:$k,body:$b} + (if $t == "" then {} else {ticket:$t} end) + (if $g == "1" then {goal:true} else {} end)
-     + (if $r == "" then {} else {requestId:$r} end) + (if $pr == "" then {} else {pr:$pr} end) + (if $sh == "" then {} else {sha:$sh} end)' \
-    | curl -sS --max-time 3 -X POST -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
-      -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null \
-    | jq -c 'select(.text != null)' 2>/dev/null || true
+     + (if $r == "" then {} else {requestId:$r} end) + (if $pr == "" then {} else {pr:$pr} end) + (if $sh == "" then {} else {sha:$sh} end)')
+  n=0; why=
+  while [ "$n" -lt "${WT_POST_TRIES:-3}" ]; do
+    [ "$n" -eq 0 ] || sleep "${WT_POST_RETRY_S:-1}"
+    n=$((n + 1))
+    ans=$(printf '%s' "$payload" | curl -sS --max-time "${WT_POST_TIMEOUT_S:-10}" -X POST -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
+      -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>&1) || true
+    if printf '%s' "$ans" | jq -e '.text != null' >/dev/null 2>&1; then printf '%s' "$ans" | jq -c .; return 0; fi
+    why=$(printf '%s' "$ans" | jq -r '.error // empty' 2>/dev/null); why=${why:-${ans:-no answer from the dashboard}}
+    printf '%s' "$ans" | jq -e '.error' >/dev/null 2>&1 && break # the dashboard answered and refused: retrying cannot help
+  done
+  echo "handoff: the dashboard did not record this message (server path skipped after $n attempt(s): $(printf '%s' "$why" | head -c 200)); nothing was sent." >&2
+  echo "handoff: retry with the same --request-id${request_id:+ ($request_id)} so the retry reuses the recorded id${request_id:+.}${request_id:-; pass one on the first try to make retries safe.}" >&2
+  return 3
 }
 
 
@@ -217,7 +230,7 @@ if [ -n "$reply" ]; then
   # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
   # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
   # WP-328: the dashboard builds the envelope and records it; an old or unreachable one falls back to the local wrap above.
-  srv=$(pane_post "$reply" reply "$text" "" 0)
+  srv=$(pane_post "$reply" reply "$text" "" 0) || exit 1
   if [ -n "$srv" ]; then
     msg=$(printf '%s' "$srv" | jq -r .text)
     [ "$(printf '%s' "$srv" | jq -r '.queued // false')" = true ] && { echo "replied $reply (queued)"; exit 0; }
@@ -425,7 +438,8 @@ hand_to() {
   # WP-328: a pane sender lets the dashboard build and record the envelope (same id everywhere below); `sq` = it queued it.
   server_recorded=0; sq=false
   case "$kind" in handoff|reply)
-    if srv=$(pane_post "$1" "$kind" "$raw_prompt" "$ticket" "$goal") && [ -n "$srv" ]; then
+    srv=$(pane_post "$1" "$kind" "$raw_prompt" "$ticket" "$goal") || exit 1
+    if [ -n "$srv" ]; then
       server_recorded=1; sq=$(printf '%s' "$srv" | jq -r '.queued // false'); qid=$(printf '%s' "$srv" | jq -r '.id // empty')
       send=$(printf '%s' "$srv" | jq -r .text); send=${send#/goal }
       [ "$goal" -eq 0 ] || send_full="/goal $(printf '%s' "$send" | tr '\n' ' ' | tr -s ' ')"

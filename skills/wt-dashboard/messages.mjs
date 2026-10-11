@@ -58,6 +58,8 @@ export class Messages {
   #at() { return new Date(this.now()).toISOString() }
   get(id) { return this.db.prepare('SELECT * FROM wt_messages WHERE id = ?').get(id) ?? null }
 
+  byRequest(requestId) { return requestId ? this.db.prepare('SELECT * FROM wt_messages WHERE request_id = ?').get(requestId) ?? null : null }
+
   // → { row, duplicate }. A known id or request_id returns the existing row untouched.
   record({ id, sender, target, kind, ticket = null, requestId = null, body, state = 'queued', senderPane = null }) {
     if (!id || !target || !kind || typeof body !== 'string') throw err(400, 'id, target, kind, body required')

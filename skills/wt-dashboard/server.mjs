@@ -2892,7 +2892,9 @@ async function deliveriesApi(req, res, url, parts) {
       // WP-332: a reply carries the ticket its sender works on (the server's own view: the sender's task/ticket token), so the receiver's
       // gate can tell a report on a handed-off card from any other agent's reply. The token is only a claim: verify re-checks it against the board.
       const ticket = b.ticket ?? (b.kind === 'reply' ? tagTicket((await agents().catch(() => [])).find((x) => x.local && x.id === author.pane) ?? {}) : null)
-      text = wrap({ kind: b.kind, from: author.name, ticket, pr: b.pr, sha: b.sha }, inner)
+      // WP-340: a retry with the same requestId re-sends the recorded envelope (same id), never a new unrecorded one.
+      const prior = msgSafe(() => messages.byRequest(b.requestId))
+      text = prior && prior.target === pane && prior.kind === b.kind ? prior.body : wrap({ kind: b.kind, from: author.name, ticket, pr: b.pr, sha: b.sha }, inner)
       env = envelopeOf(text)
     }
     const live = deliveries.live(pane) && !text.startsWith('/') && /^\s*<(wt|room)-message[ >]/.test(text)

@@ -451,6 +451,10 @@ Chat rooms shared by you and agents.
   body (only `/goal` is kept), records the message and queues it. A pane that posts a ready-made envelope, another kind,
   or a message row of its own (`POST /api/messages`) gets 400/403, and a pane can only ack a message addressed to it.
   `handoff.sh --from` is honoured only for the server's own senders (Dispatch, routines, the watchdog); an older
+  **Never a local wrap (WP-340):** a pane sender whose post fails or times out (`WT_POST_TIMEOUT_S`, default 10 s) is retried
+  (`WT_POST_TRIES`, default 3), then `handoff.sh` exits 1 with the reason and sends nothing — an envelope the dashboard did not
+  record would arrive unverified. Retry with the same `--request-id`: the dashboard re-sends the message it already recorded
+  (same id), so the retry verifies, including after "prompt not submitted". Server-token senders (Dispatch, routines) are unchanged.
   dashboard falls back to the local wrap, so a handoff is never blocked.
   **Verified before obeyed (WP-329):** the agent's UserPromptSubmit hook asks the dashboard (`GET /api/messages/:id/verify`,
   pane identity + key) whether it recorded that id, kind and sender for this very pane. A match adds a *Verified wt-pack
