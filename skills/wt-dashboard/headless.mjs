@@ -96,7 +96,8 @@ export class Headless {
   #view(r) {
     const open = this.db.prepare("SELECT id, tool, input, created FROM headless_asks WHERE run_id = ? AND state = 'open' ORDER BY created").all(r.id)
       .map((a) => ({ ...a, input: JSON.parse(a.input) }))
-    return { ...r, asks: open, live: LIVE.includes(r.state) }
+    const { run_key, ...rest } = r // WP-330: the run's secret never leaves the server
+    return { ...rest, asks: open, live: LIVE.includes(r.state) }
   }
   events(id, after = 0, limit = 500) {
     const rows = this.db.prepare('SELECT seq, at, type, json FROM headless_events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?').all(id, Number(after) || 0, Math.min(limit, 2000))
@@ -106,7 +107,7 @@ export class Headless {
 
   // ---- lifecycle ----
   // Create a run and start it now, or queue it when the cap is reached.
-  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona, plugins, spawner } = {}) {
+  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona, plugins, spawner } = {}, beforeStart = () => {}) {
     if (plugins != null && !(Array.isArray(plugins) && plugins.length <= 40 && plugins.every((x) => typeof x === 'string' && PLUGIN_ID.test(x)))) throw err(400, 'plugins: an array of up to 40 plugin ids')
     if (persona != null && !/^[a-z][a-z0-9-]{0,23}$/.test(persona)) throw err(400, 'persona: a role file name (lowercase, digits, -)')
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
@@ -118,9 +119,10 @@ export class Headless {
     if (permissionMode && permissionMode !== 'default' && policyOf(role) === 'readonly') throw err(400, `role ${role} is read-only: permissionMode must be default`)
     const id = 'hl-' + randomBytes(5).toString('hex')
     const t = this.now()
-    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, req_plugins, driver, spawner, state, created, last_event, resumes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, plugins ? JSON.stringify(plugins) : null, this.driver, typeof spawner === 'string' ? spawner : null, t, t)
+    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, req_plugins, driver, spawner, run_key, state, created, last_event, resumes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, plugins ? JSON.stringify(plugins) : null, this.driver, typeof spawner === 'string' ? spawner : null, randomBytes(32).toString('hex'), t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
+    beforeStart(id) // WP-330: the caller records the first prompt's message row before the process can read it
     this.pump()
     return this.get(id)
   }
@@ -158,7 +160,7 @@ export class Headless {
     // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
     // WT_ROLE / WT_PERSONA (WP-307): a herdr pane's role comes from its pane token, which a headless run has not got; wt-memory's context
     // and the role files read these instead, so it is briefed exactly like a herdr agent of that role.
-    const env = { TERM: 'dumb', WT_ROLE: r.role, WT_HEADLESS_ID: id, ...(r.persona ? { WT_PERSONA: r.persona } : {}),
+    const env = { TERM: 'dumb', WT_ROLE: r.role, WT_HEADLESS_ID: id, WT_RUN_KEY: r.run_key ?? '', ...(r.persona ? { WT_PERSONA: r.persona } : {}),
       ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
     let child, bin = this.cmd
     if (r.driver === 'sdk') { // WP-315: the same args and stream-json, through the Agent SDK worker; a resume keeps the run's recorded driver

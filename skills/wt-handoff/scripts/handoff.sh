@@ -207,8 +207,10 @@ if [ -n "$reply" ]; then
   msg=$(printf '%s' "$text" | node "$WTMSG" --kind reply --from "${from_arg:-${nm:-${me:-wt-handoff}}}") || { echo "wt-message wrap failed" >&2; exit 1; }
   [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
   if hl=$(hl_resolve "$reply"); then # WP-317: the sender is a headless run
-    hl_post "${hl%% *}" "$msg" || exit 1
-    record_message "${hl%% *}" "$msg" delivered
+    # WP-330: a pane sends plain text and the dashboard wraps and records it (from= is the verified sender); only the server's own
+    # token keeps posting a ready-made envelope.
+    if [ -n "$deliver_token" ]; then hl_post "${hl%% *}" "$msg" || exit 1; record_message "${hl%% *}" "$msg" delivered
+    else hl_post "${hl%% *}" "$text" || exit 1; fi
     echo "replied ${hl%% *} (headless ${hl#* })"
     exit 0
   fi
@@ -655,8 +657,8 @@ dry() {  # <what would happen>
 
 if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id>
   [ "$dry" -eq 1 ] && dry "would hand to headless ${hl#* } (${hl%% *})"
-  hl_post "${hl%% *}" "$send" || exit 1
-  record_message "${hl%% *}" "$send" delivered
+  if [ -n "$deliver_token" ]; then hl_post "${hl%% *}" "$send" || exit 1; record_message "${hl%% *}" "$send" delivered # WP-330: as for --reply
+  else hl_post "${hl%% *}" "$raw_prompt" || exit 1; fi
   out="reused headless ${hl#* } (${hl%% *})${task:+ — $task}
 reach: $SELF --reply ${hl%% *} \"...\""
   printf '%s\n' "$out"

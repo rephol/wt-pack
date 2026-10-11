@@ -506,7 +506,7 @@ case " $* " in *" POST "*) case " $* " in *hl-new3/message*) printf '%s' '{"erro
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /reused headless umk-planner-01 \(hl-new2\)/); assert.match(r.stdout, /--reply hl-new2/)
   const calls = readFileSync(clog, 'utf8')
-  assert.match(calls, /-H x-herdr-pane: wW:p5.*http:\/\/x\/api\/headless\/hl-new2\/message :: \{\s*"text": "<wt-message[^]*do it/)
+  assert.match(calls, /-H x-herdr-pane: wW:p5.*http:\/\/x\/api\/headless\/hl-new2\/message :: \{\s*"text": "do it/) // WP-330: plain text; the dashboard wraps it
   assert.match(calls, /To reply: \S+handoff.sh --reply wW:p5/) // the usual reply footer rides along
   assert.doesNotMatch(calls, /hl-old1\/message/)
   assert.equal(go(['--pane', 'umk-planner-01', '--no-goal', '--request-id', 'r317', repo]).stdout, r.stdout) // idempotent: a repeat sends nothing
@@ -516,7 +516,7 @@ case " $* " in *" POST "*) case " $* " in *hl-new3/message*) printf '%s' '{"erro
   assert.equal((readFileSync(clog, 'utf8').match(/hl-new\d\/message/g) ?? []).length, n)
   r = go(['--reply', 'hl-new2', 'thanks'])
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /replied hl-new2 \(headless umk-planner-01\)/)
-  assert.match(readFileSync(clog, 'utf8'), /hl-new2\/message :: \{\s*"text": "<wt-message[^]*kind=reply/)
+  assert.match(readFileSync(clog, 'utf8'), /hl-new2\/message :: \{\s*"text": "thanks"/) // WP-330: plain text, not a wt-message
   r = go(['--pane', 'other', '--no-goal', repo]); assert.equal(r.status, 1); assert.match(r.stderr, /the agent is queued/)
   assert.match(go(['--pane', 'umk-planner-01', '--no-goal', '--dry-run', repo]).stdout, /would hand to headless umk-planner-01 \(hl-new2\)/)
 })
