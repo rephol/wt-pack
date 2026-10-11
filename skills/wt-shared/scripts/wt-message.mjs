@@ -5,19 +5,24 @@ import { randomBytes } from 'node:crypto'
 
 export const KINDS = ['handoff', 'dispatch', 'routine', 'reply', 'system']
 export const nonce = () => randomBytes(6).toString('hex')
-// Attribute values: no quotes, brackets, ampersands or newlines.
-export const attr = (t) => String(t ?? '').replace(/["<>&\n]/g, '')
-// Bodies: neither tag can be opened or closed from inside one (a zero-width space breaks the name).
-export const unTag = (t) => String(t ?? '').replace(/<(\/?)(room-message|wt-message)/gi, '<$1$2​')
+// WP-333: attribute values are an allowlist (word chars, space . @ # : -), at most 40 chars: no quotes, brackets, CR/LS/PS, anything.
+export const attr = (t) => String(t ?? '').replace(/[^\w .@#:-]/g, '').slice(0, 40)
+// Bodies: neither tag can be opened or closed from inside one. WP-333: lookalikes too (whitespace after `<`, fullwidth `＜`, zero-width
+// chars inside the name); the `<` becomes U+2039, so no variant parses as a tag.
+const ZW = '[\\s\u200b-\u200d\u2060\ufeff]*'
+const TAG = new RegExp(`[<\uff1c]${ZW}\\/?${ZW}(?:room|wt)${ZW}-${ZW}message`, 'gi')
+export const unTag = (t) => String(t ?? '').replace(TAG, (m) => `\u2039${m.slice(1)}`)
 
-export function wrap({ kind, from = '', ticket = null, pr = null, sha = null, id = nonce() }, body) {
+export function wrap({ kind, from = '', ticket = null, pr = null, sha = null, id = nonce(), hoist = false }, body) {
   if (!KINDS.includes(kind)) throw new Error(`wt-message: bad kind ${JSON.stringify(kind)}`)
   const t = (typeof ticket === 'string' && /^[A-Z]+-\d+$/.test(ticket) ? ` ticket=${ticket}` : '')
     // WP-121: a PR dispatch names its PR and head; values that fail the check are dropped.
     + (/^\d{1,9}$/.test(String(pr ?? '')) ? ` pr=${pr}` : '') + (/^[0-9a-f]{7,40}$/.test(String(sha ?? '')) ? ` sha=${sha}` : '')
-  // A slash command stays first (`/wt-audit …` must still run as one): `/cmd <wt-message …>rest</wt-message>`.
-  const slash = String(body ?? '').match(/^(\/[^\s<]+)(?:\s+|$)/)
-  const rest = slash ? String(body).slice(slash[0].length) : body
+  // WP-333: with `hoist`, only `/goal` and `/wt-*` stay first (`/wt-audit …` must still run as one): `/cmd <wt-message …>rest</wt-message>`.
+  // Any other leading `/x` stays in the body behind a zero-width space, so the receiver's harness does not run it.
+  const text = String(body ?? '')
+  const slash = hoist ? text.match(/^(\/(?:goal|wt-[a-z0-9-]+))(?:\s+|$)/) : null
+  const rest = slash ? text.slice(slash[0].length) : /^\/\S/.test(text) ? `\u200b${text}` : text
   return `${slash ? `${slash[1]} ` : ''}<wt-message id=${id} kind=${kind} from="${attr(from)}"${t}>${unTag(rest)}</wt-message>`
 }
 

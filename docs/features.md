@@ -450,6 +450,13 @@ Chat rooms shared by you and agents.
   `from=` with the sender it verified (pane id + key, WP-327), defuses `<wt-message>` tags and leading `/commands` in the
   body (only `/goal` is kept), records the message and queues it. A pane that posts a ready-made envelope, another kind,
   or a message row of its own (`POST /api/messages`) gets 400/403, and a pane can only ack a message addressed to it.
+  **Envelope hygiene (WP-333):** `wrap` hoists a leading slash command ahead of the tag only when the caller opts in
+  (`hoist`: the handoff CLI, routines, a spawn's first prompt, a pane's `/goal`) and only for `/goal` and `/wt-*`; any other
+  leading `/x` stays in the body behind a zero-width space. `from=` keeps only word characters and ` .@#:-`, at most 40.
+  Tag lookalikes in a body (`< wt-message`, fullwidth `＜`, zero-width characters in the name) are defused to `‹`. A room
+  delivery marks a reply quote `[quote from <name>, <kind>]: "…"` (200 chars) and each context line `[<kind>] <name>: …`, with the
+  kind set by the server, so an agent named `user` reads as `[agent] user`. `GET /api/messages/:id/verify` raises at most 3
+  "Unverified message" Inbox cards per pane per 10 minutes; beyond that one "flood" card per window counts the rest.
   `handoff.sh --from` is honoured only for the server's own senders (Dispatch, routines, the watchdog); an older
   **Never a local wrap (WP-340):** a pane sender whose post fails or times out (`WT_POST_TIMEOUT_S`, default 10 s) is retried
   (`WT_POST_TRIES`, default 3), then `handoff.sh` exits 1 with the reason and sends nothing — an envelope the dashboard did not
