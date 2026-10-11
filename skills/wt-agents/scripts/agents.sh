@@ -407,6 +407,14 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   keyid=$(herdr pane get "$pane" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null || true)
   (umask 077; mkdir -p "$keydir" && chmod 700 "$keydir" && printf '%s\n' "$pane_key" > "$keydir/.tmp.$$" && mv "$keydir/.tmp.$$" "$keydir/${keyid:-$pane}") \
     || echo "warning: could not write the pane key for $pane (it will run in grace mode)" >&2
+  # A herdr pane id can be reused by a pane started outside spawn: drop keys of panes that are no longer live agents.
+  live=$(herdr agent list 2>/dev/null | jq -r '.result.agents[]?.pane_id // empty' 2>/dev/null || true)
+  if [ -n "$live" ]; then
+    for kf in "$keydir"/*; do
+      [ -f "$kf" ] || continue; kn=$(basename "$kf")
+      [ "$kn" = "${keyid:-$pane}" ] || printf '%s\n' "$live" | grep -qxF "$kn" || rm -f "$kf"
+    done
+  fi
   # Close that default tab once the agent's tab exists — only while it is still an idle shell (no agent in it).
   [ -z "$fresh_tab" ] || [ "$(herdr tab get "$fresh_tab" 2>/dev/null | jq -r '.result.tab | "\(.pane_count) \(.agent_status)"')" != "1 unknown" ] \
     || herdr tab close "$fresh_tab" >/dev/null 2>&1 || true

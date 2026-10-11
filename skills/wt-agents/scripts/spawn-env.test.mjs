@@ -282,3 +282,14 @@ test('WP-327: spawn mints a per-pane key — 0600 file in pane-keys/, the same k
   assert.notEqual(k2, key) // a respawn mints a fresh key and overwrites the file
   assert.equal(readFileSync(f, 'utf8').trim(), k2)
 })
+
+test('WP-327: spawn sweeps key files of panes that are no longer live agents (herdr reuses pane ids)', () => {
+  const orig = readFileSync(join(bin, 'herdr'), 'utf8')
+  writeFileSync(join(bin, 'herdr'), orig.replace(`echo '{"result":{"agents":[]}}'`, `echo '{"result":{"agents":[{"name":"x","pane_id":"w1:p5"}]}}'`))
+  try {
+    for (const n of ['w1:p77', 'w1:p5']) writeFileSync(join(tmp, 'pane-keys', n), 'old\n')
+    spawn()
+    assert.ok(!existsSync(join(tmp, 'pane-keys', 'w1:p77')))
+    assert.ok(existsSync(join(tmp, 'pane-keys', 'w1:p5')) && existsSync(join(tmp, 'pane-keys', 'w1:p9')))
+  } finally { writeFileSync(join(bin, 'herdr'), orig) }
+})
