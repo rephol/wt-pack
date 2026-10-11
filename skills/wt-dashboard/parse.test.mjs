@@ -1686,3 +1686,15 @@ test('parsePane: a prompt only asks while it is the last thing on screen (WP-270
   assert.equal(parsePane(`❯ go\n${menu}\n⏺ Ran it.\n✻ Cooked for 3s\n\n${footer}`).asks, false)
   assert.equal(parsePane(`❯ go\n${menu}\n`).asks, true)
 })
+
+test('WP-336: stale idle-pane footers (Reset: 0m, lower %) never win over live ones', () => {
+  const now = Date.now() + 3600_000 // past the WP-179 test's reading (shared module state)
+  const foot = (l) => parsePane(`❯ hi\n${'─'.repeat(20)}\n❯ \n${'─'.repeat(20)}\n${l}`).planUsage
+  const live = foot('Session: 9.0% · Reset: 2h41m · Weekly: 21.0% · Weekly Reset: 3d 2hr 5m')
+  const idle = foot('Session: 3.0% · Reset: 0m · Weekly: 9.0% · Weekly Reset: 3d 2hr 5m')
+  const other = foot('Session: 6.0% · Reset: 2h41m · Weekly: 20.0% · Weekly Reset: 3d 2hr 5m')
+  assert.equal(live.session.pct, 9); assert.equal(live.weekly.pct, 21)
+  notePlanUsage(live, now, 'L|w1M:p2'); notePlanUsage(other, now, 'L|w1:p1'); notePlanUsage(idle, now + 1000, 'L|w7:p2') // idle parsed last
+  const b = planUsageSnapshot(now + 2000)
+  assert.deepEqual([b.session.pct, b.weekly.pct], [9, 21])
+})
