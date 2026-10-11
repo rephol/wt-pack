@@ -392,8 +392,9 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # WP-122: mcp/<role>.json run ${WT_MEMORY_MCP:-~/.claude/skills/…}; a plugin-only install has no such link.
   set -- "$@" --env "WT_MEMORY_MCP=$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs"
   close_bare_tabs "$label" "$ws"
-  pane=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@" \
-    | jq -r .result.root_pane.pane_id)
+  created=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@")
+  pane=$(printf '%s' "$created" | jq -r .result.root_pane.pane_id)
+  new_tab=$(printf '%s' "$created" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)
   # Close that default tab once the agent's tab exists — only while it is still an idle shell (no agent in it).
   [ -z "$fresh_tab" ] || [ "$(herdr tab get "$fresh_tab" 2>/dev/null | jq -r '.result.tab | "\(.pane_count) \(.agent_status)"')" != "1 unknown" ] \
     || herdr tab close "$fresh_tab" >/dev/null 2>&1 || true
@@ -428,10 +429,19 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   [ -z "$effort" ] || set -- "$@" --effort "$effort"
   # WP-143: record what this pane actually runs (post-floor), so reuse and idle-retirement can match on it.
   herdr pane report-metadata "$pane" --source wt-dashboard ${model:+--token "model=$model"} ${effort:+--token "effort=$effort"} >/dev/null 2>&1 || true
-  while ! herdr agent start "$label" --kind claude --pane "$pane" -- "$@" >/dev/null 2>&1; do
+  # WP-319: a slow shell/claude start under load is transient — back off up to ~8 tries (WT_AGENTS_START_SLEEP
+  # scales the wait), keep herdr's last error for the message, and on final failure close the orphan pane.
+  err=
+  while ! err=$(herdr agent start "$label" --kind claude --pane "$pane" -- "$@" 2>&1 >/dev/null); do
     n=$((n + 1))
-    [ "$n" -ge 3 ] && { echo "claude did not come up in $label (pane $pane)" >&2; exit 1; }
-    sleep 3
+    if [ "$n" -ge 8 ]; then
+      herdr pane report-metadata "$pane" --source wt-dashboard --clear-token role --clear-token project --clear-token model --clear-token effort >/dev/null 2>&1 || true
+      [ -n "$new_tab" ] || new_tab=$(herdr pane get "$pane" 2>/dev/null | jq -r '.result.pane.tab_id // empty' 2>/dev/null || true)
+      [ -z "$new_tab" ] || herdr tab close "$new_tab" >/dev/null 2>&1 || true
+      echo "claude did not come up in $label (pane $pane) after $n tries: ${err:-no error output from herdr}" >&2
+      exit 1
+    fi
+    sleep $((n * ${WT_AGENTS_START_SLEEP:-2}))
   done
   herdr agent rename "$pane" "$label" >/dev/null 2>&1 || true
   echo "$label $pane"
