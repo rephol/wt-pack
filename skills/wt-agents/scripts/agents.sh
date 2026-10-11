@@ -190,9 +190,14 @@ list)
     # (WP-147's dashboard format, matched by `dnd on --for`).
     if [ -n "$json" ]; then
       # Tokens live on panes, not on the agent list.
-      herdr agent list | jq -c --arg ws "$ws" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
+      # WP-324: cross-check with claude's own session list (best effort, [] when claude is absent): herdr's
+      # agent_session id -> the live claude pid. pid null = herdr lists an agent claude does not know (ghost).
+      cs=$(claude agents --json 2>/dev/null | jq -c '[.[] | {key: .sessionId, value: .pid}] | from_entries' 2>/dev/null) || cs=
+      [ -n "$cs" ] || cs='{}'
+      herdr agent list | jq -c --arg ws "$ws" --argjson cs "$cs" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
         '.result.agents[] | select(.workspace_id == $ws) | ($panes[.pane_id] // {}) as $t |
          {name, pane: .pane_id, status: .agent_status, cwd, tokens: $t,
+          session: (.agent_session.value // null), pid: ($cs[.agent_session.value // ""] // null),
           dnd: (if ($t.dnd // "") == "" then {on:false,until:null} elif $t.dnd == "1" then {on:true,until:null} else {on:true,until:$t.dnd} end),
           pair: ($t.pair // null)}'
     else
