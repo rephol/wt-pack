@@ -51,3 +51,11 @@ test('allowed: the user, or a verified handoff/dispatch/routine from the orchest
   assert.ok(!allowed(undefined) && !allowed({}))
   assert.ok(allowed({ trust: 'unverified' }, 'off') && allowed(undefined, 'off'), 'WT_GATE=off allows everything')
 })
+
+test('allowed: a verified reply passes only when the server flagged it (current assignee reporting to the orchestrator that handed the ticket off)', () => {
+  assert.ok(allowed({ trust: 'verified', kind: 'reply', senderRole: 'worker', replyAllowed: true }))
+  assert.ok(!allowed({ trust: 'verified', kind: 'reply', senderRole: 'worker', replyAllowed: false }))
+  assert.ok(!allowed({ trust: 'verified', kind: 'reply', senderRole: 'orchestrator' })) // no flag, no pass — even from an orchestrator
+  assert.ok(!allowed({ trust: 'verified', kind: 'handoff', senderRole: 'worker', replyAllowed: true }), 'the flag means nothing on other kinds')
+  assert.ok(!allowed({ trust: 'unverified', kind: 'reply', replyAllowed: true }))
+})

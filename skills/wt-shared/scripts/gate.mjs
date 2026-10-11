@@ -58,5 +58,7 @@ export const ALLOWED_KINDS = ['handoff', 'dispatch', 'routine']
 export const allowed = (turn, mode = 'ask') => {
   if (mode === 'off') return true
   if (turn?.trust === 'user') return true
-  return turn?.trust === 'verified' && ALLOWED_KINDS.includes(turn.kind) && (turn.senderRole === 'orchestrator' || turn.senderRole === 'server')
+  if (turn?.trust !== 'verified') return false
+  if (turn.kind === 'reply') return turn.replyAllowed === true // the server checked: current assignee's report on a ticket this orchestrator handed off
+  return ALLOWED_KINDS.includes(turn.kind) && (turn.senderRole === 'orchestrator' || turn.senderRole === 'server')
 }
