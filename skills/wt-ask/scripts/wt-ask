@@ -15,7 +15,7 @@ API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 usage() { sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 call() {
   local out code
-  out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+  out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API — wt-ask needs it running (see README › Install)" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ask: $code $out" >&2; exit 1; fi
