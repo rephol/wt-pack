@@ -570,3 +570,84 @@ test('contextWindowOf: the run\'s own model first, else the largest, else null (
   assert.equal(contextWindowOf({ a: { contextWindow: 200000 }, b: { contextWindow: 1000000 } }, 'zzz'), 1000000)
   assert.equal(contextWindowOf({ a: {} }, 'a'), null); assert.equal(contextWindowOf(undefined, 'a'), null)
 })
+
+// ---- WP-315: the SDK driver (WT_HEADLESS_DRIVER=sdk) ----
+const SDK = join(import.meta.dirname, 'test-fixtures', 'fake-sdk-worker.mjs')
+const sdkSetup = (t, o = {}) => setup(t, { driver: 'sdk', worker: SDK, env: { HOME: process.env.HOME, PATH: process.env.PATH, WT_HEADLESS_SDK_MODULE: 'fake' }, ...o })
+
+test('sdk driver: spawns node with the worker and the same args + WT_CLAUDE_BIN; records driver; context_usage and commands land on the row', async (t) => {
+  const { h, start, events } = await sdkSetup(t)
+  const r = start('hello')
+  assert.equal(r.driver, 'sdk')
+  await until(() => h.get(r.id).turns === 1 && h.get(r.id).context_used, 'turn done')
+  const row = h.get(r.id)
+  assert.equal(row.context_used, 12345)
+  assert.equal(row.context_window, 400000) // the worker's maxTokens wins over the result's modelUsage (it comes after it)
+  assert.deepEqual(JSON.parse(row.init_commands), { slash_commands: ['compact', 'wt-ask'], skills: ['wt-ask'], commands: [{ name: 'compact', description: 'x' }] })
+  const w = events(r.id).find((e) => e.type === 'system/worker').event
+  assert.equal(w.claudeBin, FAKE)
+  const init = events(r.id).find((e) => e.type === 'system/init').event
+  assert.ok(init.argv.includes('--permission-prompt-tool') && init.argv.includes('stream-json'))
+})
+
+test('sdk driver: a resume keeps the recorded driver, even when the supervisor default is cli', async (t) => {
+  const { h, start, events } = await sdkSetup(t)
+  const r = start('one')
+  await until(() => h.get(r.id).turns === 1, 'turn 1')
+  h.stop(r.id)
+  await until(() => h.get(r.id).state === 'ended', 'ended')
+  h.driver = 'cli'
+  h.resume(r.id, 'two')
+  await until(() => h.get(r.id).turns === 2, 'turn 2')
+  assert.equal(h.get(r.id).driver, 'sdk')
+  assert.equal(events(r.id).filter((e) => e.type === 'system/worker').length, 2)
+})
+
+test('cli runs record driver cli and never touch the worker', async (t) => {
+  const { h, start, events } = await setup(t)
+  const r = start('hello')
+  await until(() => h.get(r.id).turns === 1, 'turn')
+  assert.equal(h.get(r.id).driver, 'cli')
+  assert.equal(events(r.id).some((e) => e.type === 'system/worker'), false)
+})
+
+test('sdk driver without the SDK installed fails the run with the setup hint; a missing claude binary fails it too', async (t) => {
+  const { h, start, state } = await setup(t, { driver: 'sdk', worker: join(tmpdir(), 'no-sdk-here', 'worker.mjs') }) // no WT_HEADLESS_SDK_MODULE, no node_modules beside the worker
+  const r = start('hello')
+  assert.equal(state(r.id), 'failed')
+  assert.equal(h.get(r.id).reason, 'SDK driver not installed: run ./setup')
+  const b = await sdkSetup(t, { cmd: 'no-such-claude-bin' })
+  const r2 = b.start('hello')
+  assert.equal(b.state(r2.id), 'failed')
+  assert.equal(b.h.get(r2.id).reason, 'claude binary not found')
+})
+
+test('driver option and WT_HEADLESS_DRIVER: invalid throws, env is read, option wins', async () => {
+  const db = { prepare: () => ({}) }
+  assert.throws(() => new Headless({ db, driver: 'bogus' }), /driver: one of cli, sdk/)
+  assert.throws(() => new Headless({ db, env: { WT_HEADLESS_DRIVER: 'x' } }), /driver/)
+  assert.equal(new Headless({ db, env: { WT_HEADLESS_DRIVER: 'sdk' } }).driver, 'sdk')
+  assert.equal(new Headless({ db, driver: 'cli', env: { WT_HEADLESS_DRIVER: 'sdk' } }).driver, 'cli')
+  assert.equal(new Headless({ db, env: {} }).driver, 'cli')
+})
+
+test('sdk driver end to end: the real worker over a fake SDK — ask round trip, context usage, commands', async (t) => {
+  const fakeSdk = join(import.meta.dirname, 'test-fixtures', 'fake-sdk.mjs')
+  const { h, start, events } = await setup(t, { driver: 'sdk', env: { HOME: process.env.HOME, PATH: process.env.PATH, WT_HEADLESS_SDK_MODULE: fakeSdk } })
+  const r = start('tool')
+  await until(() => h.get(r.id).asks.length === 1, 'ask open')
+  const ask = h.get(r.id).asks[0]
+  assert.equal(ask.tool, 'Bash')
+  h.answer(r.id, ask.id, { allow: true })
+  await until(() => h.get(r.id).turns === 1 && h.get(r.id).context_used, 'turn done')
+  const row = h.get(r.id)
+  assert.equal(row.session, 'fake-session')
+  assert.equal(row.context_used, 1234)
+  assert.equal(row.context_window, 200000)
+  assert.deepEqual(JSON.parse(row.init_commands).commands, [{ name: 'compact' }])
+  const said = events(r.id).filter((e) => e.type === 'assistant').map((e) => e.event.message.content[0].text)
+  assert.match(said[0], /^decision \{"behavior":"allow"/)
+  const init = events(r.id).find((e) => e.type === 'system/init').event
+  assert.equal(init.options.pathToClaudeCodeExecutable, FAKE)
+  assert.deepEqual(init.options.settingSources, ['user', 'project', 'local'])
+})

@@ -7,8 +7,9 @@
 // watchdog, startup reconcile, kill by the RECORDED pid only (never pkill), bounded event retention.
 import { spawn as nodeSpawn, execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync, accessSync, constants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { resolve, join, dirname, delimiter } from 'node:path'
 import { open } from './store.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
@@ -16,6 +17,8 @@ export const ROLE = /^[\w.-]{1,40}$/
 export const READ_ONLY = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead'])
 // WP-308: the wt MCP server's send_file (any server name): it only names files to the user, so it is allowed for every policy.
 export const SEND_FILE = /^mcp__.+__send_file$/
+const DRIVERS = ['cli', 'sdk']
+const SDK_DIR = fileURLToPath(new URL('./headless-sdk/', import.meta.url))
 const LIVE = ['starting', 'working', 'idle'] // a process exists
 const LINE_MAX = 256 * 1024 // an event bigger than this is stored as a stub
 const KEEP_EVENTS = 2000 // per run; older rows are dropped, seq keeps counting
@@ -56,22 +59,32 @@ export function defaultName(repo, role, taken) {
 }
 export const policyOf = (role) => POLICIES[role] ?? 'ask'
 
+// The absolute path of the claude binary: a path as given, else the first executable named so on PATH.
+function absBin(cmd, path = '') {
+  const ok = (f) => { try { accessSync(f, constants.X_OK); return true } catch { return false } }
+  if (cmd.includes('/')) return ok(resolve(cmd)) ? resolve(cmd) : null
+  return path.split(delimiter).filter(Boolean).map((d) => join(d, cmd)).find(ok) ?? null
+}
+
 export class Headless {
   // opts: cmd (the binary; tests pass a fake), cap, idleMs, stuckMs, graceMs, resumes, stuckAction, db, onChange(run id, what), log, now.
   // Product defaults are settings (WP-293): cap 0 (unlimited), idle release off (idleMs 0), stuckAction 'flag' (no automatic interrupt/kill), resumes 3 (a crash
   // mid-turn is resumed up to 3 times, then fails). An option wins, then env WT_HEADLESS_CAP / _STUCK_ACTION / _RESUMES, then the default.
-  constructor({ db, cmd = 'claude', cap, idleMs = 0, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, roles, plugins,
+  constructor({ db, cmd = 'claude', cap, idleMs = 0, stuckMs = 10 * 60_000, graceMs = 5_000, resumes, stuckAction, driver, worker = join(SDK_DIR, 'worker.mjs'), roles, plugins,
     onChange = () => {}, log = console.error, now = Date.now, env = process.env } = {}) {
     const num = (v, d) => (v === undefined || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0 ? d : Number(v))
     cap = num(cap ?? env.WT_HEADLESS_CAP, 0) // 0 = unlimited
     resumes = num(resumes ?? env.WT_HEADLESS_RESUMES, 3)
     stuckAction = stuckAction ?? env.WT_HEADLESS_STUCK_ACTION ?? 'flag'
     if (!STUCK_ACTIONS.includes(stuckAction)) throw new Error(`stuckAction: one of ${STUCK_ACTIONS.join(', ')}`)
+    // driver (WP-315; worker = the script it spawns, tests swap it): 'cli' (default) spawns `cmd`; 'sdk' spawns headless-sdk/worker.mjs, which speaks the same stream-json through the Agent SDK. Option, then env WT_HEADLESS_DRIVER.
+    driver = driver ?? env.WT_HEADLESS_DRIVER ?? 'cli'
+    if (!DRIVERS.includes(driver)) throw new Error(`driver: one of ${DRIVERS.join(', ')}`)
     // roles: the roles allowed to spawn headless (server: WT_HEADLESS_ROLES, default '*'); undefined or '*' = any.
     // plugins: ids that stay on in a run (server: WT_HEADLESS_PLUGINS, default none = every enabled plugin but wt-pack, which loads through
     // CLAUDE_CODE_PLUGIN_DIRS, is switched off); '*' = no trimming. Each run's own list (spawn `plugins`) replaces it.
     plugins = Array.isArray(plugins) ? plugins : (plugins ?? env.WT_HEADLESS_PLUGINS ?? DEFAULT_PLUGINS).split(',').map((x) => x.trim()).filter(Boolean)
-    Object.assign(this, { plugins, db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
+    Object.assign(this, { plugins, db, cmd, cap, idleMs, stuckMs, graceMs, resumes, stuckAction, driver, worker, roles: roles && !roles.includes('*') ? roles : null, onChange, log, now, env, procs: new Map() })
   }
   static open(file, o = {}) { return new Headless({ ...o, db: open(file, { log: o.log }) }) }
 
@@ -104,8 +117,8 @@ export class Headless {
     if (permissionMode && permissionMode !== 'default' && policyOf(role) === 'readonly') throw err(400, `role ${role} is read-only: permissionMode must be default`)
     const id = 'hl-' + randomBytes(5).toString('hex')
     const t = this.now()
-    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, req_plugins, state, created, last_event, resumes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, plugins ? JSON.stringify(plugins) : null, t, t)
+    this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, req_plugins, driver, state, created, last_event, resumes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, plugins ? JSON.stringify(plugins) : null, this.driver, t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
     this.pump()
     return this.get(id)
@@ -146,8 +159,17 @@ export class Headless {
     // and the role files read these instead, so it is briefed exactly like a herdr agent of that role.
     const env = { TERM: 'dumb', WT_ROLE: r.role, WT_HEADLESS_ID: id, ...(r.persona ? { WT_PERSONA: r.persona } : {}),
       ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
-    let child
-    try { child = nodeSpawn(this.cmd, args, { cwd: r.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] }) } catch (e) { return this.#end(id, 'failed', `spawn: ${e.message}`) }
+    let child, bin = this.cmd
+    if (r.driver === 'sdk') { // WP-315: the same args and stream-json, through the Agent SDK worker; a resume keeps the run's recorded driver
+      const testSdk = this.env.WT_HEADLESS_SDK_MODULE
+      if (!testSdk && !existsSync(join(dirname(this.worker), 'node_modules/@anthropic-ai/claude-agent-sdk'))) return this.#end(id, 'failed', 'SDK driver not installed: run ./setup')
+      const claude = absBin(this.cmd, this.env.PATH)
+      if (!claude) return this.#end(id, 'failed', 'claude binary not found')
+      env.WT_CLAUDE_BIN = claude
+      if (testSdk) env.WT_HEADLESS_SDK_MODULE = testSdk
+      args.unshift(this.worker); bin = process.execPath
+    }
+    try { child = nodeSpawn(bin, args, { cwd: r.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] }) } catch (e) { return this.#end(id, 'failed', `spawn: ${e.message}`) }
     const p = { child, buf: '', skip: false, done: false, exited: false, killing: false, inflight: 0 }
     this.procs.set(id, p)
     this.db.prepare("UPDATE headless_runs SET state = 'starting', pid = ?, started = ?, last_event = ?, reason = NULL WHERE id = ?").run(child.pid ?? null, this.now(), this.now(), id)
@@ -192,6 +214,12 @@ export class Headless {
       set(`state = 'idle', turns = turns + 1, cost_usd = cost_usd + ?`, Number(e.total_cost_usd) || 0)
       const win = contextWindowOf(e.modelUsage, this.run(id)?.init_model) // WP-314: the model's own window, not a guess
       if (win) set('context_window = ?', win)
+    } else if (e.type === 'system' && e.subtype === 'context_usage') { // WP-315: the SDK worker's getContextUsage(), after each result
+      if (e.maxTokens > 0) set('context_window = ?', e.maxTokens)
+      if (Number.isFinite(e.totalTokens)) set('context_used = ?', e.totalTokens)
+    } else if (e.type === 'system' && e.subtype === 'commands') {
+      let c = {}; try { c = JSON.parse(this.run(id)?.init_commands) ?? {} } catch {}
+      set('init_commands = ?', JSON.stringify({ ...c, commands: e.commands ?? [] }))
     } else if (e.type === 'user' || e.type === 'assistant') {
       set(`state = CASE WHEN state IN ('idle','starting') THEN 'working' ELSE state END`)
     } else if (e.type === 'control_request' && e.request?.subtype === 'can_use_tool') {

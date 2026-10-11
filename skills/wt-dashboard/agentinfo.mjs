@@ -45,6 +45,7 @@ export function paneInfo(a, usage = null) {
 export function headlessInfo(r, { key, state, project = null, usage = null } = {}) {
   const init = (() => { try { return JSON.parse(r.init_commands) } catch { return null } })()
   const model = r.init_model || r.model
+  if (r.context_used != null) usage = { in: r.context_used, cr: 0, cw: 0, peak: r.context_used } // WP-315: the SDK driver reports the context itself
   return {
     ...core('headless', {
       key: key ?? r.id, name: r.name, role: r.role, persona: r.persona, cwd: r.cwd, project, state: state ?? 'idle',
