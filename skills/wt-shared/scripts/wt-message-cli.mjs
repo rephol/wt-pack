@@ -11,4 +11,4 @@ for (let i = 0; i < a.length; i += 2) {
 }
 let body = ''
 for await (const c of process.stdin) body += c
-try { process.stdout.write(wrap(o, body)) } catch (e) { console.error(e.message); process.exit(2) }
+try { process.stdout.write(wrap({ ...o, hoist: true }, body)) } catch (e) { console.error(e.message); process.exit(2) }
