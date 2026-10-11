@@ -216,6 +216,15 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     routing, see Model routing), registered by the plugin's one module `hooks/register.ts`. They need a Claude Code
     build with mods. Tests: `skills/wt-mods/scripts/test` (runs `claude plugin test .` and ignores the dashboard web
     tests that runner cannot load).
+  - **Keepwarm (WP-318):** an idle long-lived agent's 1 h prompt cache lapses (a cold re-send re-writes the whole context). The
+    `keepwarm` mod fires a tool-less `$.model.fork` (it shares the session's cached prefix) after `intervalMin` idle minutes and
+    reports it to the dashboard. Measured: a ping reads the full context at ~2.5% of a cold send's cost (below the plan-limit
+    resolution), a gap over 60 min re-writes everything. Budget (Settings › Usage › Keepwarm, `GET/PATCH /api/keepwarm/settings`,
+    **off by default**): roles (orchestrator, tech-lead, planner), ping every 50 min (5–59), only above 50k context tokens, keep warm for
+    3 h after the last real turn (1–12 h, whole hours), at most 15 pings per agent per day. A ping never counts as activity, so it
+    cannot extend the window. It stops (cold) when a ping reads nothing or reads under half the previous ping's; a real turn re-arms.
+    An agent can also be armed or turned off from its menu (`POST /api/keepwarm/<pane>`); AgentInfo shows warm/cold/off, the next ping,
+    pings today and tokens read. In the agent: `/wt keepwarm [status|off]` (`wt-mods/scripts/wt-keepwarm`; `off` stays off until armed again).
   - **Context warning (WP-282):** at the end of a main-loop turn the mod reads `$.session.usage()` and toasts at 80% and 90% context used
     (once per level, re-armed when the context drops, e.g. after `/compact`) to suggest finishing and continuing in a fresh agent. It reports
     no tokens itself: the Overview usage view already re-reads each live session's transcript (every 20 s), so live sessions are covered.

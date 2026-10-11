@@ -30,7 +30,7 @@ const core = (kind, f) => ({
 })
 
 // a: the /api/agents row for a pane (model = agentModel()), usage: transcript tail usage or null.
-export function paneInfo(a, usage = null, pid = null) { // pid: the live claude pid from `claude agents --json` (WP-324), null when unknown
+export function paneInfo(a, usage = null, pid = null, keepwarm = null) { // pid: the live claude pid from `claude agents --json` (WP-324), null when unknown
   return {
     ...core('pane', {
       key: a.key, name: a.name, role: a.tags?.role ?? (a.pool !== 'other' ? a.pool : null), persona: a.tags?.persona, cwd: a.cwd, project: a.project,
@@ -38,6 +38,7 @@ export function paneInfo(a, usage = null, pid = null) { // pid: the live claude 
       sessionId: a.session, usage, contextPct: a.context?.pct, contextWindow: tokensOf(a.context?.total), lastActivity: a.lastActivity,
     }),
     pane: { id: a.id, machine: a.machine, local: a.local, tags: a.tags ?? {}, dnd: Boolean(a.tags?.dnd), pair: a.tags?.pair ?? null, workspace: a.workspace ?? null, pid, routed: a.model?.routed ?? null },
+    keepwarm, // WP-318: { state: warm|cold|off, nextAt, pingsToday, spentTokens, reason } or null when keepwarm does nothing for this pane
   }
 }
 
