@@ -295,7 +295,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   a discriminated `kind` (`pane` | `headless`), a common core (name, role, persona, cwd, project, state, resolved `model`, `effort`,
   `permissionMode`, `plugins`, `sessionId`, `commands`/`skills`, `contextUsed`/`contextWindow`/`contextPct`, `costUsd`, `turns`,
   `startedAt`, `lastActivity`) and a `pane` part (id, machine, tags, dnd, pair, routed) or a `run` part (id, state, resumes, stuck,
-  reason, pid). A value the server does not know is `null`, never invented (a pane has no cost or plugin list). Context comes from
+  reason, pid, `driver` `cli`|`sdk` from `headless_runs.driver`, shown as the Model section's **Driver** row; a pane has none). A value the server does not know is `null`, never invented (a pane has no cost or plugin list). Context comes from
   the session transcript's last turn; the window is the one the agent REPORTS (a headless run's result event `modelUsage[<model>].contextWindow`, stored as `context_window`; a pane's status line `x / 1M`), and only when none was reported the WP-201 guess (200k, 1M for a `[1m]` model or once a turn passed 200k). The existing
   fields stay (additive); the Summary's Model section, the Agents list's model and context columns and the composer read `info`.
 - A headless agent is a `claude -p` stream-json process that the dashboard server runs itself: no herdr pane, no
