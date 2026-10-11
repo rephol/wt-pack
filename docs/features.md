@@ -48,6 +48,15 @@ a file would be overwritten); the repo side is left as uncommitted changes. `wt-
 straight to the user folder (refused while the repo has a `.wt-pack/`). Agents, `wt-roles`, Dispatch and model
 routing all read through the same lookup (`wt-shared/scripts/roles.mjs`).
 
+**Repo role files need trust (WP-334).** A cloned repo can plant `.wt-pack/roles/*.md`, so the repo folder loads only
+for a project with Settings › Projects › **Trust this repo's role files** set to on (default off). Otherwise the base
+roles apply, the folder under `~/.config/wt-pack/projects/<repo>/roles` (yours) still loads, and session start, `wt-roles
+list|check` and a failed `agents.sh spawn <persona>` print one line saying so. The server mirrors the trusted projects to
+`~/.local/share/wt-dashboard/trusted-projects.json` (keyed by checkout path, so a same-named clone elsewhere is not
+trusted). On first start after upgrading, projects that already have role files (and wt-pack itself) are switched on
+once and logged; turn one off in Settings and it stays off. Other `.wt-pack/*` files (model routing, gates) are not
+covered yet.
+
 ## Board
 
 A local kanban per project (`WP-N` style keys), stored in `wt.db`. The board has its own project picker in its
