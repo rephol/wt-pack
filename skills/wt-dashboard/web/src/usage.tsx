@@ -14,7 +14,10 @@ import { api } from './rooms'
 import { Delayed, LoadError } from './skeletons'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 
+// WP-336: which reading the server picked (the freshest of the three).
+const SRC = { headless: 'headless run', pane: 'pane footer', file: 'cache file' } as const
 interface Limits {
+  source: keyof typeof SRC
   session: number | null; sessionResetAt: string | null; weekly: number | null; weeklyResetAt: string | null
   extraUsage: boolean; ageSec: number; stale: boolean
 }
@@ -66,7 +69,7 @@ export function UsageBars() {
   // No Retry button here: this renders inside a clickable Overview card.
   if (!q.data) return q.isError ? <Text type="supporting" size="sm">Claude usage unavailable</Text> : <Loading h={40} />
   const l = q.data.limits
-  if (!l) return <Text type="supporting" size="sm">No plan limits file (~/.cache/ccstatusline/usage.json)</Text>
+  if (!l) return <Text type="supporting" size="sm">No plan limits reading yet</Text>
   return (
     <VStack gap={2}>
       {([['5-hour', l.session, l.sessionResetAt], ['Weekly', l.weekly, l.weeklyResetAt]] as const).map(([label, pct, at]) => (
@@ -78,7 +81,7 @@ export function UsageBars() {
           <ProgressBar label={`${label} usage`} isLabelHidden value={pct ?? 0} max={100} variant={(pct ?? 0) >= 90 ? 'error' : (pct ?? 0) >= 70 ? 'warning' : 'accent'} />
         </VStack>
       ))}
-      {l.stale && <Badge variant="warning" label={`stale — updated ${ago(l.ageSec)}`} />}
+      {l.stale ? <Badge variant="warning" label={`stale — ${SRC[l.source]} ${ago(l.ageSec)}`} /> : <Text size="sm" type="supporting">{`${SRC[l.source]} ${ago(l.ageSec)}`}</Text>}
       <BlockLine b={q.data.block} />
     </VStack>
   )
@@ -97,10 +100,10 @@ export function UsageBreakdown() {
       <HStack gap={2} align="center" wrap="wrap">
         <Text weight="semibold">Claude usage</Text>
         {l && (l.stale
-          ? <Badge variant="warning" label={`stale — updated ${ago(l.ageSec)}; no Claude Code session refreshing it`} />
-          : <Text type="supporting" size="sm">{`updated ${ago(l.ageSec)}`}</Text>)}
+          ? <Badge variant="warning" label={`stale — ${SRC[l.source]} ${ago(l.ageSec)}; no session reporting`} />
+          : <Text type="supporting" size="sm">{`${SRC[l.source]} ${ago(l.ageSec)}`}</Text>)}
         {l?.extraUsage && <Badge label="extra usage on" />}
-        {!l && <Text type="supporting" size="sm">No plan limits file (~/.cache/ccstatusline/usage.json)</Text>}
+        {!l && <Text type="supporting" size="sm">No plan limits reading yet</Text>}
       </HStack>
       <Grid columns={{ minWidth: 220 }} gap={3}>
         {l && <Gauge label="5-hour" pct={l.session} resetAt={l.sessionResetAt} />}

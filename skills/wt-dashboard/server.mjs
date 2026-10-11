@@ -34,7 +34,7 @@ import { Dispatch, runHandoff, recoveryRequestId, resolveReport, routeRef, strik
 import { readyBatcher, readyToNotify, triageTicket } from './ticketJev.mjs'
 import { Push } from './push.mjs'
 import { Inbox, itemFromTransition, toResolve, inboxRank, reviewHolds, watchPrsUnwatched, watchPrsStale } from './inbox.mjs'
-import { UsageAgg, readLimits, PRICES, costOf } from './usage.mjs'
+import { UsageAgg, readLimits, pickLimits, parseCountdown, PRICES, costOf } from './usage.mjs'
 import { ccBlock } from './ccusage.mjs'
 import { safeFetch, parseHtml, classifyUrl } from './unfurl.mjs'
 import { RoleStore, resolveRole, inferTags, tokenDiff, adoptHandoff, clean as cleanTags, TAG_KEYS } from './roles.mjs'
@@ -464,11 +464,25 @@ export async function planUsageFromFile(file = USAGE_FILE, now = Date.now()) {
 // WP-179: the freshest ccstatusline plan-usage reading seen on ANY pane (session/weekly % are account-wide,
 // not per-pane) — no Claude API call, just whatever a pane's own statusline already shows. Pure and
 // separately testable from the herdr-dependent read loop that feeds it. Fallback only — see planUsageFromFile.
-let latestPlanUsage = null // { session: {pct, reset}, weekly: {pct, reset}, at }
-export function notePlanUsage(u, now = Date.now()) { if (u) latestPlanUsage = { ...u, at: now } }
-export function planUsageSnapshot(now = Date.now(), maxAgeMs = 10 * 60_000) {
-  return latestPlanUsage && now - latestPlanUsage.at <= maxAgeMs ? latestPlanUsage : null
+// WP-336: one reading per pane, not "last pane parsed wins". Panes disagree: an idle pane's footer is whatever
+// ccstatusline drew at its last redraw (seen live: idle panes at 3%/9% with "Reset: 0m" while active ones read 9%/21%).
+// A footer whose countdown has run out ("0m") was drawn in an earlier window → dropped. Usage only rises within a
+// window, so the highest weekly (then session) among the rest is the newest render.
+// ponytail: max across panes; a second Claude account's panes would mix in — key by account if that ever happens.
+const panePlanUsage = new Map() // pane key → { session: {pct, reset}, weekly: {pct, reset}, at }
+export function notePlanUsage(u, now = Date.now(), key = '') { if (u) panePlanUsage.set(key, { ...u, at: now }) }
+export function bestPlanUsage(now = Date.now(), maxAgeMs = 10 * 60_000) {
+  let best = null
+  for (const u of panePlanUsage.values()) {
+    if (now - u.at > maxAgeMs) continue
+    if (!parseCountdown(u.session.reset) || !parseCountdown(u.weekly.reset)) continue // expired countdown = stale render
+    if (!best || u.weekly.pct > best.weekly.pct || (u.weekly.pct === best.weekly.pct && u.session.pct > best.session.pct)) best = u
+  }
+  return best
 }
+// WP-336: the Overview tile / Settings › Usage / alerts read the freshest of headless event, pane footer, cache file.
+const limitsNow = async () => pickLimits(await readLimits(USAGE_FILE), bestPlanUsage())
+export const planUsageSnapshot = bestPlanUsage
 // Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
 const roleStore = new RoleStore(DATA)
 // Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
@@ -569,7 +583,7 @@ async function listAgents(m) {
         const raw = await readPane(m, a.pane_id, '120')
         const p = parsePane(stripAnsi(raw), raw)
         parsed.set(k, { p, seq: a.state_change_seq, at: Date.now() })
-        notePlanUsage(p.planUsage)
+        notePlanUsage(p.planUsage, Date.now(), k)
       } catch {}
     }
     const p = parsed.get(k)?.p ?? {}
@@ -1949,7 +1963,7 @@ async function usageApi() {
   const midnight = new Date(); midnight.setHours(0, 0, 0, 0)
   const range = (from) => Object.fromEntries(Object.entries(by).map(([k, f]) => [k, usageAgg.summary(from, f)]))
   return {
-    limits: await readLimits(USAGE_FILE),
+    limits: await limitsNow(),
     block: ccBlock(), // WP-227: cached, refreshed in the background
     today: range(midnight.getTime()),
     week: range(Date.now() - 7 * 86400_000),
@@ -1960,7 +1974,7 @@ async function usageApi() {
 }
 // Once per window per threshold: 80% and 95% of the 5-hour and weekly limits.
 async function usageAlerts() {
-  const l = await readLimits(USAGE_FILE)
+  const l = await limitsNow()
   if (!l || l.stale) return
   for (const [name, pct, reset] of [['5-hour', l.session, l.sessionResetAt], ['Weekly', l.weekly, l.weeklyResetAt]]) {
     for (const th of [95, 80]) {

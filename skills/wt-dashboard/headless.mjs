@@ -10,6 +10,7 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync, existsSync, accessSync, constants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve, join, dirname, delimiter } from 'node:path'
+import { noteRateLimit } from './usage.mjs'
 import { open } from './store.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
@@ -205,6 +206,7 @@ export class Headless {
     this.db.prepare('UPDATE headless_runs SET stuck = NULL WHERE id = ? AND stuck IS NOT NULL').run(id) // output = the turn is alive
     this.#append(id, type, line.length > LINE_MAX ? JSON.stringify({ type: e.type, subtype: e.subtype, truncated: line.length }) : line, this.now())
     const set = (sql, ...a) => this.db.prepare(`UPDATE headless_runs SET ${sql} WHERE id = ?`).run(...a, id)
+    if (e.type === 'rate_limit_event') noteRateLimit(e)
     if (e.type === 'system' && e.subtype === 'init') {
       set(`session = ?, plugins = ?, permission_mode = ?, api_key_source = ?, init_model = ?, init_commands = ?, state = CASE WHEN state = 'starting' THEN '${p?.inflight ? 'working' : 'idle'}' ELSE state END`,
         e.session_id ?? null, JSON.stringify((e.plugins ?? []).map((x) => x.name ?? x)), e.permissionMode ?? null, e.apiKeySource ?? null,

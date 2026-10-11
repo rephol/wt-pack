@@ -45,6 +45,39 @@ export async function readLimits(file, now = Date.now()) {
   }
 }
 
+// WP-336: the cache file is only a fallback. The freshest of three readings wins, whole (never blended — a pane or a
+// headless run can belong to another account, so numbers from two sources must not mix), and it carries its age.
+const MIN = 60_000
+// "4h57m" / "3d 15hr 7m" (ccstatusline's footer countdown) → ms, or null.
+export function parseCountdown(s) {
+  const m = String(s ?? '').match(/^\s*(?:(\d+)\s*d)?\s*(?:(\d+)\s*h(?:r)?)?\s*(?:(\d+)\s*m)?\s*$/)
+  if (!m || !(m[1] || m[2] || m[3])) return null
+  return ((+m[1] || 0) * 1440 + (+m[2] || 0) * 60 + (+m[3] || 0)) * MIN
+}
+// A headless `rate_limit_event` → the exact five_hour / seven_day windows (utilization is a 0–1 fraction), or null.
+let headlessLimits = null
+export function noteRateLimit(e, now = Date.now()) {
+  const w = e?.type === 'rate_limit_event' ? e.rate_limit_info?.unifiedWindows : null
+  const pct = (x) => (typeof x?.utilization === 'number' ? Math.round(x.utilization * 1000) / 10 : null)
+  const at = (x) => (typeof x?.resetsAt === 'number' ? new Date(x.resetsAt * 1000).toISOString() : null)
+  if (pct(w?.five_hour) == null || pct(w?.seven_day) == null) return
+  headlessLimits = { session: pct(w.five_hour), sessionResetAt: at(w.five_hour), weekly: pct(w.seven_day), weeklyResetAt: at(w.seven_day), at: now }
+}
+export const resetRateLimit = () => { headlessLimits = null }
+// file: readLimits() result; pane: server's latestPlanUsage ({session:{pct,reset},weekly:{…},at}). → the limits object
+// the Usage UI renders, plus `source` ('headless' | 'pane' | 'file'), or null when there is none.
+export function pickLimits(file, pane, now = Date.now(), headless = headlessLimits) {
+  const iso = (c) => { const ms = parseCountdown(c); return ms == null ? null : new Date(now + ms).toISOString() }
+  const cands = []
+  if (headless) cands.push({ ...headless, source: 'headless', ageSec: Math.round((now - headless.at) / 1000) })
+  if (pane) cands.push({ session: pane.session.pct, sessionResetAt: iso(pane.session.reset), weekly: pane.weekly.pct, weeklyResetAt: iso(pane.weekly.reset), source: 'pane', ageSec: Math.round((now - pane.at) / 1000) })
+  if (file) cands.push({ ...file, source: 'file' })
+  const best = cands.sort((a, b) => a.ageSec - b.ageSec)[0]
+  if (!best) return null
+  const { at, ...out } = best
+  return { extraUsage: false, ...out, stale: out.ageSec > 30 * 60 }
+}
+
 // ---- spend from transcripts ----
 // One record per assistant message id: streaming writes the same message once per content block with identical
 // usage, so the last write wins. Files are read incrementally from a remembered byte offset.
