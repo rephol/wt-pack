@@ -64,7 +64,7 @@ on `turn.complete` (cache-tax beside wt-pack) is refused or chained — note onl
 | `minContext` | `50000` | tokens, int ≥ 0 |
 | `intervalMin` | `50` | int, 5..59 |
 | `windowH` | `3` | int, **1..12** (user) |
-| `dailyCap` | `12` | pings per agent per day, int ≥ 1 `[unsourced default; ask]` |
+| `dailyCap` | `15` | pings per agent per day, int ≥ 1 (user) |
 | `stopZeroReads` | `true` | stop when a ping reads 0 |
 | `stopWritePct` | `10` | stop when writes ≥ X% of reads, 0..100 |
 
@@ -85,7 +85,7 @@ them, like `wt-ask`. Tests: `keepwarm.test.mjs` (clean: every bound incl. window
   lastReal ≤ windowH && pingsToday < dailyCap && !stopped`. Ping = `fork({prompt:'Reply with: ok'})`.
 - After a ping: stop if `cache_read == 0` (and `stopZeroReads`) or `cache_creation ≥ stopWritePct% × cache_read`;
   report `ping|stop` with usage and `nextAt`. A ping never counts as `lastReal`.
-- `/wt keepwarm [status|off]` in the `/wt` table (`commands.ts:27`) — status: warm|cold, next ping, pings today;
+- `/wt keepwarm [status|off]` (user: inside `/wt`, no separate `/keepwarm`) in the `/wt` table (`commands.ts:27`) — status: warm|cold, next ping, pings today;
   off: stop for this session and report.
 Tests: `keepwarm.test.ts` via `skills/wt-mods/scripts/test`: decide() for each gate (window edge, cap, min context,
 stop rules), and a ping never extends the window.
