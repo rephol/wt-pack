@@ -28,3 +28,10 @@ export function parseEnvelope(text) {
   const m = String(text ?? '').match(/^((?:\/\S+ )*)<wt-message id=([\w-]+) kind=(\w+) from="([^"]*)"(?: ticket=([A-Z]+-\d+))?/)
   return m && KINDS.includes(m[3]) ? { slash: m[1].trim(), id: m[2], kind: m[3], sender: m[4], ticket: m[5] ?? null } : null
 }
+
+// WP-331: third-party text (a card or PR title) that rides in a pack message at all is data: one line, tags defused, no quotes,
+// at most 120 chars, returned already quoted. Everything longer or richer is read by the agent as a tool result, not sent.
+export const quoteTitle = (t) => {
+  const one = unTag(String(t ?? '').replace(/\s+/g, ' ').replace(/["<>]/g, '').trim())
+  return `"${one.length > 120 ? `${one.slice(0, 120)}…` : one}"`
+}
