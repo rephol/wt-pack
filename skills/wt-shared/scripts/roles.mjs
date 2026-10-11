@@ -3,6 +3,7 @@
 //   roles.mjs list    [--cwd D]            JSON: every role file (name, base, meta, bytes)
 //   roles.mjs roots   [--cwd D]            JSON {in_effect: repo|user, repo, user}: the two roles/ folders (WP-289)
 //   roles.mjs resolve <name> [--cwd D]     JSON {name, base, model, effort, mcp, skills, labels}, or exit 1 (no such file)
+//   roles.mjs notice  [--cwd D]            one line when the repo has role files but is not trusted (WP-334), else nothing
 //   roles.mjs check   [--cwd D]            JSON [{name, level: warn|error, msg}]; exit 1 on any error
 // A file is an OVERRIDE when its name is a base role (worker.md) and a PERSONA otherwise (frontend-worker.md,
 // which needs `base:` in its frontmatter). Frontmatter is flat `key: value` lines plus `[a, b]` lists, no YAML.
@@ -32,6 +33,22 @@ export function mainCheckout(cwd = process.cwd(), timeout = 500) {
 export const userRoot = (checkout) => join(process.env.WT_PACK_USER_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'wt-pack', 'projects'), basename(checkout))
 export const settingsWhere = (checkout) => (!existsSync(join(checkout, '.wt-pack')) && existsSync(userRoot(checkout)) ? 'user' : 'repo')
 export const settingsRoot = (checkout, where = settingsWhere(checkout)) => (where === 'user' ? userRoot(checkout) : join(checkout, '.wt-pack'))
+// WP-334: the repo folder can be planted by a cloned repo, so its role files load only for a project the user marked
+// trusted (dashboard Settings → trustRepoRoles; the server mirrors it to trusted-projects.json {project: realpath}).
+// The user folder is user-authored and always trusted. Missing/malformed file = nothing trusted.
+const trustFile = () => process.env.WT_TRUSTED_PROJECTS || join(process.env.WT_DASHBOARD_DATA || join(homedir(), '.local', 'share', 'wt-dashboard'), 'trusted-projects.json')
+// ponytail: re-read per call (a few bytes, a handful of calls per hook); no cache to invalidate
+export const trusted = (checkout) => {
+  try { return Object.values(JSON.parse(readFileSync(trustFile(), 'utf8'))).includes(realpathSync(checkout)) } catch { return false }
+}
+// The folder role files are read from: the repo one only when trusted, else the user one (which may not exist).
+export const rolesWhere = (checkout) => { const w = settingsWhere(checkout); return w === 'repo' && !trusted(checkout) ? 'user' : w }
+export const untrustedNotice = (checkout) => {
+  if (rolesWhere(checkout) === 'repo') return ''
+  let has = false
+  try { has = readdirSync(rolesDir(checkout, 'repo')).some((f) => f.endsWith('.md')) } catch {}
+  return has ? `This repo has .wt-pack/roles but is not trusted; base roles apply. Trust it in wt-dashboard Settings › ${basename(checkout)}.` : ''
+}
 export const rolesDir = (checkout, where) => join(settingsRoot(checkout, where), 'roles')
 // WP-289: both places a role file can live, and which one is in effect (the repo folder wins when both exist).
 export const roots = (checkout) => ({ in_effect: settingsWhere(checkout), repo: rolesDir(checkout, 'repo'), user: rolesDir(checkout, 'user') })
@@ -67,11 +84,12 @@ export function parse(text) {
 }
 
 function load(checkout, name) {
-  const file = join(rolesDir(checkout), `${name}.md`)
+  const where = rolesWhere(checkout)
+  const file = join(rolesDir(checkout, where), `${name}.md`)
   let text
   try {
     // a symlink out of the checkout (file or .wt-pack/roles itself) is not a role file; the user folder bounds itself
-    const bound = settingsWhere(checkout) === 'user' ? userRoot(checkout) : checkout
+    const bound = where === 'user' ? userRoot(checkout) : checkout
     if (!realpathSync(file).startsWith(realpathSync(bound) + sep)) return null
     text = readFileSync(file, 'utf8').slice(0, 4 * CAP) // bounded: a hostile file must not stall the 2 s hook
   } catch { return null }
@@ -82,7 +100,7 @@ function load(checkout, name) {
 
 export function list(checkout) {
   let names = []
-  try { names = readdirSync(rolesDir(checkout)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort() } catch {}
+  try { names = readdirSync(rolesDir(checkout, rolesWhere(checkout))).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort() } catch {}
   return names.map((n) => load(checkout, n)).filter(Boolean)
 }
 
@@ -118,7 +136,7 @@ export function sections(checkout, role, persona) {
     }
     const skills = [].concat(r.meta.skills ?? [])
     if (skills.length) text += `\n\nSuggested skills: ${skills.join(', ')}`
-    if (text) out.push([`Project role (${name}, ${settingsWhere(checkout) === 'user' ? 'user-level' : '.wt-pack'}/roles/${name}.md)`, text])
+    if (text) out.push([`Project role (${name}, ${rolesWhere(checkout) === 'user' ? 'user-level' : '.wt-pack'}/roles/${name}.md)`, text])
   }
   return out
 }
@@ -159,7 +177,8 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
   const checkout = mainCheckout(cwd, 5000)
   const out = (x) => console.log(JSON.stringify(x))
   if (!checkout) { console.error('not in a git repo'); process.exit(2) }
-  if (cmd === 'list') out(list(checkout).map(({ name, base, meta, bytes }) => ({ name, base, meta, bytes })))
+  if (cmd === 'notice') { const n = untrustedNotice(checkout); if (n) console.log(n) }
+  else if (cmd === 'list') out(list(checkout).map(({ name, base, meta, bytes }) => ({ name, base, meta, bytes })))
   else if (cmd === 'roots') out(roots(checkout))
   else if (cmd === 'resolve') {
     const r = resolve(checkout, rest[0])
@@ -169,5 +188,5 @@ if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.met
     const f = check(checkout, { catalog: catalog() })
     out(f)
     if (f.some((x) => x.level === 'error')) process.exit(1)
-  } else { console.error('usage: roles.mjs list|roots|resolve <name>|check [--cwd D]'); process.exit(2) }
+  } else { console.error('usage: roles.mjs list|roots|notice|resolve <name>|check [--cwd D]'); process.exit(2) }
 }

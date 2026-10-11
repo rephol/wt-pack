@@ -9,6 +9,8 @@ import { parse, list, resolve, check, sections, mainCheckout, personas, CAP } fr
 
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'roles-')))
 execFileSync('git', ['init', '-q', repo])
+process.env.WT_TRUSTED_PROJECTS = join(repo, '..', `trust-${process.pid}.json`) // WP-334: this suite's repo is a trusted project
+writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ r: repo }))
 const dir = join(repo, '.wt-pack', 'roles')
 mkdirSync(dir, { recursive: true })
 const put = (n, t) => writeFileSync(join(dir, `${n}.md`), t)

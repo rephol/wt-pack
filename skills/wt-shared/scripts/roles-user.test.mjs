@@ -11,6 +11,8 @@ const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'roles-user-')))
 process.env.WT_PACK_USER_DIR = join(tmp, 'user')
 const repo = join(tmp, 'acme')
 execFileSync('git', ['init', '-q', repo])
+process.env.WT_TRUSTED_PROJECTS = join(tmp, 'trusted.json') // WP-334: the repo folder loads only for a trusted project
+writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ acme: repo }))
 const put = (root, n, t) => { mkdirSync(join(root, 'roles'), { recursive: true }); writeFileSync(join(root, 'roles', `${n}.md`), t) }
 
 test('no folder anywhere: the repo is the default; a user folder alone is read; the repo folder wins when both exist', () => {

@@ -1,13 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { list, get, expand, check, flowchart, member, TEMPLATES, templateText } from './teams.mjs'
 
+const trust = { f: join(mkdtempSync(join(tmpdir(), 'teams-trust-')), 'trusted.json'), all: {} } // WP-334: repo role files load for trusted projects only
+process.env.WT_TRUSTED_PROJECTS = trust.f
 const repo = () => {
-  const r = mkdtempSync(join(tmpdir(), 'teams-'))
+  const r = realpathSync(mkdtempSync(join(tmpdir(), 'teams-')))
+  trust.all[r] = r; writeFileSync(trust.f, JSON.stringify(trust.all))
   execFileSync('git', ['init', '-q', r])
   mkdirSync(join(r, '.wt-pack', 'teams'), { recursive: true }); mkdirSync(join(r, '.wt-pack', 'roles'), { recursive: true })
   writeFileSync(join(r, '.wt-pack', 'roles', 'frontend-worker.md'), '---\nbase: worker\n---\nUI only.')
