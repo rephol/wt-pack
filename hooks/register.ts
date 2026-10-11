@@ -8,6 +8,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { runShared, type Ctx } from '../skills/wt-mods/hooks/compose'
 import { commandsHooks, registerCommands } from '../skills/wt-mods/hooks/commands'
 import { routingHooks, routingState, registerRouting } from '../skills/wt-mods/hooks/routing'
+import { contextHooks } from '../skills/wt-mods/hooks/context'
 import { registerGuards } from '../skills/wt-mods/hooks/guards'
 import { registerAsk } from '../skills/wt-ask/hooks/register'
 import { deliverHooks } from '../skills/wt-room/mod/hooks/register'
@@ -21,13 +22,15 @@ function ctx($: EngineInterface): Ctx {
     submit: (text) => $.prompt.submit({ text }),
     every: (ms, fn) => $.clock.every(ms, fn),
     registerCommand: (c) => $.command.register(c),
+    contextPercent: async () => (await $.session.usage()).context.percent,
+    notify: (text) => $.ui.toast(text),
   }
 }
 
 export const register: Register = (on, options) => {
   const routing = routingState()
   // deliver before routing: routing's turn.complete awaits a subprocess, which must not delay deliver's next pull
-  const mods = [commandsHooks(), deliverHooks(skills), routingHooks(routing, skills)]
+  const mods = [commandsHooks(), deliverHooks(skills), routingHooks(routing, skills), contextHooks()]
   registerCommands(on, skills)
   registerRouting(on, routing, skills)
   registerGuards(on)

@@ -13,6 +13,8 @@ export type Ctx = {
   run: (argv: readonly string[], init?: Parameters<EngineInterface['process']['run']>[1]) => ReturnType<EngineInterface['process']['run']>
   submit: (text: string) => Promise<unknown>
   every: (ms: number, fn: () => void) => unknown
+  contextPercent: () => Promise<number | undefined> // WP-282: the main session's context window, % used
+  notify: (text: string) => void // a toast
   registerCommand: (c: Parameters<EngineInterface['command']['register']>[0]) => Promise<unknown>
 }
 export type Hook = (ctx: Ctx, e: any, next: (e: any) => any) => any // eslint-disable-line @typescript-eslint/no-explicit-any

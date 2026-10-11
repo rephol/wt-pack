@@ -14,5 +14,7 @@ which also registers `skills/wt-ask` and `skills/wt-room/mod`). The other skills
 - Per-request model routing (`hooks/routing.ts`, WP-211): the first request of each main-loop turn goes through
   `wt-shared/scripts/model-route.mjs`; only `WT_MODEL_ROUTING=live` rewrites the request. See docs/features.md › Model routing.
 
+- Context warning (`hooks/context.ts`, WP-282): at the end of a main-loop turn, a toast at 80% and 90% context used (once per level, re-armed when it drops) suggests a fresh agent. Per-turn token usage is not reported by the mod: the dashboard usage view already reads live transcripts.
+
 `hooks/compose.ts` lets several mods share an event the engine allows one hook on. Test: `scripts/test`. Reload
 without a restart: `/reload-plugins`.
