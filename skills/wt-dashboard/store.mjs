@@ -231,7 +231,8 @@ export const MIGRATIONS = [
   // WP-317: the canonical pane id of the agent that spawned the run (NULL = the user, or spawned before this): that pane may stop its own runs.
   { sql: `ALTER TABLE headless_runs ADD COLUMN spawner TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
   // WP-329: the sender's canonical pane, for a message an agent pane sent (NULL = the server sent it): the verify route returns it as the reply target.
-  { sql: `ALTER TABLE wt_messages ADD COLUMN sender_pane TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
+  { sql: `ALTER TABLE wt_messages ADD COLUMN sender_pane TEXT;`, legacy: () => [], import: () => {}, export: () => {} },  // WP-330: a per-run secret (env WT_RUN_KEY) that lets the run's own hook verify the messages addressed to it; never returned by a GET.
+  { sql: `ALTER TABLE headless_runs ADD COLUMN run_key TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

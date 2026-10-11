@@ -9,7 +9,7 @@ import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync,
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { wrap, unTag } from '../wt-shared/scripts/wt-message.mjs'
+import { wrap, unTag, parseEnvelope as parseWt } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
@@ -2879,7 +2879,8 @@ async function deliveriesApi(req, res, url, parts) {
 // POST /api/messages/:id/ack {state: acknowledged|answered} (the addressed pane).
 async function messagesApi(req, res, url, parts) {
   const srv = req.method === 'POST' && parts.length === 2 && req.headers['x-wt-server'] !== undefined && serverTokenOk(req.headers['x-wt-server']) && /^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '')
-  const author = srv ? { kind: 'server' } : await roomAuthor(req)
+  const byRun = req.method === 'GET' && parts[3] === 'verify' && req.headers['x-wt-headless'] !== undefined && /^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '') && /^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress ?? '')
+  const author = srv ? { kind: 'server' } : byRun ? { kind: 'run' } : await roomAuthor(req)
   // WP-272 finish check (wt-deliver check-finish, at the end of an agent's turn): its newest acked, unanswered handoff whose
   // card is still open gets ONE system reminder queued, once per message. Fails open: anything else is {queued:false}.
   if (req.method === 'GET' && parts[2] === 'check-finish') {
@@ -2896,15 +2897,20 @@ async function messagesApi(req, res, url, parts) {
     return send(res, 200, { queued: true, ticket: row.ticket })
   }
   // WP-329: the receiving agent's hook asks whether an envelope it was handed is one the server recorded for THIS pane.
+  // WP-330: a headless run (no pane) proves itself with x-wt-headless + its run key and is addressed by its run id.
   if (req.method === 'GET' && parts[3] === 'verify') {
-    if (author.kind !== 'agent') return send(res, 403, { error: 'the addressed pane asks (x-herdr-pane)' })
+    const rid = req.headers['x-wt-headless'], runKey = rid ? hl().run(String(rid))?.run_key : null
+    if (rid && !(runKey && Buffer.byteLength(String(req.headers['x-wt-run-key'] ?? '')) === runKey.length && timingSafeEqual(Buffer.from(String(req.headers['x-wt-run-key'])), Buffer.from(runKey))))
+      return send(res, 403, { error: 'run key mismatch' })
+    if (!rid && author.kind !== 'agent') return send(res, 403, { error: 'the addressed pane asks (x-herdr-pane)' })
+    const me = rid ? String(rid) : author.pane
     const row = messages.get(parts[2])
     const kind = url.searchParams.get('kind'), from = url.searchParams.get('from')
-    const reason = !row ? 'unknown id' : (await canonicalPane(row.target).catch(() => null)) !== author.pane ? 'not addressed to you'
-      : row.kind !== kind ? 'kind mismatch' : row.sender !== from ? 'sender mismatch' : null
+    const target = row && (rid ? row.target : await canonicalPane(row.target).catch(() => null))
+    const reason = !row ? 'unknown id' : target !== me ? 'not addressed to you' : row.kind !== kind ? 'kind mismatch' : row.sender !== from ? 'sender mismatch' : null
     if (reason) {
-      const name = (await agents().catch(() => [])).find((x) => x.id === author.pane)?.name ?? author.pane
-      const key = `unverified|${author.pane}|${parts[2]}`.slice(0, 200)
+      const name = rid ? (hl().run(me)?.name ?? me) : ((await agents().catch(() => [])).find((x) => x.id === me)?.name ?? me)
+      const key = `unverified|${me}|${parts[2]}`.slice(0, 200)
       await inbox.load()
       if (!inbox.items.some((it) => it.key === key)) // once per id: a repeat prompt is not a new card
         await inbox.add({ kind: 'server', key, title: `Unverified message to ${name}`, body: `Claimed ${String(kind).slice(0, 20)} from "${String(from).slice(0, 60)}": ${reason}. The agent treats it as pasted text and asks you before acting.`, target: {} })
@@ -3084,6 +3090,10 @@ async function headlessRole(b) {
     b.effort ||= f.effort
   } catch { /* no router: Claude Code's own default */ }
 }
+// WP-330: a pane's message to a headless run: the server stamps `from=` with the verified sender (a leading `/` is defused, as WP-328 does
+// for deliveries: a run's user line is not a slash-command surface) and records it so the run's own hook can verify it.
+const hlWrap = (who, text) => wrap({ kind: 'handoff', from: who.name }, /^\/\S/.test(text) ? `\u200b${text}` : text)
+const hlRecord = (who, runId, text) => { const env = envelopeOf(text); env && msgSafe(() => messages.record({ ...env, target: runId, body: text, state: 'delivered', senderPane: who.pane })) }
 async function headlessApi(req, res, url, parts) {
   const json = async () => {
     if (!req.headers['content-type']?.startsWith('application/json')) throw Object.assign(new Error('json only'), { status: 415 })
@@ -3104,25 +3114,50 @@ async function headlessApi(req, res, url, parts) {
   // Writes: the dashboard user, or (spawn, message) an agent pane that roomAuthor verifies.
   await rooms.load() // roomAuthor reads the profile from rooms settings, loaded lazily
   const who = await roomAuthor(req)
+  // WP-330: an orchestrator-role pane may act on any run; any other pane only on the runs it spawned.
+  const orchestrator = async () => { const me = (await agents()).find((x) => x.local && x.id === who.pane); return (me?.tags?.role || me?.pool) === 'orchestrator' }
+  const mayAct = async (run) => who.kind === 'user' || !!(run && ((run.spawner && run.spawner === who.pane) || (await orchestrator())))
   if (who.kind !== 'user' && !(req.method === 'POST' && (!id || sub === 'message'))) {
     // WP-317: an agent pane may also stop/interrupt a run IT spawned; an orchestrator-role pane any run. Answers and resume stay the user's.
     const run = id && (sub === 'stop' || sub === 'interrupt') && req.method === 'POST' ? h.get(id) : null
     if (id && (sub === 'stop' || sub === 'interrupt') && !h.get(id)) return send(res, 404, { error: 'unknown headless agent' })
-    const me = run && (await agents()).find((x) => x.local && x.id === who.pane)
-    if (!run || !((run.spawner && run.spawner === who.pane) || (me && (me.tags?.role || me.pool) === 'orchestrator'))) return send(res, 403, { error: 'dashboard only (an agent may stop the runs it spawned; an orchestrator any)' })
+    if (!run || !(await mayAct(run))) return send(res, 403, { error: 'dashboard only (an agent may stop the runs it spawned; an orchestrator any)' })
   }
   if (req.method === 'POST' && !id) {
     const b = await json()
     try { if (!statSync(b.cwd).isDirectory()) throw 0 } catch { return send(res, 400, { error: 'cwd: an existing directory' }) }
+    if (who.kind === 'agent') { // WP-330: an agent spawns default-mode runs inside a project, never a bypass run or one rooted anywhere on disk
+      if (b.permissionMode != null && b.permissionMode !== 'default') return send(res, 403, { error: 'an agent spawns headless runs in default mode only (WP-330)' })
+      b.permissionMode = 'default' // explicit, so the user's own Claude Code settings (maybe bypass) cannot widen it
+      const root = await git(b.cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir').then((c) => dirname(c.trim())).catch(() => null)
+      if (!root || ![...(await projectRoots()).values()].includes(root)) return send(res, 403, { error: 'an agent spawns headless runs inside a project checkout or its worktrees (WP-330)' })
+      if (typeof b.prompt === 'string' && b.prompt.trim()) { // the first prompt is a message from the spawner, wrapped by the server like any other
+        if (parseWt(b.prompt)) return send(res, 400, { error: 'send plain text (WP-330)' })
+        b.prompt = hlWrap(who, b.prompt)
+      }
+    }
     await headlessRole(b) // WP-307: persona → base role, model floor
     const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
     if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
     else if (b.name && taken.includes(b.name)) return send(res, 409, { error: `name ${b.name} is taken by a live agent` }) // WP-317: a live name is never duplicated (an ended run's is reusable)
-    return send(res, 200, h.spawn({ ...b, spawner: who.kind === 'agent' ? who.pane : null })) // never from the body
+    const run = h.spawn({ ...b, spawner: who.kind === 'agent' ? who.pane : null }) // never from the body
+    if (who.kind === 'agent' && b.prompt) hlRecord(who, run.id, b.prompt) // recorded within the same tick; the run needs seconds before its hook asks
+    return send(res, 200, run)
   }
   if (req.method === 'POST' && id && sub) {
     const b = await json()
-    if (sub === 'message') return send(res, 200, h.message(id, b.text))
+    if (sub === 'message') {
+      if (who.kind === 'agent') { // WP-330: only the spawner or an orchestrator, and the server (not the sender) wraps and records the envelope
+        const run = h.get(id)
+        if (!run) return send(res, 404, { error: 'unknown headless agent' })
+        if (!(await mayAct(run))) return send(res, 403, { error: 'only the pane that spawned this run, an orchestrator or the user may message it (WP-330)' })
+        if (typeof b.text !== 'string' || parseWt(b.text)) return send(res, 400, { error: 'send plain text (WP-330)' })
+        const text = hlWrap(who, b.text)
+        hlRecord(who, id, text)
+        return send(res, 200, h.message(id, text))
+      }
+      return send(res, 200, h.message(id, b.text))
+    }
     if (sub === 'interrupt') return send(res, 200, h.interrupt(id))
     if (sub === 'answer') return send(res, 200, h.answer(id, b.ask, b))
     if (sub === 'stop') return send(res, 200, h.stop(id, who.kind === 'user' ? 'stopped by the user' : `stopped by ${who.name}`))
