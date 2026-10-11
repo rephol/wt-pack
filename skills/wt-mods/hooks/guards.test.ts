@@ -85,3 +85,46 @@ test('WP-279: the hook asks once where the session is; exit 10 = a worktree', as
   expect(((await $.tool.call({ tool: 'Bash', command: 'git checkout main' })) as any).deny).toBeUndefined()
   expect(runs.length).toBe(1)
 })
+
+// WP-332: the destructive-action gate. The mod only prefilters and asks `wt-gate`; exit 3 = gated.
+const gateRig = (on: any, answer: (argv: string[]) => { exitCode: number; stdout: string } | 'throw') => {
+  const runs: string[][] = []
+  on('process.run', (_$: unknown, e: { argv: string[] }) => {
+    runs.push(e.argv)
+    const a = answer(e.argv)
+    if (a === 'throw') throw new Error('spawn failed')
+    return { value: { exitCode: a.exitCode, stdout: a.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: 'ran' }))
+  return runs
+}
+
+test('WP-332: a gated command is denied with the reason, after asking wt-gate', async ($, on) => {
+  const runs = gateRig(on, () => ({ exitCode: 3, stdout: '{"action":"git push","asked":true}\n' }))
+  const r: any = await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
+  expect(r.deny).toMatch(/git push needs the user's OK/)
+  expect(r.deny).toMatch(/asked them in the Inbox/)
+  expect(runs.length).toBe(1)
+  expect(runs[0].slice(-3)).toEqual(['check', '--', 'git push origin main'])
+  expect(runs[0][0]).toMatch(/skills\/wt-shared\/scripts\/wt-gate$/)
+  const un: any = await $.tool.call({ tool: 'Bash', command: 'rm -rf ~/x' })
+  expect(un.deny).toMatch(/needs the user's OK/)
+})
+
+test('WP-332: an ordinary command never spawns the gate; allowed (exit 0) and a broken gate both let it run', async ($, on) => {
+  const runs = gateRig(on, () => ({ exitCode: 0, stdout: '' }))
+  for (const command of ['npm test', 'git status', 'git commit skills/a -m "push"', 'ls -la']) {
+    const r: any = await $.tool.call({ tool: 'Bash', command })
+    expect(r.deny).toBeUndefined()
+  }
+  expect(runs.length).toBe(0)
+  const ok: any = await $.tool.call({ tool: 'Bash', command: 'git push' }) // exit 0 = allowed
+  expect(ok.deny).toBeUndefined()
+  expect(runs.length).toBe(1)
+})
+
+test('WP-332: a gate that cannot run fails open (it must not wedge every agent)', async ($, on) => {
+  gateRig(on, () => 'throw')
+  const r: any = await $.tool.call({ tool: 'Bash', command: 'git push' })
+  expect(r.deny).toBeUndefined()
+})
