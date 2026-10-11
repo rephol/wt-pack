@@ -230,6 +230,8 @@ export const MIGRATIONS = [
   { sql: `ALTER TABLE headless_runs ADD COLUMN driver TEXT; ALTER TABLE headless_runs ADD COLUMN context_used INTEGER;`, legacy: () => [], import: () => {}, export: () => {} },
   // WP-317: the canonical pane id of the agent that spawned the run (NULL = the user, or spawned before this): that pane may stop its own runs.
   { sql: `ALTER TABLE headless_runs ADD COLUMN spawner TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
+  // WP-329: the sender's canonical pane, for a message an agent pane sent (NULL = the server sent it): the verify route returns it as the reply target.
+  { sql: `ALTER TABLE wt_messages ADD COLUMN sender_pane TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).

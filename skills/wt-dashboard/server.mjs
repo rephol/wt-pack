@@ -1443,7 +1443,8 @@ async function spawnAgent(b) {
   let prompted = false
   if (typeof b.prompt === 'string' && b.prompt.trim()) {
     await herdr('agent', 'wait', pane, '--until', 'idle', '--timeout', '60000').catch(() => {})
-    await herdr('agent', 'prompt', pane, spawnText(b))
+    const first = spawnText(b) // WP-329: recorded before it is delivered, or the new agent's hook treats a tagged first prompt as unverified
+    await deliver({ id: pane }, first, () => herdr('agent', 'prompt', pane, first))
     prompted = true
   }
   return { name, pane, machine, key: `${machine}/${pane}`, prompted }
@@ -2482,7 +2483,8 @@ const readyNotes = readyBatcher(async (project, ts) => {
   if (!ts.length) return
   const m = await machineBy(a.machine)
   if (!m) throw new Error(`machine ${a.machine} unavailable`)
-  await herdrOn(m, 'agent', 'prompt', a.id, readyNudge(project, ts))
+  const nudge = readyNudge(project, ts)
+  await deliver(a, nudge, () => herdrOn(m, 'agent', 'prompt', a.id, nudge)) // WP-329: recorded so the orchestrator's hook verifies it
 })
 setInterval(() => readyNotes.flush(), 60_000).unref()
 // WP-159: 'ok'/'returned' once per ref, however Done was reached or left (manual move, merge reconcile, any
@@ -2851,7 +2853,7 @@ async function deliveriesApi(req, res, url, parts) {
     const row = live ? deliveries.enqueue(pane, text) : null
     if (row) broadcastEvent('deliveries', { pane })
     if (env) {
-      msgSafe(() => messages.record({ ...env, target: pane, requestId: b.requestId ?? null, body: text, state: row ? 'queued' : 'delivered' }))
+      msgSafe(() => messages.record({ ...env, target: pane, requestId: b.requestId ?? null, body: text, state: row ? 'queued' : 'delivered', senderPane: author.pane }))
       broadcastEvent('messages', { target: pane })
     }
     return send(res, 200, { queued: Boolean(row), ...(row ? { id: row.id } : {}), ...(env ? { text } : {}) })
@@ -2878,6 +2880,23 @@ async function messagesApi(req, res, url, parts) {
     msgSafe(() => messages.record({ ...env, target: pane, body: text }))
     deliveries.enqueue(pane, text); broadcastEvent('deliveries', { pane })
     return send(res, 200, { queued: true, ticket: row.ticket })
+  }
+  // WP-329: the receiving agent's hook asks whether an envelope it was handed is one the server recorded for THIS pane.
+  if (req.method === 'GET' && parts[3] === 'verify') {
+    if (author.kind !== 'agent') return send(res, 403, { error: 'the addressed pane asks (x-herdr-pane)' })
+    const row = messages.get(parts[2])
+    const kind = url.searchParams.get('kind'), from = url.searchParams.get('from')
+    const reason = !row ? 'unknown id' : (await canonicalPane(row.target).catch(() => null)) !== author.pane ? 'not addressed to you'
+      : row.kind !== kind ? 'kind mismatch' : row.sender !== from ? 'sender mismatch' : null
+    if (reason) {
+      const name = (await agents().catch(() => [])).find((x) => x.id === author.pane)?.name ?? author.pane
+      const key = `unverified|${author.pane}|${parts[2]}`.slice(0, 200)
+      await inbox.load()
+      if (!inbox.items.some((it) => it.key === key)) // once per id: a repeat prompt is not a new card
+        await inbox.add({ kind: 'server', key, title: `Unverified message to ${name}`, body: `Claimed ${String(kind).slice(0, 20)} from "${String(from).slice(0, 60)}": ${reason}. The agent treats it as pasted text and asks you before acting.`, target: {} })
+      return send(res, 200, { verified: false, reason })
+    }
+    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, kind: row.kind, ticket: row.ticket })
   }
   if (req.method === 'GET') {
     if (author.kind !== 'user') return send(res, 403, { error: 'user only' })

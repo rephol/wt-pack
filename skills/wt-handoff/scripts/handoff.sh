@@ -137,15 +137,18 @@ while :; do
     *) break ;;
   esac
 done
+# WP-242: taken once and unset, so the agents this script spawns never inherit it. (WP-329: before the --reply branch, so a
+# server-run reply records its envelope with the token like every other server send.)
+deliver_token=${WT_DELIVER_TOKEN:-}; unset WT_DELIVER_TOKEN
 # WP-328: --from is the server's own voice (Dispatch, routines, the watchdog hold WT_DELIVER_TOKEN); an agent's envelope is
 # stamped by the dashboard with the verified sender, so a pane's --from is ignored.
-[ -z "$from_arg" ] || [ -n "${WT_DELIVER_TOKEN:-}" ] || { echo "note: --from is ignored for an agent sender (the dashboard stamps the verified name)" >&2; from_arg=; }
+[ -z "$from_arg" ] || [ -n "$deliver_token" ] || { echo "note: --from is ignored for an agent sender (the dashboard stamps the verified name)" >&2; from_arg=; }
 
 # WP-328: a pane sends FIELDS and the dashboard builds the envelope (from= is the caller it verified), records the message and
 # queues it when the target's mod is live. Prints the JSON answer, which carries `text` (the envelope, to paste if not queued).
 # Empty output = no pane sender / server unreachable or too old: the caller falls back to wrapping locally.
 pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
-  [ -n "${HERDR_PANE_ID:-}" ] && [ -z "${WT_DELIVER_TOKEN:-}${deliver_token:-}" ] && command -v curl >/dev/null && command -v jq >/dev/null || return 0
+  [ -n "${HERDR_PANE_ID:-}" ] && [ -z "$deliver_token" ] && command -v curl >/dev/null && command -v jq >/dev/null || return 0
   jq -n --arg p "$1" --arg k "$2" --arg b "$3" --arg t "$4" --arg g "$5" --arg r "$request_id" --arg pr "$pr" --arg sh "$sha" \
     '{pane:$p,kind:$k,body:$b} + (if $t == "" then {} else {ticket:$t} end) + (if $g == "1" then {goal:true} else {} end)
      + (if $r == "" then {} else {requestId:$r} end) + (if $pr == "" then {} else {pr:$pr} end) + (if $sh == "" then {} else {sha:$sh} end)' \
@@ -385,8 +388,6 @@ has_picks() {
   jq -e --arg p "$mcp" '($p | split(",")) - (.mcpServers | keys) == []' "$f" >/dev/null 2>&1
 }
 
-# WP-242: taken once and unset, so the agents this script spawns never inherit it.
-deliver_token=${WT_DELIVER_TOKEN:-}; unset WT_DELIVER_TOKEN
 # WP-248: a session that has just spawned is still loading its start-up context and drops typed input, so wait until
 # it is registered and idle before typing (a missed registration is nudged once with a rename), and after typing
 # check the text left the input box (Enter again if not). Env knobs: WT_READY_TIMEOUT s, WT_SUBMIT_SETTLE_MS.
