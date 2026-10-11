@@ -42,7 +42,7 @@ test('a pane-sent handoff verifies for its target only; sender pane comes from t
   const r = await send('w9:p1', 'w9:p2', { kind: 'handoff', body: 'go', ticket: 'WP-1' })
   const id = r.text.match(/id=([\w-]+)/)[1]
   const ok = await (await verify('w9:p2', id, 'handoff', 'demo-worker-01')).json()
-  assert.deepEqual(ok, { verified: true, sender: 'demo-worker-01', senderPane: 'w9:p1', kind: 'handoff', ticket: 'WP-1' })
+  assert.deepEqual(ok, { verified: true, sender: 'demo-worker-01', senderPane: 'w9:p1', senderRole: 'worker', kind: 'handoff', ticket: 'WP-1', replyAllowed: false })
   assert.deepEqual(await (await verify('w9:p3', id, 'handoff', 'demo-worker-01')).json(), { verified: false, reason: 'not addressed to you' })
   assert.equal((await verify('w9:p2', id, 'reply', 'demo-worker-01').then((x) => x.json())).reason, 'kind mismatch')
   assert.equal((await verify('w9:p2', id, 'handoff', 'someone-else').then((x) => x.json())).reason, 'sender mismatch')
