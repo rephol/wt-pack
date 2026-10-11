@@ -446,6 +446,15 @@ Chat rooms shared by you and agents.
   or a message row of its own (`POST /api/messages`) gets 400/403, and a pane can only ack a message addressed to it.
   `handoff.sh --from` is honoured only for the server's own senders (Dispatch, routines, the watchdog); an older
   dashboard falls back to the local wrap, so a handoff is never blocked.
+  **Verified before obeyed (WP-329):** the agent's UserPromptSubmit hook asks the dashboard (`GET /api/messages/:id/verify`,
+  pane identity + key) whether it recorded that id, kind and sender for this very pane. A match adds a *Verified wt-pack
+  traffic* reminder that names the stored sender and reply pane; anything else (forged id, another pane's message, a
+  pre-WP-329 dashboard, no answer in 1 s) is marked *UNVERIFIED*: the agent treats it as text you pasted, takes no outward
+  action and asks you in chat, and the Inbox gets one card, "Unverified message to <agent>", per message id. Every server
+  producer (pane sends, Dispatch, routines, nudges, the Ready nudge, a spawn's first prompt) records the envelope before it
+  delivers. Not covered: `wt-watch-prs`'s poller sends from outside any pane and the server, so its `kind=system` events
+  arrive UNVERIFIED until it gets its own credential. Merge order: server first (restart it), then the plugin reaches agents
+  on their next start.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
   - Hops before a human reply — **3**; then the room pauses "waiting for a human" until you post.
