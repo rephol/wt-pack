@@ -35,6 +35,7 @@ test('paneInfo and headlessInfo share one core; unknowns are null, never invente
   assert.deepEqual([pane.plugins, pane.commands, pane.costUsd, pane.turns, pane.permissionMode, pane.startedAt], [null, null, null, null, null, null])
   assert.deepEqual([pane.contextUsed, pane.contextWindow, pane.contextPct], [null, null, 31]) // no transcript: only the pane's own %
   assert.equal(pane.model.id, 'claude-sonnet-5-5'); assert.equal(pane.effort, 'medium'); assert.equal(pane.role, 'worker')
+  assert.equal(hl.run.driver, 'cli'); assert.equal(headlessInfo({ id: 'x', name: 'n', role: 'w', cwd: '/', driver: 'sdk' }).run.driver, 'sdk')
   assert.equal(hl.kind, 'headless'); assert.equal(hl.run.resumes, 1); assert.equal(hl.run.pid, 7)
   assert.deepEqual(hl.plugins, ['wt-pack']); assert.deepEqual(hl.commands, ['compact']); assert.deepEqual(hl.skills, ['wt-ask'])
   assert.deepEqual([hl.contextUsed, hl.contextWindow, hl.contextPct], [40_000, 1_000_000, 4]) // the run's reported window, not the 200k guess

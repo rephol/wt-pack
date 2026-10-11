@@ -53,6 +53,6 @@ export function headlessInfo(r, { key, state, project = null, usage = null } = {
       plugins: arr(r.plugins), sessionId: r.session, commands: init ? arr(init.slash_commands) : null, skills: init ? arr(init.skills) : null,
       usage, contextWindow: r.context_window, costUsd: r.cost_usd, turns: r.turns, startedAt: r.started, lastActivity: r.last_event,
     }),
-    run: { id: r.id, state: r.state, resumes: r.resumes ?? 0, stuck: r.stuck ?? null, reason: r.reason ?? null, pid: r.pid ?? null },
+    run: { id: r.id, state: r.state, resumes: r.resumes ?? 0, stuck: r.stuck ?? null, reason: r.reason ?? null, pid: r.pid ?? null, driver: r.driver === 'sdk' ? 'sdk' : 'cli' },
   }
 }

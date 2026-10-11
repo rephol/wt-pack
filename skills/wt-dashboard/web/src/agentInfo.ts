@@ -17,6 +17,7 @@ export const contextLabel = (i: AgentInfo) => (i.contextPct == null ? null : i.c
 export function modelRows(i: AgentInfo): [string, string][] {
   const rows: [string, string | null][] = [
     ['Running', modelLabel(i) || null],
+    ['Driver', i.kind === 'headless' ? i.run.driver : null], // a pane has no driver
     ['Permissions', i.permissionMode],
     ['Session', i.sessionId ? i.sessionId.slice(0, 8) : null],
     ['Turns', i.turns != null ? String(i.turns) : null],

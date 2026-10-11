@@ -90,7 +90,7 @@ export interface PaneAgentInfo extends AgentInfoCore {
 }
 export interface HeadlessAgentInfo extends AgentInfoCore {
   kind: 'headless'
-  run: { id: string; state: string; resumes: number; stuck: number | null; reason: string | null; pid: number | null }
+  run: { id: string; state: string; resumes: number; stuck: number | null; reason: string | null; pid: number | null; driver: 'cli' | 'sdk' /* WP-316: what runs it; NULL in the column = cli */ }
 }
 export type AgentInfo = PaneAgentInfo | HeadlessAgentInfo
 export declare const AGENT_INFO_KINDS: readonly ['pane', 'headless']
