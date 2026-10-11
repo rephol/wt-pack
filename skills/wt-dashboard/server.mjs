@@ -47,6 +47,7 @@ import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt-shared/scripts/model-route.mjs'
 import { load as routeDecisions, report as routeReport, estimateSavings as routeSavings } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
+import { compose as composeWatchPrs } from './watchprs-event.mjs'
 import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
@@ -2483,6 +2484,7 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/(ack|cancel))?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
+  if (headers['x-wt-poller'] === '1' && !headers.origin && method === 'POST' && path === '/api/watch-prs/event') return false // WP-337 the background poller (watchPrsEvent checks loopback; a custom header = no cross-site simple request)
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/keepwarm/me/report') return false // WP-318 keepwarm mod via wt-keepwarm (keepwarmApi verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/gate\/(ask|consume)$/.test(path)) return false // WP-332 wt-gate (gateApi checks the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/messages(\/[^/]+\/ack)?$/.test(path)) return false // WP-257: handoff.sh records, the target acks by id (roomAuthor verifies the pane)
@@ -2492,7 +2494,15 @@ export function needsSession(method, path, headers) {
 // WP-242: a per-process secret only the server's own handoff.sh children get (runHandoff env), so a Dispatch (no pane id)
 // can queue its wt-message instead of pasting it. Accepted for POST /api/deliveries only, wt-message text only.
 const SERVER_TOKEN = randomBytes(24).toString('hex')
-const serverTokenOk = (h) => { const a = Buffer.from(String(h ?? '')), b = Buffer.from(SERVER_TOKEN); return a.length === b.length && timingSafeEqual(a, b) }
+const same = (x, y) => { const a = Buffer.from(String(x ?? '')), b = Buffer.from(y); return a.length === b.length && timingSafeEqual(a, b) }
+// WP-337: 'user' is the dashboard's own voice. Only the relays of a cookie-authenticated user action (the Inbox gate answer, a typed
+// reply) run handoff.sh with RELAY_TOKEN; every other server child has SERVER_TOKEN, which may not stamp from=user.
+// Neither token is ever written to disk or handed to a pane: panes cannot read a process's environment.
+const RELAY_TOKEN = randomBytes(24).toString('hex')
+const relayTokenOk = (h) => same(h, RELAY_TOKEN)
+const serverTokenOk = (h) => same(h, SERVER_TOKEN) || relayTokenOk(h)
+export const tokensForTest = { server: SERVER_TOKEN, relay: RELAY_TOKEN } // in-process only (the tests import server.mjs); never served
+export const userVoiceDenied = (req, sender) => sender === 'user' && req.headers['x-wt-server'] !== undefined && !relayTokenOk(req.headers['x-wt-server'])
 
 // ---- local ticket boards (tickets.mjs) ----
 // A ticket entering Ready on an 'Auto' board prompts that project's orchestrator agent, batched per minute (WP-39).
@@ -2637,10 +2647,10 @@ const asks = new Asks({
   },
   broadcast: broadcastEvent,
   deliver: async (pane, text) => {
-    const paste = () => runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })(['--reply', pane, '--from', 'user'], text, process.cwd())
+    const paste = () => runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: RELAY_TOKEN })(['--reply', pane, '--from', 'user'], text, process.cwd())
     if (!deliveries.live(pane)) return paste()
     // Wrap exactly as handoff.sh --reply does, so the mod submits the same kind=reply message.
-    const msg = await runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })(['--reply', pane, '--from', 'user', '--dry-run'], text, process.cwd()).then((o) => o.split('\nsend: ')[1]?.trim())
+    const msg = await runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: RELAY_TOKEN })(['--reply', pane, '--from', 'user', '--dry-run'], text, process.cwd()).then((o) => o.split('\nsend: ')[1]?.trim())
     return msg ? deliver({ id: pane }, msg, paste) : paste()
   },
 })
@@ -2884,6 +2894,7 @@ async function deliveriesApi(req, res, url, parts) {
     const pane = await canonicalPane(String(b.pane ?? ''))
     if (!pane) return send(res, 404, { error: `unknown pane ${b.pane}` })
     let text = String(b.text ?? ''), env = null
+    if (userVoiceDenied(req, envelopeOf(text)?.sender)) return send(res, 403, { error: "from=user is reserved for the dashboard's own relays (WP-337)" })
     if (author.kind === 'agent') {
       // WP-328: a pane sends fields, the server builds the envelope and stamps `from=` with the verified sender.
       if (b.text !== undefined) return send(res, 400, { error: 'send fields (kind, body), not an envelope (WP-328)' })
@@ -2998,6 +3009,7 @@ async function messagesApi(req, res, url, parts) {
   const target = await canonicalPane(String(b.target ?? '')).catch(() => null)
   if (!target) return send(res, 404, { error: `unknown pane ${b.target}` })
   const env = envelopeOf(String(b.body ?? ''))
+  if (userVoiceDenied(req, env?.sender ?? b.sender)) return send(res, 403, { error: "from=user is reserved for the dashboard's own relays (WP-337)" })
   const r = messages.record({ id: env?.id ?? b.id, sender: env?.sender ?? b.sender, target, kind: env?.kind ?? b.kind, ticket: env?.ticket ?? b.ticket ?? null, requestId: b.requestId ?? null, body: String(b.body ?? ''), state: b.state === 'delivered' ? 'delivered' : 'queued' })
   broadcastEvent('messages', { target })
   return send(res, 200, { id: r.row.id, state: r.row.state, duplicate: r.duplicate })
@@ -3688,6 +3700,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'watch-prs' && parts[2] === 'event') return await watchPrsEvent(req, res).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'keepwarm') return await keepwarmApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/teams' || url.pathname.startsWith('/api/teams/')) return await teamsApi(req, res, url.pathname.split('/').filter(Boolean).slice(0, 5)).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -3860,6 +3873,24 @@ const server = http.createServer(async (req, res) => {
       send(res, 500, { error: String(e.message ?? e) })
     }
   })
+// WP-337: wt-watch-prs's launchd poller has no pane and is no child of this server, so it cannot carry a credential (a token file would
+// be readable by every pane). It posts STRUCTURED fields ({pane, event, repo, pr, sha, …}); watchprs-event.mjs checks each against a
+// strict pattern and the SERVER writes the sentence from a fixed template, so no caller can put text in a message that arrives as
+// VERIFIED kind=system from=wt-watch-prs. Never a sender, kind or free text from the caller. Residual: any local process can still
+// post a well-formed event (ids only) to a local agent pane.
+async function watchPrsEvent(req, res) {
+  if (!/^127\.0\.0\.1:\d+$/.test(req.headers.host ?? '') || !/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress ?? '')) return send(res, 403, { error: 'loopback only' })
+  if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
+  const { pane, ...fields } = JSON.parse((await body(req)) || '{}')
+  const msg = wrap({ kind: 'system', from: 'wt-watch-prs' }, composeWatchPrs(fields)) // throws a 400 for anything off the templates
+  const id = await canonicalPane(String(pane ?? '')).catch(() => null)
+  const a = id && (await agents()).find((x) => x.local && x.id === id)
+  if (!a) return send(res, 404, { error: `unknown pane ${pane}` })
+  const m = await machineBy(a.machine)
+  const how = await deliver(a, msg, () => promptOn(herdrOn, m, a.id, msg, { confirm: true }))
+  store.delete('agents:local')
+  return send(res, 200, { ok: true, delivery: how })
+}
 // ---- keepwarm (WP-318): Settings › Keepwarm; the wt-mods keepwarm mod reads its config and reports pings here ----
 const KW_FILE = join(DATA, 'keepwarm.json')
 const keepwarm = new Keepwarm()
