@@ -207,6 +207,9 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     routing, see Model routing), registered by the plugin's one module `hooks/register.ts`. They need a Claude Code
     build with mods. Tests: `skills/wt-mods/scripts/test` (runs `claude plugin test .` and ignores the dashboard web
     tests that runner cannot load).
+  - **Context warning (WP-282):** at the end of a main-loop turn the mod reads `$.session.usage()` and toasts at 80% and 90% context used
+    (once per level, re-armed when the context drops, e.g. after `/compact`) to suggest finishing and continuing in a fresh agent. It reports
+    no tokens itself: the Overview usage view already re-reads each live session's transcript (every 20 s), so live sessions are covered.
   - Scripts and the strings sent to agents name sibling skills by resolved path, not `~/.claude/skills`. A path
     guard test (`wt-shared/scripts/paths.test.mjs`) keeps it that way.
   - `./setup doctor` fails when more than one `wt-pack@…` plugin is loaded (hooks and mods would run twice) or an
