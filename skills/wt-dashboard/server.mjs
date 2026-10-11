@@ -483,6 +483,14 @@ export function bestPlanUsage(now = Date.now(), maxAgeMs = 10 * 60_000) {
 // WP-336: the Overview tile / Settings › Usage / alerts read the freshest of headless event, pane footer, cache file.
 const limitsNow = async () => pickLimits(await readLimits(USAGE_FILE), bestPlanUsage())
 export const planUsageSnapshot = bestPlanUsage
+// WP-339: the sidebar row reads the same pick as the tile (/api/health.planUsage). It used the cache file alone, so a
+// day-old file hid the sidebar while a fresh pane footer filled the tile.
+export function planUsageFromLimits(l, now = Date.now()) {
+  if (!l || l.stale || l.session == null || l.weekly == null) return null
+  const session = l.sessionResetAt && fmtCountdown(Date.parse(l.sessionResetAt) - now)
+  const weekly = l.weeklyResetAt && fmtCountdown(Date.parse(l.weeklyResetAt) - now)
+  return session && weekly ? { session: { pct: l.session, reset: session }, weekly: { pct: l.weekly, reset: weekly }, at: now } : null
+}
 // Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
 const roleStore = new RoleStore(DATA)
 // Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
@@ -1762,9 +1770,6 @@ const freshenWeb = freshener({
 
 async function health() {
   const dist = await stat(join(DIST, 'index.html')).catch(() => null)
-  // WP-179 follow-up: the cache file wins whenever it's fresh (one account-wide number); pane parsing only
-  // fills in when the file itself is missing, never averaged or alternated with it.
-  const fileUsage = await planUsageFromFile()
   return {
     ok: true, app: 'wt-dashboard', runtime: RUNTIME, pid: process.pid, startedAt: STARTED_AT,
     managedBy: MANAGED_BY,
@@ -1772,7 +1777,7 @@ async function health() {
     webStale: selfBuild() ? await webStale(WEB) : null, // null: not this server's job (bundled app / custom dist)
     sources: { ...SOURCES, linear: { ...SOURCES.linear, enabled: Boolean(cfg.get('LINEAR_API_KEY')) } },
     jev: await jev(), // outside `sources`: Jev being down doesn't degrade this server
-    planUsage: fileUsage === undefined ? planUsageSnapshot() : fileUsage,
+    planUsage: planUsageFromLimits(await limitsNow()),
   }
 }
 
