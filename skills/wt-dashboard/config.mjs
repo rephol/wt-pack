@@ -20,6 +20,7 @@ export const KEYS = {
   WT_LINEAR_TEAMS: { list: ',', label: 'Linear teams', restart: true },
   // Read by the shell scripts too (wt-shared/scripts/mcp-mode.sh): lean | full (default).
   WT_NUDGE: { oneOf: ['on', 'off'], label: 'Nudge handed-off agents whose card is not in review' }, // WP-272: off = no "continue" line
+  WT_GATE: { oneOf: ['ask', 'off'], default: 'ask', label: 'Ask before push, merge, delete and send-out actions' }, // WP-332: off = agents act unasked, as before
   WT_MESSAGE_RESEND: { oneOf: ['on', 'off'], label: 'Resend unacknowledged messages' }, // WP-263: off = the sweep only flags, never re-types
   WT_PANE_KEY_STRICT: { oneOf: ['0', '1'], label: 'Refuse agent panes that have no pane key (WP-327; 1 once every agent is respawned)' },
   WT_AGENTS_MCP: { oneOf: ['full', 'lean'], label: 'Lean agent MCP' },

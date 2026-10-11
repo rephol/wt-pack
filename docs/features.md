@@ -469,6 +469,16 @@ Chat rooms shared by you and agents.
   instructions. The Dispatch loop hands a head to a reviewer as a `handoff` (a pane may send handoff/reply only), so it is
   recorded and verified; the background poller sends its `kind=system` events with neither a pane nor the server token, so they
   arrive UNVERIFIED (the agent asks you before acting) until it gets a credential of its own.
+  **Destructive-action gate (WP-332):** `git push`/`merge`, `gh pr approve|merge|close`, deleting branches, worktrees or files
+  outside the task's worktree (scratch in `/tmp` is fine), and sending files or secrets off the machine (`curl --data @file`,
+  `scp`/`rsync` to a host, secrets in a URL) need your OK. A wt-mods `tool.call` guard asks the `wt-gate` CLI, which allows the
+  command when the prompt this turn came from was typed by you, or was a *verified* handoff/dispatch/routine from the
+  orchestrator or the server, or a *verified reply* to an orchestrator from the card's current assignee on a ticket that orchestrator handed off (the dashboard checks all three against its records) (the hook leaves a per-prompt record in `~/.cache/wt-memory/turn-<pane>.json`; a missing or stale
+  one counts as unverified). Otherwise the agent is told no, and an Inbox ask "<agent> wants to git push: …" appears with
+  *Allow once* / *Deny*; *Allow once* lets the agent's next identical command through for 10 minutes, once. Settings →
+  *Ask before push, merge, delete and send-out actions* (`WT_GATE`, default `ask`; `off` restores the old behaviour). It is a
+  pattern list, not a shell parser: obfuscated shell (`sh -c "$(…)"`, a script that pushes itself) and other tools (`gh api -X
+  PUT …/merge`) are not caught, and a gate that cannot run lets the command through. Merge order: server (restart) → plugin.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
   - Hops before a human reply — **3**; then the room pauses "waiting for a human" until you post.

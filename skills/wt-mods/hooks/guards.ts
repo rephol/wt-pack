@@ -60,7 +60,18 @@ export const guard = (cmd: string, here = true, main = here): string | null => {
 // 10 = a wt-pack worktree, 0 = the main checkout.
 const WHERE = 'test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude-plugin/marketplace.json" || exit 1; [ "$(git rev-parse --git-dir)" = "$(git rev-parse --git-common-dir)" ] && exit 0; exit 10'
 
-export const registerGuards = (on: Parameters<Register>[0]) => {
+// WP-332: a command that might push, merge, delete outside the worktree or send files/secrets out is checked against the turn's
+// origin by `wt-gate` (the policy is wt-shared/scripts/gate.mjs; the mod has no Node and no env, so it asks the CLI). Cheap prefilter
+// first: only a command that could be gated pays for the process.
+const MAYBE_GATED = /\bgit\b[^|;&\n]*\b(push|merge|branch|worktree)\b|\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+const gateDeny = (stdout: string) => {
+  let g: { action?: string; asked?: boolean } = {}
+  try { g = JSON.parse(stdout) } catch { /* the text below still denies */ }
+  return `wt-pack gate: ${g.action ?? 'this action'} needs the user's OK (this turn was not typed by the user or a verified handoff/dispatch/routine from the orchestrator). ` +
+    (g.asked ? 'I asked them in the Inbox; wait for their answer, then retry the same command. Do not retry before it arrives.' : 'The dashboard could not be reached to ask; ask the user in chat and wait.')
+}
+
+export const registerGuards = (on: Parameters<Register>[0], skills: (root: string) => string) => {
   let where: Promise<number> | undefined // ponytail: once per session, keyed on the session's cwd, not a `cd` in the command
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     let deny = guard(e.command, false, false)
@@ -68,6 +79,11 @@ export const registerGuards = (on: Parameters<Register>[0]) => {
       where ??= $.process.run(['sh', '-c', WHERE], { timeoutMs: 3000 }).then((r) => r.exitCode, () => 1)
       const at = await where
       if (at !== 1) deny = guard(e.command, true, at === 0)
+    }
+    if (!deny && MAYBE_GATED.test(e.command.replace(/"[^"]*"|'[^']*'/g, '""'))) { // words inside a message are not subcommands
+      // exit 3 = gated; anything else (allowed, spawn error, timeout) lets it through: a broken gate must not wedge every agent
+      const r = await $.process.run([`${skills($.plugin.root)}/wt-shared/scripts/wt-gate`, 'check', '--', e.command], { timeoutMs: 8000 }).catch(() => undefined)
+      if (r && r.exitCode === 3) deny = gateDeny(r.stdout)
     }
     return deny ? { deny } : next(e)
   })

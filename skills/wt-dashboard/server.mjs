@@ -19,6 +19,7 @@ import { guardMove } from './gatemove.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
+import { Gate, GRANT_MS, replyMayAct } from './gate.mjs'
 import { Pins } from './pins.mjs'
 import { Headless, ROLE as ROLE_RE, SEND_FILE, defaultName, enabledPlugins } from './headless.mjs'
 import { paneInfo, headlessInfo } from './agentinfo.mjs'
@@ -2480,6 +2481,7 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/(ack|cancel))?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/gate\/(ask|consume)$/.test(path)) return false // WP-332 wt-gate (gateApi checks the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/messages(\/[^/]+\/ack)?$/.test(path)) return false // WP-257: handoff.sh records, the target acks by id (roomAuthor verifies the pane)
   if (headers['x-wt-server'] && method === 'POST' && (path === '/api/deliveries' || path === '/api/messages' || /^\/api\/deliveries\/[^/]+\/cancel$/.test(path))) return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
   return true
@@ -2620,8 +2622,10 @@ const messageSweep = async () => {
   })
 }
 setInterval(() => messageSweep().catch((e) => console.error('messages:', e.message)), 30_000).unref()
+const gate = new Gate({ dir: DATA })
 const asks = new Asks({
   dir: DATA,
+  onGate: (a) => gate.grant(a.pane, a.gate.hash), // WP-332: "Allow once" on a gate card
   notify: (draft) => inbox.add(draft),
   resolveNotify: async (key) => {
     await inbox.load()
@@ -2786,6 +2790,26 @@ async function ticketsApi(req, res, url, parts) {
   if (req.method === 'POST' && parts[3] === 'claim') return send(res, 200, await tickets.claim(id, me(), b.force === true))
   send(res, 404, { error: 'not found' })
 }
+// WP-332 destructive-action gate, called by wt-gate (an agent pane, key-authenticated):
+//   POST /api/gate/ask {hash, action, cmd} → an Inbox ask "<agent> wants to <action>" (one open per pane+hash), answer Allow once | Deny
+//   POST /api/gate/consume {hash}          → {granted}: a live one-shot grant for this pane and command, used up by this call
+// There is no route that creates a grant: only the user answering the ask does (Asks.answer → onGate).
+async function gateApi(req, res, url, parts) {
+  const author = await roomAuthor(req)
+  if (author.kind !== 'agent' || req.method !== 'POST') return send(res, 403, { error: 'an agent pane asks (x-herdr-pane)' })
+  if (!['ask', 'consume'].includes(parts[2])) return send(res, 404, { error: 'not found' }) // in particular: no route mints a grant
+  const b = JSON.parse((await body(req)) || '{}')
+  const hash = String(b.hash ?? '')
+  if (!/^[0-9a-f]{16}$/.test(hash)) return send(res, 400, { error: 'hash: 16 hex chars' })
+  if (parts[2] === 'consume') return send(res, 200, { granted: gate.consume(author.pane, hash) })
+  const open = (await asks.list(undefined, true)).find((a) => a.gate && a.pane === author.pane && a.gate.hash === hash && Date.now() - Date.parse(a.created) < GRANT_MS)
+  if (open) return send(res, 200, { id: open.id, deduped: true })
+  const clip = (t, n) => String(t ?? '').replace(/\s+/g, ' ').slice(0, n)
+  const project = (await agents()).find((a) => a.key === author.key)?.project ?? null
+  const q = { header: 'Gate', question: `${author.name} wants to ${clip(b.action, 60)}: ${clip(b.cmd, 120)}`, options: [{ label: 'Allow once', description: 'The agent may run this exact command once, in the next 10 minutes' }, { label: 'Deny' }], multiSelect: false }
+  const a = await asks.create({ questions: [q] }, { ...author, project }, { gate: { hash } })
+  return send(res, 200, { id: a.id, deduped: false })
+}
 // WP-164 wt-ask: POST /api/asks (agent), GET /api/asks?room=&open=1, POST /api/asks/:id/answer (user),
 // POST /api/asks/:id/resolve (the asking pane).
 async function asksApi(req, res, url, parts) {
@@ -2865,7 +2889,10 @@ async function deliveriesApi(req, res, url, parts) {
       let inner = String(b.body ?? '') // wrap() defuses inner tags
       if (/^\/\S/.test(inner)) inner = `\u200b${inner}`
       if (b.goal === true) inner = `/goal ${inner}`
-      text = wrap({ kind: b.kind, from: author.name, ticket: b.ticket, pr: b.pr, sha: b.sha }, inner)
+      // WP-332: a reply carries the ticket its sender works on (the server's own view: the sender's task/ticket token), so the receiver's
+      // gate can tell a report on a handed-off card from any other agent's reply. The token is only a claim: verify re-checks it against the board.
+      const ticket = b.ticket ?? (b.kind === 'reply' ? tagTicket((await agents().catch(() => [])).find((x) => x.local && x.id === author.pane) ?? {}) : null)
+      text = wrap({ kind: b.kind, from: author.name, ticket, pr: b.pr, sha: b.sha }, inner)
       env = envelopeOf(text)
     }
     const live = deliveries.live(pane) && !text.startsWith('/') && /^\s*<(wt|room)-message[ >]/.test(text)
@@ -2921,7 +2948,19 @@ async function messagesApi(req, res, url, parts) {
         await inbox.add({ kind: 'server', key, title: `Unverified message to ${name}`, body: `Claimed ${String(kind).slice(0, 20)} from "${String(from).slice(0, 60)}": ${reason}. The agent treats it as pasted text and asks you before acting.`, target: {} })
       return send(res, 200, { verified: false, reason })
     }
-    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, kind: row.kind, ticket: row.ticket })
+    // WP-332: who the sender is, for the destructive-action gate: a server-sent row is 'server'; a pane-sent one is its sender's role.
+    const sp = row.sender_pane ? (await agents().catch(() => [])).find((x) => x.local && x.id === row.sender_pane) : null
+    // WP-332 (c): a verified REPLY to an orchestrator is as good as the user's word when it is the current assignee's report on a
+    // ticket this orchestrator handed off. All three facts come from the server's records, never from the message text.
+    let replyAllowed = false
+    if (!rid && row.kind === 'reply' && row.ticket && row.sender_pane) {
+      const me = (await agents().catch(() => [])).find((x) => x.local && x.id === author.pane)
+      const handed = messages.db.prepare("SELECT 1 FROM wt_messages WHERE ticket = ? AND kind IN ('handoff', 'dispatch') AND sender_pane = ? LIMIT 1").get(row.ticket, author.pane)
+      const card = await tickets.get(row.ticket).catch(() => null)
+      const assignee = card?.assignee?.pane ? await canonicalPane(card.assignee.pane).catch(() => null) : null
+      replyAllowed = replyMayAct({ receiverRole: me?.tags?.role || me?.pool, handedByReceiver: !!handed, assigneePane: assignee, senderPane: row.sender_pane })
+    }
+    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket, replyAllowed })
   }
   if (req.method === 'GET') {
     if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
@@ -3627,6 +3666,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'messages') return await messagesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'deliveries') return await deliveriesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'asks') return await asksApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'gate') return await gateApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))

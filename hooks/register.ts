@@ -33,7 +33,7 @@ export const register: Register = (on, options) => {
   const mods = [commandsHooks(), deliverHooks(skills), routingHooks(routing, skills), contextHooks()]
   registerCommands(on, skills)
   registerRouting(on, routing, skills)
-  registerGuards(on)
+  registerGuards(on, skills)
   registerAsk(on, options, skills)
   on('session.start', ($, e, next) => runShared(ctx($), mods, 'session.start', e, next))
   on('turn.start', ($, e, next) => runShared(ctx($), mods, 'turn.start', e, next))

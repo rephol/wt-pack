@@ -232,7 +232,8 @@ export const MIGRATIONS = [
   { sql: `ALTER TABLE headless_runs ADD COLUMN spawner TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
   // WP-329: the sender's canonical pane, for a message an agent pane sent (NULL = the server sent it): the verify route returns it as the reply target.
   { sql: `ALTER TABLE wt_messages ADD COLUMN sender_pane TEXT;`, legacy: () => [], import: () => {}, export: () => {} },  // WP-330: a per-run secret (env WT_RUN_KEY) that lets the run's own hook verify the messages addressed to it; never returned by a GET.
-  { sql: `ALTER TABLE headless_runs ADD COLUMN run_key TEXT;`, legacy: () => [], import: () => {}, export: () => {} },
+  { sql: `ALTER TABLE headless_runs ADD COLUMN run_key TEXT;`, legacy: () => [], import: () => {}, export: () => {} },  // WP-332: one-shot grants the user's "Allow once" on a gate card mints for (pane, command hash); consumed by the agent's retry.
+  { sql: `CREATE TABLE wt_gate_grants (pane TEXT NOT NULL, hash TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY (pane, hash));`, legacy: () => [], import: () => {}, export: () => {} },
 ]
 
 // Move DATA/<name> into the backup dir; a directory that already exists there is merged (resumed move).
