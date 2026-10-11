@@ -282,16 +282,36 @@ test('WP-210: --reply queues through the dashboard when the target mod is live, 
   const stub = (body) => { writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${body}'\n`); chmodSync(join(curlBin, 'curl'), 0o755) }
   const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
   const reply = () => { const before = readFileSync(log, 'utf8').length; const out = execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', 'hi'], { encoding: 'utf8', env }); return [out, readFileSync(log, 'utf8').slice(before)] }
-  stub('{"queued":true,"id":"x"}')
+  const T = '<wt-message id=srv210 kind=reply from="s">hi</wt-message>'
+  stub(JSON.stringify({ queued: true, id: 'x', text: T }))
   let [out, calls] = reply()
   assert.match(out, /replied wW:p7 \(queued\)/)
   assert.doesNotMatch(calls, /agent prompt wW:p7/)
-  stub('{"queued":false}')
+  stub(JSON.stringify({ queued: false, text: T }))
   ;[out, calls] = reply()
-  assert.match(calls, /agent prompt wW:p7 .*<wt-message/)
-  writeFileSync(join(curlBin, 'curl'), '#!/bin/sh\nexit 7\n') // dashboard down
-  ;[out, calls] = reply()
-  assert.match(calls, /agent prompt wW:p7 /)
+  assert.match(calls, /agent prompt wW:p7 .*id=srv210/)
+})
+
+// WP-340: a pane sender never wraps locally. A failed post is retried, then fails loudly with nothing pasted;
+// a retry that succeeds pastes the dashboard's recorded envelope; a refusal is not retried.
+test('WP-340: pane_post retries, then fails loudly without a local wrap; a refusal is not retried; a retry sends the recorded text', () => {
+  const curlBin = join(tmp, 'curlbin340'), count = join(tmp, 'curl340.count'); mkdirSync(curlBin, { recursive: true })
+  const T = '<wt-message id=rec340 kind=reply from="s">hi</wt-message>'
+  const stub = (script) => { writeFileSync(count, ''); writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat >/dev/null\necho x >> ${count}\n${script}\n`); chmodSync(join(curlBin, 'curl'), 0o755) }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5', WT_POST_TRIES: '3', WT_POST_RETRY_S: '0' }
+  const go = (extra = []) => { const before = readFileSync(log, 'utf8').length; const r = spawnSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', ...extra, 'hi'], { encoding: 'utf8', env }); return [r, readFileSync(log, 'utf8').slice(before)] }
+  const tries = () => readFileSync(count, 'utf8').trim().split('\n').filter(Boolean).length
+  stub('exit 28') // timeout / down: 3 tries, then loud, nothing pasted
+  let [r, calls] = go(['--request-id', 'rid340'])
+  assert.equal(r.status, 1); assert.equal(tries(), 3)
+  assert.match(r.stderr, /did not record this message[\s\S]*retry with the same --request-id \(rid340\)/)
+  assert.doesNotMatch(calls, /agent prompt wW:p7/)
+  ;[r] = go(); assert.match(r.stderr, /pass one on the first try/)
+  stub(`printf '%s' '{"error":"unknown pane"}'`) // the dashboard refused: one try, loud
+  ;[r, calls] = go(); assert.equal(r.status, 1); assert.equal(tries(), 1); assert.match(r.stderr, /unknown pane/); assert.doesNotMatch(calls, /agent prompt/)
+  stub(`[ "$(wc -l < ${count})" -lt 2 ] && exit 28; printf '%s' '${JSON.stringify({ queued: false, text: T })}'`) // first try fails, second answers
+  ;[r, calls] = go(['--request-id', 'rid340']); assert.equal(r.status, 0, r.stderr); assert.equal(tries(), 2)
+  assert.match(calls, /agent prompt wW:p7 .*id=rec340/) // the dashboard's recorded envelope, pasted
 })
 
 test('WP-225: an agent whose task token names an open card, or that is the assignee of one, is not a free candidate', () => {
@@ -357,7 +377,7 @@ test('WP-272: with the target\'s mod live the message is queued first; typed onc
 echo "$*" >> ${curlLog}
 for a in "$@"; do url=$a; done
 case "$url" in
-  */api/deliveries) echo '{"queued":true,"id":"q1"}' ;;
+  */api/deliveries) echo '{"queued":true,"id":"q1","text":"<wt-message id=srv272 kind=handoff from=\\"s\\">x</wt-message>"}' ;;
   */api/deliveries/q1/cancel) echo "{\\"cancelled\\":true}" ;;
   */api/deliveries/q1) echo "{\\"status\\":\\"$(cat ${tmp}/q1-status)\\"}" ;;
   *) echo '{}' ;;
@@ -467,12 +487,12 @@ test('WP-257: --reply records the envelope at /api/messages; --ack posts the sta
   writeFileSync(calls, '')
   writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\necho "$@" >> ${calls}\ncat >> ${calls}\nprintf '%s' '{"queued":true,"id":"m1","state":"acknowledged"}'\n`)
   chmodSync(join(curlBin, 'curl'), 0o755)
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_DELIVER_TOKEN: 'tok' } // a server-token sender records its own envelope (a pane's is recorded by the dashboard)
   execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', 'hi'], { encoding: 'utf8', env })
   const log257 = readFileSync(calls, 'utf8')
   assert.match(log257, /\/api\/messages/)
-  assert.match(log257, /"state": "queued"/)
-  const out = execFileSync(join(here, 'handoff.sh'), ['--ack', 'ab12', '--answered'], { encoding: 'utf8', env })
+  assert.match(log257, /"state": "delivered"/)
+  const out = execFileSync(join(here, 'handoff.sh'), ['--ack', 'ab12', '--answered'], { encoding: 'utf8', env: { ...env, HERDR_PANE_ID: 'wW:p5' } })
   assert.match(out, /m1 acknowledged/)
   assert.match(readFileSync(calls, "utf8"), /"state": "answered"[\s\S]*\/api\/messages\/ab12\/ack/)
   assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--ack', 'a b'], { env, stdio: 'pipe' }), (e) => e.status === 2)
