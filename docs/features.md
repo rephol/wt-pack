@@ -329,6 +329,15 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     recorded pid only; open asks expire) and its log says `resumed_after_restart`. A working turn is told to continue; an
     idle run just gets its process back. It counts against `WT_HEADLESS_RESUMES` and the cap; with no session or no resumes
     left it is marked `failed` with the reason. Runs you stopped or removed stay ended.
+- **SDK driver (WP-315, opt-in):** `WT_HEADLESS_DRIVER=sdk` (default `cli`) runs each headless turn through the Claude Agent SDK instead of
+  `claude -p`. Same features and API (queue, asks, permissions, resume, plugins, `send_file`, roles); it uses your own `claude` binary
+  (`WT_HEADLESS_CMD`), login, settings and plugins, and a run's context usage comes from the SDK (`getContextUsage()`) rather than the
+  transcript. `./setup` installs its dependencies (~54 MB, `skills/wt-dashboard/headless-sdk`); without them an sdk run fails at start with
+  `SDK driver not installed: run ./setup`, and nothing silently falls back. A run keeps the driver it started with, also on resume. To
+  switch back, remove the variable (or set `cli`) and restart the server. `./setup doctor` reports whether the dependencies are installed.
+  *Terms:* this is for personal use on your own Claude login. The dashboard never offers a login and never holds or relays a credential.
+  If you run wt-pack for other people, use API-key authentication, as Anthropic's Agent SDK terms require
+  (<https://code.claude.com/docs/en/legal-and-compliance>).
 - **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
   again with `--resume`.
 - **Model and `/` picker (WP-300):** the stream-json `init` event's `model`, `slash_commands` and `skills` are stored on the run. The
