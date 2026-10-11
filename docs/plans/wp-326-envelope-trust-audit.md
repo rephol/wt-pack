@@ -52,7 +52,7 @@ forgery of the whole envelope (findings 1 to 5, 7, 8) and (b) third-party text r
   - **Q4 (a):** pane callers may send only `handoff` and `reply`, and the server stamps `from=`.
   - **Q6 (a):** the user sees nothing unless verification fails; then an Inbox card "unverified message to <agent>".
   - **Q7:** the peer wrapper stays unmatched.
-- **With the user (via the orchestrator); build these as settings with these defaults:**
+- **Decided by the user (2026-10-11): all three as recommended. They are still built as settings with these values as the defaults:**
   - **Q1:** an unverified envelope is treated as user-supplied text. The agent takes no outward action and asks the user in chat.
   - **Q2:** a fixed list of outward or irreversible actions (git push and merge, `gh pr approve/merge/close`, deleting branches,
     worktrees or files outside the task's worktree, sending files or secrets off the machine) needs the user. The exception is a
@@ -83,5 +83,5 @@ for every pack-wrapped body; S7 only widens it to lookalikes.
 ## Notes
 
 - S1 to S3 are one dependency chain: S2 assumes S1's identity, and S3 is meaningful only after S2. S4 to S8 are independent.
-- Process gap seen during this audit: the product-planner's `--reply` to the tech lead never arrived. Its pane shows the answer was
-  sent, but no message reached w4H:p3, and its card token still reads WP-318. Worth a look under WP-321/messages; not filed here.
+- The product-planner's reply arrived late, after this doc was drafted from the answer shown in its pane. Its answers are the same
+  as above.
