@@ -44,3 +44,9 @@ test('paneInfo and headlessInfo share one core; unknowns are null, never invente
   const bare = headlessInfo({ id: 'hl-2', name: 'n', role: 'worker', cwd: '/r', state: 'queued' })
   assert.deepEqual([bare.model, bare.plugins, bare.commands, bare.contextPct, bare.costUsd, bare.turns], [null, null, null, null, null, null])
 })
+
+test('paneInfo carries the claude pid from the cross-check; null when unknown (WP-324)', () => {
+  const a = { key: 'k', id: 'p', machine: 'm', local: true, name: 'n', pool: 'worker', status: 'idle' }
+  assert.equal(paneInfo(a, null, 4242).pane.pid, 4242)
+  assert.equal(paneInfo(a).pane.pid, null)
+})

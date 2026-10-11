@@ -540,10 +540,20 @@ async function claudeExited(m, a) {
   fg.set(a.pane_id, { seq: a.state_change_seq, at: Date.now(), exited })
   return exited
 }
+// WP-324: `claude agents --json` cross-check, sessionId -> live claude pid; best effort ({} when claude is absent), cached 3s so
+// the per-pane loop shares one spawn. A pane whose session is missing here is a herdr ghost (pid null).
+let pidCache = { at: 0, v: {} }
+const claudePids = async () => {
+  if (Date.now() - pidCache.at < 3000) return pidCache.v
+  const v = await run('claude', ['agents', '--json'], undefined, 5000, { HERDR_PANE_ID: '', HERDR_ENV: '' }).then((o) => Object.fromEntries(JSON.parse(o).map((x) => [x.sessionId, x.pid])), () => ({}))
+  pidCache = { at: Date.now(), v }
+  return v
+}
 // ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
 async function listAgents(m) {
   const { result } = JSON.parse(await herdrOn(m, 'agent', 'list'))
   const meta = await paneMeta(m).catch(() => ({ ws: new Map(), tokens: new Map() }))
+  const pids = m.local ? await claudePids() : {}
   const readEvery = m.local ? 15_000 : 30_000
   const out = []
   if (m.local) for (const p of fg.keys()) if (!result.agents.some((a) => a.pane_id === p)) fg.delete(p)
@@ -609,7 +619,7 @@ async function listAgents(m) {
       session,
       model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id), settings: m.local ? claudeSettings() : null }),
     }
-    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null) // WP-313: the one typed shape, additive to the fields above
+    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null) // WP-313: the one typed shape, additive to the fields above
     out.push(row)
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
