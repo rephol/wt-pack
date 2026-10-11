@@ -2926,7 +2926,7 @@ export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), ca
   } catch { return null }
 }
 // WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
-// POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS.
+// POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS / _DRIVER (cli|sdk, read by Headless).
 let headless
 const hl = () => headless ??= new Headless({
   db: openDb(join(DATA, 'wt.db')), cmd: process.env.WT_HEADLESS_CMD || 'claude',
