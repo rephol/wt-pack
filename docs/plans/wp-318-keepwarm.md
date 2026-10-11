@@ -53,6 +53,33 @@ transcript. If forks do not reuse the cache, or a read costs like fresh input ag
 orchestrator decides drop vs tighter budget.** Also confirm, from the binary/engine, whether a second plugin's hook
 on `turn.complete` (cache-tax beside wt-pack) is refused or chained — note only, we build inside wt-mods.
 
+## Unit 0 — results (measured 2026-10-11, sonnet, one scratch session, ~160k-token context)
+
+Source of every number is named. Harness: `claude -p` stream-json driven by a script (a fork-equivalent ping on the same session), not the `$.model.fork` mod API.
+
+**Cache reuse across idle gaps** (usage of each ping's assistant message, `forks.json`):
+
+| ping | idle gap | cache read | cache write | verdict |
+|---|---|---|---|---|
+| 0 | 1 min | 141,086 | 19,036 | warm |
+| 1 | 49.3 min | 141,086 | 19,036 | warm |
+| 2 | 49.6 min | 141,086 | 19,036 | warm |
+| 3 | 49.9 min | 141,086 | 19,036 | warm |
+| 4 (cold control) | 65.3 min | 10,988 | 149,134 | **cold: the whole context re-written** |
+
+- A ping every ~50 min keeps the 1 h cache alive indefinitely (4 pings, ~150 min, identical reads). A > 60 min gap loses it and re-writes everything (149k tokens).
+- **The "13% write" is a constant, not a leak**: 19,036 tokens written on every warm ping are the same tail each time (the fork's own new turn does not extend the cached prefix). `stopWritePct` default 10 would therefore stop a perfectly healthy keepwarm. Use "writes >= 50% of reads" (a cold ping writes ~1,357% of reads) or compare against the previous ping (a *change* in cache_read, or read < 50% of the context).
+
+**Limit cost** (source: `rate_limit_event.rate_limit_info.unifiedWindows.*.utilization` in stream-json, resolution 0.01; the earlier `ccstatusline/usage.json` numbers were a day stale and are discarded). Burst in a fresh scratch dir (HERDR_* stripped): 1 cold send of ~160k tokens, then 10 warm pings back to back (each reads ~166k):
+- the cold send moved five_hour 0.13 → 0.14 (and the next event, after turn 2, still 0.14); seven_day 0.22 → 0.22. The event is only emitted when a window moves, and **ten warm pings emitted none**: ten 166k-token reads cost < 0.01 of the five-hour window in total, i.e. under ~0.1% each — below the resolution.
+- Cost proxy (`total_cost_usd`, the session's own API-price estimate, not the plan limit): cold send $0.70; each warm ping +$0.017 (**~2.5% of a cold send**). A cold re-send after a lapsed cache costs ~40 warm pings.
+- Conclusion: **reads are cheap against the limits** (they do not count like fresh input), so the idea holds; the budget is about total pings, not limit pressure.
+
+**Recommended defaults** (the user already set: daily cap 15 pings, window 1-12 h in 1 h steps, `/wt keepwarm status|off`):
+- ping interval 50 min (floor 5; never above 55); min context 50,000 tokens; window default 3 h; daily cap 15 per agent (a 12 h window at 50 min is 14 pings, so 15 never truncates a window).
+- Stop rules: **zero reads** (cache already cold: stop and mark cold), or **read < 50% of the previous ping's read**; drop the "writes >= 10% of reads" rule. Cost of one lapsed window: one cold re-send (~$0.70 at 160k), about 40 warm pings; at 15 pings/day the worst case is ~$0.26/day per agent in estimate terms.
+- Not measured: `$.model.fork` itself (the real mod path) and a second plugin's `turn.complete` hook; both are Unit 1+ checks.
+
 ## Unit 1 — settings + config CLI (wt-dashboard)
 
 `skills/wt-dashboard/keepwarm.mjs`: `DEFAULTS` and `clean(input)` (housekeeping's pattern), persisted like housekeeping:
