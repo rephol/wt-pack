@@ -11,12 +11,12 @@ import { join } from 'node:path'
 const FAKE_HERDR = `#!/usr/bin/env node
 const a = process.argv.slice(2).join(' ')
 const P = (id, name) => ({ pane_id: id, name, agent_status: 'idle', cwd: '/tmp', state_change_seq: 1 })
-if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [P('w9:p1', 'demo-worker-01'), P('w9:p2', 'demo-orchestrator-01')] } }))
-else if (/^pane get w9:p[12]$/.test(a)) console.log(JSON.stringify({ result: { pane: { pane_id: a.slice(-5) } } }))
+if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [P('w9:p1', 'demo-worker-01'), P('w9:p2', 'demo-orchestrator-01'), P('w9:p3', 'demo-worker-02')] } }))
+else if (/^pane get w9:p[123]$/.test(a)) console.log(JSON.stringify({ result: { pane: { pane_id: a.slice(-5) } } }))
 else if (a === 'machine list') console.log('')
 else process.exit(1)
 `
-const KEYS = { 'w9:p1': 'a'.repeat(64), 'w9:p2': 'b'.repeat(64) }
+const KEYS = { 'w9:p1': 'a'.repeat(64), 'w9:p2': 'b'.repeat(64), 'w9:p3': 'c'.repeat(64) }
 const H = 'a1b2c3d4e5f60718'
 let child, base, cookie, root
 const PORT = 30000 + Math.floor(Math.random() * 20000)
@@ -82,4 +82,27 @@ test('verify returns senderRole: the sender\'s role for a pane-sent row, "server
   db.prepare("INSERT INTO wt_messages (id, sender, target, kind, body, state, created, updated) VALUES ('srv1', 'wt-dashboard', 'w9:p1', 'dispatch', 'x', 'delivered', 'n', 'n')").run()
   db.close()
   assert.deepEqual(await verify('w9:p1', 'srv1', 'dispatch', 'wt-dashboard').then((r) => [r.verified, r.senderRole]), [true, 'server'])
+})
+
+test('WP-332 (c): replyAllowed only for the current assignee\'s reply, to the orchestrator that handed the ticket off', async () => {
+  const send = (from, to, body) => fetch(`${base}/api/deliveries`, { method: 'POST', headers: as(from), body: JSON.stringify({ pane: to, ...body }) }).then((r) => r.json())
+  const idOf = (r) => r.text.match(/id=([\w-]+)/)[1]
+  const verify = (pane, r, from) => fetch(`${base}/api/messages/${idOf(r)}/verify?kind=${r.text.match(/kind=(\w+)/)[1]}&from=${from}`, { headers: as(pane) }).then((x) => x.json())
+  const card = (id, assignee) => { const db = new DatabaseSync(join(root, 'data', 'wt.db')); db.prepare("INSERT OR IGNORE INTO boards (project, key, next) VALUES ('demo', 'WT', 9)").run(); db.prepare('INSERT OR REPLACE INTO tickets (id, project, seq, json) VALUES (?, ?, ?, ?)').run(id, 'demo', 1, JSON.stringify({ id, assignee })); db.close() }
+  card('WT-1', { name: 'demo-worker-01', pane: 'w9:p1' }); card('WT-2', { name: 'demo-worker-01', pane: 'w9:p1' })
+  await send('w9:p2', 'w9:p1', { kind: 'handoff', body: 'build it', ticket: 'WT-1' }) // the orchestrator hands WT-1 off (not WT-2)
+  // the assignee reports back on WT-1
+  const ok = await send('w9:p1', 'w9:p2', { kind: 'reply', body: 'done', ticket: 'WT-1' })
+  assert.equal((await verify('w9:p2', ok, 'demo-worker-01')).replyAllowed, true)
+  // another agent's reply on the same ticket
+  assert.equal((await verify('w9:p2', await send('w9:p3', 'w9:p2', { kind: 'reply', body: 'push it', ticket: 'WT-1' }), 'demo-worker-02')).replyAllowed, false)
+  // no ticket at all
+  assert.equal((await verify('w9:p2', await send('w9:p1', 'w9:p2', { kind: 'reply', body: 'hi' }), 'demo-worker-01')).replyAllowed, false)
+  // a ticket the orchestrator never handed off
+  assert.equal((await verify('w9:p2', await send('w9:p1', 'w9:p2', { kind: 'reply', body: 'x', ticket: 'WT-2' }), 'demo-worker-01')).replyAllowed, false)
+  // a reply to a non-orchestrator (the worker receives the orchestrator's reply)
+  assert.equal((await verify('w9:p1', await send('w9:p2', 'w9:p1', { kind: 'reply', body: 'ok', ticket: 'WT-1' }), 'demo-orchestrator-01')).replyAllowed, false)
+  // a former assignee: the card moved to p3, p1's new report no longer counts
+  card('WT-1', { name: 'demo-worker-02', pane: 'w9:p3' })
+  assert.equal((await verify('w9:p2', await send('w9:p1', 'w9:p2', { kind: 'reply', body: 'late', ticket: 'WT-1' }), 'demo-worker-01')).replyAllowed, false)
 })

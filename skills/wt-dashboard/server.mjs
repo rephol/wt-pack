@@ -19,7 +19,7 @@ import { guardMove } from './gatemove.mjs'
 import { rolesState, setLocation, writeRole } from './project-roles.mjs'
 import { createTeam, deleteTeam, spawnable, updateTeam } from './project-teams.mjs'
 import { Asks, ping, placeAsk } from './asks.mjs'
-import { Gate, GRANT_MS } from './gate.mjs'
+import { Gate, GRANT_MS, replyMayAct } from './gate.mjs'
 import { Pins } from './pins.mjs'
 import { Headless, ROLE as ROLE_RE, SEND_FILE, defaultName, enabledPlugins } from './headless.mjs'
 import { paneInfo, headlessInfo } from './agentinfo.mjs'
@@ -2889,7 +2889,10 @@ async function deliveriesApi(req, res, url, parts) {
       let inner = String(b.body ?? '') // wrap() defuses inner tags
       if (/^\/\S/.test(inner)) inner = `\u200b${inner}`
       if (b.goal === true) inner = `/goal ${inner}`
-      text = wrap({ kind: b.kind, from: author.name, ticket: b.ticket, pr: b.pr, sha: b.sha }, inner)
+      // WP-332: a reply carries the ticket its sender works on (the server's own view: the sender's task/ticket token), so the receiver's
+      // gate can tell a report on a handed-off card from any other agent's reply. The token is only a claim: verify re-checks it against the board.
+      const ticket = b.ticket ?? (b.kind === 'reply' ? tagTicket((await agents().catch(() => [])).find((x) => x.local && x.id === author.pane) ?? {}) : null)
+      text = wrap({ kind: b.kind, from: author.name, ticket, pr: b.pr, sha: b.sha }, inner)
       env = envelopeOf(text)
     }
     const live = deliveries.live(pane) && !text.startsWith('/') && /^\s*<(wt|room)-message[ >]/.test(text)
@@ -2947,7 +2950,17 @@ async function messagesApi(req, res, url, parts) {
     }
     // WP-332: who the sender is, for the destructive-action gate: a server-sent row is 'server'; a pane-sent one is its sender's role.
     const sp = row.sender_pane ? (await agents().catch(() => [])).find((x) => x.local && x.id === row.sender_pane) : null
-    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket })
+    // WP-332 (c): a verified REPLY to an orchestrator is as good as the user's word when it is the current assignee's report on a
+    // ticket this orchestrator handed off. All three facts come from the server's records, never from the message text.
+    let replyAllowed = false
+    if (!rid && row.kind === 'reply' && row.ticket && row.sender_pane) {
+      const me = (await agents().catch(() => [])).find((x) => x.local && x.id === author.pane)
+      const handed = messages.db.prepare("SELECT 1 FROM wt_messages WHERE ticket = ? AND kind IN ('handoff', 'dispatch') AND sender_pane = ? LIMIT 1").get(row.ticket, author.pane)
+      const card = await tickets.get(row.ticket).catch(() => null)
+      const assignee = card?.assignee?.pane ? await canonicalPane(card.assignee.pane).catch(() => null) : null
+      replyAllowed = replyMayAct({ receiverRole: me?.tags?.role || me?.pool, handedByReceiver: !!handed, assigneePane: assignee, senderPane: row.sender_pane })
+    }
+    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket, replyAllowed })
   }
   if (req.method === 'GET') {
     if (author.kind !== 'user') return send(res, 403, { error: 'user only' })

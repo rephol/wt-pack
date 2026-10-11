@@ -5,6 +5,10 @@ import { join } from 'node:path'
 import { open } from './store.mjs'
 
 export const GRANT_MS = 10 * 60_000
+// WP-332 (c): may a verified reply act as the user's word for the gate? Receiver is an orchestrator, that orchestrator handed
+// this ticket off, and the reply comes from the card's CURRENT assignee (a former or other agent's reply stays gated).
+export const replyMayAct = ({ receiverRole, handedByReceiver, assigneePane, senderPane }) =>
+  receiverRole === 'orchestrator' && handedByReceiver === true && !!assigneePane && assigneePane === senderPane
 export class Gate {
   constructor({ dir, now = Date.now, log = console.error }) { Object.assign(this, { file: join(dir, 'wt.db'), now, log }) }
   get db() { return open(this.file, { log: this.log }) }
