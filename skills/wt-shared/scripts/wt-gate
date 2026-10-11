@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// wt-gate check -- <command>  (WP-332) — may this agent session run this Bash command now?
+// Exit 0: allow (not gated, WT_GATE=off, the turn is the user's or a verified handoff/dispatch/routine from the orchestrator/server,
+// a one-shot grant matched, or this is not an agent session at all). Exit 3: gated — prints {"action", "asked"} and has posted
+// the Inbox ask. The policy is gate.mjs; the evidence is the per-prompt record inject.mjs writes (~/.cache/wt-memory/turn-<key>.json),
+// and a missing/stale record counts as unverified. Fail-open only where a broken gate would wedge a human (no agent identity).
+import { readFileSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { classify, allowed } from './gate.mjs'
+
+const [sub, dd, ...rest] = process.argv.slice(2)
+if (sub !== 'check' || dd !== '--' || !rest.length) { console.error('usage: wt-gate check -- <command>'); process.exit(2) }
+const cmd = rest.join(' ')
+const key = process.env.HERDR_PANE_ID || process.env.WT_HEADLESS_ID
+if (!key) process.exit(0) // a human's own terminal is never gated
+
+const cwd = process.cwd()
+let root = cwd
+try { root = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 2000 }).trim() } catch { /* not a repo: the cwd is the root */ }
+const hit = classify(cmd, { cwd, root })
+if (!hit) process.exit(0)
+
+const mode = (process.env.WT_GATE ?? (() => {
+  try { return readFileSync(process.env.WT_DASHBOARD_ENV || join(homedir(), '.config', 'wt-dashboard', 'env'), 'utf8').match(/^\s*(?:export\s+)?WT_GATE=["']?(\w+)/m)?.[1] } catch { return undefined }
+})()) ?? 'ask'
+let turn
+try {
+  const f = join(process.env.WT_TURN_DIR || join(homedir(), '.cache', 'wt-memory'), `turn-${key.replace(/[^\w:-]/g, '_')}.json`)
+  if (Date.now() - statSync(f).mtimeMs < 6 * 3600_000) turn = JSON.parse(readFileSync(f, 'utf8'))
+} catch { /* missing or stale = unverified */ }
+if (allowed(turn, mode)) process.exit(0)
+
+const api = process.env.HERDR_DASH_URL || 'http://127.0.0.1:7777'
+const hash = createHash('sha1').update(cmd.replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16)
+const post = async (path, body) => {
+  const r = await fetch(`${api}${path}`, { method: 'POST', signal: AbortSignal.timeout(4000),
+    headers: { 'content-type': 'application/json', 'x-herdr-pane': process.env.HERDR_PANE_ID ?? '', ...(process.env.WT_PANE_KEY ? { 'x-wt-pane-key': process.env.WT_PANE_KEY } : {}) }, body: JSON.stringify(body) })
+  if (!r.ok) throw new Error(`${path} ${r.status}`)
+  return r.json()
+}
+let asked = false
+try {
+  if ((await post('/api/gate/consume', { hash })).granted) process.exit(0) // the user said Allow once
+  await post('/api/gate/ask', { hash, action: hit.action, cmd })
+  asked = true
+} catch (e) { console.error(`wt-gate: could not reach the dashboard (${e.message}); not asked`) }
+console.log(JSON.stringify({ action: hit.action, asked }))
+process.exit(3)
