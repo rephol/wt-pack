@@ -261,6 +261,12 @@ doctor() {
       fi
     fi
   fi
+  # WP-327: an agent pane without a key file in pane-keys/ runs in grace mode (x-herdr-pane alone is accepted).
+  if has herdr && has jq; then
+    kd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys"; nk=0
+    for p in $(herdr agent list 2>/dev/null | jq -r '.result.agents[]?.pane_id // empty' 2>/dev/null); do [ -s "$kd/$p" ] || nk=$((nk + 1)); done
+    [ "$nk" -eq 0 ] || opt "$nk agent pane(s) run without a pane key (grace) — respawn them (agents.sh spawn mints the key); WT_PANE_KEY_STRICT=1 refuses them once none are left"
+  fi
   has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
   has agent-browser && ok "agent-browser (optional, preferred for browser checks)" || opt "agent-browser not installed (optional, preferred for browser checks): npm i -g agent-browser && agent-browser install"
   has ccusage && ok "ccusage (optional, Usage live block)" || opt "ccusage not installed (optional, Usage live block): npm i -g ccusage"
