@@ -395,7 +395,8 @@ test('the child gets a minimal env: no API key, no HERDR_*', async (t) => {
   assert.ok(keys.includes('PATH') && keys.includes('HOME'))
   assert.deepEqual(keys.filter((k) => /^(ANTHROPIC|HERDR|SECRET)/.test(k)), [])
   assert.ok(keys.includes('WT_HEADLESS_ID')) // WP-312: how context_usage finds its own run
-  assert.ok(keys.length <= 7, keys.join(','))
+  assert.ok(keys.includes('WT_RUN_KEY')) // WP-330: the run's own secret for verifying messages addressed to it
+  assert.ok(keys.length <= 8, keys.join(','))
 })
 
 test('interrupt goes over a control_request and ends the turn; not-working runs refuse', async (t) => {
