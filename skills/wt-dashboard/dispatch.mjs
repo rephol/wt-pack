@@ -5,6 +5,7 @@
 import { fileURLToPath } from 'node:url'
 import { guard } from './routines.mjs'
 import { isClosed } from './contracts.mjs'
+import { quoteTitle } from '../wt-shared/scripts/wt-message.mjs'
 
 // WP-122: the agent runs this pack's own handoff.sh, not a ~/.claude/skills link that a plugin install lacks.
 const HANDOFF = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import.meta.url))
@@ -76,9 +77,9 @@ export const gateLine = (t, gates = []) => !gates.length ? '' :
 export function dispatchPrompt(t, role, report = null, gates = []) {
   const line = gateLine(t, gates) + reportLine(report)
   const ack = ` First, acknowledge this message: \`handoff.sh --ack <the id in the wt-message tag>\` (wt-handoff).`
-  if (role === 'planner') return `Use wt-plan to plan ${t.id} (${t.title}) from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.${ack}\n` + line
+  if (role === 'planner') return `Use wt-plan to plan ${t.id} ${quoteTitle(t.title)} from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.${ack}\n` + line
   const branch = `${t.id.toLowerCase()}-<short-slug>`
-  return `Implement ${t.id} — ${t.title} (\`wt-ticket show ${t.id}\`).\n\n` +
+  return `Implement ${t.id} ${quoteTitle(t.title)} (\`wt-ticket show ${t.id}\`).\n\n` +
     `First move the card: \`wt-ticket move ${t.id} building\`.${ack} ` +
     `Create a worktree on a new branch ${branch} from main, use wt-work, then wt-ship (review). ` +
     `Commit on the branch and rebase on main, resolving conflicts; if you cannot, \`wt-ticket move ${t.id} blocked --note "<reason>"\`. ` +
@@ -235,7 +236,7 @@ export class Dispatch {
     const persona = team ? personas.find((p) => p.name === tpersona) ?? null : personaFor(next, personas, role)
     const hrole = team ? persona?.base ?? tpersona : role
     try {
-      const args = ['--role', hrole, ...(persona ? ['--persona', persona.name] : []), ...(team ? ['--team', team.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--request-id', next.requestId ?? dispatchRequestId(next, hrole), '--task', `${next.id} ${next.title}`.slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
+      const args = ['--role', hrole, ...(persona ? ['--persona', persona.name] : []), ...(team ? ['--team', team.name] : []), '--kind', 'dispatch', '--from', 'wt-dashboard', '--request-id', next.requestId ?? dispatchRequestId(next, hrole), '--task', `${next.id} ${next.title}`.replace(/\s+/g, ' ').slice(0, 80), ...(buddy ? ['--buddy', buddy.id] : []), repo]
       const gates = (await this.deps.gatesOf?.(repo, team).catch(() => [])) ?? []
       const out = await this.deps.handoff(args, dispatchPrompt(next, role, (await this.deps.reportOf?.(project)) ?? null, gates), repo)
       const { name, pane } = parseHandoff(out)
@@ -383,7 +384,7 @@ export class Dispatch {
     const repo = await this.deps.repoOf(project)
     if (!repo || !t.assignee?.pane) return
     if (!d.redeliveredAt) {
-      const args = ['--pane', t.assignee.pane, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.slice(0, 80), repo]
+      const args = ['--pane', t.assignee.pane, '--kind', 'dispatch', '--from', 'wt-dashboard', '--task', `${t.id} ${t.title}`.replace(/\s+/g, ' ').slice(0, 80), repo]
       const team = t.team ? ((await this.deps.teamsOf?.(repo).catch(() => [])) ?? []).find((x) => x.name === t.team) : null
       const prompt = dispatchPrompt(t, roleFor(t), (await this.deps.reportOf?.(project)) ?? null, (await this.deps.gatesOf?.(repo, team).catch(() => [])) ?? [])
       // A failed resend still counts as the one retry (never resend on a loop): report it and move straight
