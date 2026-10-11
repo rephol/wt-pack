@@ -9,7 +9,7 @@ import { spawn as nodeSpawn, execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { readFileSync, existsSync, accessSync, constants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { resolve, join, delimiter } from 'node:path'
+import { resolve, join, dirname, delimiter } from 'node:path'
 import { open } from './store.mjs'
 
 const err = (status, m) => Object.assign(new Error(m), { status })
@@ -162,7 +162,7 @@ export class Headless {
     let child, bin = this.cmd
     if (r.driver === 'sdk') { // WP-315: the same args and stream-json, through the Agent SDK worker; a resume keeps the run's recorded driver
       const testSdk = this.env.WT_HEADLESS_SDK_MODULE
-      if (!testSdk && !existsSync(join(SDK_DIR, 'node_modules/@anthropic-ai/claude-agent-sdk'))) return this.#end(id, 'failed', 'SDK driver not installed: run ./setup')
+      if (!testSdk && !existsSync(join(dirname(this.worker), 'node_modules/@anthropic-ai/claude-agent-sdk'))) return this.#end(id, 'failed', 'SDK driver not installed: run ./setup')
       const claude = absBin(this.cmd, this.env.PATH)
       if (!claude) return this.#end(id, 'failed', 'claude binary not found')
       env.WT_CLAUDE_BIN = claude

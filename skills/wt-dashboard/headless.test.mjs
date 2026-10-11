@@ -612,12 +612,10 @@ test('cli runs record driver cli and never touch the worker', async (t) => {
 })
 
 test('sdk driver without the SDK installed fails the run with the setup hint; a missing claude binary fails it too', async (t) => {
-  const { h, start, state } = await setup(t, { driver: 'sdk' }) // no WT_HEADLESS_SDK_MODULE, and headless-sdk/node_modules is absent in a fresh checkout
-  if (!(await import('node:fs')).existsSync(join(import.meta.dirname, 'headless-sdk/node_modules/@anthropic-ai/claude-agent-sdk'))) {
-    const r = start('hello')
-    assert.equal(state(r.id), 'failed')
-    assert.equal(h.get(r.id).reason, 'SDK driver not installed: run ./setup')
-  }
+  const { h, start, state } = await setup(t, { driver: 'sdk', worker: join(tmpdir(), 'no-sdk-here', 'worker.mjs') }) // no WT_HEADLESS_SDK_MODULE, no node_modules beside the worker
+  const r = start('hello')
+  assert.equal(state(r.id), 'failed')
+  assert.equal(h.get(r.id).reason, 'SDK driver not installed: run ./setup')
   const b = await sdkSetup(t, { cmd: 'no-such-claude-bin' })
   const r2 = b.start('hello')
   assert.equal(b.state(r2.id), 'failed')
@@ -631,4 +629,25 @@ test('driver option and WT_HEADLESS_DRIVER: invalid throws, env is read, option 
   assert.equal(new Headless({ db, env: { WT_HEADLESS_DRIVER: 'sdk' } }).driver, 'sdk')
   assert.equal(new Headless({ db, driver: 'cli', env: { WT_HEADLESS_DRIVER: 'sdk' } }).driver, 'cli')
   assert.equal(new Headless({ db, env: {} }).driver, 'cli')
+})
+
+test('sdk driver end to end: the real worker over a fake SDK — ask round trip, context usage, commands', async (t) => {
+  const fakeSdk = join(import.meta.dirname, 'test-fixtures', 'fake-sdk.mjs')
+  const { h, start, events } = await setup(t, { driver: 'sdk', env: { HOME: process.env.HOME, PATH: process.env.PATH, WT_HEADLESS_SDK_MODULE: fakeSdk } })
+  const r = start('tool')
+  await until(() => h.get(r.id).asks.length === 1, 'ask open')
+  const ask = h.get(r.id).asks[0]
+  assert.equal(ask.tool, 'Bash')
+  h.answer(r.id, ask.id, { allow: true })
+  await until(() => h.get(r.id).turns === 1 && h.get(r.id).context_used, 'turn done')
+  const row = h.get(r.id)
+  assert.equal(row.session, 'fake-session')
+  assert.equal(row.context_used, 1234)
+  assert.equal(row.context_window, 200000)
+  assert.deepEqual(JSON.parse(row.init_commands).commands, [{ name: 'compact' }])
+  const said = events(r.id).filter((e) => e.type === 'assistant').map((e) => e.event.message.content[0].text)
+  assert.match(said[0], /^decision \{"behavior":"allow"/)
+  const init = events(r.id).find((e) => e.type === 'system/init').event
+  assert.equal(init.options.pathToClaudeCodeExecutable, FAKE)
+  assert.deepEqual(init.options.settingSources, ['user', 'project', 'local'])
 })
