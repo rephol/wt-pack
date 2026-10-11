@@ -225,7 +225,7 @@ dispatch)
   # --no-goal: a review is one run that stops. The body carries D: the reviewer records under it, no claim/release.
   # "Use wt-watch-prs …", not a /slash command: a plugin install namespaces it (/wt-pack:wt-watch-prs, WP-122).
   out=$(printf 'Use wt-watch-prs to review %s --sha %s --session %s' "$P" "$X" "$D" \
-    | "$H" --role reviewer --kind dispatch --pr "$P" --sha "$X" --skill wt-watch-prs ${pane:+--pane "$pane"} --no-goal "$MAIN") \
+    | "$H" --role reviewer --kind handoff --pr "$P" --sha "$X" --skill wt-watch-prs ${pane:+--pane "$pane"} --no-goal "$MAIN") \
     || { undo; die "handoff failed for #$P${out:+: $out}"; }
   echo "dispatched #$P to $(printf '%s\n' "$out" | sed -n 's/^target \([^ ]*\) .*/\1/p' | head -1)"
   ;;
@@ -266,18 +266,18 @@ poll-shas)
   i=0
   while :; do
     gh pr list --repo "$REPO" --state open --limit 50 --json number,headRefOid,author,title,isDraft 2>/dev/null \
-      | jq -r '.[] | select(.isDraft == false) | "\(.number) \(.headRefOid) \(.author.login) \(.title)"' 2>/dev/null > "$T/cur" || true
+      | jq -r '.[] | select(.isDraft == false) | "\(.number) \(.headRefOid) \(.author.login | gsub("[^A-Za-z0-9-]"; "")) \(.title | gsub("\\s+"; " ") | gsub("[\"<>]"; "") | .[0:120])"' 2>/dev/null > "$T/cur" || true
     while read -r n sha who title; do
       [ -z "$n" ] && continue
       seen "$n" "$sha" && continue; [ -d "$CLAIMS/pr$n" ] && continue; fired "$n" "$sha" && continue
-      echo "$n $sha $(date +%s)" >> "$T/fired"; echo "PR #$n — new commits $sha — $who: $title"
+      echo "$n $sha $(date +%s)" >> "$T/fired"; echo "PR #$n — new commits $sha — @$who: \"$title\"" # WP-331: the title is quoted data (one line, <=120, no tags/quotes); logins are [A-Za-z0-9-]
     done < "$T/cur"
     # A vanished PR is reported only after gh pr view confirms MERGED/CLOSED; an empty poll is a gh blip.
     : > "$T/keep"
     if [ -s "$T/cur" ]; then
       awk '{print $1}' "$T/cur" | sort -u > "$T/nums"
       [ -s "$T/prev" ] && comm -23 "$T/prev" "$T/nums" | while read -r g; do
-        info=$(gh pr view "$g" --repo "$REPO" --json state,title,author 2>/dev/null | jq -r '"\(.state) — \(.author.login): \(.title)"' 2>/dev/null)
+        info=$(gh pr view "$g" --repo "$REPO" --json state,title,author 2>/dev/null | jq -r '"\(.state | gsub("[^A-Z_]"; "")) — @\(.author.login | gsub("[^A-Za-z0-9-]"; ""))"' 2>/dev/null)
         case "$info" in MERGED*|CLOSED*) echo "PR #$g — NO LONGER OPEN — $info";; *) echo "$g" >> "$T/keep";; esac
       done
       sort -u "$T/nums" "$T/keep" > "$T/prev"
@@ -313,12 +313,16 @@ poll-replies)
     next=$(date -u -v-1M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 minute ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "$SINCE")
     for n in $(jq -r --arg me "$S" '.reviewed | to_entries[] | select(.value.state == "changes-requested" and .value.reviewer_session == $me) | .key' "$STATE" 2>/dev/null); do
       { gh api "repos/$REPO/issues/$n/comments?since=$SINCE&per_page=50" 2>/dev/null \
-          | jq -r --arg self "$SELF" '.[] | select(.user.type != "Bot" and .user.login != $self) | "C\(.id)\t\(.user.login)\tREPLY\t\(.body | gsub("\\s+"; " ") | .[0:200])"' 2>/dev/null
+          | jq -r --arg self "$SELF" '.[] | select(.user.type != "Bot" and .user.login != $self) | "C\(.id | tostring | gsub("[^0-9]"; ""))\t\(.user.login | gsub("[^A-Za-z0-9-]"; ""))\tREPLY\t"' 2>/dev/null
         gh api --paginate "repos/$REPO/pulls/$n/reviews?per_page=100" 2>/dev/null | jq -s 'add // []' 2>/dev/null \
-          | jq -r --arg self "$SELF" --arg since "$SINCE" '.[] | select(.user.type != "Bot" and .user.login != $self and .submitted_at > $since) | "R\(.id)\t\(.user.login)\tREVIEW (\(.state))\t\(.body // "" | gsub("\\s+"; " ") | .[0:160])"' 2>/dev/null
+          | jq -r --arg self "$SELF" --arg since "$SINCE" '.[] | select(.user.type != "Bot" and .user.login != $self and .submitted_at > $since) | "R\(.id | tostring | gsub("[^0-9]"; ""))\t\(.user.login | gsub("[^A-Za-z0-9-]"; ""))\tREVIEW (\(.state | gsub("[^A-Z_]"; "")))\t"' 2>/dev/null
       } | while IFS=$'\t' read -r id who kind body; do
         [ -z "$id" ] && continue; grep -qx "$n $id" "$T" && continue; echo "$n $id" >> "$T"
-        echo "PR #$n — $kind on a held PR — $who: $body"
+        # WP-331: ids only — the reply/review text is outsider-written, so the agent reads it with gh (a tool result), never from this line
+        case "$id" in
+          C*) echo "PR #$n — $kind on a held PR — @$who (comment ${id#C}) — read it with: gh api repos/$REPO/issues/comments/${id#C}" ;;
+          *)  echo "PR #$n — $kind on a held PR — @$who (review ${id#R}) — read it with: gh api repos/$REPO/pulls/$n/reviews/${id#R}" ;;
+        esac
       done
     done
     SINCE=$next; persist
