@@ -881,6 +881,11 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   different TypeSafe keys, it names the mismatch but leaves both alone (the file copy could be the newer key).
   `--fix` backs the file up to `~/.claude/.env.bak-<timestamp>` (0600) and removes just the stale
   `TYPESAFE_API_KEY` line, keeping the Keychain entry.
+- Agent identity (WP-327): `agents.sh spawn` mints a per-pane key — `WT_PANE_KEY` in the pane's env and a 0600 file
+  `<data>/pane-keys/<pane id>` — and the CLIs send it as `x-wt-pane-key` beside `x-herdr-pane`; the dashboard refuses a
+  keyed pane's calls without the matching key (`403 pane key mismatch`). A pane started outside `spawn` has no key and is
+  accepted (grace) until `WT_PANE_KEY_STRICT=1` (Settings env / `~/.config/wt-dashboard/env`); doctor warns how many agent
+  panes lack a key. The key stops forging a pane id; a same-user process that reads the file or the env is out of scope.
 - `./setup secrets`: TypeSafe key, preferring the Keychain (the file only when the Keychain isn't available);
   skips the prompt if a key is already in either place, so it never leaves a second, driftable copy behind
   (Linear goes through Settings › Integrations).

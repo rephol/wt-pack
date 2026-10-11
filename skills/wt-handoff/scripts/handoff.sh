@@ -95,7 +95,7 @@ record_message() { # <pane> <text> <state>
   command -v curl >/dev/null && command -v jq >/dev/null || return 0
   [ -n "${deliver_token:-}${HERDR_PANE_ID:-}" ] || return 0
   jq -n --arg p "$1" --arg t "$2" --arg s "$3" --arg r "$request_id" '{target:$p,body:$t,state:$s} + (if $r == "" then {} else {requestId:$r} end)' \
-    | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")" \
+    | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages" >/dev/null 2>&1 || true
 }
 while :; do
@@ -156,13 +156,13 @@ pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | selec
 HL_URL="${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless"
 hl_resolve() { # <target>
   case "$1" in *:*|'') return 1 ;; esac
-  r=$(curl -sS --max-time 3 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} "$HL_URL" 2>/dev/null | jq -r --arg t "$1" \
+  r=$(curl -sS --max-time 3 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$HL_URL" 2>/dev/null | jq -r --arg t "$1" \
     '[.[]? | select(.state != "ended" and .state != "failed")] as $l | ($l | map(select(.id == $t or .name == $t))) as $x
      | ($x | if length > 0 then . else ($l | map(select(.id | startswith($t)))) end) | if length == 1 then "\(.[0].id) \(.[0].name)" else empty end' 2>/dev/null) || return 1
   [ -n "$r" ] && printf '%s\n' "$r"
 }
 hl_post() { # <id> <text>: deliver as the run's next user message (an agent pane may; the server says 409 if it is not live)
-  o=$(jq -n --arg t "$2" '{text:$t}' | curl -sS --max-time 10 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} -H 'content-type: application/json' \
+  o=$(jq -n --arg t "$2" '{text:$t}' | curl -sS --max-time 10 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     --data @- "$HL_URL/$1/message" 2>/dev/null) || { echo "wt-dashboard not reachable" >&2; return 1; }
   e=$(printf '%s' "$o" | jq -r '.error // empty' 2>/dev/null || true)
   [ -z "$e" ] || { echo "headless $1: $e" >&2; return 1; }
@@ -172,7 +172,7 @@ hl_post() { # <id> <text>: deliver as the run's next user message (an agent pane
 if [ -n "$ack_id" ]; then
   case "$ack_id" in *[!A-Za-z0-9_-]*) echo "--ack: bad id" >&2; exit 2 ;; esac
   [ -n "${HERDR_PANE_ID:-}" ] || { echo "--ack needs a herdr pane (HERDR_PANE_ID)" >&2; exit 2; }
-  curl -sS --max-time 5 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" -H 'content-type: application/json' \
+  curl -sS --max-time 5 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     --data "$(jq -n --arg s "$ack_state" '{state:$s}')" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages/$ack_id/ack" | jq -r 'if .error then "ack failed: " + .error else "\(.id) \(.state)" end'
   exit 0
 fi
@@ -195,7 +195,7 @@ if [ -n "$reply" ]; then
   # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
   # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
   if [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
-    q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" \
+    q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
     [ "$q" = true ] && { record_message "$reply" "$msg" queued; echo "replied $reply (queued)"; exit 0; }
   fi
@@ -427,7 +427,7 @@ queue_prompt() { # <pane> <text>
   # A server-run handoff (Dispatch, routines) has no pane id: it proves itself with the dashboard's private token instead.
   set -- "$1" "$2" -H "$( [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")"
   [ -n "$deliver_token${HERDR_PANE_ID:-}" ] || return 1
-  qid=$(jq -n --arg p "$1" --arg t "$2" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST "$3" "$4" \
+  qid=$(jq -n --arg p "$1" --arg t "$2" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST "$3" "$4" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
     -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r 'if .queued == true then .id else empty end' 2>/dev/null)
   [ -n "$qid" ]
 }
@@ -441,11 +441,11 @@ queue_pulled() { # <pane>
   record_message "$1" "$send" queued
   n=0; max=${WT_PULL_WAIT_S:-30}
   while [ "$n" -lt "$max" ]; do
-    st=$(curl -sS --max-time 3 -H "$(auth_header)" "$base/api/deliveries/$qid" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
+    st=$(curl -sS --max-time 3 -H "$(auth_header)" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$base/api/deliveries/$qid" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
     case "$st" in delivered) return 0 ;; queued|'') ;; *) return 1 ;; esac
     sleep 1; n=$((n + 1))
   done
-  c=$(curl -sS --max-time 3 -X POST -H "$(auth_header)" "$base/api/deliveries/$qid/cancel" 2>/dev/null | jq -r '.cancelled // false' 2>/dev/null)
+  c=$(curl -sS --max-time 3 -X POST -H "$(auth_header)" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$base/api/deliveries/$qid/cancel" 2>/dev/null | jq -r '.cancelled // false' 2>/dev/null)
   [ "$c" = true ] && return 1
   return 0 # the mod pulled it as we cancelled
 }
@@ -586,7 +586,7 @@ finish() {  # <first output line> <target pane>
         bname=$(name_of "$bpane")
         payload=$(node -e 'const[w,wp,b,bp,br]=process.argv.slice(1);console.log(JSON.stringify({pair:{worker:{name:w,pane:wp},buddy:{name:b,pane:bp,role:br}}}))' \
           "${to_name:-$to}" "$to" "${bname:-$bpane}" "$bpane" "$brole")
-        curl -sS --max-time 5 -X PATCH -H "x-herdr-pane: ${HERDR_PANE_ID:-}" -H 'content-type: application/json' \
+        curl -sS --max-time 5 -X PATCH -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
           --data "$payload" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/tickets/$local_ticket" >/dev/null 2>&1 || true
       fi
     fi

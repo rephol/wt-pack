@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -266,4 +266,30 @@ esac`)
   assert.equal(calls.filter((l) => l.startsWith('herdr agent start')).length, 8)
   assert.ok(calls.some((l) => l === 'herdr tab close w1:t9'))
   assert.ok(calls.some((l) => /--clear-token role/.test(l)))
+})
+
+test('WP-327: spawn mints a per-pane key — 0600 file in pane-keys/, the same key in --env WT_PANE_KEY, never in a pane token', () => {
+  setAccount(null)
+  const s = spawn()
+  const key = s.tab.match(/--env WT_PANE_KEY=([0-9a-f]{64})(\s|$)/)?.[1]
+  assert.ok(key, s.tab)
+  const f = join(tmp, 'pane-keys', 'w1:p9')
+  assert.equal(readFileSync(f, 'utf8').trim(), key)
+  assert.equal(statSync(f).mode & 0o777, 0o600)
+  assert.equal(statSync(join(tmp, 'pane-keys')).mode & 0o777, 0o700)
+  assert.ok(!s.calls.some((l) => /report-metadata/.test(l) && l.includes(key)))
+  const k2 = spawn().tab.match(/WT_PANE_KEY=([0-9a-f]{64})/)[1]
+  assert.notEqual(k2, key) // a respawn mints a fresh key and overwrites the file
+  assert.equal(readFileSync(f, 'utf8').trim(), k2)
+})
+
+test('WP-327: spawn sweeps key files of panes that are no longer live agents (herdr reuses pane ids)', () => {
+  const orig = readFileSync(join(bin, 'herdr'), 'utf8')
+  writeFileSync(join(bin, 'herdr'), orig.replace(`echo '{"result":{"agents":[]}}'`, `echo '{"result":{"agents":[{"name":"x","pane_id":"w1:p5"}]}}'`))
+  try {
+    for (const n of ['w1:p77', 'w1:p5']) writeFileSync(join(tmp, 'pane-keys', n), 'old\n')
+    spawn()
+    assert.ok(!existsSync(join(tmp, 'pane-keys', 'w1:p77')))
+    assert.ok(existsSync(join(tmp, 'pane-keys', 'w1:p5')) && existsSync(join(tmp, 'pane-keys', 'w1:p9')))
+  } finally { writeFileSync(join(bin, 'herdr'), orig) }
 })

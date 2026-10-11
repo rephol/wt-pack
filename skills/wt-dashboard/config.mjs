@@ -21,6 +21,7 @@ export const KEYS = {
   // Read by the shell scripts too (wt-shared/scripts/mcp-mode.sh): lean | full (default).
   WT_NUDGE: { oneOf: ['on', 'off'], label: 'Nudge handed-off agents whose card is not in review' }, // WP-272: off = no "continue" line
   WT_MESSAGE_RESEND: { oneOf: ['on', 'off'], label: 'Resend unacknowledged messages' }, // WP-263: off = the sweep only flags, never re-types
+  WT_PANE_KEY_STRICT: { oneOf: ['0', '1'], label: 'Refuse agent panes that have no pane key (WP-327; 1 once every agent is respawned)' },
   WT_AGENTS_MCP: { oneOf: ['full', 'lean'], label: 'Lean agent MCP' },
   // Jev integrations (read by the server via cfg.get, by the CLIs via typesafe.mjs enabled()). ON where calls are
   // rare and event-driven, OFF where they scale with poll ticks or every prompt.

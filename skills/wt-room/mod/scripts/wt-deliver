@@ -19,7 +19,7 @@ done
 [ "$seen" -le 1 ] || exit 1
 call() {
   local out code
-  out=$(curl -sS --max-time 4 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: $HERDR_PANE_ID" -H 'content-type: application/json' ${3:+--data "$3"} "$API$2" 2>/dev/null) || exit 1
+  out=$(curl -sS --max-time 4 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' ${3:+--data "$3"} "$API$2" 2>/dev/null) || exit 1
   code=${out##*$'\n'}; out=${out%$'\n'*}
   [ "$code" -lt 400 ] || exit 1
   printf '%s\n' "$out"

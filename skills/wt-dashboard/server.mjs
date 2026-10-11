@@ -3091,6 +3091,20 @@ function headlessStream(req, res, url, id) {
   const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
   req.on('close', () => { clearInterval(beat); subs.delete(flush); if (!subs.size) headlessSubs.delete(id) })
 }
+// WP-327: `agents.sh spawn` mints a per-pane key (env WT_PANE_KEY + this file); the CLIs send it as x-wt-pane-key, so a bare
+// pane id is not identity. A pane without a file (started outside spawn) is accepted unless WT_PANE_KEY_STRICT=1.
+const PANE_KEYS = join(DATA_ROOT, 'pane-keys')
+export const unkeyedPanes = new Set() // grace-path panes seen, for the log; `./setup doctor` counts the missing files itself
+function paneKeyCheck(pane, sent) {
+  let want
+  try { want = readFileSync(join(PANE_KEYS, pane.replace(/[^\w.:-]/g, '_')), 'utf8').trim() } catch { want = '' }
+  if (!want) {
+    if (cfg.get('WT_PANE_KEY_STRICT') === '1') throw Object.assign(new Error('pane has no key; respawn it'), { status: 403 })
+    unkeyedPanes.add(pane); return
+  }
+  const a = Buffer.from(String(sent ?? '')), b = Buffer.from(want)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) throw Object.assign(new Error('pane key mismatch'), { status: 403 })
+}
 async function roomAuthor(req) {
   if (hasSession(req.headers.cookie)) {
     const p = rooms.settings.profile
@@ -3104,6 +3118,7 @@ async function roomAuthor(req) {
     const id = await canonicalPane(pane)
     const a = (await agents()).find((x) => x.local && x.id === id)
     if (!a) throw Object.assign(new Error(`unknown pane ${pane}`), { status: 403 })
+    paneKeyCheck(a.id, req.headers['x-wt-pane-key'])
     return { kind: 'agent', name: a.name, machine: a.machine, pane: a.id, key: a.key }
   }
   throw Object.assign(new Error('post from the dashboard, or from an agent pane with bin/room'), { status: 403 })
