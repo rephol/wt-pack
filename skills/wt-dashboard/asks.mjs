@@ -77,8 +77,8 @@ export class Asks {
   // broadcast(event, data): SSE fan-out — wired to broadcastEvent.
   // deliver(pane, text): sends a kind=reply wt-message to the pane; rejects if the pane is gone — wired to
   // handoff.sh --reply via dispatch.mjs's runHandoff (decision 3: same mechanism, same busy-pane behaviour).
-  constructor({ dir, log = console.error, notify = () => {}, resolveNotify = () => {}, broadcast = () => {}, deliver = async () => {} }) {
-    Object.assign(this, { file: join(dir, 'wt.db'), log, notify, resolveNotify, broadcast, deliver })
+  constructor({ dir, log = console.error, notify = () => {}, resolveNotify = () => {}, broadcast = () => {}, deliver = async () => {}, onGate = () => {} }) {
+    Object.assign(this, { file: join(dir, 'wt.db'), log, notify, resolveNotify, broadcast, deliver, onGate })
   }
   get db() { return open(this.file, { log: this.log }) }
   row(id) {
@@ -96,11 +96,11 @@ export class Asks {
     const all = this.db.prepare('SELECT json FROM asks ORDER BY seq').all().map((r) => JSON.parse(r.json))
     return all.filter((a) => (!room || a.room === room) && (!open || a.status === 'open'))
   }
-  async create(body, author) {
+  async create(body, author, extra = {}) { // extra: server-set fields (WP-332 `gate`), never from the body
     const f = clean(body)
     const at = new Date().toISOString()
     const a = { id: randomUUID(), pane: author.pane, agent: author.name, project: author.project ?? null,
-      room: f.room, ticket: f.ticket, questions: f.questions, ...(f.noDeliver ? { noDeliver: true } : {}), status: 'open', answer: null, created: at, closed: null }
+      room: f.room, ticket: f.ticket, questions: f.questions, ...(f.noDeliver ? { noDeliver: true } : {}), ...extra, status: 'open', answer: null, created: at, closed: null }
     this.db.prepare('INSERT INTO asks (id, json) VALUES (?, ?)').run(a.id, JSON.stringify(a))
     const it = await this.notify({
       kind: 'ask', key: `ask:${a.id}`, title: `${a.agent} · ${a.questions[0].header}`,
@@ -122,6 +122,7 @@ export class Asks {
     const changes = this.db.prepare("UPDATE asks SET json = ? WHERE id = ? AND json_extract(json, '$.status') = 'open'").run(JSON.stringify(claimed), id).changes
     if (!changes) throw err(409, `${id} is no longer open`)
     let next = claimed
+    if (a.gate && ans.selected?.[0]?.includes('Allow once')) try { this.onGate(a) } catch (e) { this.log(`asks: gate grant for ${a.pane}: ${e.message}`) } // WP-332: the user's allow mints the one-shot grant
     try {
       if (!a.noDeliver) await this.deliver(a.pane, text) // noDeliver (WP-206): the mod waits on GET and returns the answer as the tool result
     } catch (e) {
