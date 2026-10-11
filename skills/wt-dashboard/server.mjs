@@ -3140,9 +3140,8 @@ async function headlessApi(req, res, url, parts) {
     const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
     if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
     else if (b.name && taken.includes(b.name)) return send(res, 409, { error: `name ${b.name} is taken by a live agent` }) // WP-317: a live name is never duplicated (an ended run's is reusable)
-    const run = h.spawn({ ...b, spawner: who.kind === 'agent' ? who.pane : null }) // never from the body
-    if (who.kind === 'agent' && b.prompt) hlRecord(who, run.id, b.prompt) // recorded within the same tick; the run needs seconds before its hook asks
-    return send(res, 200, run)
+    // never `spawner` from the body; an agent's wrapped first prompt is recorded after the row exists and before the process starts
+    return send(res, 200, h.spawn({ ...b, spawner: who.kind === 'agent' ? who.pane : null }, (rid) => { if (who.kind === 'agent' && b.prompt) hlRecord(who, rid, b.prompt) }))
   }
   if (req.method === 'POST' && id && sub) {
     const b = await json()

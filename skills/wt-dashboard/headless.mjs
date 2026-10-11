@@ -107,7 +107,7 @@ export class Headless {
 
   // ---- lifecycle ----
   // Create a run and start it now, or queue it when the cap is reached.
-  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona, plugins, spawner } = {}) {
+  spawn({ role, cwd, prompt, model, effort, name, permissionMode, persona, plugins, spawner } = {}, beforeStart = () => {}) {
     if (plugins != null && !(Array.isArray(plugins) && plugins.length <= 40 && plugins.every((x) => typeof x === 'string' && PLUGIN_ID.test(x)))) throw err(400, 'plugins: an array of up to 40 plugin ids')
     if (persona != null && !/^[a-z][a-z0-9-]{0,23}$/.test(persona)) throw err(400, 'persona: a role file name (lowercase, digits, -)')
     if (!ROLE.test(role ?? '')) throw err(400, 'role: 1-40 chars of [\\w.-]')
@@ -122,6 +122,7 @@ export class Headless {
     this.db.prepare(`INSERT INTO headless_runs (id, name, role, persona, cwd, model, effort, prompt, req_permission_mode, req_plugins, driver, spawner, run_key, state, created, last_event, resumes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0)`).run(id, name ?? `${role}-${id.slice(3, 7)}`, role, persona || null, cwd, model ?? null, effort ?? null, prompt ?? null, permissionMode || null, plugins ? JSON.stringify(plugins) : null, this.driver, typeof spawner === 'string' ? spawner : null, randomBytes(32).toString('hex'), t, t)
     this.#note(id, 'supervisor', { subtype: 'queued' })
+    beforeStart(id) // WP-330: the caller records the first prompt's message row before the process can read it
     this.pump()
     return this.get(id)
   }

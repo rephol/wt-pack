@@ -269,6 +269,8 @@ test('WP-330 (h): the run key verifies a message for its own run only, and never
   const key = runKey(r.id)
   assert.match(key, /^[0-9a-f]{64}$/)
   const row = (await msgRows(r.id))[0] // the first prompt was wrapped and recorded as a handoff from the spawner
+  const sent = (await echoes(r.id)).find((x) => x.includes('first task')) // the fake claude received it
+  assert.ok(sent.includes(`id=${row.id} `), 'the id the run received is the recorded row')
   assert.equal(row.sender, 'demo-worker-01')
   const q = `/api/messages/${row.id}/verify?kind=handoff&from=demo-worker-01`
   const v = await (await call(q, { auth: false, headers: { 'x-wt-headless': r.id, 'x-wt-run-key': key } })).json()
