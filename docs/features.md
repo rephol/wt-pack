@@ -305,6 +305,12 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   terminal. It runs under your own Claude login with a minimal env (no API key, no `HERDR_*`). Nothing starts until
   something spawns one: `POST /api/headless {role, cwd, prompt?, model?, effort?, name?}` from the dashboard, or from an
   agent pane.
+- **Headless gate (WP-330):** an agent pane that spawns a run gets `default` permission mode only (any other mode is 403, and an
+  unset mode is pinned to `default`, so the user's own settings cannot widen it) and a `cwd` inside a project checkout or its
+  worktrees; the user keeps every mode in the New agent dialog. Only the pane that spawned a run, an orchestrator-role pane or
+  the user may message it. A pane sends plain text; the dashboard wraps it as a `handoff` from the verified sender (a pane-sent
+  ready-made envelope is 400), records it, and the run's own hook verifies it with its per-run key (`WT_RUN_KEY`, never in a
+  GET). Text you type into a run stays raw. The run's first `--prompt` from a pane is wrapped the same way.
 - It shows in the Agents list, in its role's group, with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
   while it waits on an ask. Only live or queued runs are listed: an ended, failed or removed run leaves the list (it stays in `GET /api/headless`). Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
   headless run is never picked for work.
