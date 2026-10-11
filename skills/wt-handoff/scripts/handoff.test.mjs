@@ -520,3 +520,23 @@ case " $* " in *" POST "*) case " $* " in *hl-new3/message*) printf '%s' '{"erro
   r = go(['--pane', 'other', '--no-goal', repo]); assert.equal(r.status, 1); assert.match(r.stderr, /the agent is queued/)
   assert.match(go(['--pane', 'umk-planner-01', '--no-goal', '--dry-run', repo]).stdout, /would hand to headless umk-planner-01 \(hl-new2\)/)
 })
+
+test('WP-328: a pane sender posts fields and pastes the dashboard-built envelope; --from is honoured only with the server token', () => {
+  const curlBin = join(tmp, 'curlbin328'); mkdirSync(curlBin, { recursive: true })
+  const posted = join(tmp, 'curl328.body')
+  const srvText = '<wt-message id=srv328 kind=reply from="stamped">hi</wt-message>'
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat > ${posted}\nprintf '%s' '${JSON.stringify({ queued: false, text: srvText })}'\n`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
+  const before = readFileSync(log, 'utf8').length
+  const out = execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', '--from', 'forger', 'hi'], { encoding: 'utf8', env })
+  assert.match(out, /replied wW:p7/)
+  const body = JSON.parse(readFileSync(posted, 'utf8'))
+  assert.deepEqual(body, { pane: 'wW:p7', kind: 'reply', body: 'hi' }) // fields only: no envelope, no sender
+  assert.match(readFileSync(log, 'utf8').slice(before), /agent prompt wW:p7 .*id=srv328 kind=reply from="stamped"/) // the server's text, not a local wrap
+  // --from: ignored for an agent (note on stderr), honoured with the server's token
+  const dry = (e) => spawnSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', '--from', 'forger', '--dry-run', 'hi'], { encoding: 'utf8', env: { ...env, ...e } })
+  const agent = dry({})
+  assert.doesNotMatch(agent.stdout, /from="forger"/); assert.match(agent.stderr, /--from is ignored/)
+  assert.match(dry({ WT_DELIVER_TOKEN: 't', HERDR_PANE_ID: '' }).stdout, /from="forger"/)
+})

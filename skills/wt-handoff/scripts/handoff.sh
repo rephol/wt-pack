@@ -137,6 +137,22 @@ while :; do
     *) break ;;
   esac
 done
+# WP-328: --from is the server's own voice (Dispatch, routines, the watchdog hold WT_DELIVER_TOKEN); an agent's envelope is
+# stamped by the dashboard with the verified sender, so a pane's --from is ignored.
+[ -z "$from_arg" ] || [ -n "${WT_DELIVER_TOKEN:-}" ] || { echo "note: --from is ignored for an agent sender (the dashboard stamps the verified name)" >&2; from_arg=; }
+
+# WP-328: a pane sends FIELDS and the dashboard builds the envelope (from= is the caller it verified), records the message and
+# queues it when the target's mod is live. Prints the JSON answer, which carries `text` (the envelope, to paste if not queued).
+# Empty output = no pane sender / server unreachable or too old: the caller falls back to wrapping locally.
+pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
+  [ -n "${HERDR_PANE_ID:-}" ] && [ -z "${WT_DELIVER_TOKEN:-}${deliver_token:-}" ] && command -v curl >/dev/null && command -v jq >/dev/null || return 0
+  jq -n --arg p "$1" --arg k "$2" --arg b "$3" --arg t "$4" --arg g "$5" --arg r "$request_id" --arg pr "$pr" --arg sh "$sha" \
+    '{pane:$p,kind:$k,body:$b} + (if $t == "" then {} else {ticket:$t} end) + (if $g == "1" then {goal:true} else {} end)
+     + (if $r == "" then {} else {requestId:$r} end) + (if $pr == "" then {} else {pr:$pr} end) + (if $sh == "" then {} else {sha:$sh} end)' \
+    | curl -sS --max-time 3 -X POST -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
+      -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null \
+    | jq -c 'select(.text != null)' 2>/dev/null || true
+}
 
 
 
@@ -161,6 +177,7 @@ hl_resolve() { # <target>
      | ($x | if length > 0 then . else ($l | map(select(.id | startswith($t)))) end) | if length == 1 then "\(.[0].id) \(.[0].name)" else empty end' 2>/dev/null) || return 1
   [ -n "$r" ] && printf '%s\n' "$r"
 }
+# WP-328: the headless message route still takes a locally wrapped envelope (audit finding 3 is WP-330's scope).
 hl_post() { # <id> <text>: deliver as the run's next user message (an agent pane may; the server says 409 if it is not live)
   o=$(jq -n --arg t "$2" '{text:$t}' | curl -sS --max-time 10 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     --data @- "$HL_URL/$1/message" 2>/dev/null) || { echo "wt-dashboard not reachable" >&2; return 1; }
@@ -194,13 +211,18 @@ if [ -n "$reply" ]; then
   fi
   # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
   # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
-  if [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
+  # WP-328: the dashboard builds the envelope and records it; an old or unreachable one falls back to the local wrap above.
+  srv=$(pane_post "$reply" reply "$text" "" 0)
+  if [ -n "$srv" ]; then
+    msg=$(printf '%s' "$srv" | jq -r .text)
+    [ "$(printf '%s' "$srv" | jq -r '.queued // false')" = true ] && { echo "replied $reply (queued)"; exit 0; }
+  elif [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
     q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
     [ "$q" = true ] && { record_message "$reply" "$msg" queued; echo "replied $reply (queued)"; exit 0; }
   fi
   herdr agent prompt "$reply" "$msg" >/dev/null
-  record_message "$reply" "$msg" delivered
+  [ -n "$srv" ] || record_message "$reply" "$msg" delivered
   echo "replied $reply"
   exit 0
 fi
@@ -397,6 +419,15 @@ hand_to() {
   # typed: no queue, no ordering (a queue only drains between turns, and /goal's Stop hook keeps the turn open).
   # WP-272: without --goal that line is plain ("Do the task in <file>") and, when the target's delivery mod is live,
   # the message is queued first and only typed if the mod does not pull it within WT_PULL_WAIT_S.
+  # WP-328: a pane sender lets the dashboard build and record the envelope (same id everywhere below); `sq` = it queued it.
+  server_recorded=0; sq=false
+  case "$kind" in handoff|reply)
+    if srv=$(pane_post "$1" "$kind" "$raw_prompt" "$ticket" "$goal") && [ -n "$srv" ]; then
+      server_recorded=1; sq=$(printf '%s' "$srv" | jq -r '.queued // false'); qid=$(printf '%s' "$srv" | jq -r '.id // empty')
+      send=$(printf '%s' "$srv" | jq -r .text); send=${send#/goal }
+      [ "$goal" -eq 0 ] || send_full="/goal $(printf '%s' "$send" | tr '\n' ' ' | tr -s ' ')"
+    fi ;;
+  esac
   if [ "$goal" -eq 0 ] && queue_pulled "$1"; then
     return 0
   fi
@@ -435,10 +466,15 @@ queue_prompt() { # <pane> <text>
 # WP-272: queue-first handoff. True when the target's mod is live, took the message and PULLED it within WT_PULL_WAIT_S.
 # An unpulled row is cancelled (the server settles it as pasted) and the caller types the short line once: same envelope id.
 queue_pulled() { # <pane>
-  base=${HERDR_DASH_URL:-http://127.0.0.1:7777}; qid=
+  base=${HERDR_DASH_URL:-http://127.0.0.1:7777}
   command -v jq >/dev/null || return 1
-  queue_prompt "$1" "$send" || return 1 # not live: nothing queued, nothing recorded (finish records it delivered once typed)
-  record_message "$1" "$send" queued
+  if [ "$server_recorded" -eq 1 ]; then
+    [ "$sq" = true ] && [ -n "$qid" ] || return 1 # the dashboard recorded it; not live → typed by the caller
+  else
+    qid=
+    queue_prompt "$1" "$send" || return 1 # not live: nothing queued, nothing recorded (finish records it delivered once typed)
+    record_message "$1" "$send" queued
+  fi
   n=0; max=${WT_PULL_WAIT_S:-30}
   while [ "$n" -lt "$max" ]; do
     st=$(curl -sS --max-time 3 -H "$(auth_header)" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$base/api/deliveries/$qid" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)
@@ -525,6 +561,7 @@ else
   esac
 fi
 
+raw_prompt=$prompt # WP-328: what a pane sender posts as fields; the dashboard wraps it
 # Wrap once, before the goal/no-goal split (so --no-goal is tagged too); a failed wrap never sends untagged.
 prompt=$(printf '%s' "$prompt" | node "$WTMSG" --kind "$kind" --from "${from_arg:-${from_name:-${from_pane:-wt-handoff}}}" ${ticket:+--ticket "$ticket"} ${pr:+--pr "$pr"} ${sha:+--sha "$sha"}) \
   || { echo "wt-message wrap failed" >&2; exit 1; }
@@ -558,7 +595,7 @@ finish() {  # <first output line> <target pane>
   [ -n "$ticket" ] && set -- "$@" --token "ticket=$ticket"
   [ -n "$from_pane" ] && set -- "$@" --token "handoff_from=${from_name:-$from_pane}" --token "handoff_from_pane=$from_pane"
   line=$1; shift
-  record_message "$to" "$send" delivered # WP-257: hand_to confirmed the prompt was submitted
+  [ "${server_recorded:-0}" -eq 1 ] || record_message "$to" "$send" delivered # WP-257: hand_to confirmed the prompt was submitted
   tag "$@"
   [ -n "$from_pane" ] && tag "$from_pane" --token "handoff_to=${to_name:-$to}" --token "handoff_to_pane=$to"
   # A planner handing its plan over: its task label moves on to "handed to <worker>".

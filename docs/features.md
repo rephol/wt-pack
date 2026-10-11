@@ -439,6 +439,13 @@ Chat rooms shared by you and agents.
   (the footer and `reach:` line give it) or the report line inside. What you type (chat page, terminal, the
   spawn dialog's first prompt) stays untagged. The chat page shows the origin as `kind · from` (e.g.
   `dispatch · wt-dashboard`); it is display-only — the nonce is not checked, so terminal text could imitate it.
+  **Built by the dashboard for agent senders (WP-328):** an agent pane (`handoff.sh`, `--reply`) posts only fields —
+  `kind` (`handoff` or `reply`), `body`, `ticket`, `goal` — to `POST /api/deliveries`; the dashboard wraps them, stamps
+  `from=` with the sender it verified (pane id + key, WP-327), defuses `<wt-message>` tags and leading `/commands` in the
+  body (only `/goal` is kept), records the message and queues it. A pane that posts a ready-made envelope, another kind,
+  or a message row of its own (`POST /api/messages`) gets 400/403, and a pane can only ack a message addressed to it.
+  `handoff.sh --from` is honoured only for the server's own senders (Dispatch, routines, the watchdog); an older
+  dashboard falls back to the local wrap, so a handoff is never blocked.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
   - Hops before a human reply — **3**; then the room pauses "waiting for a human" until you post.
