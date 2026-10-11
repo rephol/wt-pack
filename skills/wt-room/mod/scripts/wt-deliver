@@ -8,6 +8,15 @@
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 [ -n "${HERDR_PANE_ID:-}" ] || exit 1
+# WP-320: a claude started from inside a pane inherits HERDR_PANE_ID; only the pane's own (outermost) claude
+# may take its deliveries. Another `claude` between this one and herdr in the process tree means we are nested: stand down.
+p=$$; seen=0
+while [ "${p:-0}" -gt 1 ]; do
+  read -r pp c <<<"$(ps -o ppid=,comm= -p "$p" 2>/dev/null)" || break
+  case "${c##*/}" in herdr) break ;; claude) seen=$((seen + 1)) ;; esac  # herdr owns the pane: nothing above counts
+  p=${pp:-0}
+done
+[ "$seen" -le 1 ] || exit 1
 call() {
   local out code
   out=$(curl -sS --max-time 4 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: $HERDR_PANE_ID" -H 'content-type: application/json' ${3:+--data "$3"} "$API$2" 2>/dev/null) || exit 1

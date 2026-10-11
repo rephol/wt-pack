@@ -161,3 +161,4 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
   Earlier shapes that failed: a marketplace copy of a skill-dir mod loses its sibling scripts (cache copy = its
   `source` dir only) and clashes by name with the `<name>@skills-dir` plugin Claude Code builds from a skill dir that
   carries `.claude-plugin/` — hence no skill carries one.
+- A `claude` started from inside an agent's pane (tests, `claude -p` probes, scripts) inherits `HERDR_PANE_ID` and, through `wt-deliver`, used to pull that pane's pending wt-message into the child session (WP-320). `skills/wt-room/mod/scripts/wt-deliver` now walks its process tree up to `herdr` and stands down (exit 1) when more than one `claude` sits in between; only the pane's own claude takes deliveries. Other scripts that identify by `HERDR_PANE_ID` alone (`wt-ask`, `wt-ticket`) are not gated: strip `HERDR_*` from a child claude's env when a test must not act as the pane.
