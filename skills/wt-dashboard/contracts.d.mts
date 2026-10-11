@@ -87,6 +87,7 @@ export interface AgentInfoCore {
 export interface PaneAgentInfo extends AgentInfoCore {
   kind: 'pane'
   pane: { id: string; machine: string; local: boolean; tags: Record<string, string>; dnd: boolean; pair: string | null; workspace: string | null; pid: number | null /* live claude pid (claude agents --json), WP-324 */; routed: string | null /* the tier asked for when it differs from what runs */ }
+  keepwarm: { state: 'warm' | 'cold' | 'off'; nextAt: number | null; pingsToday: number; spentTokens: number; reason: string | null } | null // WP-318
 }
 export interface HeadlessAgentInfo extends AgentInfoCore {
   kind: 'headless'

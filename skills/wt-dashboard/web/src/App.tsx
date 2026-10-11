@@ -1264,6 +1264,16 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }),
     onError: (e) => toast({ body: `DND not sent: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
+  // WP-318: Arm/Off keepwarm for this agent (the mod follows the dashboard's answer on its next look).
+  const kwOn = agent.info?.kind === 'pane' && agent.info.keepwarm != null && agent.info.keepwarm.state !== 'off'
+  const kwM = useMutation({
+    mutationFn: async (action: 'arm' | 'off') => {
+      const r = await fetch(`/api/keepwarm/${encodeURIComponent(agent.id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }),
+    onError: (e) => toast({ body: `Keepwarm not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   const send = useMutation({
     mutationFn: (body: { text?: string; keys?: string[] }) => postAgent(agent, body),
     onSuccess: (_d, body) => {
@@ -1450,6 +1460,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
               { label: dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb', description: dnd ? undefined : 'Skip this agent for free-pick hand-offs', onClick: () => dndM.mutate(!dnd) },
+              { label: kwOn ? 'Keepwarm off' : 'Keepwarm on', description: kwOn ? 'Stop pinging its prompt cache' : 'Keep its prompt cache warm while idle (Settings › Keepwarm sets the budget)', onClick: () => kwM.mutate(kwOn ? 'off' : 'arm') },
             ] : []),
             agent.local
               ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }

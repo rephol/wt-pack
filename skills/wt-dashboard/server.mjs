@@ -47,6 +47,7 @@ import { judge as jevJudge, minFor } from '../wt-shared/scripts/typesafe.mjs'
 import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt-shared/scripts/model-route.mjs'
 import { load as routeDecisions, report as routeReport, estimateSavings as routeSavings } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
+import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
 import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, goalLoop, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
@@ -643,7 +644,7 @@ async function listAgents(m) {
       session,
       model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id), settings: m.local ? claudeSettings() : null }),
     }
-    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null) // WP-313: the one typed shape, additive to the fields above
+    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null, m.local ? keepwarm.info(row.id, row.tags?.role) : null) // WP-313: the one typed shape, additive to the fields above
     out.push(row)
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
@@ -2482,6 +2483,7 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && (method === 'POST' || method === 'PATCH') && /^\/api\/tickets(\/[^/]+){0,2}$/.test(path)) return false // wt-ticket (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/(ack|cancel))?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
+  if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/keepwarm/me/report') return false // WP-318 keepwarm mod via wt-keepwarm (keepwarmApi verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/gate\/(ask|consume)$/.test(path)) return false // WP-332 wt-gate (gateApi checks the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/messages(\/[^/]+\/ack)?$/.test(path)) return false // WP-257: handoff.sh records, the target acks by id (roomAuthor verifies the pane)
   if (headers['x-wt-server'] && method === 'POST' && (path === '/api/deliveries' || path === '/api/messages' || /^\/api\/deliveries\/[^/]+\/cancel$/.test(path))) return false // handoff.sh run by this server (WP-242; deliveriesApi checks the token)
@@ -3686,6 +3688,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
       if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'keepwarm') return await keepwarmApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/teams' || url.pathname.startsWith('/api/teams/')) return await teamsApi(req, res, url.pathname.split('/').filter(Boolean).slice(0, 5)).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -3857,6 +3860,44 @@ const server = http.createServer(async (req, res) => {
       send(res, 500, { error: String(e.message ?? e) })
     }
   })
+// ---- keepwarm (WP-318): Settings › Keepwarm; the wt-mods keepwarm mod reads its config and reports pings here ----
+const KW_FILE = join(DATA, 'keepwarm.json')
+const keepwarm = new Keepwarm()
+const kwLoaded = readFile(KW_FILE, 'utf8').then((t) => { const j = JSON.parse(t); Object.assign(keepwarm, new Keepwarm({ settings: j.settings, overrides: j.overrides })) }, () => {})
+const kwSave = () => writeFile(KW_FILE, JSON.stringify(keepwarm.snapshot(), null, 2))
+// GET/PATCH settings and POST /:pane {action: arm|off, windowH?} are the user's; GET me and POST me/report are the pane's own mod.
+async function keepwarmApi(req, res, parts) {
+  await kwLoaded
+  const author = await roomAuthor(req)
+  const json = async () => JSON.parse((await body(req)) || '{}')
+  const sub = parts[2]
+  if (sub === 'settings' && req.method === 'GET') return send(res, 200, { settings: keepwarm.settings, defaults: KW_DEFAULTS })
+  if (sub === 'settings' && req.method === 'PATCH') {
+    if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
+    const settings = keepwarm.patch(await json()); await kwSave()
+    return send(res, 200, { settings, defaults: KW_DEFAULTS })
+  }
+  if (sub === 'me') {
+    if (author.kind !== 'agent') return send(res, 403, { error: 'the pane itself asks (x-herdr-pane)' })
+    const role = (await agents()).find((a) => a.key === author.key)?.tags?.role
+    if (req.method === 'GET' && parts.length === 3) return send(res, 200, { ...keepwarm.effective(author.pane, role), ...keepwarm.info(author.pane, role) })
+    if (req.method === 'POST' && parts[3] === 'report') {
+      const b = await json()
+      if (b.event === 'stop' && b.off) { keepwarm.set(author.pane, 'off'); await kwSave() } // /wt keepwarm off: stays off until armed again
+      else keepwarm.report(author.pane, b)
+      return send(res, 200, { ok: true })
+    }
+  }
+  if (sub && sub !== 'me' && req.method === 'POST' && parts.length === 3) {
+    if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
+    const pane = await canonicalPane(decodeURIComponent(sub))
+    if (!pane || !(await agents()).some((a) => a.local && a.id === pane)) return send(res, 404, { error: `unknown pane ${sub}` })
+    const b = await json()
+    keepwarm.set(pane, b.action, b.windowH); await kwSave(); store.delete('agents:local')
+    return send(res, 200, { ok: true })
+  }
+  return send(res, 404, { error: 'not found' })
+}
 // ---- housekeeping (Settings › Observability): hourly, and once a minute after start ----
 const HK_FILE = join(DATA, 'housekeeping.json')
 const LOGS = join(homedir(), 'Library', 'Logs', 'wt-dashboard')

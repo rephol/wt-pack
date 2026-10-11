@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# wt-keepwarm — the keepwarm mod's door to wt-dashboard (WP-318). bash + curl + node, no other deps.
+#   wt-keepwarm config            print this pane's effective config as JSON (the mod follows it)
+#   wt-keepwarm report [json|-]   post a ping/stop report ({event:'ping',usage:{read,write},nextAt} | {event:'stop',reason,off?})
+#   wt-keepwarm status            one human line: warm|cold|off, next ping, pings today
+#   wt-keepwarm off               turn keepwarm off for this agent until it is armed again in the dashboard
+# Identity: $HERDR_PANE_ID (+ $WT_PANE_KEY). Exit: 0 ok, 1 API error / dashboard down, 2 usage.
+set -u
+API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
+call() { # <method> <path> [json]
+  local out code
+  out=$(curl -sS --max-time 10 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+    ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-keepwarm: wt-dashboard not reachable at $API" >&2; exit 1; }
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  if [ "$code" -ge 400 ]; then echo "wt-keepwarm: $code $out" >&2; exit 1; fi
+  printf '%s\n' "$out"
+}
+case "${1:-}" in
+  config) call GET /api/keepwarm/me ;;
+  report) body=${2:--}; [ "$body" = - ] && body=$(cat); call POST /api/keepwarm/me/report "$body" >/dev/null ;;
+  off) call POST /api/keepwarm/me/report '{"event":"stop","off":true,"reason":"turned off"}' >/dev/null && echo "keepwarm off for this agent (arm it again in the dashboard)" ;;
+  status)
+    out=$(call GET /api/keepwarm/me) || exit 1
+    node -e '
+      const c = JSON.parse(process.argv[1]), min = (ms) => Math.max(0, Math.round((ms - Date.now()) / 60000))
+      if (!c.enabled) { console.log("keepwarm: off" + (c.reason ? ` (${c.reason})` : "")); process.exit(0) }
+      console.log(`keepwarm: ${c.state ?? "cold"}${c.nextAt ? ` · next ping in ${min(c.nextAt)} min` : ""} · ${c.pingsToday}/${c.dailyCap} pings today · window ${c.windowH} h` + (c.reason ? ` · ${c.reason}` : ""))' "$out" ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+esac

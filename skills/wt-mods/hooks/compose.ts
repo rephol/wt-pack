@@ -15,6 +15,9 @@ export type Ctx = {
   every: (ms: number, fn: () => void) => unknown
   contextPercent: () => Promise<number | undefined> // WP-282: the main session's context window, % used
   notify: (text: string) => void // a toast
+  now: () => Promise<number> // WP-318: $.clock.now
+  contextTokens: () => Promise<number | undefined> // WP-318: the main session's context size in tokens
+  fork: (prompt: string) => Promise<{ isAnswered: boolean; reason?: string; usage?: { cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }> // WP-318: $.model.fork, tool-less, shares the session's cache
   registerCommand: (c: Parameters<EngineInterface['command']['register']>[0]) => Promise<unknown>
 }
 export type Hook = (ctx: Ctx, e: any, next: (e: any) => any) => any // eslint-disable-line @typescript-eslint/no-explicit-any
