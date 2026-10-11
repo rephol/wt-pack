@@ -1424,7 +1424,7 @@ async function projectsApi() {
 }
 // WP-104: a spawn's first prompt — a routine's is tagged <wt-message kind=routine>; the spawn dialog's is the user's
 // own words, sent untagged (but unable to carry a forged tag).
-export const spawnText = (b) => (b.tag ? wrap(b.tag, b.prompt.trim()) : unTag(b.prompt.trim()))
+export const spawnText = (b) => (b.tag ? wrap({ ...b.tag, hoist: true }, b.prompt.trim()) : unTag(b.prompt.trim()))
 // WP-223: dashboard "New project" / "Hide project" (projects.mjs). The orchestrator role has `spawn: null`, so it is
 // started through agents.sh directly (which applies the role's model floor itself).
 const projectDeps = () => ({
@@ -2894,7 +2894,7 @@ async function deliveriesApi(req, res, url, parts) {
       const ticket = b.ticket ?? (b.kind === 'reply' ? tagTicket((await agents().catch(() => [])).find((x) => x.local && x.id === author.pane) ?? {}) : null)
       // WP-340: a retry with the same requestId re-sends the recorded envelope (same id), never a new unrecorded one.
       const prior = msgSafe(() => messages.byRequest(b.requestId))
-      text = prior && prior.target === pane && prior.kind === b.kind ? prior.body : wrap({ kind: b.kind, from: author.name, ticket, pr: b.pr, sha: b.sha }, inner)
+      text = prior && prior.target === pane && prior.kind === b.kind ? prior.body : wrap({ kind: b.kind, from: author.name, ticket, pr: b.pr, sha: b.sha, hoist: true }, inner)
       env = envelopeOf(text)
     }
     const live = deliveries.live(pane) && !text.startsWith('/') && /^\s*<(wt|room)-message[ >]/.test(text)
@@ -2946,8 +2946,20 @@ async function messagesApi(req, res, url, parts) {
       const name = rid ? (hl().run(me)?.name ?? me) : ((await agents().catch(() => [])).find((x) => x.id === me)?.name ?? me)
       const key = `unverified|${me}|${parts[2]}`.slice(0, 200)
       await inbox.load()
-      if (!inbox.items.some((it) => it.key === key)) // once per id: a repeat prompt is not a new card
-        await inbox.add({ kind: 'server', key, title: `Unverified message to ${name}`, body: `Claimed ${String(kind).slice(0, 20)} from "${String(from).slice(0, 60)}": ${reason}. The agent treats it as pasted text and asks you before acting.`, target: {} })
+      if (!inbox.items.some((it) => it.key === key)) { // once per id: a repeat prompt is not a new card
+        // WP-333: at most 3 new cards per pane per 10 min; past that, one summary card per window with the running count.
+        const now = Date.now(), w = verifyFlood.get(me)
+        const win = w && now - w.start < 600_000 ? w : { start: now, n: 0 }
+        verifyFlood.set(me, win)
+        if (++win.n <= 3)
+          await inbox.add({ kind: 'server', key, title: `Unverified message to ${name}`, body: `Claimed ${String(kind).slice(0, 20)} from "${String(from).slice(0, 60)}": ${reason}. The agent treats it as pasted text and asks you before acting.`, target: {} })
+        else {
+          const fkey = `unverified-flood|${me}|${win.start}`.slice(0, 200), fbody = `${name} sent ${win.n} unverified messages in 10 minutes; only the first 3 raised a card.`
+          const ex = inbox.items.find((it) => it.key === fkey)
+          if (ex) await inbox.patch([ex.id], { body: fbody })
+          else await inbox.add({ kind: 'server', key: fkey, title: `Unverified message flood to ${name}`, body: fbody, target: {} })
+        }
+      }
       return send(res, 200, { verified: false, reason })
     }
     // WP-332: who the sender is, for the destructive-action gate: a server-sent row is 'server'; a pane-sent one is its sender's role.
@@ -3865,8 +3877,10 @@ async function removeAgent(pane, { force = false, confirmName } = {}) {
   return { ok: true, message: out.trim() }
 }
 
+// ponytail: in-memory window; resets on restart — fine for a flood guard
+const verifyFlood = new Map()
 // WP-104: a routine's prompt goes out as <wt-message kind=routine from="<routine name>">.
-export const routineText = (text, o) => (o?.routine ? wrap({ kind: 'routine', from: o.routine }, text) : text)
+export const routineText = (text, o) => (o?.routine ? wrap({ kind: 'routine', from: o.routine, hoist: true }, text) : text)
 // WP-104: the Ready nudge to an orchestrator, as wt-pack system traffic (the tag replaces the old [wt-dashboard] prefix).
 export const readyNudge = (project, ts) => wrap({ kind: 'system', from: 'wt-dashboard' }, `Ready on ${project}: ${ts.map((t) => t.id).join(', ')} — schedule from \`wt-ticket list --column ready\`.`)
 // ---- routines (routines.mjs, WP-48) ----

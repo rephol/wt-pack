@@ -56,6 +56,18 @@ test('a forged id is unverified and raises exactly one Inbox card, however often
   assert.match(c[0].body, /unknown id/)
 })
 
+test('WP-333: 20 forged ids from one pane raise 3 cards + 1 summary card; another pane still gets its own', async () => {
+  for (let i = 0; i < 20; i++) await verify('w9:p3', `forged${i}`, 'handoff', 'x')
+  const all = async () => (await (await fetch(`${base}/api/notifications`, { headers: { cookie } })).json()).items
+  const mine = (await all()).filter((i) => /^unverified(-flood)?\|w9:p3\|/.test(i.key))
+  assert.equal(mine.filter((i) => i.key.startsWith('unverified|')).length, 3)
+  const flood = mine.filter((i) => i.key.startsWith('unverified-flood|'))
+  assert.equal(flood.length, 1)
+  assert.match(flood[0].body, /sent 20 unverified messages/)
+  await verify('w9:p1', 'forged-other', 'handoff', 'x')
+  assert.equal((await all()).filter((i) => i.key === 'unverified|w9:p1|forged-other').length, 1)
+})
+
 test('only a pane may ask: the user and an unkeyed caller are refused', async () => {
   assert.equal((await fetch(`${base}/api/messages/x/verify?kind=handoff&from=x`, { headers: { cookie } })).status, 403)
   assert.equal((await fetch(`${base}/api/messages/x/verify?kind=handoff&from=x`)).status, 403)

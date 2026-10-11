@@ -148,7 +148,7 @@ export function roomContext(all, since, upto, max = 10, bytes = 2000) {
   for (let i = upto - 1; i >= Math.max(0, since) && out.length < max; i--) {
     const m = all[i]
     const names = m.attachments?.length ? ` [${m.attachments.map((a) => a.name ?? String(a.path ?? '').split('/').pop()).join(', ')}]` : ''
-    const line = `${m.author.name}: ${String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}${names}`
+    const line = `[${m.author.kind}] ${attr(m.author.name)}: ${String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}${names}`
     if (size + line.length > bytes) break
     size += line.length + 1
     out.unshift(line)
@@ -158,7 +158,7 @@ export function roomContext(all, since, upto, max = 10, bytes = 2000) {
 export function batchPrompt(slug, msgs, broadcast = false, local = true, nonce = randomBytes(6).toString('hex'), context = null) {
   const lines = msgs.map((m) => {
     const kind = ['user', 'agent', 'system'].includes(m.author.kind) ? m.author.kind : 'agent'
-    const body = withAttachments(`${m.replyTo ? `(replying to ${m.replyTo.name}: "${m.replyTo.text}") ` : ''}${m.text}`, m.attachments, local)
+    const body = withAttachments(`${m.replyTo ? `[quote from ${attr(m.replyTo.name)}, ${m.replyTo.kind ?? 'agent'}]: "${unTag(String(m.replyTo.text ?? '').slice(0, 200))}" ` : ''}${m.text}`, m.attachments, local)
     return `<room-message id=${nonce} room=${slug} from="${attr(m.author.name)}" kind=${kind}${broadcast ? ' broadcast=1' : ''}>${unTag(body)}</room-message>`
   })
   // Context rides first, in its own room-message tag (a delivery must still start with one, WP-210's mod check).
@@ -415,7 +415,7 @@ export class Rooms {
     // A reply stores who/what it answers (snippet, so it renders without the original loaded); replying to an agent addresses it.
     const parent = typeof replyTo === 'string' ? (await this.messages(slug)).find((m) => m.id === replyTo && m.author.kind !== 'system') : null
     if (parent) {
-      msg.replyTo = { id: parent.id, name: parent.author.kind === 'user' ? this.settings.profile.handle : parent.author.name, text: replySnippet(parent.text) }
+      msg.replyTo = { id: parent.id, name: parent.author.kind === 'user' ? this.settings.profile.handle : parent.author.name, kind: parent.author.kind, text: replySnippet(parent.text) }
       if (parent.author.kind === 'agent' && agents.some((a) => a.name === parent.author.name) && !msg.mentions.includes(parent.author.name)) msg.mentions.push(parent.author.name)
     }
     const cmd = parseCommand(msg, room, agents, this.settings.profile.handle)
