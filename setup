@@ -175,6 +175,14 @@ doctor() {
     if built; then ok "dashboard web built"; else opt "dashboard web built, but older than web/src — npm --prefix skills/wt-dashboard run build"; fi
   else bad "dashboard web not built — ./setup install"; fi
 
+  # WP-315: the opt-in SDK headless driver's deps (WT_HEADLESS_DRIVER=sdk); the default cli driver needs none.
+  if [ -f "$DASH/headless-sdk/package.json" ]; then
+    if sdk_deps; then ok "headless SDK driver deps"
+    elif grep -qsE '^[[:space:]]*(export[[:space:]]+)?WT_HEADLESS_DRIVER=[\"'"'"']?sdk' "$HOME/.config/wt-dashboard/env" || [ "${WT_HEADLESS_DRIVER:-}" = sdk ]; then
+      bad "WT_HEADLESS_DRIVER=sdk but the headless SDK deps are missing — ./setup install"
+    else opt "headless SDK driver deps not installed (only needed for WT_HEADLESS_DRIVER=sdk; ./setup installs it)"; fi
+  fi
+
   if [ "$service" -eq 0 ]; then opt "service not checked (--no-service)"
   elif [ "$OS" = Darwin ]; then
     root=$(service_root)
@@ -380,6 +388,9 @@ plugin_check() {
   return 0
 }
 
+# WP-315: headless-sdk deps are current when node_modules is newer than the lockfile.
+sdk_deps() { [ "$DASH/headless-sdk/node_modules/.package-lock.json" -nt "$DASH/headless-sdk/package-lock.json" ]; }
+
 web() {
   step "dashboard (npm deps + web build)"
   w="$DASH/web"
@@ -387,6 +398,12 @@ web() {
   else (cd "$w" && npm ci --no-audit --no-fund >/dev/null 2>&1) && ok "installed web dependencies (npm ci)" || { bad "npm ci in $w failed (run it there to see why)"; return 1; }; fi
   if built; then ok "already: web built"
   else (npm --prefix "$DASH" run build >/dev/null 2>&1) && ok "built web (skills/wt-dashboard/web/dist)" || { bad "npm --prefix $DASH run build failed"; return 1; }; fi
+  # Optional: a failure here is a note, not a failure (the default cli driver works without it).
+  if [ -f "$DASH/headless-sdk/package.json" ]; then
+    if sdk_deps; then ok "already: headless SDK driver deps"
+    elif (cd "$DASH/headless-sdk" && npm ci --omit=optional --no-audit --no-fund >/dev/null 2>&1); then ok "installed headless SDK driver deps (opt-in: WT_HEADLESS_DRIVER=sdk)"
+    else opt "headless SDK driver deps not installed (npm ci in $DASH/headless-sdk failed; only needed for WT_HEADLESS_DRIVER=sdk)"; fi
+  fi
 }
 
 svc() {
