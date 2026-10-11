@@ -1,0 +1,7 @@
+{
+  "name": "wt-pack",
+  "private": true,
+  "scripts": {
+    "test": "git ls-files '*.test.mjs' | grep -v '^skills/wt-dashboard/' | xargs node --test --test-concurrency=1"
+  }
+}
