@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# wt-message show <id> — read the body of a pack message addressed to this pane (WP-352). Also: pointer, and the wrapper flags of wt-message-cli.mjs.
+exec node "$(dirname "$0")/wt-message-cli.mjs" "$@"
