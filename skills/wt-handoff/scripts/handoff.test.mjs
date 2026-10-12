@@ -31,6 +31,15 @@ writeFileSync(join(tmp, '.local', 'share', 'wt-dashboard', 'trusted-projects.jso
 const run = (args, input = 'review it') => execFileSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8',
   env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' } })
 
+// WP-352: a send the dashboard recorded (a server-token sender, curl answering 2xx for /api/messages) to a keyed pane types the pointer;
+// without a recorded row, or to a pane with no key file, the full text is pasted as before.
+const curlOk = join(tmp, 'curlok'); mkdirSync(curlOk)
+writeFileSync(join(curlOk, 'curl'), '#!/bin/sh\ncase " $* " in *" -w "*) printf 200 ;; *) echo "{}" ;; esac\n'); chmodSync(join(curlOk, 'curl'), 0o755)
+const keys = join(tmp, '.local', 'share', 'wt-dashboard', 'pane-keys'); mkdirSync(keys, { recursive: true })
+for (const p of ['wW:p1', 'wW:p7', 'wW:p9']) writeFileSync(join(keys, p), 'k'.repeat(64))
+const ptrEnv = { PATH: `${curlOk}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_DELIVER_TOKEN: 'tok' }
+const runPtr = (args, input = 'review it', env = {}) => execFileSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8', env: { ...ptrEnv, ...env } })
+
 test('WP-121: --role reviewer targets <repo>-reviewers, spawns in the main checkout, tags pr/sha', () => {
   const sha = 'b'.repeat(40)
   const out = run(['--role', 'reviewer', '--kind', 'dispatch', '--pr', '12', '--sha', sha, '--no-goal', '--dry-run', repo], '/wt-watch-prs review 12')
@@ -93,9 +102,9 @@ test('WP-143: live routing reuses a free worker already on the routed tier/effor
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
   let out = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
   assert.match(out, /would reuse worker demo-worker-01 \(wW:p1\) \(model sonnet\)/) // routed dry-run wording (plan Unit 2)
-  execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
+  execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'list the open PRs', encoding: 'utf8', env: { ...liveEnv, PATH: `${curlOk}:${liveEnv.PATH}`, WT_DELIVER_TOKEN: 'tok' } })
   let calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr pane send-text wW:p1 <wt-message id=\w+ kind=handoff from="[^"]*">Read it with: wt-message show \w+<\/wt-message>$/m) // WP-352: the recorded pointer, not 'Do the task in'
+  assert.match(calls, /^herdr pane send-text wW:p1 <wt-message id=\w+ kind=handoff from="[^"]*">Read it with: wt-message show \w+, do what it asks, then report as it says<\/wt-message>$/m) // WP-352: the recorded pointer, not 'Do the task in'
   assert.ok(!calls.includes('tab create'))
 
   // same model, different effort: still a spawn, not a reuse (the effort half of the match rule)
@@ -347,9 +356,9 @@ test('WP-272: no /goal by default (typed short line naming the file); --goal arm
     { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
   for (const flags of [[], ['--no-goal']]) {
     writeFileSync(log, '')
-    run(['--role', 'worker', '--pane', 'wW:p9', ...flags, repo], 'do the thing')
+    runPtr(['--role', 'worker', '--pane', 'wW:p9', ...flags, repo], 'do the thing')
     const calls = readFileSync(log, 'utf8')
-    const m = calls.match(/^herdr pane send-text wW:p9 <wt-message id=(\w+) kind=handoff from="[^"]*">Read it with: wt-message show \1<\/wt-message>$/m)
+    const m = calls.match(/^herdr pane send-text wW:p9 <wt-message id=(\w+) kind=handoff from="[^"]*">Read it with: wt-message show \1, do what it asks, then report as it says<\/wt-message>$/m)
     assert.ok(m, calls) // WP-352: one typed POINTER with the recorded id; no /goal, no untagged line, nothing pasted
     const file = join(tmp, '.local', 'share', 'wt-dashboard', 'messages', `${m[1]}.md`) // the mode-600 local copy of the full message
     assert.match(readFileSync(file, 'utf8'), /^<wt-message id=\w+ kind=handoff[^>]*>[\s\S]*do the thing/)
@@ -360,17 +369,17 @@ test('WP-272: no /goal by default (typed short line naming the file); --goal arm
   writeFileSync(log, '')
   // the ticket prefix needs a known key; a Linear team in HOME's env file supplies one without the live dashboard (WP-348: the run is pinned to a closed port)
   mkdirSync(join(tmp, '.config', 'wt-dashboard'), { recursive: true }); writeFileSync(join(tmp, '.config', 'wt-dashboard', 'env'), 'WT_LINEAR_TEAMS=WP\n')
-  run(['--role', 'worker', '--pane', 'wW:p9', '--task', 'WP-5 x', '--goal', repo], 'do the thing')
+  runPtr(['--role', 'worker', '--pane', 'wW:p9', '--task', 'WP-5 x', '--goal', repo], 'do the thing')
   rmSync(join(tmp, '.config', 'wt-dashboard', 'env'))
   let calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr pane send-text wW:p9 \/goal <wt-message id=\w+ kind=handoff from="[^"]*" ticket=WP-5>Read it with: wt-message show \w+<\/wt-message>$/m, calls)
+  assert.match(calls, /^herdr pane send-text wW:p9 \/goal <wt-message id=\w+ kind=handoff from="[^"]*" ticket=WP-5>Read it with: wt-message show \w+, do what it asks, then report as it says<\/wt-message>$/m, calls)
   assert.doesNotMatch(calls, /agent prompt|Do the task in|do the thing/)
   // send-text fails: the same pointer is pasted instead, and the script says why
   writeFileSync(log, '')
   const r = spawnSync(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { input: 'do the thing', encoding: 'utf8',
-    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_FAIL_SEND_TEXT: '1' } })
+    env: { ...ptrEnv, WT_FAIL_SEND_TEXT: '1' } })
   assert.match(r.stderr, /could not type the pointer/)
-  assert.match(readFileSync(log, 'utf8'), /^herdr agent prompt wW:p9 <wt-message id=\w+ kind=handoff[^>]*>Read it with: wt-message show \w+<\/wt-message>$/m)
+  assert.match(readFileSync(log, 'utf8'), /^herdr agent prompt wW:p9 <wt-message id=\w+ kind=handoff[^>]*>Read it with: wt-message show \w+, do what it asks, then report as it says<\/wt-message>$/m)
 })
 
 test('WP-272: with the target\'s mod live the message is queued first; typed once only if it is not pulled in time', () => {
@@ -397,7 +406,7 @@ esac
   assert.doesNotMatch(readFileSync(curlLog, 'utf8'), /cancel/)
   writeFileSync(join(tmp, 'q1-status'), 'queued'); writeFileSync(log, ''); writeFileSync(curlLog, '')
   go()
-  assert.equal((readFileSync(log, 'utf8').match(/send-text wW:p9 <wt-message id=srv272 kind=handoff from="s">Read it with: wt-message show srv272<\/wt-message>/g) ?? []).length, 1) // not pulled: cancelled, typed once, as the pointer
+  assert.equal((readFileSync(log, 'utf8').match(/send-text wW:p9 <wt-message id=srv272 kind=handoff from="s">Read it with: wt-message show srv272, do what it asks, then report as it says<\/wt-message>/g) ?? []).length, 1) // not pulled: cancelled, typed once, as the pointer
   assert.match(readFileSync(curlLog, 'utf8'), /deliveries\/q1\/cancel/)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
@@ -462,20 +471,20 @@ test('WP-249: a reused agent missing from agent list is renamed to its tab label
   writeFileSync(join(tmp, 'pane-wW_p7.json'), JSON.stringify({ result: { pane: { pane_id: 'wW:p7', tab_id: 'wW:t7', tokens: {} } } }))
   writeFileSync(join(tmp, 'tabs.json'), JSON.stringify({ result: { tabs: [{ tab_id: 'wW:t7', label: 'demo-worker-07' }] } }))
   writeFileSync(log, '')
-  run(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
+  runPtr(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
   const calls = readFileSync(log, 'utf8')
   assert.match(calls, /^herdr agent rename wW:p7 demo-worker-07$/m)
   assert.ok(calls.indexOf('agent rename') < calls.indexOf('send-text'), calls)
   writeFileSync(log, '')
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [{ name: 'demo-worker-07', pane_id: 'wW:p7', tab_id: 'wW:t7', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
-  run(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
+  runPtr(['--role', 'worker', '--pane', 'wW:p7', repo], 'do the thing')
   assert.doesNotMatch(readFileSync(log, 'utf8'), /agent rename/) // registered: left alone
 })
 
 test('WP-251: --request-id sends once; a repeat returns the first output, a different id sends again', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [{ name: 'demo-worker-07', pane_id: 'wW:p7', tab_id: 'wW:t7', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
   const sends = () => (readFileSync(log, 'utf8').match(/send-text/g) ?? []).length
-  const go = (id) => run(['--role', 'worker', '--pane', 'wW:p7', '--request-id', id, repo], 'do the thing')
+  const go = (id) => runPtr(['--role', 'worker', '--pane', 'wW:p7', '--request-id', id, repo], 'do the thing')
   writeFileSync(log, '')
   const first = go('req-1')
   assert.equal(sends(), 1)
@@ -641,8 +650,23 @@ test('WP-354: a worker handoff carries the worktree line; a reviewer handoff doe
 
 test('WP-352: a --reply to a pane without a live mod types the recorded pointer, never the body', () => {
   writeFileSync(log, '')
-  run(['--reply', 'wW:p9', '--from', 'worker'], 'x'.repeat(3000) + ' the long decision')
+  runPtr(['--reply', 'wW:p9', '--from', 'worker'], 'x'.repeat(3000) + ' the long decision')
   const calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr agent prompt wW:p9 <wt-message id=(\w+) kind=reply from="[^"]*">Read it with: wt-message show \1<\/wt-message>$/m)
+  assert.match(calls, /^herdr agent prompt wW:p9 <wt-message id=(\w+) kind=reply from="[^"]*">Read it with: wt-message show \1, do what it asks, then report as it says<\/wt-message>$/m)
   assert.doesNotMatch(calls, /the long decision|Do the task in/)
+})
+
+test('WP-352: no recorded row (no pane identity or token) or a pane without a key file → the full text is pasted, never a pointer nobody can read', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
+  writeFileSync(log, '')
+  run(['--role', 'worker', '--pane', 'wW:p9', repo], 'do the thing') // run(): no token, no pane id → nothing recorded
+  let calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr agent prompt wW:p9 <wt-message id=\w+ kind=handoff[^>]*>[\s\S]*do the thing/m)
+  assert.doesNotMatch(calls, /Read it with/)
+  writeFileSync(log, '')
+  runPtr(['--reply', 'wW:p3', '--from', 'worker'], 'short answer') // recorded, but wW:p3 has no key file
+  calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr agent prompt wW:p3 <wt-message id=\w+ kind=reply[^>]*>short answer/m)
+  assert.doesNotMatch(calls, /Read it with/)
 })

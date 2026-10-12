@@ -93,17 +93,25 @@ RECEIPTS="$SELFDIR/../../wt-shared/scripts/receipts.mjs"
 ack_id=; ack_state=acknowledged
 # WP-257: write the envelope to the dashboard's message record (best effort: never blocks or fails a send).
 # A server-run handoff proves itself with its token, an agent with its pane id (like /api/deliveries).
+recorded=0 # WP-352: set by record_message when the dashboard answered 2xx; a pointer is only typed for a row that exists
 record_message() { # <pane> <text> <state>
+  recorded=0
   command -v curl >/dev/null && command -v jq >/dev/null || return 0
   [ -n "${deliver_token:-}${HERDR_PANE_ID:-}" ] || return 0
-  jq -n --arg p "$1" --arg t "$2" --arg s "$3" --arg r "$request_id" '{target:$p,body:$t,state:$s} + (if $r == "" then {} else {requestId:$r} end)' \
+  code=$(jq -n --arg p "$1" --arg t "$2" --arg s "$3" --arg r "$request_id" '{target:$p,body:$t,state:$s} + (if $r == "" then {} else {requestId:$r} end)' \
     | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
-      -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages" >/dev/null 2>&1 || true
+      -H 'content-type: application/json' --data @- -o /dev/null -w '%{http_code}' "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages" 2>/dev/null) || code=
+  case "$code" in 2??) recorded=1 ;; esac
+  return 0
 }
 # WP-352: what gets TYPED into a pane whose delivery mod is not live: the short pointer for a recorded envelope
-# (`<wt-message id=… kind=… from=…>Read it with: wt-message show <id></wt-message>`), never the full text and never an untagged line.
-ptr() { # <envelope text>
-  p=$(printf '%s' "$1" | node "$WTMSG" pointer 2>/dev/null) && [ -n "$p" ] && printf '%s' "$p" || printf '%s' "$1"
+# (`<wt-message id=… kind=… from=…>Read it with: wt-message show <id>, do what it asks, then report as it says</wt-message>`), never the full text and never an untagged line.
+# A pane without a key file cannot run `wt-message show` (it verifies through the grace path), so it gets the text as before; so does a send the
+# dashboard has no row for (no pane identity / token, dashboard down): a pointer there could be neither verified nor read.
+ptr() { # <pane> <envelope text> [recorded 0|1]
+  kf="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys/$(printf '%s' "$1" | tr -c 'A-Za-z0-9._:-' _)"
+  [ "${3:-0}" -eq 1 ] && [ -s "$kf" ] || { printf '%s' "$2"; return 0; }
+  p=$(printf '%s' "$2" | node "$WTMSG" pointer 2>/dev/null) && [ -n "$p" ] && printf '%s' "$p" || printf '%s' "$2"
 }
 while :; do
   case "${1:-}" in
@@ -246,8 +254,8 @@ if [ -n "$reply" ]; then
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
     [ "$q" = true ] && { record_message "$reply" "$msg" queued; echo "replied $reply (queued)"; exit 0; }
   fi
-  [ -n "$srv" ] || record_message "$reply" "$msg" delivered # recorded BEFORE typing: the pointer is verified against this row
-  herdr agent prompt "$reply" "$(ptr "$msg")" >/dev/null
+  rec=1; [ -n "$srv" ] || { record_message "$reply" "$msg" delivered; rec=$recorded; } # recorded BEFORE typing: the pointer is verified against this row
+  herdr agent prompt "$reply" "$(ptr "$reply" "$msg" "$rec")" >/dev/null
   echo "replied $reply"
   exit 0
 fi
@@ -461,15 +469,19 @@ hand_to() {
   fi
   # WP-352: the row is recorded before anything is typed (the receiving hook verifies the pointer against it); the full body is
   # read by the target with `wt-message show <id>`, and kept in the mode-600 file as a local copy.
-  [ "${server_recorded:-0}" -eq 1 ] || { record_message "$1" "$send" delivered; server_recorded=1; }
+  [ "${server_recorded:-0}" -eq 1 ] || { record_message "$1" "$send" delivered; server_recorded=$recorded; }
   save_message >/dev/null || true
-  typed=$(ptr "$send")
-  if herdr pane send-text "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null 2>&1; then
-    sleep 0.4 # an Enter sent in the same instant as the text is dropped
-    herdr pane send-keys "$1" enter >/dev/null
+  typed=$(ptr "$1" "$send" "$server_recorded")
+  if [ "$typed" = "$send" ]; then # no pointer (no recorded row, or a keyless pane): paste the full text as before
+    herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   else
-    echo "warning: could not type the pointer into $1 (send-text failed): pasting it" >&2
-    herdr agent prompt "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null
+    if herdr pane send-text "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null 2>&1; then
+      sleep 0.4 # an Enter sent in the same instant as the text is dropped
+      herdr pane send-keys "$1" enter >/dev/null
+    else
+      echo "warning: could not type the pointer into $1 (send-text failed): pasting it" >&2
+      herdr agent prompt "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null
+    fi
   fi
   node "$PANE_SUBMIT" confirm "$1" --settle "${WT_SUBMIT_SETTLE_MS:-1500}" 2>/dev/null \
     || { echo "prompt not submitted: it is still in the input box of $1" >&2; exit 1; }
