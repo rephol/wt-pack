@@ -122,6 +122,13 @@ test('a second concurrent tick is a no-op', async () => {
   assert.equal(calls.length, 1)
 })
 
+test('paused project (WP-346): nothing dispatched', async () => {
+  const { tickets, d, calls } = await setup({ extra: { paused: (p) => p === 'wt-pack' } })
+  await ready(tickets, 'a')
+  await d.tick()
+  assert.equal(calls.length, 0)
+})
+
 test('dispatch off: nothing dispatched', async () => {
   const { tickets, d, calls } = await setup()
   await tickets.setSettings('wt-pack', { dispatch: false })

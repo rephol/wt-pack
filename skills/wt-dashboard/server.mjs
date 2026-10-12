@@ -48,6 +48,7 @@ import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt
 import { load as routeDecisions, report as routeReport, estimateSavings as routeSavings } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { compose as composeWatchPrs } from './watchprs-event.mjs'
+import { Pauses, pauseProject, resumeProject } from './pause.mjs'
 import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
@@ -83,6 +84,7 @@ const BIND_OK = bindCheck(BIND, process.env.WT_ALLOW_REMOTE === '1')
 const DATA_ROOT = process.env.WT_DASHBOARD_DATA ?? join(homedir(), '.local', 'share', 'wt-dashboard')
 const DATA = join(DATA_ROOT, 'data')
 const psettings = new ProjectSettings({ dir: DATA, cfg }) // WP-107: per-project settings over cfg
+const pauses = new Pauses(() => psettings.db) // WP-346: paused projects (pause.mjs)
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
 const STALL_MS = 20 * 60_000
@@ -1382,7 +1384,7 @@ const refillAt = new Map()
 async function refillTeams(project) {
   const mod = await import('../wt-shared/scripts/teams.mjs').catch(() => null)
   const root = (await projectRoots()).get(project)
-  if (!mod || !root) return
+  if (!mod || !root || pauses.has(project)) return // WP-346: a paused project's seats stay empty
   const teams = mod.list(root)
   if (!teams.length) return
   const ag = (await agents().catch(() => [])).filter((a) => a.local)
@@ -3508,6 +3510,7 @@ async function projectSettingsApi(req, res, parts) {
     setLocation(root, JSON.parse((await body(req)) || '{}').where)
     return send(res, 200, await rolesState(root, git))
   }
+  if (sub === 'pause' || sub === 'resume') return projectPauseApi(req, res, project, sub)
   if (sub !== 'settings') return send(res, 404, { error: 'not found' })
   const state = () => ({ project, items: psettings.list(project) })
   if (req.method === 'GET' && !key) return send(res, 200, state())
@@ -3523,6 +3526,36 @@ async function projectSettingsApi(req, res, parts) {
       : git(root, 'config', '--unset', 'credential.https://github.com.username')).catch(() => {})
   }
   send(res, 200, state())
+}
+
+// WP-346 pause: GET /api/projects/:p/pause → { paused, at, agents }; POST …/pause saves and despawns the project's agents,
+// POST …/resume brings them back. The dashboard user only: an agent pausing its own project would despawn itself.
+async function projectPauseApi(req, res, project, sub) {
+  if (req.method === 'GET' && sub === 'pause') { const r = pauses.get(project); return send(res, 200, { paused: !!r, at: r?.at ?? null, agents: r?.agents ?? [] }) }
+  if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
+  await rooms.load()
+  if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
+  if (!(await projectRoots()).has(project)) return send(res, 404, { error: `unknown project ${project}` })
+  const mark = async (names, paused) => {
+    const open = (await tickets.list(project)).tickets ?? []
+    for (const t of open) if (t.assignee?.name && names.includes(t.assignee.name) && !!t.paused !== paused) await tickets.mutate(t.id, (c) => { if (paused) c.paused = true; else delete c.paused; return c })
+  }
+  const d = sub === 'pause'
+    ? { agents: () => agents(), rm: (pane) => run(AGENTS_SH, ['rm', pane, '--force'], homedir(), 30_000), stopHeadless: (id) => hl().stop(id, 'project paused'), mark }
+    : { mark, resumeHeadless: (id, text) => hl().resume(id, text), send: async (pane, text) => { await new Promise((r) => setTimeout(r, 8000)); // let claude finish starting
+      await herdr('pane', 'send-text', pane, text); await herdr('pane', 'send-keys', pane, 'enter') }, spawn: resumeSpawn }
+  const out = await (sub === 'pause' ? pauseProject : resumeProject)(project, pauses, d)
+  store.delete('agents:local')
+  send(res, 200, out)
+}
+// Spawn a saved agent back under its name, role, cwd, model, effort and session (the same arguments respawn uses), then restore its other tokens.
+async function resumeSpawn(a) {
+  if (!a.role || !a.cwd || !existsSync(a.cwd)) throw new Error(`${a.name}: needs a role and an existing cwd (${a.cwd ?? 'none'})`)
+  const t = a.tokens ?? {}, sess = a.session && (await findTranscript(a.session)) ? a.session : null // a session that never took a prompt has no transcript to resume
+  const out = await run(AGENTS_SH, ['spawn', a.persona || a.role, a.cwd, '--label', a.name, ...(sess ? ['--resume', sess] : []), ...(t.model ? ['--model', t.model] : []), ...(t.effort ? ['--effort', t.effort] : [])], a.cwd, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
+  const pane = out.trim().split(/\s+/).pop()
+  for (const [k, v] of Object.entries(t)) if (!['role', 'persona', 'project', 'spawned_by', 'created', 'model', 'effort'].includes(k)) await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--token', `${k}=${v}`).catch(() => {})
+  return pane
 }
 
 // ---- Terminals (terminals.mjs): shells owned by herdr, mirrored and typed into from the dashboard ----
@@ -3962,6 +3995,7 @@ export const readyNudge = (project, ts) => wrap({ kind: 'system', from: 'wt-dash
 const routines = new Routines({
   dir: DATA,
   deps: {
+    paused: (project) => pauses.has(project),
     agents: () => agents(),
     host: () => host(),
     prompt: async (a, text, o) => {
@@ -3993,6 +4027,7 @@ const dispatcher = new Dispatch({
   deps: {
     agents: () => agents(),
     host: () => host(),
+    paused: (project) => pauses.has(project),
     maxWorking: (project) => Number(psettings.get(project, 'maxWorking')),
     baseBranch: (project) => psettings.get(project, 'baseBranch'),
     triageOn: (project) => jevOn('TICKET_TRIAGE', project),

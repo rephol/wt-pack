@@ -115,6 +115,14 @@ test('cap: working agents + an open spawn not yet working ≥ maxWorking → ski
   assert.match(u.reason, /^cap: 2/)
 })
 
+test('a paused project (WP-346) skips its routines', async () => {
+  const { w, r } = setup()
+  w.deps.paused = (p) => p === 'wt-pack'
+  w.list = [{ id: 'p1', name: 'orch', pool: 'orchestrator', project: 'wt-pack', status: 'idle' }]
+  const x = r.create({ name: 'p', schedule: 'every 1h', target: { kind: 'prompt', role: 'orchestrator', project: 'wt-pack', text: 'digest' } })
+  assert.equal((await r.runNow(x.id)).reason, 'project paused')
+})
+
 test('prompt: idle agent prompted; busy → skipped; none → skipped', async () => {
   const { w, r } = setup()
   const x = r.create({ name: 'p', schedule: 'every 1h', target: { kind: 'prompt', role: 'orchestrator', project: 'wt-pack', text: 'digest' } })
