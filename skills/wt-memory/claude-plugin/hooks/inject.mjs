@@ -65,6 +65,7 @@ async function reminderFor(prompt) {
   // WP-352: a typed POINTER is trusted only when it is exactly the pointer line for its id (the dashboard then marks the id used: a replay is
   // refused); an inline envelope also proves its body hash against the record. Anything else (text after the envelope) is not a message.
   if (!pointer && !sha) { writeTurn({ trust: 'unverified' }); return UNVERIFIED('text outside the envelope') }
+  if (!/^(?:\/goal|\/wt-[a-z0-9-]+)?$/.test(e.slash)) { writeTurn({ trust: 'unverified' }); return UNVERIFIED('unexpected command before the envelope') } // only what wrap() hoists
   const v = await verify(e, pointer ? '&pointer=1' : `&sha=${sha}`)
   if (!v.verified) { writeTurn({ trust: 'unverified' }); return UNVERIFIED(clean(v.reason)) }
   writeTurn({ trust: 'verified', kind: v.kind, sender: v.sender, senderRole: v.senderRole ?? null, replyAllowed: v.replyAllowed === true })

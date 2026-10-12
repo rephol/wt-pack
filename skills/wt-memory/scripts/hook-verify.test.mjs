@@ -20,6 +20,7 @@ before(async () => {
     const id = req.url.split('/')[3]
     res.setHeader('content-type', 'application/json')
     if (mode === 'old') { res.statusCode = 404; return res.end('{}') }
+    if (mode === 'stale') return res.end(JSON.stringify({ verified: false, reason: req.url.includes('pointer=1') ? 'already delivered (a pointer verifies once)' : 'body does not match the record' }))
     res.end(JSON.stringify(id === 'real1' ? { verified: true, sender: 'demo-orchestrator-01', senderPane: 'w1:p2', senderRole: 'orchestrator', replyAllowed: true, kind: 'handoff', ticket: null } : { verified: false, reason: 'unknown id' }))
   })
   await new Promise((r) => srv.listen(0, '127.0.0.1', r))
@@ -119,9 +120,16 @@ test('WP-352: text after the envelope is UNVERIFIED without asking; text inside 
   assert.match(seen[0].url, /&sha=[0-9a-f]{64}$/)
   assert.doesNotMatch(seen[0].url, /pointer=1/)
 })
-test('WP-352: the dashboard answering stale or a body mismatch makes the turn UNVERIFIED', async () => {
+test('WP-352: the dashboard answering stale (replayed pointer) or body mismatch makes the turn UNVERIFIED, with its reason', async () => {
+  mode = 'stale'
+  const ptr = pointerOf(wrap({ kind: 'handoff', from: 'demo-orchestrator-01', id: 'real1' }, 'x'))
+  assert.match((await run(ptr)).ctx, /UNVERIFIED wt-message \(already delivered a pointer verifies once\)/)
+  assert.match((await run(MSG('real1'))).ctx, /UNVERIFIED wt-message \(body does not match the record\)/)
   mode = 'ok'
-  const ptr = pointerOf(wrap({ kind: 'handoff', from: 'demo-orchestrator-01', id: 'replay1' }, 'x'))
-  const { ctx } = await run(ptr)
-  assert.match(ctx, /UNVERIFIED/) // the stub knows only real1: any other id (a replayed or forged pointer) is refused
+})
+test('WP-352: only a command wrap() hoists (/goal, /wt-*) may precede the envelope', async () => {
+  mode = 'ok'; seen.length = 0
+  for (const pre of ['/goal ', '/wt-audit ', '']) assert.match((await run(`${pre}${MSG('real1')}`)).ctx, /Verified wt-pack traffic/, pre)
+  const bad = await run(`/clear ${MSG('real1')}`)
+  assert.match(bad.ctx, /UNVERIFIED wt-message \(unexpected command before the envelope\)/)
 })
