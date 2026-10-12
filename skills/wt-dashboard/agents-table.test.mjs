@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentTable, reconcile } from './agents-table.mjs'
+import { AgentTable, reconcile, rowAsAgent } from './agents-table.mjs'
 import { ProjectStore } from './project-store.mjs'
 
 const mem = () => { const db = new DatabaseSync(':memory:'); return () => db }
@@ -93,4 +93,12 @@ test('import is atomic: a failing import leaves no table, so the next open retri
 test('reconcile: model/effort/team follow the pane (a cleared one drops); other tags merge', () => {
   const r = reconcile([row({ tags: { role: 'worker', team: 'old', model: 'opus' } })], [live({ paneTokens: { role: 'worker', model: 'sonnet' } })], new Set(['%1']))
   assert.deepEqual(r[0].patch.tags, { role: 'worker', model: 'sonnet' })
+})
+
+test('rowAsAgent: a row with no seen/gone/paused stamp falls back to created_at, never epoch 0 (WP-350)', () => {
+  const t = new AgentTable(() => new DatabaseSync(':memory:'))
+  t.upsert('x-1', { state: 'paused' }, 5_000)
+  const a = rowAsAgent(t.get('x-1'))
+  assert.equal(a.statusSince, 5_000)
+  assert.equal(a.lastActivity, 5_000)
 })

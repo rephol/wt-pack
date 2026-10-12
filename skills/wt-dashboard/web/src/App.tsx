@@ -207,7 +207,7 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
 // WP-277: working is violet (custom 'working' StatusDot variant, index.css): blue (accent) sat too close to the green done dot.
 const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error', paused: 'neutral', missing: 'error' }
 
-const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
+const lastActive = (a: Agent) => { const t = a.lastActivity || a.statusSince; return t > 0 ? shortAgo(new Date(t).toISOString()) : '—' } // WP-350: a stored row with no stamp has no age
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
 const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
 // The right panel (agent or terminal): its handle is on the panel's LEFT edge, so dragging left must widen it
@@ -244,6 +244,7 @@ function ActivityRow({ agent, lastTool }: { agent: Agent; lastTool: string | nul
 }
 
 const idleFor = (a: Agent) => {
+  if (!(a.statusSince > 0)) return '—'
   const m = Math.floor((Date.now() - a.statusSince) / 60_000)
   return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
 }
