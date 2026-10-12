@@ -326,5 +326,7 @@ export class Tickets {
 
 // `WP-12 [ready] (bug,M,P2) title @assignee`; priority is Linear's scale, 0 = none (omitted), 1 urgent … 4 low.
 export const ticketRow = (t) => `${t.id} [${t.column}] (${[t.type, t.size, t.priority && `P${t.priority}`].filter(Boolean).join(',')}) ${t.title}${t.assignee ? ` @${t.assignee.name}` : ''}`
+// WP-322: a history from/to is a column or assignee string, except on a pair event where it is { worker, buddy } | null.
+export const histVal = (v) => v == null ? '—' : typeof v !== 'object' ? String(v) : [v.worker?.name, v.buddy?.name].filter(Boolean).join(' + ') || '—'
 export const ticketText = (t) => [ticketRow(t), ...(t.links.length ? [t.links.join(' ')] : []), '', t.body, '',
-  ...t.history.map((h) => `[${h.at.slice(0, 16).replace('T', ' ')}] ${h.author} ${h.kind}${h.from !== undefined || h.to !== undefined ? ` ${h.from ?? '—'} → ${h.to ?? '—'}` : ''}${h.text ? `: ${h.text}` : ''}`)].join('\n') + '\n'
+  ...t.history.map((h) => `[${h.at.slice(0, 16).replace('T', ' ')}] ${h.author} ${h.kind}${h.from !== undefined || h.to !== undefined ? ` ${histVal(h.from)} → ${histVal(h.to)}` : ''}${h.text ? `: ${h.text}` : ''}`)].join('\n') + '\n'

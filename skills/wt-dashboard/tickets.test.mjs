@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Tickets, deriveKey, ticketRow, ticketMatches } from './tickets.mjs'
+import { Tickets, deriveKey, ticketRow, ticketText, ticketMatches } from './tickets.mjs'
 import { exportTo } from './store.mjs'
 
 const tmp = () => mkdtemp(join(tmpdir(), 'tickets-'))
@@ -72,6 +72,8 @@ test('WP-147: pair round-trips, is validated, and is cleared on Done', async () 
   const p1 = await t.patch(id, { pair }, user)
   assert.deepEqual(p1.pair, pair)
   assert.deepEqual([p1.history.at(-1).kind, p1.history.at(-1).to], ['pair', pair])
+  assert.match(ticketText(p1), /pair — → wt-pack-worker-01 \+ wt-pack-reviewer-01/) // WP-322: never [object Object]
+  assert.ok(!ticketText(p1).includes('[object Object]'))
   // A pair member can go null independently (e.g. a gone buddy with no replacement), never rejected.
   const p2 = await t.patch(id, { pair: { ...pair, buddy: null } }, user)
   assert.equal(p2.pair.buddy, null)
