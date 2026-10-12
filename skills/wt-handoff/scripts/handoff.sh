@@ -513,6 +513,10 @@ auth_header() { [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" ||
 task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
 from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
 from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
+# WP-354: a worker's work happens in a worktree under <main>/.claude/worktrees, never a ../<repo>-* sibling or /tmp
+[ "${role:-worker}" = worker ] && prompt="$prompt
+
+Worktree: do the work in a worktree made with skills/wt-plan/scripts/worktree.sh <branch> (under <main>/.claude/worktrees); never git worktree add beside the repo or in /tmp."
 [ -n "$from_pane" ] && prompt="$prompt
 
 Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: $SELF --reply $from_pane \"...\""
