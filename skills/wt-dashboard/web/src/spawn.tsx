@@ -157,9 +157,13 @@ export function RemoveHost() {
   const qc = useQueryClient()
   const toast = useToast()
   useEffect(() => {
-    const on = (e: Event) => { setA((e as CustomEvent<SpawnAgentLite>).detail); setStep('confirm'); setTyped('') }
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<SpawnAgentLite>).detail
+      if (!d.id) { toast({ body: 'No pane to remove; use Forget', type: 'error' }); return } // WP-351: a stored row has no pane
+      setA(d); setStep('confirm'); setTyped('')
+    }
     addEventListener('open-remove', on); return () => removeEventListener('open-remove', on)
-  }, [])
+  }, [toast])
   const rm = useMutation({
     mutationFn: (force: boolean) => api(`/api/agents/${encodeURIComponent(a!.machine)}/${encodeURIComponent(a!.id)}`, { method: 'DELETE', body: JSON.stringify({ force, confirmName: typed || undefined }) }),
     onSuccess: () => { toast({ body: `Removed ${a!.name}` }); setA(null); qc.invalidateQueries({ queryKey: ['overview'] }) },
