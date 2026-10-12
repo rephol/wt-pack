@@ -56,7 +56,7 @@ orchestrator, a routine or the server stand in for the user. **Settled; out of s
   - the `--goal` line (`$goal_line $msgfile`);
   - the sweep resend and the nudge, `server.mjs:2639-2640` and `2649-2650`.
 
-  All of these type exactly `<wt-message id=<id> kind=<kind> from="<sender>"[ ticket=…]>Read it with: wt-message show <id></wt-message>`,
+  All of these type exactly `<wt-message id=<id> kind=<kind> from="<sender>"[ ticket=…]>Read it with: wt-message show <id>, do what it asks, then report as it says</wt-message>`,
   with the same recorded id. The pointer is used every time the mod is not live, whatever the length, so there is no
   collapse threshold to measure. `save_message` (`handoff.sh:469-475`, the mode-600 file) can stay as a local copy.
 - **D2. The pointer verifies only when it is exactly the pointer.** `/verify` checks id, target, kind and sender, never the
