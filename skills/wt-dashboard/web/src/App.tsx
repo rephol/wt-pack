@@ -61,6 +61,7 @@ import { PwaHost, InstallHint, UpdateBanner } from './pwa'
 import { openInbox } from './inbox'
 import { sortAgents, initialSort, activityOf, projectList, extraAgent, mergeAgents, isLive, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
+import { storedMode } from './storedMode'
 import { QuickSwitcher, rememberRecent } from './switcher'
 import { taskLabel } from './switcherData'
 import { Layout, LayoutContent, LayoutPanel } from '@astryxdesign/core/Layout'
@@ -207,7 +208,9 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
 // WP-277: working is violet (custom 'working' StatusDot variant, index.css): blue (accent) sat too close to the green done dot.
 const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error', paused: 'neutral', missing: 'error' }
 
-const lastActive = (a: Agent) => { const t = a.lastActivity || a.statusSince; return t > 0 ? shortAgo(new Date(t).toISOString()) : '—' } // WP-350: a stored row with no stamp has no age
+// WP-353: a stamp that is not milliseconds (0, unset, seconds) has no age
+const stampAgo = (t: number | null | undefined) => (t != null && t > 1e12 ? shortAgo(new Date(t).toISOString()) : '—')
+const lastActive = (a: Agent) => stampAgo(a.lastActivity || a.statusSince) // WP-350: a stored row with no stamp has no age
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
 const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
 // The right panel (agent or terminal): its handle is on the panel's LEFT edge, so dragging left must widen it
@@ -654,7 +657,18 @@ function AgentLink({ machine, name, pane }: { machine: string; name?: string; pa
   if (!name) return null
   return pane ? <Link href={`#${agentHash(`${machine}/${pane}`)}`}>{`@${name}`}</Link> : <Text size="sm" weight="medium">{`@${name}`}</Text>
 }
-function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: Task | null; dnd?: boolean; onToggleDnd?: () => void }) {
+// WP-353: the one-line replacement for the composer of a paused/missing/exited agent.
+function StoredBar({ agent, stored, act }: { agent: Agent; stored: NonNullable<ReturnType<typeof storedMode>>; act?: { onClick: () => void } }) {
+  const t = stampAgo(agent.statusSince), ago = t === '—' ? '' : ` ${t}`
+  return (
+    <HStack gap={2} align="center" justify="between" wrap="wrap" data-stored-bar="" style={{ padding: '8px 4px' }}>
+      <Text type="supporting" size="sm">{stored.state === 'paused' ? `Paused${ago} — Resume to talk to it` : `Not running (${stored.state}${ago}) — Respawn to talk to it`}</Text>
+      {act && <Button label={stored.verb} size="sm" variant="primary" onClick={act.onClick} />}
+    </HStack>
+  )
+}
+function AgentSummary({ agent, task, dnd, onToggleDnd, stored }: { agent: Agent; task: Task | null; dnd?: boolean; onToggleDnd?: () => void; stored?: { id: string; label: string; onClick: () => void }[] }) {
+  const toast = useToast()
   const t = agent.tags ?? {}
   // WP-147: `pair` is just the paired ticket id (the pane token) — read-only here; editing lives in the ticket drawer.
   const pairTicket = t.pair ?? null
@@ -671,7 +685,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
     <VStack gap={5} isScrollable style={{ paddingTop: 4 }}>
       {agent.question && <Card variant="red"><VStack gap={1}><Text size="sm" weight="semibold">Waiting on you</Text><Text>{agent.question}</Text></VStack></Card>}
 
-      {agent.local && agentKind(agent) === 'pane' && (
+      {agent.local && agentKind(agent) === 'pane' && !stored && (
         <HStack gap={2} align="center" wrap="wrap">
           <Button label={dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb'} size="sm" variant={dnd ? 'secondary' : 'ghost'} onClick={onToggleDnd} />
           {pairTicket && <Badge variant="neutral" label={`paired · ${pairTicket}`} />}
@@ -707,6 +721,14 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         <SummaryRow label={task?.worktree ? 'Worktree' : 'Folder'}>
           <Tooltip content={workdir}><Text size="sm" maxLines={1}>{shortPath(workdir) ?? workdir}</Text></Tooltip>
         </SummaryRow>
+        {stored && <>
+          <SummaryRow label="State"><Text size="sm">{`${agent.status}${stampAgo(agent.statusSince) === '—' ? '' : ` · ${stampAgo(agent.statusSince)}`}`}</Text></SummaryRow>
+          {agent.project && <SummaryRow label="Project"><Text size="sm">{agent.project}</Text></SummaryRow>}
+          <SummaryRow label="Role"><Text size="sm">{agent.pool}</Text></SummaryRow>
+          <SummaryRow label="Session">{agent.session
+            ? <Tooltip content="Copy session id"><span role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => navigator.clipboard.writeText(agent.session!).then(() => toast({ body: 'Copied', type: 'info' }), (e) => toast({ body: `Copy failed: ${e}`, type: 'error' }))}><Text size="sm" type="code" maxLines={1}>{agent.session}</Text></span></Tooltip>
+            : <Text size="sm" type="supporting">—</Text>}</SummaryRow>
+        </>}
         {plan && <SummaryRow label="Plan"><Text size="sm" type="code" maxLines={2}>{plan}</Text></SummaryRow>}
         {task?.pr && <SummaryRow label="PR"><PrCell pr={task.pr} /></SummaryRow>}
       </SummarySection>
@@ -722,7 +744,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         </SummarySection>
       )}
 
-      {(agent.recap || ctxText) && (
+      {!stored && (agent.recap || ctxText) && (
         <SummarySection title="Activity">
           {agent.recap && <Text size="sm">{agent.recap}</Text>}
           {info && ctxText && (
@@ -737,13 +759,19 @@ function AgentSummary({ agent, task, dnd, onToggleDnd }: { agent: Agent; task: T
         </SummarySection>
       )}
 
-      {details.length > 0 && (
+      {(details.length > 0 || stored) && (
         <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<Text size="sm" weight="semibold">Details</Text>}>
           <VStack gap={1} style={{ paddingTop: 8 }}>
             {details.map(([k, v]) => <SummaryRow key={k} label={TOKEN_LABEL[k] ?? k.replaceAll('_', ' ')}><Text size="sm">{k === 'handoff_at' && /^\d+$/.test(v) ? new Date(Number(v) * 1000).toLocaleString() : v}</Text></SummaryRow>)}
-            <SummaryRow label={agentKind(agent) === 'headless' ? 'Run' : 'Pane'}><Text size="sm" type="code">{agent.id}</Text></SummaryRow>
+            <SummaryRow label={agentKind(agent) === 'headless' ? 'Run' : 'Pane'}><Text size="sm" type={stored ? undefined : 'code'}>{stored ? '— no pane (stored)' : agent.id}</Text></SummaryRow>
           </VStack>
         </Collapsible>
+      )}
+
+      {stored && (
+        <HStack gap={2} align="center" wrap="wrap">
+          {stored.map((m) => <Button key={m.id} label={m.label.replace('…', '')} size="sm" variant={m.id === 'resume' || m.id === 'respawn' ? 'primary' : 'ghost'} onClick={m.onClick} />)}
+        </HStack>
       )}
     </VStack>
   )
@@ -1071,6 +1099,14 @@ function agentStreamSpec(base: string, key: string, session: string | null) {
     },
   }
 }
+// WP-353: a stored agent's saved transcript, one snapshot by name (no pane, no reconnect: the server ends it with 'end').
+const storedStreamSpec = (name: string) => ({
+  url: () => `/api/agents/by-name/${encodeURIComponent(name)}/stream?since=0`,
+  attach: (es: EventSource, apply: (fn: (items: Msg[]) => Msg[], cursor?: string | null) => void) => {
+    es.onmessage = (ev) => apply((prev) => mergeAgentMsgs(prev, JSON.parse(ev.data)), ev.lastEventId || undefined)
+    es.addEventListener('end', () => es.close())
+  },
+})
 function toRows(msgs: Msg[]): Row[] {
   const rows: Row[] = []
   const meta = deriveMeta(msgs)
@@ -1156,7 +1192,9 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     }, 50)
     return () => clearTimeout(t)
   }, [autoFocus, tab])
+  const stored = storedMode(agent) // WP-353
   const cmds = useQuery({
+    enabled: !stored,
     queryKey: ['commands', agent.key],
     queryFn: () => getJSON<Command[]>(`${agentUrl(agent)}/commands`),
     staleTime: 60_000,
@@ -1190,15 +1228,16 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   const qc = useQueryClient()
   // Keyed on the session id: /clear or a restart gives a new transcript, so a new cache entry.
   // Remote agents stream too (WP-97: the transcript over SSH, matched to the pane); the pane view covers the wait.
-  const live = agent.local ? Boolean(agent.session) : true
-  const stream = useStream<Msg>(live ? `agent|${agent.key}|${agent.session ?? 'remote'}` : null, () => agentStreamSpec(agentUrl(agent), agent.key, agent.session))
+  const live = !stored && (agent.local ? Boolean(agent.session) : true)
+  const streamKey = stored ? (agent.session ? `agent|${agent.key}|${agent.session}|saved` : null) : live ? `agent|${agent.key}|${agent.session ?? 'remote'}` : null // |saved: a Resume must not reuse the closed snapshot entry
+  const stream = useStream<Msg>(streamKey, () => stored ? storedStreamSpec(agent.name) : agentStreamSpec(agentUrl(agent), agent.key, agent.session))
   const remote = useSyncExternalStore(subRemote, () => (agent.local ? null : remoteStates.get(agent.key) ?? 'loading'))
-  const transcript = live && (agent.local || stream.items.length > 0) // a remote stream counts once it has messages
+  const transcript = stored ? Boolean(agent.session) : live && (agent.local || stream.items.length > 0) // a remote stream counts once it has messages
   // Remote until then, and session-less local agents: the pane-read timeline instead of the transcript.
   const pane = useQuery({
     queryKey: ['pane', agent.key],
     queryFn: () => getJSON<{ turns: { role: 'user' | 'assistant'; text: string }[]; tail?: string }>(`${agentUrl(agent)}?lines=500`),
-    enabled: !transcript,
+    enabled: !transcript && !stored,
     refetchInterval: agent.status === 'working' ? 5000 : false,
   })
   // No parsed turns (a narrow remote pane with no prompt on screen): its last lines, as-is, rather than nothing.
@@ -1298,6 +1337,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
       qc.invalidateQueries({ queryKey: ['overview'] })
     },
   })
+  useEffect(() => { if (stored) { setQueued([]); send.reset() } }, [stored?.state]) // eslint-disable-line react-hooks/exhaustive-deps -- WP-353: no stale optimistic or failed sends on a stored row
   // The list is built only when the transcript (or working state) changes, never per keystroke:
   // the draft lives in this component, and re-rendering 200+ Markdown messages per key was the lag.
   const working = agent.status === 'working'
@@ -1308,7 +1348,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     const call = c?.kind === 'tools' ? c.calls.at(-1) : undefined
     return call ? `${call.name}${call.target ? `: ${call.target}` : ''}` : null
   }, [allRows])
-  const noneYet = transcript && !stream.synced && !msgs.length // nothing cached and the stream has not answered
+  const noneYet = transcript && !stream.synced && !stream.error && !msgs.length // nothing cached and the stream has not answered
   const messageList = useMemo(() => noneYet ? <Delayed><ChatSkeleton /></Delayed> : (
               <ChatMessageList density={density} isStreaming={working} data-agent-chat="">
                 {allRows.length > rows.length && <ShowEarlier onClick={() => setLimit((l) => l + DOCK_LIMIT)} />}
@@ -1347,11 +1387,11 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   ), [rows, allRows.length, working, density, noneYet, jump, chatRef?.chat])
 
   const page = mode === 'page'
-  const summary = <AgentSummary agent={agent} task={task} dnd={dnd} onToggleDnd={() => dndM.mutate(!dnd)} />
+  const summary = <AgentSummary agent={agent} task={task} dnd={dnd} onToggleDnd={() => dndM.mutate(!dnd)} stored={stored ? ops.menu().filter((m) => ['resume', 'respawn', 'forget', 'forget-confirm'].includes(m.id)) : undefined} />
   const conversation = (
           <VStack gap={2} style={{ flex: 1, minHeight: 0 }}>
             {kind === 'headless' && <HeadlessBar id={agent.id} />}
-            {!live && <Text type="supporting" size="sm">no transcript · pane view</Text>}
+            {!live && !stored && <Text type="supporting" size="sm">no transcript · pane view</Text>}
             {remote && <Text type="supporting" size="sm">{transcript ? 'remote · transcript'
               : remote === 'unmatched' ? 'remote · transcript not matched — pane view'
               : remote === 'unreachable' ? 'remote · unreachable — pane view' : 'remote · loading transcript… (pane view)'}</Text>}
@@ -1360,12 +1400,13 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             {transcript && !streamErr && !stream.synced && msgs.length > 0 && (
               <div role="status" style={{ height: 0, overflow: 'visible', display: 'flex', justifyContent: 'flex-end', position: 'relative', zIndex: 1, pointerEvents: 'none' }}>
                 <HStack gap={1} align="center" style={{ height: 20 }}><StatusDot variant="neutral" label="" /><Text type="supporting" size="sm">syncing…</Text></HStack></div>)}
-            {send.isError && <Banner status="error" title="Send failed" description={String(send.error)} />}
+            {!stored && send.isError && <Banner status="error" title="Send failed" description={String(send.error)} />}
             {chatRef && <PinnedBar chat={chatRef} onJump={jumpTo} />}
             <div ref={chatBox} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <ChatLayout ref={layoutRef}
-              emptyState={transcript && !stream.synced ? <Delayed><ChatSkeleton /></Delayed> : <EmptyState isCompact title="No messages yet" />}
-              composer={heldPicker ? null : (<VStack gap={1}>
+              emptyState={transcript && !stream.synced && !stream.error ? <Delayed><ChatSkeleton /></Delayed>
+                : <EmptyState isCompact title="No messages yet" />}
+              composer={stored ? <StoredBar agent={agent} stored={stored} act={ops.menu().find((m) => m.id === stored.verb.toLowerCase())} /> : heldPicker ? null : (<VStack gap={1}>
                 <ChatComposer
                   sendButton={working ? <Tooltip content="Queue: Claude picks it up after its current step"><span><ChatSendButton /></span></Tooltip> : undefined}
                   value={draft}
@@ -1417,9 +1458,11 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
                   }
                 />
               </VStack>)}>
-              {messageList}
-              <ActivityRow agent={agent} lastTool={lastTool} />
-              {queued.length > 0 && (
+              {stored && !msgs.length && !noneYet
+                ? <EmptyState isCompact title={`No saved transcript for ${agent.name}.`} description={agent.session ? `Session ${agent.session}` : undefined} />
+                : messageList}
+              {!stored && <ActivityRow agent={agent} lastTool={lastTool} />}
+              {!stored && queued.length > 0 && (
                 <VStack gap={1} style={{ padding: '0 8px 8px', alignItems: 'flex-end' }}>
                   {queued.map((q) => (
                     <HStack key={q.id} gap={1} align="center" style={{ opacity: q.state === 'sending' || q.state === 'queued' ? 0.7 : 1, maxWidth: '85%' }}>

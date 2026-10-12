@@ -971,9 +971,10 @@ function firstBatch(emit, res, text, base, offset, since, asks) {
     if (first.length) emit(first, offset); else res.write(`id: ${emit.id(offset)}\n: empty\n\n`)
   }
 }
-export async function streamTranscript(req, res, session, url, fileOverride) {
-  let file = fileOverride ?? (session && (await findTranscript(session)))
-  if (!file && !session) return send(res, 404, { error: 'no transcript for this agent' })
+// once (WP-353, a stored agent's saved transcript): never wait for a file that won't appear (404 at once), and end after the first batch.
+export async function streamTranscript(req, res, session, url, fileOverride, { once = false } = {}) {
+  let file = fileOverride ?? (session && (await findTranscript(session).catch(() => null)))
+  if (!file && (!session || once)) return send(res, 404, { error: once ? 'no saved transcript' : 'no transcript for this agent' })
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
   // A fresh session (new agent, /clear, a restart after a rename) has no JSONL until its first turn. A 404 here
   // closes EventSource for good, so hold the stream open and wait for the file instead.
@@ -1001,6 +1002,7 @@ export async function streamTranscript(req, res, session, url, fileOverride) {
   let partial = ''
   const asks = new Set()
   firstBatch(emit, res, all.slice(0, nl + 1), 0, offset, Number(req.headers['last-event-id'] ?? url?.searchParams.get('since')), asks)
+  if (once) return res.end('event: end\ndata: {}\n\n') // the client closes its EventSource on 'end', so it never reconnects
 
   let busy = false
   const pull = async () => {
@@ -3593,6 +3595,13 @@ async function agentByNameApi(req, res, name, sub) {
   const row = agentTable.get(name) ?? (name.includes(':') ? agentTable.byPane(name) : undefined) // a pane id works too
   if (!sub && req.method === 'GET') return row ? send(res, 200, Object.fromEntries(BYNAME_FIELDS.map((k) => [k, row[k] ?? null]))) : send(res, 404, { error: `no agent ${name}` })
   if (sub === 'pause' || sub === 'resume') return agentPauseApi(req, res, name, sub)
+  if (sub === 'stream' && req.method === 'GET') { // WP-353: the saved transcript of a paused/missing/exited row, read-only, one snapshot
+    await rooms.load()
+    if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
+    if (!row) return send(res, 404, { error: `no agent ${name}` })
+    if (!['paused', 'missing', 'exited'].includes(row.state)) return send(res, 409, { error: 'use the pane route' })
+    return streamTranscript(req, res, row.session, new URL(req.url, 'http://x'), undefined, { once: true })
+  }
   if (sub !== 'forget' || req.method !== 'POST') return send(res, 404, { error: 'not found' })
   await rooms.load()
   const who = await roomAuthor(req)
