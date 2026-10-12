@@ -603,3 +603,13 @@ test('WP-348: handoff to a pane whose agents-table row is paused, exited or miss
   writeFileSync(state, 'idle')
   assert.equal(spawnSync(join(here, 'handoff.sh'), ['--no-goal', '--dry-run', '--pane', 'wW:p1', repo], { input: 'x', encoding: 'utf8', env }).status, 0)
 })
+
+test('WP-348: a paused team member still holds its seat (the dashboard counts it), and a dead dashboard counts none', () => {
+  const fake = join(tmp, 'teambin'); mkdirSync(fake, { recursive: true })
+  const rows = join(tmp, 'team-rows.json'); writeFileSync(rows, '[{"name":"p","state":"paused","tags":{"team":"web","role":"worker"}}]')
+  writeFileSync(join(fake, 'curl'), `#!/bin/sh\ncat ${rows}\n`, { mode: 0o755 })
+  const count = (path) => execFileSync('sh', ['-c', `. ${join(here, '..', '..', 'wt-shared', 'scripts', 'agent-pane.sh')}; agent_paused_in_team web worker`],
+    { encoding: 'utf8', env: { PATH: `${path}:${process.env.PATH}`, HERDR_DASH_URL: 'http://127.0.0.1:9' } }).trim()
+  assert.equal(count(fake), '1')
+  assert.equal(count(bin), '0') // the shared stub curl output is not the rows JSON, or the port is closed
+})

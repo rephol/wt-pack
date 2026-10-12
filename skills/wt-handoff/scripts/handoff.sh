@@ -763,6 +763,7 @@ if [ -n "$team" ]; then
   seats=$(node "$SELFDIR/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "${main_checkout:-$cwd}" 2>/dev/null) || seats=0
   [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
   have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
+  . "$SELFDIR/../../wt-shared/scripts/agent-pane.sh"; have=$(( ${have:-0} + $(agent_paused_in_team "$team" "$want") )) # WP-348: a paused member still holds its seat
   if [ "${have:-0}" -ge "$seats" ]; then
     full="team full: $have/$seats $want in $team"
     [ "$dry" -eq 1 ] && dry "$full"
