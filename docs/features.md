@@ -38,9 +38,13 @@ A queue of work across PRs, agents and the local board, with a **Mine / Everyone
 - An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)).
 - Skills: wt-plan, wt-work, wt-babysit, wt-finish, wt-handoff.
 
+## Project store (WP-347)
+
+Projects live in `wt.db` (`projects`: name, root, added_at). Every project the dashboard derives (configured repo, `WT_DASHBOARD_PROJECTS`, running agents' checkouts, New project) is remembered, so a project stays listed with no running agent or herdr workspace. Hide project still removes it from the list; a stored project whose checkout is gone is dropped from the list.
+
 ## Project pause (WP-346)
 
-Settings › Projects › **Pause** saves every agent of the project (name, role or persona, folder, pane tokens, session id, headless run id), then closes the panes and stops the headless runs. Agents caught mid-turn are marked and get one `continue` on resume. Cards stay In progress and are marked `paused`. While paused, Dispatch (including its reconcile), routines targeting the project and team refill skip it; keepwarm has nothing to ping because the agents are gone. **Resume** respawns each pane agent under its old name with `--resume <session>`, model, effort and tokens (fresh pane key), and resumes headless runs by session id; one cold cache write per agent. A failed despawn or respawn is listed and retried on the next Resume. Saved in `wt.db` (`project_pauses`); `GET /api/projects/:p/pause`, `POST …/pause`, `POST …/resume` (dashboard user only).
+Settings › Projects › **Pause** saves every agent of the project (name, role or persona, folder, pane tokens, session id, headless run id), then closes the panes and stops the headless runs. Agents caught mid-turn are marked and get one `continue` on resume. Cards stay In progress and are marked `paused`. While paused, Dispatch (including its reconcile), routines targeting the project and team refill skip it; keepwarm has nothing to ping because the agents are gone. **Resume** respawns each pane agent under its old name with `--resume <session>`, model, effort and tokens (fresh pane key), and resumes headless runs by session id; one cold cache write per agent. A failed despawn or respawn is listed and retried on the next Resume. If a saved folder is gone (its worktree was removed after the merge), Resume restarts the agent in the project's main checkout on a fresh session and lists it in the result (`fallbacks`); only a missing role fails. A paused project always stays in the project list, marked `(paused)`, even when hidden. Saved in `wt.db` (`project_pauses`); `GET /api/projects/:p/pause`, `POST …/pause`, `POST …/resume` (dashboard user only).
 
 ## Project settings location (WP-234)
 
