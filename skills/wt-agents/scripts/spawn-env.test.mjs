@@ -58,52 +58,40 @@ test('no account: no --env, gh not asked; unknown account: warns, spawns without
   assert.ok(existsSync(join(tmp, '.claude.json')))
 })
 
-test('WP-120: numbering skips a name held by an exited agent in watchdog.json; no file → 01', () => {
-  const wd = join(tmp, 'data', 'watchdog.json')
-  writeFileSync(wd, JSON.stringify({ lastSeen: { 'w1:p1': { name: 'demo-worker-01', goneAt: '2026-09-27T12:04:09Z' }, 'w1:p2': { name: 'demo-worker-02', goneAt: '2026-09-27T12:04:09Z' }, 'w1:p3': { name: 'demo-worker-07' } } }))
-  assert.match(spawn().out, /^demo-worker-03 /)
-  rmSync(wd)
+// WP-348: numbering reads the dashboard's agents table (GET /api/agents, every row whatever its state); a fake curl serves it.
+const rows = join(tmp, 'rows.json')
+stub('curl', `case "$*" in *"/api/agents") cat ${rows} 2>/dev/null || exit 22 ;; *) exit 22 ;; esac`)
+const row = (name, state) => ({ name, local: true, state, status: state })
+
+test('WP-120/348: numbering skips a name held by a paused, exited or missing row; no dashboard → 01', () => {
+  writeFileSync(rows, JSON.stringify([row('demo-worker-01', 'paused'), row('demo-worker-02', 'exited'), row('demo-worker-03', 'missing')]))
+  assert.match(spawn().out, /^demo-worker-04 /)
+  rmSync(rows)
   assert.match(spawn().out, /^demo-worker-01 /)
 })
 
-test('WP-120: an entry with no goneAt (not exited) does NOT reserve its number', () => {
-  const wd = join(tmp, 'data', 'watchdog.json')
-  // demo-worker-01 has no goneAt: if select(.goneAt) were dropped or broken, it would wrongly occupy 01
-  // and the next spawn would land on 02 instead.
-  writeFileSync(wd, JSON.stringify({ lastSeen: { 'w1:p1': { name: 'demo-worker-01' } } }))
-  assert.match(spawn().out, /^demo-worker-01 /)
-  rmSync(wd)
+test('WP-148/348: numbering reuses the LOWEST free number, not max+1', () => {
+  writeFileSync(rows, JSON.stringify([row('demo-worker-02', 'paused')]))
+  assert.match(spawn().out, /^demo-worker-01 /) // 01 is free even though 02 is occupied
+  rmSync(rows)
 })
 
-test('WP-148: numbering reuses the LOWEST free number, not max+1', () => {
-  const wd = join(tmp, 'data', 'watchdog.json')
-  writeFileSync(wd, JSON.stringify({ lastSeen: { 'w1:p2': { name: 'demo-worker-02', goneAt: '2026-09-27T12:04:09Z' } } }))
-  // 01 is free even though 02 is occupied: lowest free wins, not one past the max seen.
-  assert.match(spawn().out, /^demo-worker-01 /)
-  rmSync(wd)
-})
-
-test('WP-148: agents.sh rm drops the removed name from watchdog.json lastSeen, freeing its number', () => {
+test('WP-148/348: agents.sh rm posts forget for the removed name; --keep-row does not', () => {
   const rmTmp = mkdtempSync(join(tmpdir(), 'wt-spawn-env-rm-'))
-  const rmBin = join(rmTmp, 'bin')
-  mkdirSync(rmBin); mkdirSync(join(rmTmp, 'data'))
+  const rmBin = join(rmTmp, 'bin'), rmLog = join(rmTmp, 'calls.log')
+  mkdirSync(rmBin)
   const rmStub = (name, body) => { writeFileSync(join(rmBin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(rmBin, name), 0o755) }
   rmStub('herdr', `case "$1 $2" in
   "agent list") echo '{"result":{"agents":[{"name":"demo-worker-01","pane_id":"w1:p1"}]}}' ;;
   "agent get") echo '{"result":{"agent":{"agent_status":"idle","tab_id":"t1","name":"demo-worker-01"}}}' ;;
   "tab close") echo '{}' ;;
 esac`)
-  const wd = join(rmTmp, 'data', 'watchdog.json')
-  writeFileSync(wd, JSON.stringify({ lastSeen: {
-    'w1:p1': { name: 'demo-worker-01', goneAt: '2026-09-27T12:04:09Z' },
-    'w1:p2': { name: 'demo-worker-02', goneAt: '2026-09-27T12:04:09Z' },
-  } }))
-  execFileSync(join(here, 'agents.sh'), ['rm', 'demo-worker-01'], {
-    encoding: 'utf8',
-    env: { PATH: `${rmBin}:${process.env.PATH}`, HOME: rmTmp, XDG_CACHE_HOME: rmTmp, WT_DASHBOARD_DATA: rmTmp },
-  })
-  const after = JSON.parse(readFileSync(wd, 'utf8'))
-  assert.deepEqual(Object.keys(after.lastSeen), ['w1:p2'])
+  rmStub('curl', `echo "curl $*" >> ${rmLog}`)
+  const rm = (...args) => execFileSync(join(here, 'agents.sh'), ['rm', ...args], { encoding: 'utf8', env: { PATH: `${rmBin}:${process.env.PATH}`, HOME: rmTmp, XDG_CACHE_HOME: rmTmp, WT_DASHBOARD_DATA: rmTmp, HERDR_DASH_URL: 'http://dash' } })
+  rm('demo-worker-01', '--keep-row')
+  assert.ok(!existsSync(rmLog), 'pause/respawn keep the row')
+  rm('demo-worker-01')
+  assert.match(readFileSync(rmLog, 'utf8'), /-X POST .*http:\/\/dash\/api\/agents\/by-name\/demo-worker-01\/forget/)
   rmSync(rmTmp, { recursive: true, force: true })
 })
 

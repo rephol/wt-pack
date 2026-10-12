@@ -316,14 +316,12 @@ TEAM_MEMBERS
   slug=$(repo_slug "$main")
   # herdr names are <= 32: a persona's longer role part shortens the repo part ("-" + role + "-NN").
   [ -z "$persona" ] || slug=$(printf '%s' "$slug" | cut -c1-$((28 - ${#persona})))
-  # WP-120: plus the names of exited agents the watchdog remembers — herdr drops them from its list, and
-  # reusing one blocks that agent's Resume ("already running in pane …"). A deliberate `rm` (or the WP-143
-  # idle retirement, which also runs `rm`) drops its own name from watchdog.json below, so only a crash-gone
-  # agent still occupies a number here.
+  # WP-120: plus the names of exited/paused/missing agents the dashboard remembers (its agents table, WP-348) — herdr drops them from its
+  # list, and reusing one blocks that agent's Resume. A deliberate `rm` forgets its row, so only those still occupy a number here.
   # WP-148: pick the LOWEST unoccupied number rather than max+1, so numbers freed by removal get reused.
-  wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
+  # WP-348: the names come from the dashboard's agents table (every row, paused/exited/missing included), not watchdog.json.
   used=$({ herdr agent list | jq -r '.result.agents[].name // empty'
-    [ -r "$wd" ] && jq -r '.lastSeen // {} | .[] | select(.goneAt) | .name // empty' "$wd" 2>/dev/null; } \
+    curl -sS --max-time 3 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null | jq -r '.[]? | select(.local) | .name // empty' 2>/dev/null; } \
     | sed -n "s/^$slug-$lrole-0*\([0-9][0-9]*\)$/\1/p" | sort -nu)
   num=$(printf '%s\n' "$used" | awk 'BEGIN{n=1} NF{if ($1==n) n++} END{print n}')
   label=$(printf '%s-%s-%02d' "$slug" "$lrole" "$num")
@@ -507,7 +505,10 @@ dnd)
   ;;
 
 rm)
-  target=${1:?name or pane required}; force=${2:-}
+  # WP-348: --keep-row leaves the agents-table row (pause and respawn keep it); any other rm forgets it.
+  target=; force=; keep_row=
+  for a in "$@"; do case "$a" in --force) force=--force ;; --keep-row) keep_row=1 ;; *) [ -n "$target" ] || target=$a ;; esac; done
+  : "${target:?name or pane required}"
   pane=$(herdr agent list | jq -r --arg t "$target" \
     '.result.agents[] | select(.name == $t or .pane_id == $t) | .pane_id' | head -1)
   if [ -z "$pane" ]; then
@@ -527,13 +528,10 @@ rm)
   name=$(herdr agent get "$pane" | jq -r '.result.agent.name // empty')
   herdr tab close "$tab" >/dev/null
   [ -n "$name" ] && rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$name.json"
-  # WP-148: a deliberate rm is not a crash to resume, so drop its name from the watchdog's memory too —
-  # otherwise WP-120's Resume-collision guard keeps the number reserved forever and numbering only climbs.
-  wd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/data/watchdog.json"
-  if [ -n "$name" ] && [ -r "$wd" ]; then
-    tmp_wd="$wd.tmp.$$"
-    jq --arg n "$name" '.lastSeen |= with_entries(select(.value.name != $n))' "$wd" > "$tmp_wd" \
-      && mv "$tmp_wd" "$wd" || rm -f "$tmp_wd"
+  # WP-148/348: a deliberate rm forgets the agent's row, so its number is free again (pause and respawn pass --keep-row).
+  if [ -n "$name" ] && [ -z "$keep_row" ]; then
+    curl -sS --max-time 3 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
+      "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents/by-name/$name/forget" >/dev/null 2>&1 || true
   fi
   echo "removed $target ($pane, was $status)"
   ;;
@@ -546,6 +544,11 @@ respawn)
   for a in "$@"; do case "$a" in --force) force=--force ;; --stale) stale=1 ;; *) target=$a ;; esac; done
   respawn_one() {  # <name|pane> -> prints "<name> <new-pane>"
     row=$(herdr agent list | jq -c --arg t "$1" '[.result.agents[] | select(.name == $t or .pane_id == $t)][0] // empty')
+    if [ -z "$row" ]; then
+      # WP-348: a missing agent (gone from herdr) is respawnable from its agents-table row: name, role, cwd and session.
+      . "$(dirname "$0")/../../wt-shared/scripts/agent-pane.sh"
+      row=$(agent_row "$1" | jq -c 'select(.state == "missing" or .state == "exited") | {name, pane_id: "", cwd, agent_status: "idle", agent_session: {value: .session}, tokens: ({role, persona, project, ticket} | with_entries(select(.value != null)))}' 2>/dev/null)
+    fi
     [ -n "$row" ] || { echo "no such agent: $1" >&2; return 1; }
     name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
     r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
@@ -565,7 +568,7 @@ respawn)
     # (spawn would take the bare persona name for a brand-new role and pool).
     pn=$(printf '%s' "$row" | jq -r '.tokens.persona // empty')
     if [ -n "$pn" ] && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$pn" --cwd "$dir" >/dev/null 2>&1; then r=$pn; fi
-    "$self" rm "$old" --force >/dev/null || return 1
+    [ -z "$old" ] || "$self" rm "$old" --force --keep-row >/dev/null || return 1
     out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
     new=${out#* }
     # Spawn writes its own role/project/spawned_by/created/model/effort; carry the rest (task, ticket, task_state …) over.
