@@ -49,11 +49,12 @@ import { load as routeDecisions, report as routeReport, estimateSavings as route
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { compose as composeWatchPrs } from './watchprs-event.mjs'
 import { ProjectStore } from './project-store.mjs'
-import { Pauses, pauseProject, resumeProject } from './pause.mjs'
+import { AgentTable, reconcile, rowAsAgent } from './agents-table.mjs'
+import { pauseAgent, resumeAgent, pauseProject, resumeProject } from './pause.mjs'
 import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
-import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, goalLoop, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -86,7 +87,8 @@ const DATA_ROOT = process.env.WT_DASHBOARD_DATA ?? join(homedir(), '.local', 'sh
 const DATA = join(DATA_ROOT, 'data')
 const psettings = new ProjectSettings({ dir: DATA, cfg }) // WP-107: per-project settings over cfg
 const projectStore = new ProjectStore(() => psettings.db) // WP-347
-const pauses = new Pauses(() => psettings.db) // WP-346: paused projects (pause.mjs)
+const agentTable = new AgentTable(() => psettings.db, (t) => t.importLegacy(DATA, (p, at) => projectStore.setPaused(p, at))) // WP-348: one row per local pane agent (agents-table.mjs)
+const pauses = { has: (project) => projectStore.isPaused(project) } // WP-346: paused projects are flagged on the project store
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
 const STALL_MS = 20 * 60_000
@@ -500,7 +502,7 @@ export function planUsageFromLimits(l, now = Date.now()) {
   return session && weekly ? { session: { pct: l.session, reset: session }, weekly: { pct: l.weekly, reset: weekly }, at: now } : null
 }
 // Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
-const roleStore = new RoleStore(DATA)
+const roleStore = new RoleStore(DATA).attach(agentTable) // WP-348: tags live in the agents table (agent-tags.json is imported once)
 // Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
 async function paneMeta(m) {
   if (!m.local) return { ws: new Map(), tokens: new Map() }
@@ -512,14 +514,14 @@ async function paneMeta(m) {
     }
   })
 }
-// Keep each local agent's pane tokens equal to data/agent-tags.json (backfilling an agent seen for the first
+// Keep each local agent's pane tokens equal to the agents table row's tags (backfilling an agent seen for the first
 // time from inference). Only when they differ, so a herdr restart re-applies them and a steady state costs nothing.
 const syncing = new Set()
 async function syncTokens(agents) {
   let backfilled = false
   for (const a of agents) {
     if (!a.local || syncing.has(a.id)) continue
-    if (!roleStore.tags[a.name]) {
+    if (!roleStore.tags[a.name]) { // no row tags yet (a new or untagged agent)
       roleStore.tags[a.name] = inferTags({ name: a.name, role: a.pool === 'other' ? undefined : a.pool, project: a.project ?? undefined, ticket: ticketOf(a.cwd) ?? undefined })
       backfilled = true
     }
@@ -673,10 +675,19 @@ const machineStatus = (r) =>
     : r.ok && Date.now() - r.lastSeen < 60_000 ? 'online'
     : Date.now() - r.lastSeen < 5 * 60_000 ? 'stale' : 'offline'
 
+// WP-348 watcher: runs on each fresh local listing (3 s cache, so the 4 s tick drives it), adds no herdr call (pane list is paneMeta's cached one).
+async function watchAgents(local) {
+  const rows = agentTable.list()
+  const panes = new Set([...(await paneMeta((await machines())[0]).catch(() => ({ tokens: new Map() }))).tokens.keys()])
+  if (!local.length && !panes.size && rows.some((r) => r.state === 'running' || r.state === 'idle')) return // herdr restarting, not every agent dying
+  const live = local.filter((a) => a.local)
+  for (const u of reconcile(rows, live, new Set([...panes, ...live.map((a) => a.id)]))) agentTable.upsert(u.name, u.patch)
+}
+
 async function agents() {
   const ms = await machines()
   ms.filter((m) => !m.local && m.enabled).forEach(refreshRemote)
-  const local = await cached('agents:local', 3000, () => listAgents(ms[0]))
+  const local = await cached('agents:local', 3000, async () => { const l = await listAgents(ms[0]); await watchAgents(l).catch((e) => console.error('agents table:', e.message)); return l })
   return [...local, ...ms.filter((m) => !m.local && m.enabled).flatMap((m) => remote.get(m.label)?.agents ?? [])]
 }
 
@@ -1376,7 +1387,7 @@ async function retireIdleWorkers(project) {
     agentsInPool.push({ pane_id: x.pane_id, agent_status: x.agent_status, tokens: tokensOf.get(x.pane_id) ?? {} })
   }
   for (const pane of retireIdle(agentsInPool, n)) {
-    await run(AGENTS_SH, ['rm', pane], homedir(), 30_000).catch((e) => console.error(`retire ${pane}:`, e.message))
+    await run(AGENTS_SH, ['rm', pane], homedir(), 30_000).then(() => forgetPane(pane), (e) => console.error(`retire ${pane}:`, e.message))
   }
   store.delete('agents:local')
 }
@@ -1389,7 +1400,7 @@ async function refillTeams(project) {
   if (!mod || !root || pauses.has(project)) return // WP-346: a paused project's seats stay empty
   const teams = mod.list(root)
   if (!teams.length) return
-  const ag = (await agents().catch(() => [])).filter((a) => a.local)
+  const ag = [...(await agents().catch(() => [])).filter((a) => a.local), ...agentTable.list().filter((r) => r.state === 'paused').map(rowAsAgent)] // WP-348: a paused member still fills its seat
   const open = new Set((await tickets.list(project)).tickets.filter((t) => t.team && ['ready', 'planning', 'building', 'review'].includes(t.column)).map((t) => `${project}/${t.team}`))
   const views = teams.map((t) => teamView(t, project, ag, () => undefined))
   for (const v of teamsNeedingRefill(views, open, refillAt, Date.now())) {
@@ -2491,6 +2502,7 @@ export function needsSession(method, path, headers) {
   if (headers['x-herdr-pane'] && method === 'POST' && (path === '/api/asks' || /^\/api\/asks\/[^/]+\/resolve$/.test(path))) return false // wt-ask (roomAuthor verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/deliveries(\/hello|\/[^/]+\/(ack|cancel))?$/.test(path)) return false // wt-deliver-mod, handoff.sh (roomAuthor verifies the pane)
   if (headers['x-wt-poller'] === '1' && !headers.origin && method === 'POST' && path === '/api/watch-prs/event') return false // WP-337 the background poller (watchPrsEvent checks loopback; a custom header = no cross-site simple request)
+  if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/agents\/by-name\/[^/]+\/forget$/.test(path)) return false // WP-348 agents.sh rm (agentByNameApi verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && path === '/api/keepwarm/me/report') return false // WP-318 keepwarm mod via wt-keepwarm (keepwarmApi verifies the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/gate\/(ask|consume)$/.test(path)) return false // WP-332 wt-gate (gateApi checks the pane)
   if (headers['x-herdr-pane'] && method === 'POST' && /^\/api\/messages(\/[^/]+\/ack)?$/.test(path)) return false // WP-257: handoff.sh records, the target acks by id (roomAuthor verifies the pane)
@@ -3532,29 +3544,63 @@ async function projectSettingsApi(req, res, parts) {
   send(res, 200, state())
 }
 
-// WP-346 pause: GET /api/projects/:p/pause → { paused, at, agents }; POST …/pause saves and despawns the project's agents,
-// POST …/resume brings them back. The dashboard user only: an agent pausing its own project would despawn itself.
-async function projectPauseApi(req, res, project, sub) {
-  if (req.method === 'GET' && sub === 'pause') { const r = pauses.get(project); return send(res, 200, { paused: !!r, at: r?.at ?? null, agents: r?.agents ?? [] }) }
-  if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
-  await rooms.load()
-  if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
-  if (!(await projectRoots()).has(project)) return send(res, 404, { error: `unknown project ${project}` })
+// WP-346/348 pause: GET /api/projects/:p/pause → { paused, at, agents }; POST …/pause and …/resume pause or resume every agent of the
+// project; POST /api/agents/by-name/:n/pause|resume does one agent. The dashboard user only: an agent pausing itself would despawn itself.
+function pauseDeps(project) {
   const mark = async (names, paused) => {
-    const open = (await tickets.list(project)).tickets ?? []
+    const open = project ? (await tickets.list(project)).tickets ?? [] : []
     for (const t of open) if (t.assignee?.name && names.includes(t.assignee.name) && !!t.paused !== paused) await tickets.mutate(t.id, (c) => { if (paused) c.paused = true; else delete c.paused; return c })
   }
-  const d = sub === 'pause'
-    ? { agents: () => agents(), rm: (pane) => run(AGENTS_SH, ['rm', pane, '--force'], homedir(), 30_000), stopHeadless: (id) => hl().stop(id, 'project paused'), mark }
-    : { mark, resumeHeadless: async (id, text) => { // WP-347: a gone cwd falls back to the main checkout
-      const r = hl().run(id), root = (await projectRoots()).get(project), gone = !!(r && root && !existsSync(r.cwd))
+  return {
+    agents: () => agents(), mark,
+    rm: (pane) => run(AGENTS_SH, ['rm', pane, '--force', '--keep-row'], homedir(), 30_000), stopHeadless: (id) => hl().stop(id, 'paused'),
+    resumeHeadless: async (id, text) => { // WP-347: a gone cwd falls back to the main checkout
+      const r = hl().run(id), root = (await projectRoots()).get(project ?? r?.project), gone = !!(r && root && !existsSync(r.cwd))
       if (gone) hl().db.prepare('UPDATE headless_runs SET cwd = ? WHERE id = ?').run(root, id)
       hl().resume(id, text)
       return gone ? { fallback: { from: r.cwd, to: root } } : null
     },
     send: async (pane, text) => { await new Promise((r) => setTimeout(r, 8000)); // let claude finish starting
-      await herdr('pane', 'send-text', pane, text); await herdr('pane', 'send-keys', pane, 'enter') }, spawn: (a) => resumeSpawn(a, project) }
-  const out = await (sub === 'pause' ? pauseProject : resumeProject)(project, pauses, d)
+      await herdr('pane', 'send-text', pane, text); await herdr('pane', 'send-keys', pane, 'enter') },
+    spawn: (row) => resumeSpawn(row, row.project),
+  }
+}
+async function projectPauseApi(req, res, project, sub) {
+  if (req.method === 'GET' && sub === 'pause') {
+    const at = projectStore.pausedAt(project), agents = agentTable.list().filter((r) => r.project === project && r.state === 'paused').map((r) => ({ name: r.name, midTurn: r.mid_turn }))
+    return send(res, 200, { paused: at != null, at, agents })
+  }
+  if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
+  await rooms.load()
+  if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
+  if (!(await projectRoots()).has(project)) return send(res, 404, { error: `unknown project ${project}` })
+  const out = await (sub === 'pause' ? pauseProject : resumeProject)(project, agentTable, projectStore, pauseDeps(project))
+  store.delete('agents:local')
+  send(res, 200, out)
+}
+// WP-348 /api/agents/by-name/:n: GET the row (the fields handoff and the scripts need, never tags beyond the mirrored set or a key),
+// POST pause|resume (dashboard user only), POST forget (the cookie, or a pane for an exited/missing row or its own; never a paused row).
+const BYNAME_FIELDS = ['name', 'pane', 'stable_pane', 'state', 'session', 'cwd', 'role', 'persona', 'project', 'ticket']
+async function agentByNameApi(req, res, name, sub) {
+  const row = agentTable.get(name) ?? (name.includes(':') ? agentTable.byPane(name) : undefined) // a pane id works too
+  if (!sub && req.method === 'GET') return row ? send(res, 200, Object.fromEntries(BYNAME_FIELDS.map((k) => [k, row[k] ?? null]))) : send(res, 404, { error: `no agent ${name}` })
+  if (sub === 'pause' || sub === 'resume') return agentPauseApi(req, res, name, sub)
+  if (sub !== 'forget' || req.method !== 'POST') return send(res, 404, { error: 'not found' })
+  await rooms.load()
+  const who = await roomAuthor(req)
+  if (!row) return send(res, 404, { error: `no agent ${name}` })
+  if (who.kind !== 'user' && (row.state === 'paused' || !(['exited', 'missing'].includes(row.state) || who.name === name))) return send(res, 403, { error: 'a pane may forget an exited or missing agent, or itself; a paused one only the dashboard' })
+  agentTable.remove(name)
+  store.delete('agents:local')
+  send(res, 200, { ok: true })
+}
+// POST /api/agents/by-name/:n/pause|resume (WP-348), the dashboard user only.
+async function agentPauseApi(req, res, name, sub) {
+  if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
+  await rooms.load()
+  if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
+  const project = agentTable.get(name)?.project ?? (await agents()).find((a) => a.local && a.name === name)?.project ?? null
+  const out = await (sub === 'pause' ? pauseAgent : resumeAgent)(name, agentTable, pauseDeps(project))
   store.delete('agents:local')
   send(res, 200, out)
 }
@@ -3562,6 +3608,7 @@ async function projectPauseApi(req, res, project, sub) {
 // WP-347: a saved cwd that is gone (its worktree was removed after the merge) falls back to the project's main checkout, and the
 // session starts fresh there (claude resumes per directory); the result reports it. Only a missing role fails.
 async function resumeSpawn(a, project) {
+  a = { ...a, tokens: a.tags ?? {} }
   if (!a.role) throw new Error(`${a.name}: no role saved`)
   let cwd = a.cwd, fallback = null
   if (!cwd || !existsSync(cwd)) {
@@ -3799,8 +3846,13 @@ const server = http.createServer(async (req, res) => {
         const [code, out] = await handoffTask(decodeURIComponent(parts[2]), b.mode).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
         return send(res, code, out)
       }
+      if (parts[0] === 'api' && parts[1] === 'agents' && parts[2] === 'by-name' && parts[3]) return await agentByNameApi(req, res, decodeURIComponent(parts[3]), parts[4]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'agents') {
-        if (!parts[2]) { const ag = await agents(); return send(res, 200, [...ag, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))]) }
+        if (!parts[2]) { // WP-348: paused and missing agents stay listed (no pane), so they never disappear
+          const ag = await agents(), have = new Set(ag.filter((a) => a.local).map((a) => a.name))
+          const stored = agentTable.list().filter((r) => (r.state === 'paused' || r.state === 'missing') && !have.has(r.name)).map(rowAsAgent)
+          return send(res, 200, [...ag, ...stored, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))])
+        }
         if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
         // /api/agents/:machine/:pane[/stream]
         const m = await machineBy(decodeURIComponent(parts[2]))
@@ -3989,6 +4041,8 @@ let hk = { settings: { ...HK_DEFAULTS }, lastRun: null }
 const hkLoaded = readFile(HK_FILE, 'utf8').then((t) => { const j = JSON.parse(t); hk = { settings: cleanSettings(j.settings), lastRun: j.lastRun ?? null } }, () => {})
 // Remove = the wt-agents script's rm (closes the tab), local agents only. Refuses a working agent unless forced;
 // an orchestrator needs its name typed back.
+// WP-348: a deliberate server-side rm forgets the agent's row in-process (a child agents.sh carries no pane key to ask the forget route).
+const forgetPane = (pane) => { const r = agentTable.byPane(pane); if (r && r.state !== 'paused') agentTable.remove(r.name) }
 async function removeAgent(pane, { force = false, confirmName } = {}) {
   const no = (status, error, needs) => Object.assign(new Error(error), { status, needs })
   store.delete('agents:local')
@@ -3997,6 +4051,7 @@ async function removeAgent(pane, { force = false, confirmName } = {}) {
   if (/orchestrator/i.test(a.name) && confirmName !== a.name) throw no(409, 'type the orchestrator\'s name to remove it', 'name')
   if (a.status === 'working' && !force) throw no(409, `${a.name} is working; a turn in flight dies with it`, 'force')
   const out = await run(AGENTS_SH, ['rm', pane, ...(force ? ['--force'] : [])], homedir(), 30_000)
+  forgetPane(pane)
   store.delete('agents:local'); store.delete('overview')
   await rooms.leave(a.name).catch((e) => console.error(`rooms: leave ${a.name}: ${e.message}`))
   await tickets.leave(a.name).catch((e) => console.error(`tickets: leave ${a.name}: ${e.message}`))
@@ -4146,8 +4201,8 @@ async function housekeepingApi(req, res, sub) {
 }
 // ---- watchdog (watchdog.mjs, WP-70): Settings › Observability › Watchdog; every 60s ----
 const WD_FILE = join(DATA, 'watchdog.json')
-let wd = { settings: cleanWatchdogSettings(), open: {}, resolved: [], lastRun: null, lastSeen: {} }
-const wdLoaded = readFile(WD_FILE, 'utf8').then((t) => { const j = JSON.parse(t); wd = { settings: cleanWatchdogSettings(j.settings), open: j.open ?? {}, resolved: j.resolved ?? [], lastRun: j.lastRun ?? null, lastSeen: j.lastSeen ?? {} } }, () => {})
+let wd = { settings: cleanWatchdogSettings(), open: {}, resolved: [], lastRun: null }
+const wdLoaded = readFile(WD_FILE, 'utf8').then((t) => { const j = JSON.parse(t); wd = { settings: cleanWatchdogSettings(j.settings), open: j.open ?? {}, resolved: j.resolved ?? [], lastRun: j.lastRun ?? null } }, () => {})
 const serverErrors = [] // console.error timestamps, last hour (wrapped in the listening block)
 // The pack checkout, for Investigate's wt-handoff: the one this server runs from (<pack>/skills/wt-dashboard, WP-122).
 const packRoot = () => { try { return realpathSync(fileURLToPath(new URL('../..', import.meta.url))) } catch { return null } }
@@ -4192,11 +4247,10 @@ async function watchdogSnapshot() {
   const boards = []
   for (const project of Object.keys(keys)) boards.push({ project, ...(await tickets.list(project)) })
   const fs = await statfs(DATA).catch(() => null)
-  // WP-109: remember live pool agents' sessions; a remembered pane still open without an agent has exited.
+  // WP-348: exited agents are the agents table's exited rows (the watcher keeps them true); panes is the snapshot's pane list.
   const panes = await herdr('pane', 'list').then((t) => JSON.parse(t).result.panes.map((x) => x.pane_id), () => null)
-  wd.lastSeen = await mergeLastSeen(ag, panes)
   return {
-    exited: exitedAgents(wd.lastSeen, panes),
+    exited: exitedAgents(agentTable.list()),
     stale: await staleHooks(ag).catch(() => null),
     starts: await readFile(join(DATA, 'server-starts.json'), 'utf8').then(JSON.parse, () => null),
     queue: [...rooms.queue].flatMap(([key, items]) => items.map((it) => ({ agent: nameOf.get(key) ?? key, slug: it.slug, ts: it.msg.ts }))),
@@ -4207,13 +4261,6 @@ async function watchdogSnapshot() {
     jev: await readCalls().catch(() => null),
     goalLoops: wd.settings['goal-loop']?.on === false ? [] : await goalLoops(ag, wd.settings['goal-loop']?.threshold ?? 5).catch(() => []),
   }
-}
-// WP-150: agents.sh's `rm` edits watchdog.json's lastSeen directly on disk (drops the removed agent's name)
-// independently of this process. Re-read it from disk instead of merging from the stale in-memory copy, so
-// that edit isn't clobbered by this tick's next write.
-async function mergeLastSeen(ag, panes) {
-  const diskLastSeen = await readFile(WD_FILE, 'utf8').then((t) => JSON.parse(t).lastSeen ?? wd.lastSeen, () => wd.lastSeen)
-  return rememberAgents(diskLastSeen, ag, panes, (c) => ticketOf(c ?? ''))
 }
 async function clearLoopedGoal(g, snap) {
   let note = ''
@@ -4242,10 +4289,6 @@ async function runWatchdogOnce() {
     const g = snap.goalLoops.find((x) => x.pane === f.key.split('|')[1])
     if (g) await clearLoopedGoal(g, snap)
   }
-  // WP-150: re-merge right before the write — watchdogSnapshot()'s merge is minutes^Wseconds stale by now
-  // (staleHooks' ps exec and the inbox I/O above ran in between), wide enough for agents.sh's rm to land its
-  // disk edit in that window. This second merge closes the gap to (read → sync merge → write), no more awaits.
-  wd.lastSeen = await mergeLastSeen(snap.agents, snap.panes)
   const at = new Date().toISOString()
   wd = { ...wd, open: d.open, resolved: [...d.resolved.map((f) => ({ ...f, resolvedAt: at })), ...wd.resolved].slice(0, 20), lastRun: at }
   await writeFile(WD_FILE, JSON.stringify(wd, null, 2))
@@ -4253,7 +4296,7 @@ async function runWatchdogOnce() {
 }
 async function watchdogApi(req, res, sub) {
   await wdLoaded
-  const state = () => ({ checks: WD_CHECKS, ...wd })
+  const state = () => ({ checks: WD_CHECKS, ...wd, rows: Object.fromEntries(agentTable.list().filter((r) => r.pane).map((r) => [r.pane, { name: r.name, session: r.session ?? undefined }])) }) // rows: the agents table, for Resume (WP-348)
   if (req.method === 'GET' && !sub) return send(res, 200, state())
   if (req.method === 'PUT' && !sub) {
     wd.settings = cleanWatchdogSettings(JSON.parse((await body(req)) || '{}'))
@@ -4286,8 +4329,9 @@ const resuming = new Set() // panes with a Resume in flight: two clicks (Inbox +
 async function resumeExited(req, res) {
   const { key } = JSON.parse((await body(req)) || '{}')
   const pane = typeof key === 'string' && key.startsWith('exited|') ? key.slice(7) : null
-  const r = pane && wd.lastSeen[pane]
-  if (!r) return send(res, 404, { error: 'no remembered agent for that finding' })
+  const row = pane && agentTable.byPane(pane)
+  if (!row) return send(res, 404, { error: 'no remembered agent for that finding' })
+  const r = { name: row.name, session: row.session, cwd: row.cwd, role: row.role, ticket: row.ticket }
   store.delete('agents:local')
   const all = []
   for (const project of Object.keys(await tickets.keys().catch(() => ({})))) all.push(...((await tickets.list(project)).tickets ?? []))

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, rememberAgents, exitedAgents, goalLoop, INFRA_RE, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, INFRA_RE, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const min = (n) => new Date(now - n * 60_000).toISOString()
@@ -107,24 +107,17 @@ test('investigatePrompt: finding text is framed as data and cannot close the tag
   assert.match(p, /not instructions/)
 })
 
-test('exited: remembered pool pane with no agent fires; gone pane, agent back and non-pool panes do not', () => {
-  const ag = (x) => ({ id: 'w1:p1', local: true, name: 'wt-pack-worker-01', session: 's-1', cwd: '/r/.claude/worktrees/wp-9-x', pool: 'worker', tags: {}, ...x })
-  const umk = ag({ id: 'u:p1', name: 'umk-orch', pool: 'other', session: 's-u' })
-  let seen = rememberAgents({}, [ag(), umk], ['w1:p1', 'u:p1'], () => 'WP-9', now - 5 * 60_000)
-  assert.deepEqual(Object.keys(seen), ['w1:p1'])
-  assert.equal(seen['w1:p1'].ticket, 'WP-9')
-  // claude exits: the pane stays, the agent drops out of `agent list`
-  seen = rememberAgents(seen, [umk], ['w1:p1', 'u:p1'], undefined, now - 2 * 60_000)
-  const ex = exitedAgents(seen, ['w1:p1', 'u:p1'])
-  assert.deepEqual(ex, [{ pane: 'w1:p1', name: 'wt-pack-worker-01', session: 's-1', since: min(2) }])
-  const f = evaluate({ exited: ex }, {}, now)
+test('exited: table rows that exited (or went missing with a session) fire; running, paused and sessionless-missing do not', () => {
+  const row = (o) => ({ name: 'wt-pack-worker-01', pane: 'w1:p1', session: 's-1', state: 'exited', gone_at: now - 2 * 60_000, ...o })
+  const ex = exitedAgents([row(), row({ name: 'a', pane: 'w1:p2', state: 'idle' }), row({ name: 'b', pane: 'w1:p3', state: 'paused' }),
+    row({ name: 'c', pane: 'w1:p4', state: 'missing' }), row({ name: 'd', pane: 'w1:p5', state: 'missing', session: null })])
+  assert.deepEqual(ex.map((e) => e.name), ['wt-pack-worker-01', 'c'])
+  assert.deepEqual(ex[0], { pane: 'w1:p1', name: 'wt-pack-worker-01', session: 's-1', since: min(2) })
+  const f = evaluate({ exited: ex.slice(0, 1) }, {}, now)
   assert.deepEqual(f.map((x) => x.key), ['exited|w1:p1'])
   assert.match(f[0].body, /s-1/)
-  assert.deepEqual(checks({ exited: ex }, { exited: { threshold: 5 } }), [])
-  // agent back → no longer exited; pane gone → pruned; unknown panes → nothing
-  assert.deepEqual(exitedAgents(rememberAgents(seen, [ag()], ['w1:p1']), ['w1:p1']), [])
-  assert.deepEqual(rememberAgents(seen, [], ['u:p1']), {})
-  assert.deepEqual(exitedAgents(seen, null), [])
+  assert.deepEqual(checks({ exited: ex.slice(0, 1) }, { exited: { threshold: 5 } }), [])
+  assert.deepEqual(exitedAgents(undefined), [])
 })
 
 test('resume: argv mirrors spawn plus --resume; blocked when running again, name taken or ticket reassigned', () => {
@@ -163,49 +156,10 @@ test('WP-120 stale-hooks: ps parse, agents started before the guard flagged, aft
   assert.deepEqual(checks({ stale: null }), [])
 })
 
-// WP-150: agents.sh `rm` edits watchdog.json's lastSeen directly on disk between ticks. A tick that merges
-// from its own stale in-memory lastSeen (instead of re-reading disk) clobbers that edit on its next write.
-test('watchdog tick: an external edit to watchdog.json between ticks survives the next tick (WP-150)', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'watchdog-'))
-  await mkdir(join(root, 'data'), { recursive: true })
-  const wdFile = join(root, 'data', 'watchdog.json')
-  const removedEntry = { 'w1:p1': { name: 'wt-pack-worker-05', session: 's1', cwd: '/x', role: 'worker', ticket: null, seenAt: min(10), goneAt: min(5) } }
-  await writeFile(wdFile, JSON.stringify({ settings: {}, open: {}, resolved: [], lastRun: null, lastSeen: removedEntry }))
-  // Shim herdr to always fail, so agents()/pane-list return null deterministically (this machine's real pool
-  // would otherwise leak in): rememberAgents(lastSeen, null, ...) then just passes its base lastSeen through,
-  // isolating the thing under test — whether that base came from disk or a stale in-memory copy.
-  const bin = join(root, 'bin')
-  await mkdir(bin, { recursive: true })
-  await writeFile(join(bin, 'herdr'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
-  const port = 20000 + Math.floor(Math.random() * 20000)
-  const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname],
-    { env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root, PATH: `${bin}:/usr/bin:/bin` }, stdio: ['ignore', 'pipe', 'pipe'] })
-  try {
-    await new Promise((res, rej) => {
-      let out = '', err = ''
-      srv.stdout.on('data', (d) => { out += d; if (out.includes('api →')) res() })
-      srv.stderr.on('data', (d) => { err += d })
-      srv.on('exit', (c) => rej(new Error(`server exited (${c}) before listening: ${err.slice(-400)}`)))
-      setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
-    })
-    const token = (await readFile(join(root, 'session'), 'utf8')).trim()
-    const run = () => fetch(`http://127.0.0.1:${port}/api/watchdog/run`, { method: 'POST', headers: { cookie: `hd_session=${token}` } })
-    assert.equal((await run()).status, 200) // first tick: loads and rewrites the file with the same (unedited) lastSeen
-    // simulate agents.sh rm: drop the agent's name directly on disk, same as its jq+mv edit
-    await writeFile(wdFile, JSON.stringify({ ...JSON.parse(await readFile(wdFile, 'utf8')), lastSeen: {} }))
-    assert.equal((await run()).status, 200) // second tick must not resurrect it from a stale in-memory copy
-    assert.deepEqual(JSON.parse(await readFile(wdFile, 'utf8')).lastSeen, {})
-  } finally { srv.kill() }
-})
-
-test('WP-221 shellForeground: shell in the foreground = claude exited; an exited agent is remembered as gone', () => {
+test('WP-221 shellForeground: shell in the foreground = claude exited', () => {
   assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5 }), true)
   assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 9 }), false)
   assert.equal(shellForeground(undefined), false)
-  const a = { id: 'w1:p1', local: true, name: 'w', session: 's', pool: 'worker', status: 'idle' }
-  const seen = rememberAgents({}, [a], ['w1:p1'], () => null, now)
-  const after = rememberAgents(seen, [{ ...a, status: 'exited' }], ['w1:p1'], () => null, now + 1000)
-  assert.deepEqual(exitedAgents(after, ['w1:p1']).map((e) => e.pane), ['w1:p1'])
 })
 
 test('WP-221 review: exec claude (shell pid reused) is alive; Resume ignores the exited agent herdr still lists', () => {

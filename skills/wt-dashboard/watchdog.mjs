@@ -38,7 +38,7 @@ export function enteredAt(t) {
 
 // snap: { starts: [ms], queue: [{ agent, slug, ts }], boards: [{ project, auto, dispatch, tickets }],
 //   agents: [{ name }] | null (null = unknown), herdr: { ok, lastOkAt }, diskFree: bytes | null, dbBytes: bytes | null,
-//   errors: [ms], jev: [{ ts, err, feature, test? }], exited: [{ pane, name, session, since }] (exitedAgents),
+//   errors: [ms], jev: [{ ts, err, feature, test? }], exited: [{ pane, name, session, since }] (exitedAgents, from the agents table rows),
 //   stale: { guardAt: ms, agents: [{ pane, name, startedAt: ms }] } (staleAgents) | null }
 // A missing part of the snapshot means "unknown" and never fires.
 export function evaluate(snap, settings, now = Date.now()) {
@@ -206,33 +206,17 @@ export function inboxOps({ opened, resolved }) {
   }
 }
 
-// WP-109: herdr forgets a pane's agent (and its session id) once claude exits, so the watchdog remembers every live
-// local pool agent. lastSeen: { [pane]: { name, session, cwd, role, ticket, seenAt, goneAt? } }. agents: agents() rows;
-// panes: pane ids from `herdr pane list`, or null (unknown → nothing pruned). A pane that is gone is pruned.
-export function rememberAgents(lastSeen = {}, agents, panes, ticketOf = () => null, now = Date.now()) {
-  if (!agents) return lastSeen
-  const at = new Date(now).toISOString()
-  const next = {}
-  // WP-221: herdr can keep a pane's agent (idle/done, session id and all) after claude exits; status 'exited' is gone too.
-  const live = new Map(agents.filter((a) => a.local && a.status !== 'exited').map((a) => [a.id, a]))
-  for (const [pane, { goneAt, ...r }] of Object.entries(lastSeen))
-    if (!panes || panes.includes(pane)) next[pane] = live.has(pane) ? r : { ...r, goneAt: goneAt ?? at }
-  for (const a of live.values()) {
-    if (!a.session || !a.pool || a.pool === 'other') continue
-    next[a.id] = { name: a.name, session: a.session, cwd: a.cwd, role: a.pool, ticket: a.tags?.task ?? ticketOf(a.cwd) ?? null, seenAt: at }
-  }
-  return next
-}
 // WP-221: `herdr pane process-info` → true when the pane's shell is back in the foreground, i.e. claude has exited
 // (herdr may still report the agent idle/done). handoff.sh candidates() runs the same jq test.
 // The shell itself must be what runs: `exec claude` keeps the shell's pid, so the process name decides too.
 export const SHELL_RE = /^-?(zsh|bash|fish|sh|dash|ksh|tcsh)$/
 export const shellForeground = (info) => info?.shell_pid != null && info.foreground_process_group_id === info.shell_pid
   && (info.foreground_processes ?? []).every((p) => SHELL_RE.test(p.name ?? p.argv0 ?? ''))
-// Remembered panes that still exist with no agent in them → the `exited` check's input.
-export const exitedAgents = (lastSeen = {}, panes) => (panes
-  ? Object.entries(lastSeen).filter(([pane, r]) => r.goneAt && panes.includes(pane)).map(([pane, r]) => ({ pane, name: r.name, session: r.session, since: r.goneAt }))
-  : [])
+// WP-348: the agents table's exited rows (and missing ones that kept a session) → the `exited` check's input. Keyed by pane
+// for the finding key; the row is what Resume reads, so a respawn under a new pane id does not lose the agent.
+export const exitedAgents = (rows = []) => rows
+  .filter((r) => r.pane && (r.state === 'exited' || (r.state === 'missing' && r.session)))
+  .map((r) => ({ pane: r.pane, name: r.name, session: r.session, since: new Date(r.gone_at ?? r.seen_at ?? 0).toISOString() }))
 
 // Why a Resume must not run, or null. tickets: every board's cards. Dispatch may already have re-assigned the ticket
 // to a fresh agent under the SAME name, so the assignee is compared by pane (WP-108).

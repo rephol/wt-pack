@@ -84,7 +84,7 @@ import { TeamsPage } from './teams'
 import { useChangeStream } from './changes'
 
 // ---------- types (mirror server.mjs) ----------
-type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
+type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited' | 'paused' | 'missing' // paused/missing: WP-348 agents-table rows with no pane
 // WP-181: an agent waiting on something (a picker, a question) is 'blocked', not 'working' — but it is just as
 // unable to take a message right now. A message sent while blocked was labelled 'sending' (only 'working' counted
 // as busy) and then never confirmed, since nothing delivers a queued message until the agent goes idle.
@@ -204,7 +204,7 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
   done: { label: 'Done', dot: 'neutral', group: 'done' },
 }
 // WP-277: working is violet (custom 'working' StatusDot variant, index.css): blue (accent) sat too close to the green done dot.
-const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error' }
+const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error', paused: 'neutral', missing: 'error' }
 
 const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
@@ -1274,6 +1274,15 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }),
     onError: (e) => toast({ body: `Keepwarm not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
+  // WP-348: pause despawns the agent (its row stays, with its session); resume respawns it with --resume.
+  const pauseM = useMutation({
+    mutationFn: async (what: 'pause' | 'resume') => {
+      const r = await fetch(`/api/agents/by-name/${encodeURIComponent(agent.name)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['agents'] }) },
+    onError: (e) => toast({ body: `Not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   const send = useMutation({
     mutationFn: (body: { text?: string; keys?: string[] }) => postAgent(agent, body),
     onSuccess: (_d, body) => {
@@ -1456,6 +1465,8 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
             ...(canStop(kind, agent.headlessState) ? [{ label: 'Stop agent…', description: 'End its process; it stays resumable', onClick: () => setStopOpen(true) }] : []),
+            ...(agent.local && agent.status === 'paused' ? [{ label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => pauseM.mutate('resume') }] : []),
+            ...(agent.local && kind === 'pane' && agent.status !== 'paused' && agent.status !== 'missing' ? [{ label: 'Pause agent', description: 'Save it and close its tab; Resume brings it back with its session', onClick: () => pauseM.mutate('pause') }] : []),
             ...(agent.local && kind === 'pane' ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },

@@ -40,6 +40,8 @@ Nothing is written into this source tree. The data root is `$WT_DASHBOARD_DATA`,
 
 `wt.db` is SQLite via Node's built-in `node:sqlite` (**node >= 22.13**, checked by `./setup doctor`); the server is its only writer, the CLIs go through the API. On first start the old `tickets/`, `rooms.json`, `rooms/` and `notifications.jsonl` are imported once and moved to `data/pre-sqlite-<time>/`.
 
+Agents table (WP-348): `agents` in `wt.db` is created on first use and imports `agent-tags.json`, `watchdog.json` `lastSeen` and `project_pauses` once; those are left in place. Rolling back to a pre-WP-348 commit ignores the table and finds them again — pauses made after WP-348 live only in the table, so **Resume every paused agent before rolling back**; tag edits since are not in `agent-tags.json`.
+
 Rollback to a pre-SQLite commit: stop the service; `node wt-dashboard/store.mjs export --to ~/.local/share/wt-dashboard/data` (read-only on `wt.db`, writes the old JSON/JSONL layout); move `data/wt.db*` aside (required: a later start of the new code would otherwise ignore the newer JSON and log "legacy JSON newer than wt.db"); check out the old commit; restart.
 Env names are `WT_DASHBOARD_*`; the old `HERDR_DASH_*` names still work as a fallback.
 

@@ -67,7 +67,7 @@ export interface RoomMsg {
 
 // ---- agents (agentinfo.mjs; `info` on every GET /api/agents row and GET /api/headless[/:id], WP-313) ----
 export type AgentKind = 'pane' | 'headless'
-export type AgentState = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
+export type AgentState = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited' | 'paused' | 'missing' // paused/missing: WP-348 stored rows
 // What an agent is and runs on, the same for a herdr pane and a headless run. Unknown = null (never invented): a pane has no
 // cost, plugin list or command list; a run has no tags.
 export interface AgentInfoCore {

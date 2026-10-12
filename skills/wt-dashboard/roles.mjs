@@ -1,7 +1,7 @@
 // Configurable agent roles (Settings › Roles) and the per-agent tags wt-dashboard mirrors into herdr pane tokens.
 // A role resolves as: the pane's `role` token > the role's workspace glob > its name glob > "other".
 // Tokens (source "wt-dashboard") are display-only, one merged map per pane, values cut at 80 chars, and they live
-// only in the running herdr server — so data/agent-tags.json is the source of truth and they are re-applied.
+// only in the running herdr server — so the agents table (agents-table.mjs, WP-348; it replaced data/agent-tags.json) is the source of truth and they are re-applied.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -20,7 +20,7 @@ export const DEFAULT_ROLES = [
 ]
 export const ADDED_DEFAULTS = ['reviewer'] // defaults added after roles.json shipped; append new ones here
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
-// MIRRORED keys live in data/agent-tags.json and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
+// MIRRORED keys live in the agents table row's tags and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
 // alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.
 // WP-143: agents.sh's `model`/`effort` tokens are neither MIRRORED nor LIVE here — this file's mirror only ever
 // gets a value from inferTags()'s one-time backfill or adoptHandoff()'s ticket/handoff_at copy, so adding them
@@ -107,7 +107,7 @@ export class RoleStore {
       const missing = DEFAULT_ROLES.filter((d) => ADDED_DEFAULTS.includes(d.id) && !saved.some((r) => r.id === d.id) && !this.retired.includes(d.id))
       this.roles = [...saved, ...missing].slice(0, 20)
     } catch { this.roles = DEFAULT_ROLES }
-    try { this.tags = JSON.parse(await readFile(this.tagsFile, 'utf8')) } catch { this.tags = {} }
+    if (!this.table) try { this.tags = JSON.parse(await readFile(this.tagsFile, 'utf8')) } catch { this.tags = {} } // WP-348: with a table the rows are the tags
     return this
   }
   async saveRoles(list) {
@@ -116,7 +116,18 @@ export class RoleStore {
     this.retired = DEFAULT_ROLES.map((d) => d.id).filter((id) => !kept.has(id))
     await this.#write(this.rolesFile, this.roles); await this.#write(this.retiredFile, this.retired)
   }
+  // WP-348: attach(table) retires data/agent-tags.json — tags[name] reads and writes the agents table row's tags (legacy file imported once).
+  attach(table) { this.table = table; this.tags = tagsView(table); return this }
   async setTags(name, tags) { this.tags[name] = clean(tags); await this.saveTags() }
-  async saveTags() { await this.#write(this.tagsFile, this.tags) }
+  async saveTags() { if (!this.table) await this.#write(this.tagsFile, this.tags) }
   async #write(f, v) { await mkdir(dirname(f), { recursive: true }); await writeFile(f, JSON.stringify(v, null, 2)) }
 }
+
+// roleStore.tags as an object over the agents table: tags[name] → the row's mirrored tags (undefined when none), tags[name] = t → upsert.
+export const tagsView = (table) => new Proxy({}, {
+  get: (_, name) => { if (typeof name !== 'string') return undefined; const t = table.get(name)?.tags; return t && Object.keys(t).length ? t : undefined },
+  set: (_, name, tags) => { table.upsert(name, { tags, state: table.get(name)?.state ?? 'idle' }); return true },
+  has: (_, name) => !!table.get(String(name)),
+  ownKeys: () => table.list().map((r) => r.name),
+  getOwnPropertyDescriptor: (_, name) => { const r = table.get(String(name)); return r ? { enumerable: true, configurable: true, value: r.tags } : undefined },
+})
