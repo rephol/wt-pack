@@ -29,14 +29,14 @@ export function useAgentOps(agent: Agent, opts: { canStop?: boolean; onStop?: ()
     'remove-remote': { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
     resume: { label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => run.mutate('resume') },
     respawn: { label: 'Respawn agent', description: 'Start it again with its saved session', onClick: () => run.mutate('resume') },
-    forget: { label: 'Forget agent', description: 'It is not running; its saved row is dropped (its number becomes free). The transcript stays on disk.', onClick: () => run.mutate('forget') },
+    forget: { label: 'Forget agent', description: 'Drop its saved row; its number becomes free (transcript kept)', onClick: () => run.mutate('forget') },
     'forget-confirm': { label: 'Forget agent…', description: 'Drop its saved row; the transcript stays on disk', onClick: () => setAsk('forget') },
     stop: { label: 'Stop agent…', description: 'End its process; it stays resumable', onClick: () => opts.onStop?.() },
   }
   const menu = (): (Item & { id: ActionId })[] => agentActions(agent, { canStop: opts.canStop && !!opts.onStop }).map((id) => ({ id, ...items[id] }))
   const dialog = ask && (
     <AlertDialog isOpen onOpenChange={(o) => !o && setAsk(null)} title={ask === 'pause' ? `Pause ${agent.name}?` : `Forget ${agent.name}?`} actionLabel={ask === 'pause' ? 'Pause agent' : 'Forget agent'} actionVariant={ask === 'forget' ? 'destructive' : undefined}
-      description={ask === 'pause' ? 'Its pane closes. Resume restarts it with its saved session in its saved folder (one cold cache write).' : `Forget ${agent.name}? The dashboard drops its saved row and name, so Resume is no longer offered. Its conversation transcript is not deleted.`}
+      description={ask === 'pause' ? 'Its pane closes. Resume restarts it with its saved session in its saved folder (one cold cache write).' : `The dashboard drops its saved row and name, so Resume is no longer offered. Its conversation transcript is not deleted.`}
       onAction={() => { run.mutate(ask); setAsk(null) }} />
   )
   return { menu, dialog }
