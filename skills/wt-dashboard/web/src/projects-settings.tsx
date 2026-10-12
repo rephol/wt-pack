@@ -39,7 +39,7 @@ let wanted: string | null = null
 export const openProjectSettings = (project: string) => { wanted = project; openSettings('projects') }
 
 export function ProjectsSection() {
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api<{ name: string }[]>('/api/projects') })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api<{ name: string; paused?: boolean }[]>('/api/projects') })
   const names = (projects.data ?? []).map((p) => p.name)
   const [project, setP] = useState<string | null>(wanted)
   const setProject = (p: string) => { wanted = p; setP(p) } // survives the dialog remounting (desktop ⇄ phone shell)
@@ -50,7 +50,7 @@ export function ProjectsSection() {
     <VStack gap={5}>
       <HStack gap={3} align="end" wrap="wrap">
         <Selector label="Project" width={CONTROL_WIDTH} value={current} onChange={setProject}
-          options={[...new Set([current, ...names])].map((n) => ({ value: n, label: n }))} />
+          options={[...new Set([current, ...names])].map((n) => ({ value: n, label: projects.data?.find((p) => p.name === n)?.paused ? `${n} (paused)` : n }))} />
         <NewProjectButton />
         <HideProject project={current} onHidden={() => { wanted = null; setP(null) }} />
       </HStack>
@@ -138,9 +138,9 @@ function PauseCard({ project }: { project: string }) {
   const key = ['project-pause', project]
   const q = useQuery({ queryKey: key, queryFn: () => api<PauseState>(`${base}/pause`) })
   const go = useMutation({
-    mutationFn: (what: 'pause' | 'resume') => api<{ agents?: number; resumed?: number; failed: { name: string; error: string }[] }>(`${base}/${what}`, { method: 'POST', body: '{}' }),
+    mutationFn: (what: 'pause' | 'resume') => api<{ agents?: number; resumed?: number; failed: { name: string; error: string }[]; fallbacks?: { name: string; to: string }[] }>(`${base}/${what}`, { method: 'POST', body: '{}' }),
     onSuccess: (r, what) => {
-      toast(r.failed.length ? { body: `${what === 'pause' ? 'Paused' : 'Resumed'} with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: what === 'pause' ? `Paused: ${r.agents} agent(s) saved` : `Resumed ${r.resumed} agent(s)` })
+      toast(r.failed.length ? { body: `${what === 'pause' ? 'Paused' : 'Resumed'} with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: what === 'pause' ? `Paused: ${r.agents} agent(s) saved` : `Resumed ${r.resumed} agent(s)${r.fallbacks?.length ? `; ${r.fallbacks.map((f) => f.name).join(', ')} restarted in ${r.fallbacks[0].to} (old folder gone)` : ''}` })
       qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['tickets', project] })
     },
     onError: (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }),

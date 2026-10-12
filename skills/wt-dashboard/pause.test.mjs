@@ -11,7 +11,7 @@ const mk = (agents) => {
     agents: async () => [...agents, { ...pane('other'), project: 'q' }],
     rm: async (id) => calls.push(['rm', id]), stopHeadless: async (id) => calls.push(['stop', id]),
     mark: async (n, v) => marks.push([n, v]),
-    spawn: async (a) => (calls.push(['spawn', a.name, a.session, a.tokens?.ticket]), `%new-${a.name}`),
+    spawn: async (a) => (calls.push(['spawn', a.name, a.session, a.tokens?.ticket]), { pane: `%new-${a.name}` }),
     resumeHeadless: async (id, t) => calls.push(['resume', id, t]), send: async (p, t) => calls.push(['send', p, t]),
   }
   return { d, calls, marks, pauses: new Pauses(() => new DatabaseSync(':memory:')) }
@@ -56,4 +56,15 @@ test('a failed despawn is reported and not respawned; a failed respawn stays pau
 
 test('snapshotAgent keeps headless runs by id', () => {
   assert.deepEqual(snapshotAgent(hl('h')), { kind: 'headless', id: 'hl-h', name: 'h', session: 's-h', midTurn: true })
+})
+
+test('resume reports a folder fallback instead of failing', async () => {
+  const { d, pauses } = mk([pane('a'), hl('h')])
+  await pauseProject('p', pauses, d)
+  d.spawn = async (a) => ({ pane: `%new-${a.name}`, fallback: { from: a.cwd, to: '/repo' } })
+  d.resumeHeadless = async () => ({ fallback: { from: '/gone', to: '/repo' } })
+  const r = await resumeProject('p', pauses, d)
+  assert.deepEqual([r.resumed, r.failed.length], [2, 0])
+  assert.deepEqual(r.fallbacks.map((f) => [f.name, f.to]), [['a', '/repo'], ['h', '/repo']])
+  assert.ok(!pauses.has('p'))
 })

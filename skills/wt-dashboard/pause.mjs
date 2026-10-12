@@ -39,20 +39,20 @@ export async function pauseProject(project, pauses, d) {
   return { project, agents: saved.length, midTurn: saved.filter((s) => s.midTurn).length, failed }
 }
 
-// d: { spawn(agent) → pane id, resumeHeadless(id, text), send(pane, text), mark(names, paused) }
+// d: { spawn(agent) → { pane, fallback? } (fallback: { from, to } when its folder was gone), resumeHeadless(id, text), send(pane, text), mark(names, paused) }
 export async function resumeProject(project, pauses, d) {
   const rec = pauses.get(project)
   if (!rec) throw err(409, `${project} is not paused`)
-  const left = [], failed = []
+  const left = [], failed = [], fallbacks = []
   for (const a of rec.agents) {
     if (a.left) continue // never despawned (pause could not close it): still running
     try {
-      if (a.kind === 'headless') await d.resumeHeadless(a.id, a.midTurn ? 'continue' : null)
-      else { const pane = await d.spawn(a); if (a.midTurn) await d.send(pane, 'continue') }
+      if (a.kind === 'headless') { const r = await d.resumeHeadless(a.id, a.midTurn ? 'continue' : null); if (r?.fallback) fallbacks.push({ name: a.name, ...r.fallback }) }
+      else { const { pane, fallback } = await d.spawn(a); if (fallback) fallbacks.push({ name: a.name, ...fallback }); if (a.midTurn) await d.send(pane, 'continue') }
     } catch (e) { failed.push({ name: a.name, error: e.message }); left.push(a) }
   }
-  if (failed.length) { pauses.set(project, { agents: left }, rec.at); return { project, resumed: rec.agents.length - left.length, failed } } // retry resumes only the rest
+  if (failed.length) { pauses.set(project, { agents: left }, rec.at); return { project, resumed: rec.agents.length - left.length, failed, fallbacks } } // retry resumes only the rest
   pauses.clear(project)
   await d.mark(rec.agents.map((a) => a.name), false)
-  return { project, resumed: rec.agents.length, failed }
+  return { project, resumed: rec.agents.length, failed, fallbacks }
 }
