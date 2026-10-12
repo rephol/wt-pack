@@ -2,7 +2,7 @@
 // watches (reconcile, below), not the source of truth. The table is lazy like project_pauses/projects: store.mjs's staged
 // migrations only import when legacy *files* are present, which cannot carry this import.
 // Never stored: task, task_state, handoff_* (LIVE_KEYS) or a pane key. tags = roles.mjs MIRRORED_KEYS only.
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MIRRORED_KEYS } from './roles.mjs'
 

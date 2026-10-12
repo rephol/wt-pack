@@ -88,7 +88,6 @@ const DATA = join(DATA_ROOT, 'data')
 const psettings = new ProjectSettings({ dir: DATA, cfg }) // WP-107: per-project settings over cfg
 const projectStore = new ProjectStore(() => psettings.db) // WP-347
 const agentTable = new AgentTable(() => psettings.db, (t) => t.importLegacy(DATA, (p, at) => projectStore.setPaused(p, at))) // WP-348: one row per local pane agent (agents-table.mjs)
-const pauses = { has: (project) => projectStore.isPaused(project) } // WP-346: paused projects are flagged on the project store
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
 const STALL_MS = 20 * 60_000
@@ -1397,7 +1396,7 @@ const refillAt = new Map()
 async function refillTeams(project) {
   const mod = await import('../wt-shared/scripts/teams.mjs').catch(() => null)
   const root = (await projectRoots()).get(project)
-  if (!mod || !root || pauses.has(project)) return // WP-346: a paused project's seats stay empty
+  if (!mod || !root || projectStore.isPaused(project)) return // WP-346: a paused project's seats stay empty
   const teams = mod.list(root)
   if (!teams.length) return
   const ag = [...(await agents().catch(() => [])).filter((a) => a.local), ...agentTable.list().filter((r) => r.state === 'paused').map(rowAsAgent)] // WP-348: a paused member still fills its seat
@@ -1424,7 +1423,7 @@ async function projectRoots() {
     }
     for (const [name, root] of map) projectStore.add(name, root) // WP-347: remembered, so it stays listed with no agents
     for (const [name, root] of projectStore.all()) if (!map.has(name) && existsSync(root)) map.set(name, root)
-    for (const h of cfg.list('WT_DASHBOARD_HIDDEN_PROJECTS')) if (!pauses.has(h)) map.delete(h) // WP-223: Hide project (a paused project stays listed)
+    for (const h of cfg.list('WT_DASHBOARD_HIDDEN_PROJECTS')) if (!projectStore.isPaused(h)) map.delete(h) // WP-223: Hide project (a paused project stays listed)
     return map
   })
 }
@@ -1438,7 +1437,7 @@ async function projectsApi() {
   const ag = (await agents()).filter((a) => a.local)
   const inside = (dir) => ag.filter((a) => a.cwd === dir || a.cwd?.startsWith(dir + '/')).map((a) => a.name)
   return Promise.all([...(await projectRoots())].map(async ([name, root]) => ({
-    name, root, paused: pauses.has(name),
+    name, root, paused: projectStore.isPaused(name),
     worktrees: (await linkedWorktrees(root).catch(() => [])).map((w) => ({ ...w, ticket: ticketOf(w.branch) ?? ticketOf(w.path), agents: inside(w.path) })),
   })))
 }
@@ -4079,7 +4078,7 @@ export const readyNudge = (project, ts) => wrap({ kind: 'system', from: 'wt-dash
 const routines = new Routines({
   dir: DATA,
   deps: {
-    paused: (project) => pauses.has(project),
+    paused: (project) => projectStore.isPaused(project),
     agents: () => agents(),
     host: () => host(),
     prompt: async (a, text, o) => {
@@ -4111,7 +4110,7 @@ const dispatcher = new Dispatch({
   deps: {
     agents: () => agents(),
     host: () => host(),
-    paused: (project) => pauses.has(project),
+    paused: (project) => projectStore.isPaused(project),
     maxWorking: (project) => Number(psettings.get(project, 'maxWorking')),
     baseBranch: (project) => psettings.get(project, 'baseBranch'),
     triageOn: (project) => jevOn('TICKET_TRIAGE', project),
