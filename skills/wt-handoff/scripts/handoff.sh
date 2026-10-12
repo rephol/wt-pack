@@ -100,6 +100,11 @@ record_message() { # <pane> <text> <state>
     | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages" >/dev/null 2>&1 || true
 }
+# WP-352: what gets TYPED into a pane whose delivery mod is not live: the short pointer for a recorded envelope
+# (`<wt-message id=… kind=… from=…>Read it with: wt-message show <id></wt-message>`), never the full text and never an untagged line.
+ptr() { # <envelope text>
+  p=$(printf '%s' "$1" | node "$WTMSG" pointer 2>/dev/null) && [ -n "$p" ] && printf '%s' "$p" || printf '%s' "$1"
+}
 while :; do
   case "${1:-}" in
     -h|--help) sed -n "2,/^[^#]/{/^#/s/^# \{0,1\}//p;}" "$0"; exit 0 ;;
@@ -241,8 +246,8 @@ if [ -n "$reply" ]; then
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
     [ "$q" = true ] && { record_message "$reply" "$msg" queued; echo "replied $reply (queued)"; exit 0; }
   fi
-  herdr agent prompt "$reply" "$msg" >/dev/null
-  [ -n "$srv" ] || record_message "$reply" "$msg" delivered
+  [ -n "$srv" ] || record_message "$reply" "$msg" delivered # recorded BEFORE typing: the pointer is verified against this row
+  herdr agent prompt "$reply" "$(ptr "$msg")" >/dev/null
   echo "replied $reply"
   exit 0
 fi
@@ -439,7 +444,7 @@ hand_to() {
   # WP-240/243: herdr's prompt pastes, and so does any long burst of typed text, which Claude Code hands the model as
   # pasted content it will not act on. So the message goes to a mode-600 file and only a SHORT line naming it is
   # typed: no queue, no ordering (a queue only drains between turns, and /goal's Stop hook keeps the turn open).
-  # WP-272: without --goal that line is plain ("Do the task in <file>") and, when the target's delivery mod is live,
+  # WP-272 (WP-352: the typed line is now the recorded pointer, not "Do the task in <file>"): when the target's delivery mod is live,
   # the message is queued first and only typed if the mod does not pull it within WT_PULL_WAIT_S.
   # WP-328: a pane sender lets the dashboard build and record the envelope (same id everywhere below); `sq` = it queued it.
   server_recorded=0; sq=false
@@ -454,13 +459,17 @@ hand_to() {
   if [ "$goal" -eq 0 ] && queue_pulled "$1"; then
     return 0
   fi
-  if msgfile=$(save_message) && herdr pane send-text "$1" "$( [ "$goal" -eq 1 ] && printf '%s' "$goal_line $msgfile; reporting what it asks for is the goal" || printf '%s' "${ticket:+$ticket: }Do the task in $msgfile, then report with handoff.sh --reply")" >/dev/null 2>&1; then
+  # WP-352: the row is recorded before anything is typed (the receiving hook verifies the pointer against it); the full body is
+  # read by the target with `wt-message show <id>`, and kept in the mode-600 file as a local copy.
+  [ "${server_recorded:-0}" -eq 1 ] || { record_message "$1" "$send" delivered; server_recorded=1; }
+  save_message >/dev/null || true
+  typed=$(ptr "$send")
+  if herdr pane send-text "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null 2>&1; then
     sleep 0.4 # an Enter sent in the same instant as the text is dropped
     herdr pane send-keys "$1" enter >/dev/null
   else
-    # WP-267: say why the whole message is pasted instead of the short line (it was silent before)
-    echo "warning: could not type the short line into $1 (message file or send-text failed): pasting the full message" >&2
-    herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
+    echo "warning: could not type the pointer into $1 (send-text failed): pasting it" >&2
+    herdr agent prompt "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null
   fi
   node "$PANE_SUBMIT" confirm "$1" --settle "${WT_SUBMIT_SETTLE_MS:-1500}" 2>/dev/null \
     || { echo "prompt not submitted: it is still in the input box of $1" >&2; exit 1; }
@@ -611,7 +620,6 @@ if [ "$goal" -eq 1 ]; then
   fi
   send=$prompt                # sent as a normal prompt after the short line (WP-242)
   send_full="/goal $flat"     # fallback when the line cannot be typed
-  goal_line="/goal ${ticket:+$ticket: }do the task in"
 else
   send=$prompt
 fi

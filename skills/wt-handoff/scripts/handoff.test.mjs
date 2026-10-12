@@ -18,6 +18,7 @@ writeFileSync(join(bin, 'herdr'), `#!/bin/sh\necho "herdr $*" >> ${log}\ncase "$
   "pane list") cat "${tmp}/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "tab list") cat "${tmp}/tabs.json" 2>/dev/null || echo '{"result":{"tabs":[]}}' ;;
   "pane read") cat "${submitted}" ;;
+  "pane send-text") [ -z "$WT_FAIL_SEND_TEXT" ] || exit 1 ;;
   "tab get") echo '{"result":{"tab":{"label":"r"}}}' ;;
   "pane get") cat "${tmp}/pane-$(echo "$3" | tr : _).json" 2>/dev/null || echo '{"result":{"pane":{"tokens":{}}}}' ;;
   "agent prompt") case " $* " in *" --wait "*) [ -f "${tmp}/goal-clear-fails" ] && exit 1 || exit 0 ;; esac ;;
@@ -94,7 +95,7 @@ test('WP-143: live routing reuses a free worker already on the routed tier/effor
   assert.match(out, /would reuse worker demo-worker-01 \(wW:p1\) \(model sonnet\)/) // routed dry-run wording (plan Unit 2)
   execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'list the open PRs', encoding: 'utf8', env: liveEnv })
   let calls = readFileSync(log, 'utf8')
-  assert.match(calls, /^herdr pane send-text wW:p1 Do the task in /m) // WP-272: the plain short line
+  assert.match(calls, /^herdr pane send-text wW:p1 <wt-message id=\w+ kind=handoff from="[^"]*">Read it with: wt-message show \w+<\/wt-message>$/m) // WP-352: the recorded pointer, not 'Do the task in'
   assert.ok(!calls.includes('tab create'))
 
   // same model, different effort: still a spawn, not a reuse (the effort half of the match rule)
@@ -348,12 +349,13 @@ test('WP-272: no /goal by default (typed short line naming the file); --goal arm
     writeFileSync(log, '')
     run(['--role', 'worker', '--pane', 'wW:p9', ...flags, repo], 'do the thing')
     const calls = readFileSync(log, 'utf8')
-    const file = calls.match(/^herdr pane send-text wW:p9 Do the task in (\S+\.md), then report with handoff\.sh --reply$/m)?.[1]
-    assert.ok(file, calls) // no /goal; one short typed line naming the message file; nothing pasted
+    const m = calls.match(/^herdr pane send-text wW:p9 <wt-message id=(\w+) kind=handoff from="[^"]*">Read it with: wt-message show \1<\/wt-message>$/m)
+    assert.ok(m, calls) // WP-352: one typed POINTER with the recorded id; no /goal, no untagged line, nothing pasted
+    const file = join(tmp, '.local', 'share', 'wt-dashboard', 'messages', `${m[1]}.md`) // the mode-600 local copy of the full message
     assert.match(readFileSync(file, 'utf8'), /^<wt-message id=\w+ kind=handoff[^>]*>[\s\S]*do the thing/)
     assert.equal(statSync(file).mode & 0o777, 0o600)
     assert.match(calls, /^herdr pane send-keys wW:p9 enter/m)
-    assert.doesNotMatch(calls, /agent prompt|\/goal|send-text .*<wt-message/)
+    assert.doesNotMatch(calls, /agent prompt|\/goal|Do the task in|do the thing/)
   }
   writeFileSync(log, '')
   // the ticket prefix needs a known key; a Linear team in HOME's env file supplies one without the live dashboard (WP-348: the run is pinned to a closed port)
@@ -361,16 +363,14 @@ test('WP-272: no /goal by default (typed short line naming the file); --goal arm
   run(['--role', 'worker', '--pane', 'wW:p9', '--task', 'WP-5 x', '--goal', repo], 'do the thing')
   rmSync(join(tmp, '.config', 'wt-dashboard', 'env'))
   let calls = readFileSync(log, 'utf8')
-  const gfile = calls.match(/^herdr pane send-text wW:p9 \/goal WP-5: do the task in (\S+\.md); reporting what it asks for is the goal$/m)?.[1]
-  assert.ok(gfile, calls)
-  assert.doesNotMatch(calls, /agent prompt/)
-  // the file cannot be written: the full message is pasted, and the script says why
-  const blocker = join(tmp, 'not-a-dir'); writeFileSync(blocker, '')
+  assert.match(calls, /^herdr pane send-text wW:p9 \/goal <wt-message id=\w+ kind=handoff from="[^"]*" ticket=WP-5>Read it with: wt-message show \w+<\/wt-message>$/m, calls)
+  assert.doesNotMatch(calls, /agent prompt|Do the task in|do the thing/)
+  // send-text fails: the same pointer is pasted instead, and the script says why
   writeFileSync(log, '')
   const r = spawnSync(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { input: 'do the thing', encoding: 'utf8',
-    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MESSAGES_DIR: join(blocker, 'x') } })
-  assert.match(r.stderr, /warning: could not type the short line/)
-  assert.match(readFileSync(log, 'utf8'), /^herdr agent prompt wW:p9 /m)
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_FAIL_SEND_TEXT: '1' } })
+  assert.match(r.stderr, /could not type the pointer/)
+  assert.match(readFileSync(log, 'utf8'), /^herdr agent prompt wW:p9 <wt-message id=\w+ kind=handoff[^>]*>Read it with: wt-message show \w+<\/wt-message>$/m)
 })
 
 test('WP-272: with the target\'s mod live the message is queued first; typed once only if it is not pulled in time', () => {
@@ -397,7 +397,7 @@ esac
   assert.doesNotMatch(readFileSync(curlLog, 'utf8'), /cancel/)
   writeFileSync(join(tmp, 'q1-status'), 'queued'); writeFileSync(log, ''); writeFileSync(curlLog, '')
   go()
-  assert.equal((readFileSync(log, 'utf8').match(/send-text wW:p9 Do the task in /g) ?? []).length, 1) // not pulled: cancelled, typed once
+  assert.equal((readFileSync(log, 'utf8').match(/send-text wW:p9 <wt-message id=srv272 kind=handoff from="s">Read it with: wt-message show srv272<\/wt-message>/g) ?? []).length, 1) // not pulled: cancelled, typed once, as the pointer
   assert.match(readFileSync(curlLog, 'utf8'), /deliveries\/q1\/cancel/)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
@@ -638,4 +638,11 @@ test('WP-354: a worker handoff carries the worktree line; a reviewer handoff doe
   rmSync(msgs, { recursive: true, force: true })
   execFileSync(join(here, 'handoff.sh'), ['--no-goal', repo], { input: 'Use wt-work on plan.md. Work in /x/.claude/worktrees/wp-1-foo', encoding: 'utf8', env })
   assert.doesNotMatch(execFileSync('cat', [join(msgs, execFileSync('ls', [msgs], { encoding: 'utf8' }).trim().split('\n')[0])], { encoding: 'utf8' }), /^Worktree: /m)
+
+test('WP-352: a --reply to a pane without a live mod types the recorded pointer, never the body', () => {
+  writeFileSync(log, '')
+  run(['--reply', 'wW:p9', '--from', 'worker'], 'x'.repeat(3000) + ' the long decision')
+  const calls = readFileSync(log, 'utf8')
+  assert.match(calls, /^herdr agent prompt wW:p9 <wt-message id=(\w+) kind=reply from="[^"]*">Read it with: wt-message show \1<\/wt-message>$/m)
+  assert.doesNotMatch(calls, /the long decision|Do the task in/)
 })

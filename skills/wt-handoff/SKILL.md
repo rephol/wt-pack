@@ -46,9 +46,9 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
 - No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. No `/goal` by default (WP-272): when the
   target's delivery mod is live the message is queued and the target pulls it between turns (if not pulled within
-  `WT_PULL_WAIT_S`, 30 s, the queued row is cancelled and the short line is typed once, same envelope id); otherwise the
-  message goes to a mode-600 file and one short line `<ticket>: Do the task in <file>, then report with handoff.sh --reply`
-  is typed. `--goal` arms a `/goal` as before (its one-line / 4000-character rules: `../wt-plan/references/handoff.md`);
+  `WT_PULL_WAIT_S`, 30 s, the queued row is cancelled and the pointer is typed once, same envelope id); otherwise the
+  row is recorded first and a short **pointer** is typed (WP-352): `<wt-message id=<id> kind=… from=…>Read it with: wt-message show <id></wt-message>`.
+  The target reads the body with `wt-message show <id>`; a mode-600 copy stays in `~/.local/share/wt-dashboard/messages/<id>.md`. `--goal` arms a `/goal` as before (its one-line / 4000-character rules: `../wt-plan/references/handoff.md`);
   `--no-goal` is accepted and is the default. Without a goal the dashboard keeps the agent going: it nudges an acknowledged
   handoff whose card is still open (4 min, once) and the delivery mod reminds at the end of a turn that did not report.
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
