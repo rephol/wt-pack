@@ -70,11 +70,13 @@ work, re-invoke with `discard_changes: true`; if step 2 did **not** clear it, th
 stop.
 
 **It will report no active worktree session when the worktree was not created by `EnterWorktree`.** That is
-the normal case for anything `wt-plan` made — it creates with plain `git worktree add` and enters by path, so
+the normal case for anything `wt-plan` made — it creates with `worktree.sh` (a plain `git worktree add` under
+`<main>/.claude/worktrees`) and enters by path, so
 the harness never owned it. Fall back to plain git, from the main checkout:
 
 ```
-git worktree list                       # confirm the path and branch
+git worktree list                       # confirm the path and branch (a ticket's worktree lives under <main>/.claude/worktrees;
+                                        # one beside the repo, ../<repo>-*, or in /tmp is stray: retire it the same way)
 git -C <main> worktree remove <path>    # --force only after the user accepts the loss
 git -C <main> branch -d <branch>        # -D only after the user accepts the loss
 ```
