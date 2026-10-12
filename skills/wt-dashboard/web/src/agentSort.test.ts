@@ -22,8 +22,8 @@ import { projectCounts, countTooltip, rank } from './agentSort.ts'
 test('projectCounts: agents only, working and needs-you, tasks-only projects kept at 0', () => {
   const ag = (project: string | null, status: 'working' | 'idle', asks = false) => ({ name: 'x', status, asks, statusSince: 0, project })
   const r = projectCounts([ag('acmeapp', 'working'), ag('acmeapp', 'idle', true), ag('acmeapp', 'idle'), ag('ops', 'idle'), ag(null, 'working')], ['acmeapp', 'tasks-only'])
-  assert.deepEqual(r.all, { agents: 5, working: 2, needs: 1, paused: 0 })
-  assert.deepEqual(r.by, [['acmeapp', { agents: 3, working: 1, needs: 1, paused: 0 }], ['ops', { agents: 1, working: 0, needs: 0, paused: 0 }], ['tasks-only', { agents: 0, working: 0, needs: 0, paused: 0 }]])
+  assert.deepEqual(r.all, { agents: 5, working: 2, needs: 1, notLive: 0 })
+  assert.deepEqual(r.by, [['acmeapp', { agents: 3, working: 1, needs: 1, notLive: 0 }], ['ops', { agents: 1, working: 0, needs: 0, notLive: 0 }], ['tasks-only', { agents: 0, working: 0, needs: 0, notLive: 0 }]])
   assert.equal(countTooltip(r.by[0][1]), '3 agents · 1 working · 1 needs you')
 })
 
@@ -39,11 +39,12 @@ test('mergeAgents: stored row added, live pane wins over a stored row of the sam
 })
 test('a paused or missing row is not working and never needs you', () => {
   const r = projectCounts([row('a', 'paused', 'p', true), row('b', 'missing', 'p', true), row('c', 'idle', 'p', true)])
-  assert.deepEqual(r.all, { agents: 1, working: 0, needs: 1, paused: 2 })
-  assert.equal(countTooltip(r.all), '1 agent · 1 needs you · 2 paused')
+  assert.deepEqual(r.all, { agents: 1, working: 0, needs: 1, notLive: 2 })
+  assert.equal(countTooltip(r.all), '1 agent · 1 needs you · 2 not running')
   assert.ok(rank(row('a', 'paused', 'p', true)) > rank(row('c', 'idle')))
 })
 test('projectList: stored-only paused, agents-only, cards-only, deduped', () => {
   const l = projectList([{ name: 'porto', paused: true }, { name: 'both' }], [row('x', 'idle', 'agentsonly'), row('y', 'idle', 'both')], ['cardsonly', 'both'])
-  assert.deepEqual(l.by.map((p) => `${p.name}${p.paused ? '*' : ''}`).sort(), ['agentsonly', 'both', 'cardsonly', 'porto*'])
+  assert.deepEqual(l.by.map((p) => `${p.name}${p.paused ? '*' : ''}`).slice().sort(), ['agentsonly', 'both', 'cardsonly', 'porto*'])
+  assert.equal(l.by.at(-1)?.name, 'porto') // paused sorts last
 })

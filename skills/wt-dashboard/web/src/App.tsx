@@ -617,8 +617,8 @@ export default function App() {
       {pauseAsk && <AlertDialog isOpen onOpenChange={(o) => !o && setPauseAsk(null)} title={`Pause ${pauseAsk}?`} actionLabel="Pause project"
         description={`Saves and closes its ${counts.by.find(([p]) => p === pauseAsk)?.[1].agents ?? 0} live agent(s). Dispatch, routines and keepwarm skip it until you Resume; each agent resumes with its session.`}
         isActionLoading={pauseP.isPending} onAction={() => pauseP.mutate(pauseAsk)} />}
-      <SettingsHost project={project} agents={all?.agents ?? []} />
-      <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
+      <SettingsHost project={project} agents={(all?.agents ?? []).filter(isLive)} />
+      <SpawnHost agents={(all?.agents ?? []).filter(isLive)} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
       <SavedHost />
@@ -643,7 +643,7 @@ export default function App() {
           toPanel(key)
         }} />}
       <PwaHost openInbox={openInbox} />
-      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
+      <QuickSwitcher agents={(all?.agents ?? []).filter(isLive)} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => open(`room:${sl}`)} unread={narrow && Object.keys(dockMarks).length > 0}
         onOpenTicket={(_p, id) => openTicket(id)} />
