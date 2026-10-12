@@ -513,6 +513,15 @@ auth_header() { [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" ||
 task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
 from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
 from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
+# WP-354: a worker's work happens in a worktree under <main>/.claude/worktrees, never a ../<repo>-* sibling or /tmp.
+# Only for the RESOLVED worker role (set above, after routing), and not when the prompt already names such a worktree.
+WTSH="$(cd "$SELFDIR/../../wt-plan/scripts" 2>/dev/null && pwd -P)/worktree.sh" # absolute: a handoff into another repo has no skills/ of its own
+case "$role$prompt" in
+  worker*.claude/worktrees/*) ;;
+  worker*) prompt="$prompt
+
+Worktree: if this prompt names a worktree, work there; otherwise create one with $WTSH <branch> (it lands under <main>/.claude/worktrees). Never git worktree add beside the repo or in /tmp." ;;
+esac
 [ -n "$from_pane" ] && prompt="$prompt
 
 Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: $SELF --reply $from_pane \"...\""

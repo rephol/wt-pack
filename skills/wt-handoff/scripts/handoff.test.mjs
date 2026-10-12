@@ -617,3 +617,25 @@ test('WP-348: a paused team member still holds its seat (the dashboard counts it
 test('WP-338: --pane with no cwd prints usage and exits 2 (no unbound variable)', () => {
   assert.throws(() => run(['--pane', 'wW:p1']), (e) => { assert.equal(e.status, 2); assert.match(e.stderr, /usage: handoff\.sh/); return true })
 })
+
+test('WP-354: a worker handoff carries the worktree line; a reviewer handoff does not', () => {
+  const msgs = join(tmp, 'wp354-msgs')
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MESSAGES_DIR: msgs }
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo },
+    { name: 'demo-reviewer-01', pane_id: 'wR:p1', tab_id: 't2', agent_status: 'idle', workspace_id: 'wR', cwd: repo }] } }))
+  const sent = (role) => {
+    rmSync(msgs, { recursive: true, force: true })
+    execFileSync(join(here, 'handoff.sh'), ['--role', role, '--no-goal', repo], { input: 'do it', encoding: 'utf8', env })
+    return execFileSync('cat', [join(msgs, execFileSync('ls', [msgs], { encoding: 'utf8' }).trim().split('\n')[0])], { encoding: 'utf8' })
+  }
+  const line = sent('worker').match(/^Worktree: .*$/m)?.[0]
+  assert.match(line, /if this prompt names a worktree, work there; otherwise create one with \/\S+\/wt-plan\/scripts\/worktree\.sh <branch>/)
+  assert.ok(line.includes(`${realpathSync(join(here, '..', '..'))}/wt-plan/scripts/worktree.sh`)) // absolute, this install's own
+  assert.doesNotMatch(sent('reviewer'), /^Worktree: /m)
+  assert.doesNotMatch(sent('planner'), /^Worktree: /m)
+  // a plan-style prompt that already names its worktree gets no second, conflicting line
+  rmSync(msgs, { recursive: true, force: true })
+  execFileSync(join(here, 'handoff.sh'), ['--no-goal', repo], { input: 'Use wt-work on plan.md. Work in /x/.claude/worktrees/wp-1-foo', encoding: 'utf8', env })
+  assert.doesNotMatch(execFileSync('cat', [join(msgs, execFileSync('ls', [msgs], { encoding: 'utf8' }).trim().split('\n')[0])], { encoding: 'utf8' }), /^Worktree: /m)
+})

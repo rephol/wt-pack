@@ -22,6 +22,10 @@ here the prose *is* the quality. Read the references. They are not optional cont
 
 ## Intake
 
+**Where you work (WP-354).** Every ticket's work happens in a worktree under `<main checkout>/.claude/worktrees`, made
+with `skills/wt-plan/scripts/worktree.sh <branch>` — never `git worktree add` beside the repo (`../<repo>-*`) or in
+`/tmp`. If the plan's worktree is not there, create one with `worktree.sh` before the first edit.
+
 Read, in this order:
 
 1. **The plan.** Whole. Including the deferred section and the Definition of Done.

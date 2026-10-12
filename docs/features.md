@@ -299,6 +299,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   and a `-f`/`-m` pattern under 6 characters or starting with `-` (BSD matches those against every agent and Chrome
   renderer), then run the real binary. Independent of the wt-memory plugin hook; `./setup doctor` counts agent
   sessions without it (respawn them). Deliberate bypass: `/usr/bin/pkill` by full path.
+- Worktree rule (WP-354): every ticket's work happens in a worktree under `<main checkout>/.claude/worktrees`, created with
+  `skills/wt-plan/scripts/worktree.sh <branch>` — never a `../<repo>-*` sibling or `/tmp`. It is in the worker and planner
+  role rules (wt-memory), in the `Worktree:` line `wt-handoff` appends to every worker prompt, and in wt-work and wt-finish.
+  `./setup doctor` warns about any worktree of the repo outside that folder.
 - **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
   closes; a worktree it used stays on disk.
 - **Model and effort** (WP-198): the Summary tab's **Model** section shows what the session actually runs, e.g.
