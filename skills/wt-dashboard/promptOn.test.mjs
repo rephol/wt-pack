@@ -19,7 +19,7 @@ test('WP-240: plain text and multi-line slash text paste; a failed send-text fal
 })
 test('WP-352: a long /goal envelope is typed as its short pointer, never "do the task in <file>" (paste of the pointer if send-text fails)', async () => {
   const msg = '<wt-message id=abc123 kind=dispatch from="x" ticket=WP-9>' + 'y'.repeat(900) + '</wt-message>'
-  const ptr = '<wt-message id=abc123 kind=dispatch from="x" ticket=WP-9>Read it with: wt-message show abc123</wt-message>'
+  const ptr = '<wt-message id=abc123 kind=dispatch from="x" ticket=WP-9>Read it with: wt-message show abc123, do what it asks, then report as it says</wt-message>'
   let [c, h] = rec()
   await promptOn(h, {}, 'p1', '/goal ' + msg)
   assert.deepEqual(c, [`pane send-text p1 /goal ${ptr}`, 'pane send-keys p1 enter'])

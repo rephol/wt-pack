@@ -2609,13 +2609,17 @@ const deliveries = new Deliveries({ dir: DATA })
 // WP-257: the envelope record behind every send. Best effort: a record that cannot be written never blocks the send.
 const messages = new Messages({ dir: DATA })
 const msgSafe = (fn) => { try { return fn() } catch (e) { console.error('messages:', e.message) } }
+// WP-352: what is TYPED into a pane: the recorded pointer for an envelope, unless the pane has no key file (then `wt-message show` is refused
+// and the pointer could never be read: it gets the text as before and verifies through the grace path).
+const hasPaneKey = (pane) => { try { return readFileSync(join(PANE_KEYS, String(pane).replace(/[^\w.:-]/g, '_')), 'utf8').trim() !== '' } catch { return false } }
+const typedFor = (pane, text) => (envelopeOf(text) && hasPaneKey(pane) ? pointerOf(text) ?? text : text)
 async function deliver(a, text, paste, o = {}) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
   const env = envelopeOf(text)
   const mid = env && msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text }))?.row.id
   const mark = (to, extra) => mid && msgSafe(() => messages.move(mid, to, extra))
   if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' } // 'delivered' once the mod acks
   // WP-352: typed (no live mod) = a short recorded pointer, never the full text; paste(typed) receives it, a non-envelope stays as it is.
-  try { await paste(env ? pointerOf(text) ?? text : text) } catch (e) { mark('failed', { error: e.message.slice(0, 200) }); throw e }
+  try { await paste(typedFor(a.id, text)) } catch (e) { mark('failed', { error: e.message.slice(0, 200) }); throw e }
   mark('delivered')
   return 'pasted'
 }
@@ -2624,7 +2628,7 @@ setInterval(async () => {
   for (const r of deliveries.stranded()) {
     if (!deliveries.settle(r.id, 'pasted')) continue // the mod got there first
     const env = envelopeOf(r.body)
-    try { await herdr('agent', 'prompt', r.pane, r.body); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
+    try { await herdr('agent', 'prompt', r.pane, typedFor(r.pane, r.body)); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
   }
 }, 15_000).unref()
 // WP-257 expiry: an unacknowledged handoff/dispatch is resent with the same envelope id, then flagged in the Inbox.
@@ -2643,6 +2647,7 @@ const messageSweep = async () => {
       const t = await agentFor(ags, row.target)
       if (!t || t.local === false) throw new Error(`${row.target} is gone`)
       const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message
+      msgSafe(() => messages.reopen(row.id)) // WP-352: a resend is a new typed pointer for the same id; the first one's use-once mark must not refuse it
       await deliver({ id: t.id }, body, (p) => herdr('agent', 'prompt', t.id, p))
     },
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
@@ -2654,7 +2659,7 @@ const messageSweep = async () => {
     send: async (row) => {
       const a = await agentFor(ags, row.target)
       const text = wrap({ kind: 'system', from: 'wt-dashboard', ticket: row.ticket }, nudgeText(a?.tags?.role ?? a?.pool, row.ticket))
-      return deliver({ id: row.target }, text, (p) => herdr('agent', 'prompt', t.id, p))
+      return deliver({ id: a?.id ?? row.target }, text, (p) => herdr('agent', 'prompt', a?.id ?? row.target, p))
     },
   }).catch((e) => console.error('messages nudge:', e.message))
   // WP-261: acknowledged, then the agent went idle or vanished and the card never moved on and nothing was reported.

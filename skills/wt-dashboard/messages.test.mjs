@@ -248,3 +248,12 @@ test('WP-272 finish check: the newest acked, unanswered handoff with an open car
   m.record(draft({ id: 'c3', ticket: 'WP-3' })); m.move('c3', 'delivered'); m.ack('c3', null, 'answered')
   assert.equal(await m.remindable('w1:p1', () => true), null)
 })
+
+test('WP-352: a pointer verifies once; a resend of the same id reopens it', async () => {
+  const { m, draft } = await setup()
+  m.record(draft())
+  assert.equal(m.firstPointer('a1'), true)
+  assert.equal(m.firstPointer('a1'), false) // replay
+  m.reopen('a1') // the sweep types a fresh pointer for the same id
+  assert.equal(m.firstPointer('a1'), true)
+})
