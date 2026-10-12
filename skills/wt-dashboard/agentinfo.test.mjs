@@ -50,3 +50,10 @@ test('paneInfo carries the claude pid from the cross-check; null when unknown (W
   assert.equal(paneInfo(a, null, 4242).pane.pid, 4242)
   assert.equal(paneInfo(a).pane.pid, null)
 })
+
+test('WP-348: paneInfo carries stableKey (the name) and its table row; no row → null; a paused stored row reads state paused', () => {
+  const a = { key: 'm/w1:p1', id: 'w1:p1', machine: 'm', local: true, name: 'w-01', pool: 'worker', status: 'idle', cwd: '/r' }
+  assert.equal(paneInfo(a).stableKey, 'w-01'); assert.equal(paneInfo(a).table, null)
+  assert.deepEqual(paneInfo(a, null, null, null, { state: 'idle', paused_at: null, gone_at: 5 }).table, { state: 'idle', pausedAt: null, goneAt: 5 })
+  assert.equal(paneInfo({ ...a, id: null, status: 'paused' }, null, null, null, { state: 'paused', paused_at: 9 }).state, 'paused')
+})

@@ -48,9 +48,10 @@ export class Keepwarm {
   }
 
   // The config the pane's own mod follows: armed by the user, or enabled globally for its role.
-  effective(pane, role) {
+  // paused (WP-348): the agent's project is paused, so nothing is pinged whatever was armed.
+  effective(pane, role, paused = false) {
     const o = this.overrides[pane], s = this.settings
-    const enabled = o?.armed === false ? false : o?.armed === true || (s.enabled && s.roles.includes(role))
+    const enabled = paused || o?.armed === false ? false : o?.armed === true || (s.enabled && s.roles.includes(role))
     return { enabled, intervalMin: s.intervalMin, minContext: s.minContext, windowH: o?.windowH ?? s.windowH, dailyCap: s.dailyCap, pingsToday: this.#run(pane).pings }
   }
 
@@ -66,8 +67,8 @@ export class Keepwarm {
   }
 
   // AgentInfo.keepwarm for a pane, or null when keepwarm does nothing for it.
-  info(pane, role) {
-    const e = this.effective(pane, role), r = this.runs.get(pane)
+  info(pane, role, paused = false) {
+    const e = this.effective(pane, role, paused), r = this.runs.get(pane)
     if (!e.enabled && !r) return null
     return { state: e.enabled ? (r?.state ?? 'cold') : 'off', nextAt: r?.nextAt ?? null, pingsToday: e.pingsToday, spentTokens: r?.spent ?? 0, reason: r?.reason ?? (e.enabled && !r ? 'no ping yet' : null) }
   }

@@ -651,7 +651,7 @@ async function listAgents(m) {
       session,
       model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id), settings: m.local ? claudeSettings() : null }),
     }
-    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null, m.local ? keepwarm.info(row.id, row.tags?.role) : null) // WP-313: the one typed shape, additive to the fields above
+    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null, m.local ? keepwarm.info(kwKey(row.id), row.tags?.role, kwPaused(row.id)) : null, m.local ? agentTable.get(row.name) ?? null : null) // WP-313: the one typed shape, additive to the fields above
     out.push(row)
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
@@ -3229,7 +3229,8 @@ async function headlessApi(req, res, url, parts) {
       }
     }
     await headlessRole(b) // WP-307: persona → base role, model floor
-    const taken = [...(await agents()).map((a) => a.name), ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
+    const taken = [...(await agents()).map((a) => a.name), ...agentTable.list().map((r) => r.name), // WP-348: a paused/exited/missing agent's name is not free
+      ...h.db.prepare("SELECT name FROM headless_runs WHERE state NOT IN ('ended','failed')").all().map((x) => x.name)]
     if (!b.name && typeof b.role === 'string' && ROLE_RE.test(b.role)) b.name = defaultName(await projectOf(b.cwd), b.role, taken) // WP-306
     else if (b.name && taken.includes(b.name)) return send(res, 409, { error: `name ${b.name} is taken by a live agent` }) // WP-317: a live name is never duplicated (an ended run's is reusable)
     // never `spawner` from the body; an agent's wrapped first prompt is recorded after the row exists and before the process starts
@@ -3850,7 +3851,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'agents') {
         if (!parts[2]) { // WP-348: paused and missing agents stay listed (no pane), so they never disappear
           const ag = await agents(), have = new Set(ag.filter((a) => a.local).map((a) => a.name))
-          const stored = agentTable.list().filter((r) => (r.state === 'paused' || r.state === 'missing') && !have.has(r.name)).map(rowAsAgent)
+          const stored = agentTable.list().filter((r) => (r.state === 'paused' || r.state === 'missing') && !have.has(r.name)).map((r) => { const a = rowAsAgent(r); return { ...a, info: paneInfo(a, null, null, null, r) } })
           return send(res, 200, [...ag, ...stored, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))])
         }
         if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
@@ -3998,7 +3999,14 @@ async function watchPrsEvent(req, res) {
 // ---- keepwarm (WP-318): Settings › Keepwarm; the wt-mods keepwarm mod reads its config and reports pings here ----
 const KW_FILE = join(DATA, 'keepwarm.json')
 const keepwarm = new Keepwarm()
-const kwLoaded = readFile(KW_FILE, 'utf8').then((t) => { const j = JSON.parse(t); Object.assign(keepwarm, new Keepwarm({ settings: j.settings, overrides: j.overrides })) }, () => {})
+// WP-348: overrides and runs are keyed by the agent's NAME (stable across a pane-id change); a pane-keyed override from before is moved onto its row's name.
+const kwKey = (pane) => agentTable.byPane(pane)?.name ?? pane
+const kwPaused = (pane) => { const p = agentTable.byPane(pane)?.project; return !!p && projectStore.isPaused(p) } // a paused project's agents are not pinged
+const kwLoaded = readFile(KW_FILE, 'utf8').then((t) => {
+  const j = JSON.parse(t), overrides = {}
+  for (const [k, v] of Object.entries(j.overrides ?? {})) overrides[kwKey(k)] = v
+  Object.assign(keepwarm, new Keepwarm({ settings: j.settings, overrides }))
+}, () => {})
 const kwSave = () => writeFile(KW_FILE, JSON.stringify(keepwarm.snapshot(), null, 2))
 // GET/PATCH settings and POST /:pane {action: arm|off, windowH?} are the user's; GET me and POST me/report are the pane's own mod.
 async function keepwarmApi(req, res, parts) {
@@ -4015,11 +4023,14 @@ async function keepwarmApi(req, res, parts) {
   if (sub === 'me') {
     if (author.kind !== 'agent') return send(res, 403, { error: 'the pane itself asks (x-herdr-pane)' })
     const role = (await agents()).find((a) => a.key === author.key)?.tags?.role
-    if (req.method === 'GET' && parts.length === 3) return send(res, 200, { ...keepwarm.effective(author.pane, role), ...keepwarm.info(author.pane, role) })
+    if (req.method === 'GET' && parts.length === 3) {
+      const k = kwKey(author.pane), paused = kwPaused(author.pane)
+      return send(res, 200, { ...keepwarm.effective(k, role, paused), ...keepwarm.info(k, role, paused) })
+    }
     if (req.method === 'POST' && parts[3] === 'report') {
       const b = await json()
-      if (b.event === 'stop' && b.off) { keepwarm.set(author.pane, 'off'); await kwSave() } // /wt keepwarm off: stays off until armed again
-      else keepwarm.report(author.pane, b)
+      if (b.event === 'stop' && b.off) { keepwarm.set(kwKey(author.pane), 'off'); await kwSave() } // /wt keepwarm off: stays off until armed again
+      else keepwarm.report(kwKey(author.pane), b)
       return send(res, 200, { ok: true })
     }
   }
@@ -4028,7 +4039,7 @@ async function keepwarmApi(req, res, parts) {
     const pane = await canonicalPane(decodeURIComponent(sub))
     if (!pane || !(await agents()).some((a) => a.local && a.id === pane)) return send(res, 404, { error: `unknown pane ${sub}` })
     const b = await json()
-    keepwarm.set(pane, b.action, b.windowH); await kwSave(); store.delete('agents:local')
+    keepwarm.set(kwKey(pane), b.action, b.windowH); await kwSave(); store.delete('agents:local')
     return send(res, 200, { ok: true })
   }
   return send(res, 404, { error: 'not found' })
