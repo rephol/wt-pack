@@ -647,8 +647,12 @@ test('WP-354: a worker handoff carries the worktree line; a reviewer handoff doe
   rmSync(msgs, { recursive: true, force: true })
   execFileSync(join(here, 'handoff.sh'), ['--no-goal', repo], { input: 'Use wt-work on plan.md. Work in /x/.claude/worktrees/wp-1-foo', encoding: 'utf8', env })
   assert.doesNotMatch(execFileSync('cat', [join(msgs, execFileSync('ls', [msgs], { encoding: 'utf8' }).trim().split('\n')[0])], { encoding: 'utf8' }), /^Worktree: /m)
+})
 
 test('WP-352: a --reply to a pane without a live mod types the recorded pointer, never the body', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-worker-09', pane_id: 'wW:p9', tab_id: 't9', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } })) // not left to an earlier test
+  writeFileSync(join(keys, 'wW:p9'), 'k'.repeat(64)) // not left to the load-time loop: an earlier test may have run handoff with another HOME layout
   writeFileSync(log, '')
   runPtr(['--reply', 'wW:p9', '--from', 'worker'], 'x'.repeat(3000) + ' the long decision')
   const calls = readFileSync(log, 'utf8')
