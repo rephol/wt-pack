@@ -226,6 +226,7 @@ export class Routines {
       if (t.kind === 'action' && this.busy.has(t.action)) return skip(`${t.action} still running`)
       const why = await guard({ working, pending, max: this.settings().maxWorking, host: this.deps.host })
       if (why) return skip(why)
+      if (t.project && this.deps.paused?.(t.project)) return skip('project paused') // WP-346
       if (t.kind === 'prompt') {
         // WP-147: DND or paired agents are unavailable to a routine's free pick, same as wt-handoff's candidates().
         // WP-238: nor a team member (a team's agents work its tickets only); a named agent is still fine.

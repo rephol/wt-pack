@@ -56,6 +56,7 @@ export function ProjectsSection() {
       </HStack>
       <Text type="supporting" size="sm">Order: server env var › this project › global (Settings) › default. Reset returns a key to what it inherits.</Text>
       <ProjectKeys project={current} />
+      <PauseCard project={current} />
       <BoardAutomation project={current} />
       <RolesCard project={current} />
     </VStack>
@@ -124,6 +125,37 @@ function BoardAutomation({ project }: { project: string }) {
       <SettingsRow title="Auto" description="Jev promotes Backlog tickets to Ready." control={<Switch label="Auto" isLabelHidden value={!!q.data.auto} isDisabled={set.isPending} onChange={(v: boolean) => set.mutate({ auto: v })} />} />
       <SettingsRow title="Dispatch" description="Hand Ready tickets to free agents. Minimum priority, stall minutes and Report to: the board's Automation menu."
         control={<Switch label="Dispatch" isLabelHidden value={!!q.data.dispatch} isDisabled={set.isPending} onChange={(v: boolean) => set.mutate({ dispatch: v })} />} />
+    </SettingsCard>
+  )
+}
+
+type PauseState = { paused: boolean; at: number | null; agents: { name: string; midTurn: boolean }[] }
+// WP-346: Pause saves and despawns the project's agents (cards stay In progress, marked paused); Resume respawns them.
+function PauseCard({ project }: { project: string }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const base = `/api/projects/${encodeURIComponent(project)}`
+  const key = ['project-pause', project]
+  const q = useQuery({ queryKey: key, queryFn: () => api<PauseState>(`${base}/pause`) })
+  const go = useMutation({
+    mutationFn: (what: 'pause' | 'resume') => api<{ agents?: number; resumed?: number; failed: { name: string; error: string }[] }>(`${base}/${what}`, { method: 'POST', body: '{}' }),
+    onSuccess: (r, what) => {
+      toast(r.failed.length ? { body: `${what === 'pause' ? 'Paused' : 'Resumed'} with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: what === 'pause' ? `Paused: ${r.agents} agent(s) saved` : `Resumed ${r.resumed} agent(s)` })
+      qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ['agents'] }); qc.invalidateQueries({ queryKey: ['tickets', project] })
+    },
+    onError: (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
+  if (!q.data) return null
+  const p = q.data
+  return (
+    <SettingsCard title="Pause">
+      <SettingsRow title={p.paused ? 'Paused' : 'Pause project'}
+        description={p.paused
+          ? `${p.agents.length} agent(s) saved${p.at ? ` ${new Date(p.at).toLocaleString()}` : ''}. Dispatch, routines and keepwarm skip this project. Resume respawns each agent with its session; resuming costs one cold cache write per agent.`
+          : 'Saves every agent here (name, role, folder, tokens, session), then closes them. Cards stay In progress, marked paused. Agents caught mid-turn get one “continue” on resume.'}
+        control={p.paused
+          ? <Button label="Resume" variant="primary" isDisabled={go.isPending} onClick={() => go.mutate('resume')} />
+          : <Button label="Pause" variant="secondary" isDisabled={go.isPending} onClick={() => go.mutate('pause')} />} />
     </SettingsCard>
   )
 }

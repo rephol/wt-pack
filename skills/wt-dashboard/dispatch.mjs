@@ -179,6 +179,7 @@ export class Dispatch {
       this.db.prepare('DELETE FROM board_events WHERE at < ?').run(now - 30 * DAY) // ponytail: fixed 30d, as routines
       const ags = await this.deps.agents().catch((e) => (this.log(`dispatch: agents: ${e.message}`), null))
       for (const { project, key, dispatch } of this.db.prepare('SELECT project, key, dispatch FROM boards').all()) {
+        if (this.deps.paused?.(project)) continue // WP-346: a paused project's agents are saved, not gone — no reconcile, no dispatch
         await this.reconcile(project, key, ags, now).catch((e) => this.log(`reconcile ${project}: ${e.message}`))
         if (dispatch) await this.dispatchOne(project, ags, now).catch((e) => this.log(`dispatch ${project}: ${e.message}`))
         else this.st(project).waiting = null

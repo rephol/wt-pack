@@ -38,6 +38,10 @@ A queue of work across PRs, agents and the local board, with a **Mine / Everyone
 - An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)).
 - Skills: wt-plan, wt-work, wt-babysit, wt-finish, wt-handoff.
 
+## Project pause (WP-346)
+
+Settings › Projects › **Pause** saves every agent of the project (name, role or persona, folder, pane tokens, session id, headless run id), then closes the panes and stops the headless runs. Agents caught mid-turn are marked and get one `continue` on resume. Cards stay In progress and are marked `paused`. While paused, Dispatch (including its reconcile), routines targeting the project and team refill skip it; keepwarm has nothing to ping because the agents are gone. **Resume** respawns each pane agent under its old name with `--resume <session>`, model, effort and tokens (fresh pane key), and resumes headless runs by session id; one cold cache write per agent. A failed despawn or respawn is listed and retried on the next Resume. Saved in `wt.db` (`project_pauses`); `GET /api/projects/:p/pause`, `POST …/pause`, `POST …/resume` (dashboard user only).
+
 ## Project settings location (WP-234)
 
 A project's pack files (`roles/*.md`, `model-routing.json`) live either in the repo (`<repo>/.wt-pack/`, committed
