@@ -34,6 +34,7 @@ export function modelRows(i: AgentInfo): [string, string][] {
     ['Cost', i.costUsd != null ? `$${i.costUsd.toFixed(2)}` : null],
     ['Plugins', i.plugins ? `${i.plugins.length}: ${i.plugins.join(', ')}` : null],
     ['Keepwarm', keepwarmLabel(i)],
+    ['Messages', i.kind === 'pane' && i.modLive === false && !['paused', 'missing', 'exited'].includes(i.state) ? 'delivery mod not live: messages arrive as typed pointers (wt-message show)' : null], // WP-352
     ['Commands', i.commands || i.skills ? `${i.commands?.length ?? 0} commands · ${i.skills?.length ?? 0} skills` : null],
   ]
   return rows.filter((r): r is [string, string] => r[1] != null)

@@ -12,6 +12,7 @@ const FAKE_HERDR = `#!/usr/bin/env node
 const a = process.argv.slice(2).join(' ')
 const P = (id, name) => ({ pane_id: id, name, agent_status: 'idle', cwd: '/tmp', state_change_seq: 1 })
 if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [P('w9:p1', 'demo-worker-01'), P('w9:p2', 'demo-orchestrator-01'), P('w9:p3', 'demo-worker-02')] } }))
+else if (a === 'pane get w9:p9') console.log(JSON.stringify({ result: { pane: { pane_id: 'w9:p1' } } })) // WP-352: p9 is demo-worker-01's pane id from before a renumber
 else if (/^pane get w9:p[123]$/.test(a)) console.log(JSON.stringify({ result: { pane: { pane_id: a.slice(-5) } } }))
 else if (a === 'machine list') console.log('')
 else process.exit(1)
@@ -115,4 +116,12 @@ test('WP-344: a server-sent reply from the user is replyAllowed; the same row wi
   db.close()
   assert.deepEqual(await verify('usr1').then((r) => [r.verified, r.replyAllowed]), [true, true])
   assert.equal((await verify('usr2')).replyAllowed, false)
+})
+
+test('WP-352 (D7): a row whose sender pane id predates a renumber still resolves the sender\'s role', async () => {
+  const db = new DatabaseSync(join(root, 'data', 'wt.db'))
+  db.prepare("INSERT INTO wt_messages (id, sender, target, kind, body, state, created, updated, sender_pane) VALUES ('old1', 'demo-worker-01', 'w9:p2', 'reply', 'x', 'delivered', 'n', 'n', 'w9:p9')").run()
+  db.close()
+  const v = await fetch(`${base}/api/messages/old1/verify?kind=reply&from=demo-worker-01`, { headers: as('w9:p2') }).then((r) => r.json())
+  assert.deepEqual([v.verified, v.senderRole], [true, 'worker']) // by raw id the p9 lookup missed and fell back to 'agent'
 })

@@ -90,6 +90,7 @@ export interface PaneAgentInfo extends AgentInfoCore {
   stableKey: string // WP-348: the agents-table key (the agent's name), stable across a pane-id change
   table: { state: 'running' | 'idle' | 'paused' | 'exited' | 'missing'; pausedAt: number | null; goneAt: number | null } | null // WP-348: its durable row
   keepwarm: { state: 'warm' | 'cold' | 'off'; nextAt: number | null; pingsToday: number; spentTokens: number; reason: string | null } | null // WP-318
+  modLive: boolean | null // WP-352: the pane's wt-deliver mod said hello within LIVE_MS (null: unknown / not a local pane)
 }
 export interface HeadlessAgentInfo extends AgentInfoCore {
   kind: 'headless'
