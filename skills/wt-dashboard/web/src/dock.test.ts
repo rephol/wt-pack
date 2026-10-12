@@ -52,3 +52,9 @@ test('load tolerates garbage and a throwing localStorage', () => {
   save(open4()) // no throw
   delete g.localStorage
 })
+
+test('a paused or missing agent never marks the dock "needs you"', () => {
+  const s = ['local/w1:pa', 'local/w1:pb', 'local/w1:pc'].reduce((d, k, i) => minimise(openChat(d, k, i + 1), k, 10), EMPTY)
+  const ag = (key: string, status: string) => ({ key, asks: true, status, statusSince: 0 })
+  assert.deepEqual(unread(s, { rooms: [], agents: [ag('local/w1:pa', 'paused'), ag('local/w1:pb', 'missing'), ag('local/w1:pc', 'idle')] }), { 'local/w1:pc': '!' })
+})

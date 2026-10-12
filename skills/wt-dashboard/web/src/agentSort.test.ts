@@ -18,11 +18,32 @@ test('initialSort: ?sort= over storage, invalid ignored', () => {
   assert.equal(initialSort('', null), 'attention')
 })
 
-import { projectCounts, countTooltip } from './agentSort.ts'
+import { projectCounts, countTooltip, rank } from './agentSort.ts'
 test('projectCounts: agents only, working and needs-you, tasks-only projects kept at 0', () => {
   const ag = (project: string | null, status: 'working' | 'idle', asks = false) => ({ name: 'x', status, asks, statusSince: 0, project })
   const r = projectCounts([ag('acmeapp', 'working'), ag('acmeapp', 'idle', true), ag('acmeapp', 'idle'), ag('ops', 'idle'), ag(null, 'working')], ['acmeapp', 'tasks-only'])
-  assert.deepEqual(r.all, { agents: 5, working: 2, needs: 1 })
-  assert.deepEqual(r.by, [['acmeapp', { agents: 3, working: 1, needs: 1 }], ['ops', { agents: 1, working: 0, needs: 0 }], ['tasks-only', { agents: 0, working: 0, needs: 0 }]])
+  assert.deepEqual(r.all, { agents: 5, working: 2, needs: 1, paused: 0 })
+  assert.deepEqual(r.by, [['acmeapp', { agents: 3, working: 1, needs: 1, paused: 0 }], ['ops', { agents: 1, working: 0, needs: 0, paused: 0 }], ['tasks-only', { agents: 0, working: 0, needs: 0, paused: 0 }]])
   assert.equal(countTooltip(r.by[0][1]), '3 agents · 1 working · 1 needs you')
+})
+
+import { extraAgent, mergeAgents, projectList } from './agentSort.ts'
+const row = (name: string, status: string, project: string | null = 'p', asks = false) => ({ key: `k-${name}-${status}`, name, status: status as 'idle', asks, statusSince: 0, project })
+test('extraAgent keeps headless and stored rows, drops live panes', () => {
+  assert.deepEqual(['paused', 'missing', 'exited', 'working', 'idle'].map((status) => extraAgent({ status })), [true, true, true, false, false])
+  assert.equal(extraAgent({ status: 'idle', headless: true }), true)
+})
+test('mergeAgents: stored row added, live pane wins over a stored row of the same name', () => {
+  const m = mergeAgents([row('a', 'idle')], [row('a', 'paused'), row('b', 'paused')])
+  assert.deepEqual(m.map((x) => `${x.name}:${x.status}`), ['a:idle', 'b:paused'])
+})
+test('a paused or missing row is not working and never needs you', () => {
+  const r = projectCounts([row('a', 'paused', 'p', true), row('b', 'missing', 'p', true), row('c', 'idle', 'p', true)])
+  assert.deepEqual(r.all, { agents: 1, working: 0, needs: 1, paused: 2 })
+  assert.equal(countTooltip(r.all), '1 agent · 1 needs you · 2 paused')
+  assert.ok(rank(row('a', 'paused', 'p', true)) > rank(row('c', 'idle')))
+})
+test('projectList: stored-only paused, agents-only, cards-only, deduped', () => {
+  const l = projectList([{ name: 'porto', paused: true }, { name: 'both' }], [row('x', 'idle', 'agentsonly'), row('y', 'idle', 'both')], ['cardsonly', 'both'])
+  assert.deepEqual(l.by.map((p) => `${p.name}${p.paused ? '*' : ''}`).sort(), ['agentsonly', 'both', 'cardsonly', 'porto*'])
 })
