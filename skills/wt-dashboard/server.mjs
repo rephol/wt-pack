@@ -48,6 +48,7 @@ import { loadConfig as routeConfig, outcome as routeOutcome, TIERS } from '../wt
 import { load as routeDecisions, report as routeReport, estimateSavings as routeSavings } from '../wt-shared/scripts/routing-eval.mjs'
 import { readCalls, healthSummary, featureStats, recentCalls, tailLines, authErrors } from './jevlog.mjs'
 import { compose as composeWatchPrs } from './watchprs-event.mjs'
+import { ProjectStore } from './project-store.mjs'
 import { Pauses, pauseProject, resumeProject } from './pause.mjs'
 import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
@@ -84,6 +85,7 @@ const BIND_OK = bindCheck(BIND, process.env.WT_ALLOW_REMOTE === '1')
 const DATA_ROOT = process.env.WT_DASHBOARD_DATA ?? join(homedir(), '.local', 'share', 'wt-dashboard')
 const DATA = join(DATA_ROOT, 'data')
 const psettings = new ProjectSettings({ dir: DATA, cfg }) // WP-107: per-project settings over cfg
+const projectStore = new ProjectStore(() => psettings.db) // WP-347
 const pauses = new Pauses(() => psettings.db) // WP-346: paused projects (pause.mjs)
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
@@ -1399,7 +1401,7 @@ async function refillTeams(project) {
     store.delete('agents:local')
   }
 }
-// Project name → main checkout: the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
+// Project name → main checkout: the project store (wt.db, WP-347), the configured repo, $WT_DASHBOARD_PROJECTS (colon-separated repo paths),
 // and every repo a local agent is working in, minus $WT_DASHBOARD_HIDDEN_PROJECTS (names).
 async function projectRoots() {
   return cached('projectRoots', 30_000, async () => {
@@ -1409,7 +1411,9 @@ async function projectRoots() {
       const c = await git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir').catch(() => null)
       if (c) { const root = dirname(c.trim()); map.set(basename(root), root) }
     }
-    for (const h of cfg.list('WT_DASHBOARD_HIDDEN_PROJECTS')) map.delete(h) // WP-223: Hide project
+    for (const [name, root] of map) projectStore.add(name, root) // WP-347: remembered, so it stays listed with no agents
+    for (const [name, root] of projectStore.all()) if (!map.has(name) && existsSync(root)) map.set(name, root)
+    for (const h of cfg.list('WT_DASHBOARD_HIDDEN_PROJECTS')) if (!pauses.has(h)) map.delete(h) // WP-223: Hide project (a paused project stays listed)
     return map
   })
 }
@@ -1423,7 +1427,7 @@ async function projectsApi() {
   const ag = (await agents()).filter((a) => a.local)
   const inside = (dir) => ag.filter((a) => a.cwd === dir || a.cwd?.startsWith(dir + '/')).map((a) => a.name)
   return Promise.all([...(await projectRoots())].map(async ([name, root]) => ({
-    name, root,
+    name, root, paused: pauses.has(name),
     worktrees: (await linkedWorktrees(root).catch(() => [])).map((w) => ({ ...w, ticket: ticketOf(w.branch) ?? ticketOf(w.path), agents: inside(w.path) })),
   })))
 }
@@ -3542,20 +3546,34 @@ async function projectPauseApi(req, res, project, sub) {
   }
   const d = sub === 'pause'
     ? { agents: () => agents(), rm: (pane) => run(AGENTS_SH, ['rm', pane, '--force'], homedir(), 30_000), stopHeadless: (id) => hl().stop(id, 'project paused'), mark }
-    : { mark, resumeHeadless: (id, text) => hl().resume(id, text), send: async (pane, text) => { await new Promise((r) => setTimeout(r, 8000)); // let claude finish starting
-      await herdr('pane', 'send-text', pane, text); await herdr('pane', 'send-keys', pane, 'enter') }, spawn: resumeSpawn }
+    : { mark, resumeHeadless: async (id, text) => { // WP-347: a gone cwd falls back to the main checkout
+      const r = hl().run(id), root = (await projectRoots()).get(project), gone = !!(r && root && !existsSync(r.cwd))
+      if (gone) hl().db.prepare('UPDATE headless_runs SET cwd = ? WHERE id = ?').run(root, id)
+      hl().resume(id, text)
+      return gone ? { fallback: { from: r.cwd, to: root } } : null
+    },
+    send: async (pane, text) => { await new Promise((r) => setTimeout(r, 8000)); // let claude finish starting
+      await herdr('pane', 'send-text', pane, text); await herdr('pane', 'send-keys', pane, 'enter') }, spawn: (a) => resumeSpawn(a, project) }
   const out = await (sub === 'pause' ? pauseProject : resumeProject)(project, pauses, d)
   store.delete('agents:local')
   send(res, 200, out)
 }
 // Spawn a saved agent back under its name, role, cwd, model, effort and session (the same arguments respawn uses), then restore its other tokens.
-async function resumeSpawn(a) {
-  if (!a.role || !a.cwd || !existsSync(a.cwd)) throw new Error(`${a.name}: needs a role and an existing cwd (${a.cwd ?? 'none'})`)
-  const t = a.tokens ?? {}, sess = a.session && (await findTranscript(a.session)) ? a.session : null // a session that never took a prompt has no transcript to resume
-  const out = await run(AGENTS_SH, ['spawn', a.persona || a.role, a.cwd, '--label', a.name, ...(sess ? ['--resume', sess] : []), ...(t.model ? ['--model', t.model] : []), ...(t.effort ? ['--effort', t.effort] : [])], a.cwd, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
+// WP-347: a saved cwd that is gone (its worktree was removed after the merge) falls back to the project's main checkout, and the
+// session starts fresh there (claude resumes per directory); the result reports it. Only a missing role fails.
+async function resumeSpawn(a, project) {
+  if (!a.role) throw new Error(`${a.name}: no role saved`)
+  let cwd = a.cwd, fallback = null
+  if (!cwd || !existsSync(cwd)) {
+    const root = (await projectRoots()).get(project)
+    if (!root) throw new Error(`${a.name}: its folder ${cwd ?? '(none)'} is gone and ${project} has no checkout`)
+    fallback = { from: cwd ?? null, to: root }; cwd = root
+  }
+  const t = a.tokens ?? {}, sess = !fallback && a.session && (await findTranscript(a.session)) ? a.session : null // a session that never took a prompt has no transcript to resume
+  const out = await run(AGENTS_SH, ['spawn', a.persona || a.role, cwd, '--label', a.name, ...(sess ? ['--resume', sess] : []), ...(t.model ? ['--model', t.model] : []), ...(t.effort ? ['--effort', t.effort] : [])], cwd, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
   const pane = out.trim().split(/\s+/).pop()
   for (const [k, v] of Object.entries(t)) if (!['role', 'persona', 'project', 'spawned_by', 'created', 'model', 'effort'].includes(k)) await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--token', `${k}=${v}`).catch(() => {})
-  return pane
+  return { pane, fallback }
 }
 
 // ---- Terminals (terminals.mjs): shells owned by herdr, mirrored and typed into from the dashboard ----
