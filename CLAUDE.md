@@ -64,7 +64,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 
 ## Traps
 - `HERDR_PANE_ID` may be the stable id — resolve via `herdr pane get` (`canonicalPane()`).
-- Pane tokens: ≤32 keys, values ≤80 chars; `task`/`handoff_*` never mirrored to `agent-tags.json`;
+- Pane tokens: ≤32 keys, values ≤80 chars; `task`/`handoff_*` never stored in the agents table (WP-348; it replaced `agent-tags.json`);
   unknown roles dropped.
 - WKWebView `window.confirm` is always false — native dialogs banned (`noNativeDialogs.test.ts`).
 - Room turns: agents answering in a room end their session turn with at most one line: `→ answered in #<slug>`.
