@@ -67,7 +67,7 @@ export interface RoomMsg {
 
 // ---- agents (agentinfo.mjs; `info` on every GET /api/agents row and GET /api/headless[/:id], WP-313) ----
 export type AgentKind = 'pane' | 'headless'
-export type AgentState = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited'
+export type AgentState = 'idle' | 'working' | 'blocked' | 'done' | 'unknown' | 'exited' | 'paused' | 'missing' // paused/missing: WP-348 stored rows
 // What an agent is and runs on, the same for a herdr pane and a headless run. Unknown = null (never invented): a pane has no
 // cost, plugin list or command list; a run has no tags.
 export interface AgentInfoCore {
@@ -87,6 +87,8 @@ export interface AgentInfoCore {
 export interface PaneAgentInfo extends AgentInfoCore {
   kind: 'pane'
   pane: { id: string; machine: string; local: boolean; tags: Record<string, string>; dnd: boolean; pair: string | null; workspace: string | null; pid: number | null /* live claude pid (claude agents --json), WP-324 */; routed: string | null /* the tier asked for when it differs from what runs */ }
+  stableKey: string // WP-348: the agents-table key (the agent's name), stable across a pane-id change
+  table: { state: 'running' | 'idle' | 'paused' | 'exited' | 'missing'; pausedAt: number | null; goneAt: number | null } | null // WP-348: its durable row
   keepwarm: { state: 'warm' | 'cold' | 'off'; nextAt: number | null; pingsToday: number; spentTokens: number; reason: string | null } | null // WP-318
 }
 export interface HeadlessAgentInfo extends AgentInfoCore {

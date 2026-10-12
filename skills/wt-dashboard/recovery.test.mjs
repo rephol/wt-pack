@@ -58,3 +58,11 @@ test('a paired card is flagged, never re-dispatched', async () => {
   assert.equal(r[0].redispatched, false)
   assert.equal(keys.length, 0)
 })
+
+test('WP-348: a paused agent\'s card is not orphaned by the restart sweep', async () => {
+  const { tickets, mk, notes, keys, deps } = await setup([live])
+  const t = await mk('a', 'building', { name: 'w-2', pane: 'p2' })
+  await tickets.mutate(t.id, (c) => ({ ...c, paused: true }))
+  assert.deepEqual(await sweep({ tickets, deps }), [])
+  assert.deepEqual([keys.length, notes.length, (await tickets.get(t.id)).assignee.name], [0, 0, 'w-2'])
+})

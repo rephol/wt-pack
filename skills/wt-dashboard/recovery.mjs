@@ -12,7 +12,7 @@ export async function sweep({ tickets, deps, now = Date.now(), log = console.err
   for (const { id, project } of tickets.db.prepare('SELECT id, project FROM tickets').all()) {
     const t = await tickets.get(id)
     const who = t.assignee
-    if (!['planning', 'building'].includes(t.column) || !who?.pane || t.dispatch?.state === 'interrupted') continue
+    if (!['planning', 'building'].includes(t.column) || !who?.pane || t.dispatch?.state === 'interrupted' || t.paused) continue // WP-348: a paused agent's card is not orphaned
     const a = local.find((x) => x.name === who.name)
     if (a && a.status !== 'exited') continue
     const reason = `dashboard restarted; ${who.name} is gone`

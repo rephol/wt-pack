@@ -703,6 +703,12 @@ if [ "$mode" = pane ]; then
       fi
     fi
   fi
+  # WP-348: a target the agents table says is paused, exited or missing has no live pane to hand to; resume it first.
+  . "$(dirname "$0")/../../wt-shared/scripts/agent-pane.sh"
+  row=$(agent_row "$pane_arg" || true)
+  case "$(printf '%s' "$row" | jq -r '.state // empty' 2>/dev/null)" in
+    paused|exited|missing) echo "$(printf '%s' "$row" | jq -r '.name') is $(printf '%s' "$row" | jq -r '.state'): resume it first" >&2; exit 1 ;;
+  esac
   target_dnd=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.dnd // empty')
   [ -z "$target_dnd" ] || echo "warning: $(name_of "$pane_arg") is DND" >&2
   [ "$dry" -eq 1 ] && dry "would hand to pane $pane_arg"
@@ -757,6 +763,7 @@ if [ -n "$team" ]; then
   seats=$(node "$SELFDIR/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "${main_checkout:-$cwd}" 2>/dev/null) || seats=0
   [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
   have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
+  . "$SELFDIR/../../wt-shared/scripts/agent-pane.sh"; have=$(( ${have:-0} + $(agent_paused_in_team "$team" "$want") )) # WP-348: a paused member still holds its seat
   if [ "${have:-0}" -ge "$seats" ]; then
     full="team full: $have/$seats $want in $team"
     [ "$dry" -eq 1 ] && dry "$full"

@@ -201,6 +201,9 @@ dispatch)
   ws=$(herdr workspace list 2>/dev/null | jq -r --arg l "$(basename "$MAIN")-reviewers" '.result.workspaces[]? | select(.label == $l) | .workspace_id' | head -1)
   # The reviewer that held this PR gets it back when free; else handoff reuses a free pool reviewer or spawns one.
   prev=$(jq -r --arg n "$P" '.reviewed[$n].reviewer // ""' "$STATE")
+  # WP-348: the agents table says whether the previous reviewer can take it (paused/exited/missing cannot); herdr's list still decides idle.
+  . "$here/../../wt-shared/scripts/agent-pane.sh"
+  case "$( [ -n "$prev" ] && agent_state "$prev" || true)" in paused|exited|missing) prev="" ;; esac
   pane=""; [ -n "$prev" ] && pane=$(printf '%s' "$ag" | jq -r --arg n "$prev" '.result.agents[]? | select(.name == $n and (.agent_status == "idle" or .agent_status == "done")) | .pane_id' | head -1)
   # WP-147: a paired ticket's branch (wp-N-…) routes the review to its buddy instead — the pairing is the
   # deliberate choice, so it wins over both the last reviewer and a free pool pick.

@@ -48,3 +48,12 @@ test('info: null when keepwarm does nothing for the pane; off after the user tur
   k.set('p1', 'arm'); assert.equal(k.info('p1', 'worker').state, 'cold')
   k.set('p1', 'off'); assert.equal(k.info('p1', 'worker').state, 'off')
 })
+
+test('WP-348: a paused project is never enabled, whatever was armed or globally on', () => {
+  const k = new Keepwarm({ settings: { ...DEFAULTS, enabled: true } })
+  k.set('a', 'arm')
+  assert.equal(k.effective('a', 'worker').enabled, true)
+  assert.equal(k.effective('a', 'worker', true).enabled, false)
+  assert.equal(k.effective('b', 'planner', true).enabled, false)
+  assert.equal(k.info('a', 'worker', true)?.state ?? 'off', 'off')
+})

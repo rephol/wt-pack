@@ -454,9 +454,9 @@ export function TicketDetail({ phone, project, ticket, isNew, blockAsk, backLabe
   // WP-147: pairing's buddy is edited here; the worker side just follows the ticket's own assignee. The
   // POST .../buddy endpoint (not a plain PATCH) also tags/clears the `pair` pane token on both agents — the
   // thing every free-agent picker actually gates on — so the exclusivity holds for a buddy set this way too.
-  const { data: agentsForPair } = useQuery({ queryKey: ['agents'], queryFn: () => api<{ local: boolean; project: string | null; pool: string; name: string; id: string; tags?: Record<string, string> }[]>('/api/agents'), staleTime: 30_000 })
+  const { data: agentsForPair } = useQuery({ queryKey: ['agents'], queryFn: () => api<{ local: boolean; project: string | null; pool: string; name: string; id: string | null; status?: string; tags?: Record<string, string> }[]>('/api/agents'), staleTime: 30_000 })
   const buddyOptions = useMemo(() => [{ value: '', label: '— none —' }, ...(agentsForPair ?? [])
-    .filter((a) => a.local && a.project === project && (a.pool === 'worker' || a.pool === 'reviewer') && a.name !== ticket?.assignee?.name
+    .filter((a) => a.local && a.id && a.status !== 'paused' && a.status !== 'missing' && a.status !== 'exited' && a.project === project && (a.pool === 'worker' || a.pool === 'reviewer') && a.name !== ticket?.assignee?.name
       && !a.tags?.dnd && (!a.tags?.pair || a.tags.pair === ticket?.id))
     .map((a) => ({ value: a.name, label: `${a.name} (${a.pool})` }))], [agentsForPair, project, ticket?.assignee?.name, ticket?.id])
   const setBuddyM = useMutation({ mutationFn: (buddy: string | null) => send<Ticket>(`${tUrl(ticket!.id)}/buddy`, 'POST', { buddy }), onSuccess: done })

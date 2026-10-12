@@ -89,7 +89,7 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
 - The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: <absolute path of this handoff.sh> --reply <id> "..."`
   (resolved at send time, so it works from the `./setup` links and from a plugin install).
 - `handoff_at` is what lets the dashboard adopt the new `ticket` over its own mirrored copy
-  (`data/agent-tags.json`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
+  (the dashboard's agents table, `wt.db`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
 - `wt-finish` clears `task` when the work is retired.
 
 ## Knowing when a handoff is done

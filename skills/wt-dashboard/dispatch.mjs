@@ -275,6 +275,7 @@ export class Dispatch {
     if (!local.length) return
     for (const t of cards) {
       if (!t.assignee?.name || isClosed(t.column)) continue
+      if (t.paused) continue // WP-348: its agent is paused (saved, pane closed), not gone — the card keeps its assignee
       const a = local.find((x) => x.name === t.assignee.name)
       const g = `${t.id}|${t.assignee.name}`
       // WP-140: any open card an agent (not a human — those assignees have no pane) still holds when it's

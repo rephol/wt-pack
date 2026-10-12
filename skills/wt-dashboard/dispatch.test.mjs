@@ -795,3 +795,15 @@ test('WP-331: a card title rides in the dispatch prompt as one quoted, defused l
     assert.ok(!p.includes('from="user"'))
   }
 })
+
+test('WP-348: a card marked paused keeps its assignee when its (paused) agent is absent from the live list', async () => {
+  const other = { name: 'someone-else', local: true, status: 'working' }
+  const { tickets, d } = await setup({ agents: [other] })
+  await tickets.setSettings('wt-pack', { dispatch: false })
+  const t = await tickets.create('wt-pack', { title: 'a', column: 'building' }, user)
+  await tickets.patch(t.id, {}, user, { name: 'wt-pack-worker-07', pane: 'w7:p1' })
+  await tickets.mutate(t.id, (c) => ({ ...c, paused: true }))
+  for (let i = 0; i < 4; i++) await d.tick()
+  const T = await tickets.get(t.id)
+  assert.deepEqual([T.column, T.assignee?.name], ['building', 'wt-pack-worker-07'])
+})

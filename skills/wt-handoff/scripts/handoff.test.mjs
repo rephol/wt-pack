@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync, statSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -28,7 +28,7 @@ execFileSync('git', ['-C', repo, 'init', '-q'])
 mkdirSync(join(tmp, '.local', 'share', 'wt-dashboard'), { recursive: true }) // WP-334: HOME = tmp, so the repo's role files need a trust entry here
 writeFileSync(join(tmp, '.local', 'share', 'wt-dashboard', 'trusted-projects.json'), JSON.stringify({ demo: repo }))
 const run = (args, input = 'review it') => execFileSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8',
-  env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' } })
+  env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' } })
 
 test('WP-121: --role reviewer targets <repo>-reviewers, spawns in the main checkout, tags pr/sha', () => {
   const sha = 'b'.repeat(40)
@@ -58,7 +58,7 @@ test('WP-128: shadow logs a routing line and changes nothing; live spawns a fres
   // which never lands below sonnet — this local task is a read-only rule, so effort drops one level too.
   assert.match(out, /routing: sonnet \(shadow, local\+session-floor, ref [a-z0-9]+#0\)/)
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', repo], { input: 'list the open PRs', encoding: 'utf8',
-    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' } })
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' } })
   assert.match(out, /would spawn a reviewer in \S+ with --model sonnet/) // a reused agent can't switch model without a picker
   assert.match(out, /would spawn a reviewer in \S+ with --model sonnet --effort low/)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
@@ -84,7 +84,7 @@ const runCancel = (args) => execFileSync(join(here, 'handoff.sh'), args, { encod
   env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', HERDR_DASH_URL: 'http://127.0.0.1:1' } })
 
 test('WP-143: live routing reuses a free worker already on the routed tier/effort; a different tier or effort spawns fresh', () => {
-  const liveEnv = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' }
+  const liveEnv = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MODEL_ROUTING: 'live' }
   // WP-157: --session floors this local read-only pick to sonnet/low (never haiku for a session's own tier)
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
     { pane_id: 'wW:p1', tokens: { model: 'sonnet', effort: 'low' } }] } }))
@@ -116,7 +116,7 @@ test('WP-143: live routing reuses a free worker already on the routed tier/effor
 test('WP-143: WT_WORKERS_MAX caps the worker pool; a full pool exits 3 and never tab-creates', () => {
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-worker-01', pane_id: 'wW:p1', tab_id: 't1', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
-  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
   assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', repo], { input: 'do a thing', encoding: 'utf8', env }),
     (e) => { assert.equal(e.status, 3); assert.match(e.stderr, /pool full: 1\/1 plain workers in demo/); return true })
   assert.ok(!readFileSync(log, 'utf8').includes('tab create'))
@@ -144,7 +144,7 @@ test('WP-147: a DND agent is not listed, and --pane to one warns but still sends
   let threw = null
   let out
   try { out = execFileSync(join(here, 'handoff.sh'), ['--pane', 'wW:p1', '--no-goal', repo], { input: 'x', encoding: 'utf8',
-    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp } }) } catch (e) { threw = e }
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9' } }) } catch (e) { threw = e }
   assert.equal(threw, null)
   assert.match(out, /^reused wW:p1$/m)
   writeFileSync(join(tmp, 'panes.json'), '{"result":{"panes":[]}}')
@@ -197,7 +197,7 @@ case "$url" in
 esac
 `)
   chmodSync(join(curlBin, 'curl'), 0o755)
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
   let out = execFileSync(join(here, 'handoff.sh'), ['--no-goal', '--dry-run', '--task', 'WP-9 fix it', repo], { input: 'x', encoding: 'utf8', env })
   assert.match(out, /would hand to pane wW:p9$/m)
   out = execFileSync(join(here, 'handoff.sh'), ['--role', 'reviewer', '--no-goal', '--dry-run', '--task', 'WP-9 fix it', repo], { input: 'x', encoding: 'utf8', env })
@@ -254,7 +254,7 @@ test('WP-205: the worker cap counts only agents of the same persona kind (none f
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-frontend-worker-01', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'idle', workspace_id: 'wW', cwd: repo }] } }))
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p2', tokens: { persona: 'frontend-worker' } }] } }))
-  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
   const go = (extra) => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', ...extra, '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env })
   assert.match(go([]), /would spawn a worker/) // an idle persona agent does not fill a plain ticket's cap
   assert.match(go(['--persona', 'frontend-worker']), /would reuse worker demo-frontend-worker-01/)
@@ -267,7 +267,7 @@ test('WP-205: a persona at its own cap is full (exit 3) while a plain handoff is
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
     { name: 'demo-frontend-worker-01', pane_id: 'wW:p2', tab_id: 't2', agent_status: 'working', workspace_id: 'wW', cwd: repo }] } }))
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [{ pane_id: 'wW:p2', tokens: { persona: 'frontend-worker' } }] } }))
-  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '1' }
   try {
     assert.throws(() => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--persona', 'frontend-worker', '--no-goal', repo], { input: 'x', encoding: 'utf8', env }),
       (e) => { assert.equal(e.status, 3); assert.match(e.stderr, /pool full: 1\/1 frontend-worker workers/); return true })
@@ -282,7 +282,7 @@ test('WP-210: --reply queues through the dashboard when the target mod is live, 
   const curlBin = join(tmp, 'curlbin210')
   mkdirSync(curlBin, { recursive: true })
   const stub = (body) => { writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${body}'\n`); chmodSync(join(curlBin, 'curl'), 0o755) }
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
   const reply = () => { const before = readFileSync(log, 'utf8').length; const out = execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', 'hi'], { encoding: 'utf8', env }); return [out, readFileSync(log, 'utf8').slice(before)] }
   const T = '<wt-message id=srv210 kind=reply from="s">hi</wt-message>'
   stub(JSON.stringify({ queued: true, id: 'x', text: T }))
@@ -300,7 +300,7 @@ test('WP-340: pane_post retries, then fails loudly without a local wrap; a refus
   const curlBin = join(tmp, 'curlbin340'), count = join(tmp, 'curl340.count'); mkdirSync(curlBin, { recursive: true })
   const T = '<wt-message id=rec340 kind=reply from="s">hi</wt-message>'
   const stub = (script) => { writeFileSync(count, ''); writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat >/dev/null\necho x >> ${count}\n${script}\n`); chmodSync(join(curlBin, 'curl'), 0o755) }
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5', WT_POST_TRIES: '3', WT_POST_RETRY_S: '0' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5', WT_POST_TRIES: '3', WT_POST_RETRY_S: '0' }
   const go = (extra = []) => { const before = readFileSync(log, 'utf8').length; const r = spawnSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', ...extra, 'hi'], { encoding: 'utf8', env }); return [r, readFileSync(log, 'utf8').slice(before)] }
   const tries = () => readFileSync(count, 'utf8').trim().split('\n').filter(Boolean).length
   stub('exit 28') // timeout / down: 3 tries, then loud, nothing pasted
@@ -332,7 +332,7 @@ esac
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [agent('demo-worker-01', 'wW:p1'), agent('demo-worker-02', 'wW:p2'), agent('demo-worker-03', 'wW:p3'), agent('demo-worker-04', 'wW:p4')] } }))
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
     { pane_id: 'wW:p1', tokens: { task: 'WP-1 still on it' } }, { pane_id: 'wW:p3', tokens: { task: 'WP-2 finished' } }, { pane_id: 'wW:p4', tokens: {} }] } }))
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
   const list = execFileSync(join(here, 'handoff.sh'), ['--list', repo], { input: '', encoding: 'utf8', env })
   assert.ok(!list.includes('wW:p1') && !list.includes('wW:p2'), list) // token names open WP-1; assignee of WP-1
   assert.ok(list.includes('wW:p3') && list.includes('wW:p4'), list) // WP-2 is done; no token, no card
@@ -356,7 +356,10 @@ test('WP-272: no /goal by default (typed short line naming the file); --goal arm
     assert.doesNotMatch(calls, /agent prompt|\/goal|send-text .*<wt-message/)
   }
   writeFileSync(log, '')
+  // the ticket prefix needs a known key; a Linear team in HOME's env file supplies one without the live dashboard (WP-348: the run is pinned to a closed port)
+  mkdirSync(join(tmp, '.config', 'wt-dashboard'), { recursive: true }); writeFileSync(join(tmp, '.config', 'wt-dashboard', 'env'), 'WT_LINEAR_TEAMS=WP\n')
   run(['--role', 'worker', '--pane', 'wW:p9', '--task', 'WP-5 x', '--goal', repo], 'do the thing')
+  rmSync(join(tmp, '.config', 'wt-dashboard', 'env'))
   let calls = readFileSync(log, 'utf8')
   const gfile = calls.match(/^herdr pane send-text wW:p9 \/goal WP-5: do the task in (\S+\.md); reporting what it asks for is the goal$/m)?.[1]
   assert.ok(gfile, calls)
@@ -365,7 +368,7 @@ test('WP-272: no /goal by default (typed short line naming the file); --goal arm
   const blocker = join(tmp, 'not-a-dir'); writeFileSync(blocker, '')
   writeFileSync(log, '')
   const r = spawnSync(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { input: 'do the thing', encoding: 'utf8',
-    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MESSAGES_DIR: join(blocker, 'x') } })
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_MESSAGES_DIR: join(blocker, 'x') } })
   assert.match(r.stderr, /warning: could not type the short line/)
   assert.match(readFileSync(log, 'utf8'), /^herdr agent prompt wW:p9 /m)
 })
@@ -386,7 +389,7 @@ case "$url" in
 esac
 `)
   chmodSync(join(curlBin, 'curl'), 0o755)
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_PANE_ID: 'wS:p1', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_PULL_WAIT_S: '1' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', HERDR_PANE_ID: 'wS:p1', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_PULL_WAIT_S: '1' }
   const go = () => execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--pane', 'wW:p9', repo], { input: 'do the thing', encoding: 'utf8', env })
   writeFileSync(join(tmp, 'q1-status'), 'delivered'); writeFileSync(log, ''); writeFileSync(curlLog, '')
   go()
@@ -423,7 +426,7 @@ test('WP-247: team workers do not count against the plain pool cap; --pane refus
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [agent(1), agent(2), agent(3)] } }))
   writeFileSync(join(tmp, 'panes.json'), JSON.stringify({ result: { panes: [
     { pane_id: 'wW:p1', tokens: {} }, { pane_id: 'wW:p2', tokens: { team: 'web', role: 'worker' } }, { pane_id: 'wW:p3', tokens: { team: 'web', role: 'worker' } }] } }))
-  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '2' }
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_WORKERS_MAX: '2' }
   const plain = execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env })
   assert.match(plain, /^dry-run: would spawn a worker/) // 1 teamless of 2, not 3 of 2
   assert.match(execFileSync(join(here, 'handoff.sh'), ['--role', 'worker', '--no-goal', '--dry-run', repo], { input: 'x', encoding: 'utf8', env: { ...env, WT_WORKERS_MAX: '1' } }), /pool full: 1\/1 plain/) // p1 still counts
@@ -489,7 +492,7 @@ test('WP-257: --reply records the envelope at /api/messages; --ack posts the sta
   writeFileSync(calls, '')
   writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\necho "$@" >> ${calls}\ncat >> ${calls}\nprintf '%s' '{"queued":true,"id":"m1","state":"acknowledged"}'\n`)
   chmodSync(join(curlBin, 'curl'), 0o755)
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_DELIVER_TOKEN: 'tok' } // a server-token sender records its own envelope (a pane's is recorded by the dashboard)
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', WT_DELIVER_TOKEN: 'tok' } // a server-token sender records its own envelope (a pane's is recorded by the dashboard)
   execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', 'hi'], { encoding: 'utf8', env })
   const log257 = readFileSync(calls, 'utf8')
   assert.match(log257, /\/api\/messages/)
@@ -508,7 +511,7 @@ test('WP-298: --effort sets the unit tier/effort in any mode (low → haiku, med
   assert.match(w(['--effort', 'high']), /would spawn a worker in \S+ --effort high/)
   assert.doesNotMatch(w(['--effort', 'high']), /--model/)
   assert.doesNotMatch(w([]), /--model|--effort/) // no unit effort: the spawn falls to agents.sh's sonnet floor
-  const bad = spawnSync(join(here, 'handoff.sh'), ['--effort', 'xhigh', '--dry-run', repo], { input: 'x', encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: tmp } })
+  const bad = spawnSync(join(here, 'handoff.sh'), ['--effort', 'xhigh', '--dry-run', repo], { input: 'x', encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9' } })
   assert.equal(bad.status, 2)
 })
 
@@ -549,7 +552,7 @@ test('WP-328: a pane sender posts fields and pastes the dashboard-built envelope
   const srvText = '<wt-message id=srv328 kind=reply from="stamped">hi</wt-message>'
   writeFileSync(join(curlBin, 'curl'), `#!/bin/sh\ncat > ${posted}\nprintf '%s' '${JSON.stringify({ queued: false, text: srvText })}'\n`)
   chmodSync(join(curlBin, 'curl'), 0o755)
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_PANE_ID: 'wW:p5' }
   const before = readFileSync(log, 'utf8').length
   const out = execFileSync(join(here, 'handoff.sh'), ['--reply', 'wW:p7', '--from', 'forger', 'hi'], { encoding: 'utf8', env })
   assert.match(out, /replied wW:p7/)
@@ -578,11 +581,35 @@ esac
   const agent = (n, p) => ({ name: n, pane_id: p, tab_id: 't1', agent_status: 'idle', workspace_id: 'wW', cwd: repo })
   writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [agent('demo-worker-01', 'wW:p1'), agent('demo-worker-02', 'wW:p2'), agent('demo-worker-03', 'wW:p3')] } }))
   writeFileSync(join(tmp, 'pane-wW_p1.json'), '{"result":{"pane":{"pane_id":"wW:p1","tokens":{}}}}')
-  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_PANE_ID: 'wW:p1', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', HERDR_PANE_ID: 'wW:p1', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' }
   // relative $0: held-card lookup (wt-ticket, resolved after `cd $main_checkout`) must still run, so p2 (assignee of WP-1) is excluded
   const list = execFileSync('./handoff.sh', ['--list', repo], { cwd: here, input: '', encoding: 'utf8', env })
   assert.ok(!list.includes('wW:p1'), list) // the sender
   assert.ok(!list.includes('wW:p2'), list) // held a card — only excluded if the relative path resolved
   assert.ok(list.includes('wW:p3'), list)
   for (const f of ['agents.json', 'pane-wW_p1.json']) writeFileSync(join(tmp, f), f === 'agents.json' ? '{"result":{"agents":[]}}' : '{"result":{"pane":{"tokens":{}}}}')
+})
+
+test('WP-348: handoff to a pane whose agents-table row is paused, exited or missing refuses; a dead dashboard falls through to herdr', () => {
+  const fake = join(tmp, 'rowbin'); mkdirSync(fake, { recursive: true })
+  const state = join(tmp, 'row-state'); writeFileSync(state, 'paused')
+  writeFileSync(join(fake, 'curl'), `#!/bin/sh\ncase "$*" in *by-name*) printf '{"name":"wt-pack-worker-09","state":"%s"}' "$(cat ${state})" ;; *) exit 22 ;; esac\n`, { mode: 0o755 })
+  const env = { PATH: `${fake}:${bin}:${process.env.PATH}`, HOME: tmp, WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HERDR_DASH_URL: 'http://127.0.0.1:9' }
+  for (const st of ['paused', 'exited', 'missing']) {
+    writeFileSync(state, st)
+    const r = spawnSync(join(here, 'handoff.sh'), ['--no-goal', '--pane', 'wW:p1', repo], { input: 'x', encoding: 'utf8', env })
+    assert.equal(r.status, 1); assert.match(r.stderr, new RegExp(`wt-pack-worker-09 is ${st}: resume it first`))
+  }
+  writeFileSync(state, 'idle')
+  assert.equal(spawnSync(join(here, 'handoff.sh'), ['--no-goal', '--dry-run', '--pane', 'wW:p1', repo], { input: 'x', encoding: 'utf8', env }).status, 0)
+})
+
+test('WP-348: a paused team member still holds its seat (the dashboard counts it), and a dead dashboard counts none', () => {
+  const fake = join(tmp, 'teambin'); mkdirSync(fake, { recursive: true })
+  const rows = join(tmp, 'team-rows.json'); writeFileSync(rows, '[{"name":"p","state":"paused","tags":{"team":"web","role":"worker"}}]')
+  writeFileSync(join(fake, 'curl'), `#!/bin/sh\ncat ${rows}\n`, { mode: 0o755 })
+  const count = (path) => execFileSync('sh', ['-c', `. ${join(here, '..', '..', 'wt-shared', 'scripts', 'agent-pane.sh')}; agent_paused_in_team web worker`],
+    { encoding: 'utf8', env: { PATH: `${path}:${process.env.PATH}`, HERDR_DASH_URL: 'http://127.0.0.1:9' } }).trim()
+  assert.equal(count(fake), '1')
+  assert.equal(count(bin), '0') // the shared stub curl output is not the rows JSON, or the port is closed
 })
