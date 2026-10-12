@@ -515,6 +515,7 @@ async function paneMeta(m) {
 }
 // Keep each local agent's pane tokens equal to the agents table row's tags (backfilling an agent seen for the first
 // time from inference). Only when they differ, so a herdr restart re-applies them and a steady state costs nothing.
+const omitSpawn = (t = {}) => Object.fromEntries(Object.entries(t).filter(([k]) => !['model', 'effort', 'team'].includes(k))) // WP-348
 const syncing = new Set()
 async function syncTokens(agents) {
   let backfilled = false
@@ -526,7 +527,7 @@ async function syncTokens(agents) {
     }
     const adopted = adoptHandoff(roleStore.tags[a.name], a.paneTokens)
     if (adopted) { roleStore.tags[a.name] = adopted; backfilled = true }
-    const { set, clear } = tokenDiff(a.paneTokens, roleStore.tags[a.name])
+    const { set, clear } = tokenDiff(a.paneTokens, omitSpawn(roleStore.tags[a.name])) // model/effort/team follow the pane; the row only remembers them
     if (!set.length && !clear.length) continue
     syncing.add(a.id)
     herdr('pane', 'report-metadata', a.id, '--source', 'wt-dashboard', ...set.flatMap(([k, v]) => ['--token', `${k}=${v}`]), ...clear.flatMap((k) => ['--clear-token', k]))
@@ -677,10 +678,17 @@ const machineStatus = (r) =>
 // WP-348 watcher: runs on each fresh local listing (3 s cache, so the 4 s tick drives it), adds no herdr call (pane list is paneMeta's cached one).
 async function watchAgents(local) {
   const rows = agentTable.list()
-  const panes = new Set([...(await paneMeta((await machines())[0]).catch(() => ({ tokens: new Map() }))).tokens.keys()])
+  const meta = await paneMeta((await machines())[0]).catch(() => null)
+  if (!meta) return // a failed pane list is not 'no panes': leave the rows as they are
+  const panes = new Set(meta.tokens.keys())
   if (!local.length && !panes.size && rows.some((r) => r.state === 'running' || r.state === 'idle')) return // herdr restarting, not every agent dying
   const live = local.filter((a) => a.local)
-  for (const u of reconcile(rows, live, new Set([...panes, ...live.map((a) => a.id)]))) agentTable.upsert(u.name, u.patch)
+  for (const u of reconcile(rows, live, new Set([...panes, ...live.map((a) => a.id)]))) {
+    const cur = agentTable.get(u.name) // re-read: a pause or forget may have landed while this tick awaited
+    if (u.created ? cur : cur?.state === 'paused') continue
+    if (!u.created && !cur) continue
+    agentTable.upsert(u.name, u.patch)
+  }
 }
 
 async function agents() {
@@ -3589,7 +3597,9 @@ async function agentByNameApi(req, res, name, sub) {
   await rooms.load()
   const who = await roomAuthor(req)
   if (!row) return send(res, 404, { error: `no agent ${name}` })
-  if (who.kind !== 'user' && (row.state === 'paused' || !(['exited', 'missing'].includes(row.state) || who.name === name))) return send(res, 403, { error: 'a pane may forget an exited or missing agent, or itself; a paused one only the dashboard' })
+  // a pane may forget itself, an exited/missing row, or a row whose agent herdr no longer lists (agents.sh rm closes the tab, then asks, before the watcher has run); never a paused row
+  const stillLive = (await agents()).some((a) => a.local && a.name === name)
+  if (who.kind !== 'user' && (row.state === 'paused' || !(['exited', 'missing'].includes(row.state) || who.name === name || !stillLive))) return send(res, 403, { error: 'a pane may forget an exited or missing agent, or itself; a paused one only the dashboard' })
   agentTable.remove(name)
   store.delete('agents:local')
   send(res, 200, { ok: true })
@@ -3850,7 +3860,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'agents') {
         if (!parts[2]) { // WP-348: paused and missing agents stay listed (no pane), so they never disappear
           const ag = await agents(), have = new Set(ag.filter((a) => a.local).map((a) => a.name))
-          const stored = agentTable.list().filter((r) => (r.state === 'paused' || r.state === 'missing') && !have.has(r.name)).map((r) => { const a = rowAsAgent(r); return { ...a, info: paneInfo(a, null, null, null, r) } })
+          const stored = agentTable.list().filter((r) => ['paused', 'missing', 'exited'].includes(r.state) && !have.has(r.name)).map((r) => { const a = rowAsAgent(r); return { ...a, info: paneInfo(a, null, null, null, r) } })
           return send(res, 200, [...ag, ...stored, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))])
         }
         if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))

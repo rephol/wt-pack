@@ -40,12 +40,13 @@ test('by-name returns the row without tags; forget: a pane may forget itself or 
   // seed a paused row and an exited one next to the live ones
   const db = new DatabaseSync(join(root, 'data', 'wt.db'))
   const ins = db.prepare("INSERT INTO agents (name, state, created_at) VALUES (?, ?, 1)")
-  ins.run('demo-worker-07', 'paused'); ins.run('demo-worker-08', 'exited'); db.close()
+  ins.run('demo-worker-07', 'paused'); ins.run('demo-worker-08', 'exited'); ins.run('demo-worker-09', 'idle'); db.close() // 09: still idle in the table, but herdr no longer lists it (agents.sh rm just closed its tab)
   const forget = (n, h) => fetch(`${base}/api/agents/by-name/${n}/forget`, { method: 'POST', body: '{}', headers: h })
   assert.equal((await forget('demo-worker-02', pane('w9:p1'))).status, 403) // another running agent
   assert.equal((await forget('demo-worker-07', pane('w9:p1'))).status, 403) // a paused one: only the dashboard
   assert.equal((await forget('demo-worker-08', pane('w9:p1'))).status, 200) // exited
   assert.equal((await fetch(`${base}/api/agents/by-name/demo-worker-08`)).status, 404)
+  assert.equal((await forget('demo-worker-09', pane('w9:p1'))).status, 200) // a pane may forget a row whose agent is no longer live
   const cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
   assert.equal((await forget('demo-worker-07', { cookie })).status, 200) // the user
 })

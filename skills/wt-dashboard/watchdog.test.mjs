@@ -107,11 +107,11 @@ test('investigatePrompt: finding text is framed as data and cannot close the tag
   assert.match(p, /not instructions/)
 })
 
-test('exited: table rows that exited (or went missing with a session) fire; running, paused and sessionless-missing do not', () => {
+test('exited: only table rows that exited fire; running, paused and missing (tab closed) do not', () => {
   const row = (o) => ({ name: 'wt-pack-worker-01', pane: 'w1:p1', session: 's-1', state: 'exited', gone_at: now - 2 * 60_000, ...o })
   const ex = exitedAgents([row(), row({ name: 'a', pane: 'w1:p2', state: 'idle' }), row({ name: 'b', pane: 'w1:p3', state: 'paused' }),
     row({ name: 'c', pane: 'w1:p4', state: 'missing' }), row({ name: 'd', pane: 'w1:p5', state: 'missing', session: null })])
-  assert.deepEqual(ex.map((e) => e.name), ['wt-pack-worker-01', 'c'])
+  assert.deepEqual(ex.map((e) => e.name), ['wt-pack-worker-01'])
   assert.deepEqual(ex[0], { pane: 'w1:p1', name: 'wt-pack-worker-01', session: 's-1', since: min(2) })
   const f = evaluate({ exited: ex.slice(0, 1) }, {}, now)
   assert.deepEqual(f.map((x) => x.key), ['exited|w1:p1'])

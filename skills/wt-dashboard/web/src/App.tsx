@@ -1283,6 +1283,14 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['agents'] }) },
     onError: (e) => toast({ body: `Not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
+  const forgetM = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/agents/by-name/${encodeURIComponent(agent.name)}/forget`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['agents'] }) },
+    onError: (e) => toast({ body: `Not forgotten: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   const send = useMutation({
     mutationFn: (body: { text?: string; keys?: string[] }) => postAgent(agent, body),
     onSuccess: (_d, body) => {
@@ -1465,6 +1473,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
             ...(canStop(kind, agent.headlessState) ? [{ label: 'Stop agent…', description: 'End its process; it stays resumable', onClick: () => setStopOpen(true) }] : []),
+            ...(agent.local && (agent.status === 'missing' || agent.status === 'exited') ? [{ label: 'Forget agent', description: 'Drop its saved row (name, session); its number becomes free', onClick: () => forgetM.mutate() }] : []),
             ...(agent.local && agent.status === 'paused' ? [{ label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => pauseM.mutate('resume') }] : []),
             ...(agent.local && kind === 'pane' && agent.status !== 'paused' && agent.status !== 'missing' ? [{ label: 'Pause agent', description: 'Save it and close its tab; Resume brings it back with its session', onClick: () => pauseM.mutate('pause') }] : []),
             ...(agent.local && kind === 'pane' ? [

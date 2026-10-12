@@ -79,3 +79,18 @@ test('reconcile: two panes on one session do not flap', () => {
   const lv = [live(), live({ name: 'x', id: '%2' })]
   assert.deepEqual(reconcile(rows, lv, new Set(['%1', '%2'])), [])
 })
+
+test('import is atomic: a failing import leaves no table, so the next open retries it', () => {
+  const db = new DatabaseSync(':memory:'), open = () => db
+  let boom = true
+  const t = new AgentTable(open, (tbl) => { tbl.upsert('x', { state: 'idle' }); if (boom) throw new Error('import failed') })
+  assert.throws(() => t.db, /import failed/)
+  assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'agents'").get().n, 0)
+  boom = false
+  assert.equal(t.get('x').state, 'idle') // second open: table created and import ran again
+})
+
+test('reconcile: model/effort/team follow the pane (a cleared one drops); other tags merge', () => {
+  const r = reconcile([row({ tags: { role: 'worker', team: 'old', model: 'opus' } })], [live({ paneTokens: { role: 'worker', model: 'sonnet' } })], new Set(['%1']))
+  assert.deepEqual(r[0].patch.tags, { role: 'worker', model: 'sonnet' })
+})

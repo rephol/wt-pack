@@ -212,10 +212,10 @@ export function inboxOps({ opened, resolved }) {
 export const SHELL_RE = /^-?(zsh|bash|fish|sh|dash|ksh|tcsh)$/
 export const shellForeground = (info) => info?.shell_pid != null && info.foreground_process_group_id === info.shell_pid
   && (info.foreground_processes ?? []).every((p) => SHELL_RE.test(p.name ?? p.argv0 ?? ''))
-// WP-348: the agents table's exited rows (and missing ones that kept a session) → the `exited` check's input. Keyed by pane
+// WP-348: the agents table's exited rows → the `exited` check's input. Keyed by pane
 // for the finding key; the row is what Resume reads, so a respawn under a new pane id does not lose the agent.
 export const exitedAgents = (rows = []) => rows
-  .filter((r) => r.pane && (r.state === 'exited' || (r.state === 'missing' && r.session)))
+  .filter((r) => r.pane && r.state === 'exited') // a missing row (tab closed) is not a crash to resume: its pane is gone
   .map((r) => ({ pane: r.pane, name: r.name, session: r.session, since: new Date(r.gone_at ?? r.seen_at ?? 0).toISOString() }))
 
 // Why a Resume must not run, or null. tickets: every board's cards. Dispatch may already have re-assigned the ticket

@@ -78,3 +78,12 @@ test('a partial resume failure keeps only the failed agent (and the project) pau
   assert.deepEqual(calls, [['spawn', 'b', 's-b', 'WP-1', 'sonnet']])
   assert.ok(!projects.isPaused('p'))
 })
+
+test('a failed continue after a successful respawn does not strand the row as paused', async () => {
+  const { d, table } = mk([pane('a', 'working')])
+  await pauseAgent('a', table, d)
+  d.send = async () => { throw new Error('pane not ready') }
+  const r = await resumeAgent('a', table, d)
+  assert.equal(r.sendFailed, 'pane not ready')
+  assert.deepEqual([table.get('a').state, table.get('a').pane], ['idle', '%new-a'])
+})

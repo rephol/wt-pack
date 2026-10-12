@@ -20,10 +20,15 @@ export class AgentTable {
     if (!this._db) {
       const db = this._db = this.open()
       this.fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agents'").get()
-      db.exec(`CREATE TABLE IF NOT EXISTS agents (name TEXT PRIMARY KEY, role TEXT, persona TEXT, project TEXT, cwd TEXT, session TEXT,
-        pane TEXT, stable_pane TEXT, ticket TEXT, tags TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL, mid_turn INTEGER NOT NULL DEFAULT 0,
-        seen_at INTEGER, gone_at INTEGER, paused_at INTEGER, created_at INTEGER NOT NULL)`)
-      if (this.fresh) this.onCreate?.(this)
+      // creating the table and importing the legacy stores are one transaction: a failed import leaves no table, so the next start retries it
+      db.exec('BEGIN')
+      try {
+        db.exec(`CREATE TABLE IF NOT EXISTS agents (name TEXT PRIMARY KEY, role TEXT, persona TEXT, project TEXT, cwd TEXT, session TEXT,
+          pane TEXT, stable_pane TEXT, ticket TEXT, tags TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL, mid_turn INTEGER NOT NULL DEFAULT 0,
+          seen_at INTEGER, gone_at INTEGER, paused_at INTEGER, created_at INTEGER NOT NULL)`)
+        if (this.fresh) this.onCreate?.(this)
+        db.exec('COMMIT')
+      } catch (e) { try { db.exec('ROLLBACK') } catch { /* no transaction left */ } this._db = undefined; throw e }
     }
     return this._db
   }
@@ -97,7 +102,8 @@ export function reconcile(rows, live, panes, now = Date.now()) {
     }
     claimed.add(row.name)
     const patch = fresh(a, row)
-    const tags = { ...row.tags, ...mirrored(a.paneTokens) }
+    const { model: _m, effort: _e, team: _t, ...kept } = row.tags ?? {} // spawn-owned keys follow the pane (a cleared one drops); the rest merge
+    const tags = { ...kept, ...mirrored(a.paneTokens) }
     if (JSON.stringify(tags) !== JSON.stringify(row.tags ?? {})) patch.tags = tags
     if (changed(row, patch) || patch.tags) out.push({ name: row.name, patch })
   }

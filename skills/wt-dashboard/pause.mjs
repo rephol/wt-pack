@@ -36,11 +36,13 @@ export async function resumeAgent(name, table, d) {
   else {
     const r = await d.spawn(row)
     pane = r.pane; fallback = r.fallback ?? null
-    if (row.mid_turn) await d.send(pane, 'continue')
   }
+  // the row leaves `paused` as soon as the agent is running again; a failed `continue` must not strand a live pane as paused
   table.upsert(name, { state: 'idle', pane, paused_at: null, gone_at: null, mid_turn: false, ...(fallback ? { cwd: fallback.to } : {}) })
   await d.mark([name], false)
-  return { name, fallback }
+  let sendFailed = null
+  if (row.mid_turn && !isRun(row.pane)) try { await d.send(pane, 'continue') } catch (e) { sendFailed = e.message }
+  return { name, fallback, ...(sendFailed ? { sendFailed } : {}) }
 }
 
 export async function pauseProject(project, table, projects, d, now = Date.now()) {
