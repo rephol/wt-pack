@@ -299,6 +299,7 @@ TEAM_MEMBERS
     seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "$cwd" 2>/dev/null) || seats=0
     [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
     have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
+    . "$(dirname "$0")/../../wt-shared/scripts/agent-pane.sh"; have=$(( ${have:-0} + $(agent_paused_in_team "$team" "$want") )) # WP-348: a paused member still holds its seat
     [ "${have:-0}" -lt "$seats" ] || { echo "team full: $have/$seats $want in $team" >&2; exit 3; }
   fi
 
@@ -515,7 +516,9 @@ rm)
     # WP-222: its claude exited, so herdr no longer lists it — still close the bare tab left under its name.
     [ -n "$(herdr tab list | jq -r --arg l "$target" '.result.tabs[] | select(.label == $l and .pane_count == 1 and .agent_status == "unknown") | .tab_id')" ] \
       || { echo "no such agent: $target" >&2; exit 1; }
-    close_bare_tabs "$target"; echo "removed $target (bare shell tab)"; exit 0
+    close_bare_tabs "$target"
+    [ -n "$keep_row" ] || curl -sS --max-time 3 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents/by-name/$target/forget" >/dev/null 2>&1 || true # WP-348: a crashed agent's row goes too
+    echo "removed $target (bare shell tab)"; exit 0
   fi
   status=$(herdr agent get "$pane" | jq -r '.result.agent.agent_status')
   # Closing a working agent discards a turn in flight, and its work is only in
