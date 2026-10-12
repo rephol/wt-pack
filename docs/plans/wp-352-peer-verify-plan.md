@@ -125,3 +125,20 @@ The first draft said the producer of the "Do the task in" prompt was unknown; it
 covered only the `--reply` path, and it proposed matching Claude Code's pasted wrapper, which is now dropped. It missed
 that a pointer's body is not verified (D2) and that a pointer could be replayed (D3), and it cited `inject.mjs:62`, which
 is `:61`.
+
+## Unit 1 results
+
+Harness: the real hook (`inject.mjs`) fed prompts with `HERDR_DASH_URL` on a closed port and a scratch `WT_TURN_DIR`; the
+handoff paths run through `handoff.test.mjs`'s herdr shim. **No throwaway herdr agents were spawned**, so (b) below is read from
+the code, not observed live.
+
+- (a) **Reproduced, by the hook.** The two prompts the tech lead saw: `WP-351: Do the task in /tmp/x/987287bd44af.md, then report
+  with handoff.sh --reply` and `<pasted_content …><wt-message id=ff818b6c765c …>…</pasted_content>` each produce **no reminder and
+  a turn record `{"trust":"user"}`**. Before this change `handoff.sh` typed exactly that first line (`handoff.test.mjs` asserted
+  it), and `--reply` to a pane without a live mod pasted the full envelope.
+- (b) **Why a mod stops being live (code only).** `deliveries.hellos` is an in-memory map (`deliveries.mjs`): a dashboard restart
+  empties it, so every pane is "not live" until its mod's next hello (≤20 s); a pane also reads not-live while its mod is
+  stood down (WP-320) or when its hello fails (`wt-deliver`'s silent non-2xx exit). Not confirmed on the live system.
+  D6 makes it visible (Agents › Model › Messages row); the doctor line is not built (below).
+- Where `UNVERIFIED` came from in the WP-351 case: the long typed envelope collapsed to a pasted block, so it did not start
+  with the tag and the hook never classified it. With D1 no sender types a long envelope any more.
