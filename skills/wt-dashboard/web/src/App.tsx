@@ -8,6 +8,7 @@ import { SideNav, SideNavHeading, SideNavItem } from '@astryxdesign/core/SideNav
 import { Card } from '@astryxdesign/core/Card'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Button } from '@astryxdesign/core/Button'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -58,7 +59,7 @@ import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
 import { PwaHost, InstallHint, UpdateBanner } from './pwa'
 import { openInbox } from './inbox'
-import { sortAgents, initialSort, activityOf, projectCounts, countTooltip, type AgentSort } from './agentSort'
+import { sortAgents, initialSort, activityOf, projectList, extraAgent, mergeAgents, isLive, countTooltip, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { QuickSwitcher, rememberRecent } from './switcher'
 import { taskLabel } from './switcherData'
@@ -352,10 +353,10 @@ export default function App() {
   const q = useQuery({
     queryKey: ['overview'],
     // WP-293: headless runs are appended to /api/agents only, not /api/overview; merged here (deduped by key).
+    // WP-349: so are the agents table's paused/missing/exited rows, which the sidebar and lists must still show.
     queryFn: async () => {
-      const [o, hl] = await Promise.all([getJSON<Overview>('/api/overview'), getJSON<Agent[]>('/api/agents').then((l) => l.filter((a) => a.headless)).catch(() => [])])
-      const have = new Set(o.agents.map((a) => a.key))
-      return { ...o, agents: [...o.agents, ...hl.filter((a) => !have.has(a.key))] }
+      const [o, hl] = await Promise.all([getJSON<Overview>('/api/overview'), getJSON<Agent[]>('/api/agents').then((l) => l.filter(extraAgent)).catch(() => [])])
+      return { ...o, agents: mergeAgents(o.agents, hl) }
     },
     refetchInterval: 4000,
     placeholderData: keepPreviousData,
@@ -379,7 +380,11 @@ export default function App() {
   }
   const data = useMemo(() => (all ? scopeToProject(all, project) : undefined), [all, project])
   // Sidebar badges count AGENTS (same list and project field as the Agents page); tasks are not counted.
-  const counts = useMemo(() => projectCounts(all?.agents ?? [], [...new Set(activeTasks(all?.tasks ?? []).map((t) => t.project).filter((p): p is string => Boolean(p)))]), [all])
+  // WP-349: every stored project is listed (paused ones too), not just those with live agents or active cards.
+  const storedQ = useQuery({ queryKey: ['projects'], queryFn: () => getJSON<{ name: string; paused?: boolean }[]>('/api/projects'), refetchInterval: 15000 })
+  const plist = useMemo(() => projectList(storedQ.data ?? [], all?.agents ?? [], activeTasks(all?.tasks ?? []).map((t) => t.project).filter((p): p is string => Boolean(p))), [all, storedQ.data])
+  const counts = { all: plist.all, by: plist.by.map((p) => [p.name, p.counts] as const) }
+  const pausedProjects = useMemo(() => new Set(plist.by.filter((p) => p.paused).map((p) => p.name)), [plist])
   const openAgent = all?.agents.find((a) => a.key === openPane) ?? null
   const openRoom = openPane?.startsWith('room:') ? roomsQ.data?.rooms.find((r) => r.slug === openPane.slice(5)) ?? null : null
   const narrow = useNarrow()
@@ -455,6 +460,35 @@ export default function App() {
     return () => removeEventListener('keydown', on)
   })
 
+  const qc = useQueryClient()
+  const toast = useToast()
+  const resumeP = useMutation({
+    mutationFn: async (p: string) => {
+      const r = await fetch(`/api/projects/${encodeURIComponent(p)}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? r.statusText)
+      return j as { resumed?: number; failed: { name: string; error: string }[] }
+    },
+    onSuccess: (r) => {
+      toast(r.failed.length ? { body: `Resumed with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: `Resumed ${r.resumed ?? 0} agent(s)` })
+      for (const k of ['projects', 'overview', 'agents', 'project-pause']) qc.invalidateQueries({ queryKey: [k] })
+    },
+    onError: (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
+  const [pauseAsk, setPauseAsk] = useState<string | null>(null)
+  const pauseP = useMutation({
+    mutationFn: async (p: string) => {
+      const r = await fetch(`/api/projects/${encodeURIComponent(p)}/pause`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? r.statusText)
+      return j as { agents?: number; failed: { name: string; error: string }[] }
+    },
+    onSuccess: (r) => {
+      toast(r.failed.length ? { body: `Paused with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: `Paused: ${r.agents} agent(s) saved` })
+      setPauseAsk(null); for (const k of ['projects', 'overview', 'agents', 'project-pause']) qc.invalidateQueries({ queryKey: [k] })
+    },
+    onError: (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   const projectRows = [['all', 'All projects', counts.all] as const, ...counts.by.map(([p, c]) => [p, p, c] as const)]
   const current = projectRows.find(([v]) => v === project) ?? projectRows[0]
   const countsEnd = (c: typeof counts.all) => (
@@ -468,8 +502,11 @@ export default function App() {
   const projectPicker = (
     <div className="hd-project-picker"><DropdownMenu hasChevron={!navCollapsed} menuWidth={260}
       button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: current[0] === 'all' && !navCollapsed ? undefined : <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
-      items={projectRows.map(([v, label, c]) => ({ id: v, label, icon: projectIcon(v, label, false), endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} />
+      items={projectRows.map(([v, label, c]) => ({ id: v, label: pausedProjects.has(v) ? `${label} (paused)` : label, icon: projectIcon(v, label, false),
+        endContent: <HStack gap={1} align="center">{v !== 'all' && !pausedProjects.has(v) && c.agents > 0 && <Button label="Pause" size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setPauseAsk(v) }} />}{pausedProjects.has(v) && <Button label="Resume" size="sm" variant="primary" isDisabled={resumeP.isPending} onClick={(e) => { e.stopPropagation(); resumeP.mutate(v) }} />}<Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip></HStack>,
+        onClick: () => setProject(v) }))} />
       {/* WP-110: the picked project's settings, one click from the sidebar (hidden for All projects) */}
+      {pausedProjects.has(project) && !navCollapsed && <Button label="Resume" size="sm" variant="primary" isDisabled={resumeP.isPending} onClick={() => resumeP.mutate(project)} />}
       {project !== 'all' && !navCollapsed && <IconButton label="Project settings" tooltip={`${current[1]} settings`} icon={<GearIcon />} size="sm" variant="ghost" onClick={() => openProjectSettings(project)} />}</div>
   )
   const nav = (
@@ -542,7 +579,7 @@ export default function App() {
         {!fullKey && data && page === 'tasks' && <TaskQueue tasks={data.tasks} onOpen={open} showProject={data.allProjects} suggested={suggested} />}
         {!fullKey && page === 'board' && <Board project={boardProject ?? project} phone={boardPhone} projects={counts.by.map(([p]) => p)} onProject={setBoardProject} />}
         {!fullKey && page === 'teams' && <TeamsPage project={project} projectNames={counts.by.map(([p]) => p)} />}
-        {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={all?.agents ?? []} />}
+        {!fullKey && page === 'routines' && <RoutinesPage phone={phone} project={project} projects={counts.by.map(([p]) => p)} agents={(all?.agents ?? []).filter(isLive)} />}
         {!fullKey && data && page === 'agents' && <AgentsPage data={data} onOpen={openInPanel} onOpenFull={openFull} selected={dockOpen.at(-1) ?? openPane} />}
         {!fullKey && !termPage && page === 'terminals' && (termsOn
           ? <TerminalsPage phone={phone} onOpen={(pn) => open(`term:${pn}`)} />
@@ -577,8 +614,11 @@ export default function App() {
           </>
         ) : undefined}
       />
-      <SettingsHost project={project} agents={all?.agents ?? []} />
-      <SpawnHost agents={all?.agents ?? []} project={project} onOpenAgent={open} />
+      {pauseAsk && <AlertDialog isOpen onOpenChange={(o) => !o && setPauseAsk(null)} title={`Pause ${pauseAsk}?`} actionLabel="Pause project"
+        description={`Saves and closes its ${counts.by.find(([p]) => p === pauseAsk)?.[1].agents ?? 0} live agent(s). Dispatch, routines and keepwarm skip it until you Resume; each agent resumes with its session.`}
+        isActionLoading={pauseP.isPending} onAction={() => pauseP.mutate(pauseAsk)} />}
+      <SettingsHost project={project} agents={(all?.agents ?? []).filter(isLive)} />
+      <SpawnHost agents={(all?.agents ?? []).filter(isLive)} project={project} onOpenAgent={open} />
       <RemoveHost />
       <InboxHost onOpenAgent={open} />
       <SavedHost />
@@ -603,7 +643,7 @@ export default function App() {
           toPanel(key)
         }} />}
       <PwaHost openInbox={openInbox} />
-      <QuickSwitcher agents={all?.agents ?? []} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
+      <QuickSwitcher agents={(all?.agents ?? []).filter(isLive)} rooms={roomsQ.data?.rooms ?? []} project={project} loading={!all} phone={phone} hidden={fabHidden}
         projects={[...new Set([...(project === 'all' ? [] : [project]), ...counts.by.map(([p]) => p)])]}
         onOpenAgent={(k, full) => (full ? openFull(k) : open(k))} onOpenRoom={(sl) => open(`room:${sl}`)} unread={narrow && Object.keys(dockMarks).length > 0}
         onOpenTicket={(_p, id) => openTicket(id)} />
@@ -802,7 +842,7 @@ function MachinesStrip({ machines }: { machines: Machine[] }) {
 }
 
 // ---------- agents ----------
-const needsYou = (a: Agent) => a.asks && a.status !== 'working'
+const needsYou = (a: Agent) => isLive(a) && a.asks && a.status !== 'working'
 const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
   all: () => true,
   busy: (a) => isBusy(a.status),
@@ -1283,6 +1323,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['agents'] }) },
     onError: (e) => toast({ body: `Not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
+  const [ask, setAsk] = useState<'pause' | 'forget' | null>(null)
   const forgetM = useMutation({
     mutationFn: async () => {
       const r = await fetch(`/api/agents/by-name/${encodeURIComponent(agent.name)}/forget`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
@@ -1445,6 +1486,9 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   if (mode === 'dock') return <VStack gap={2} height="100%" padding={2}>{conversation}</VStack>
   return (
       <VStack gap={3} height="100%" padding={page ? 0 : 4} data-agent-panel={page ? undefined : ''} data-agent-page={page ? '' : undefined}>
+        {ask && <AlertDialog isOpen onOpenChange={(o) => !o && setAsk(null)} title={ask === 'pause' ? `Pause ${agent.name}?` : `Forget ${agent.name}?`} actionLabel={ask === 'pause' ? 'Pause agent' : 'Forget agent'} actionVariant={ask === 'forget' ? 'destructive' : undefined}
+          description={ask === 'pause' ? 'Its pane closes. Resume restarts it with its saved session in its saved folder (one cold cache write).' : 'Drops its saved row, including its session; it cannot be resumed afterwards.'}
+          onAction={() => { if (ask === 'pause') pauseM.mutate('pause'); else forgetM.mutate(); setAsk(null) }} />}
         {stopOpen && <HeadlessStopDialog id={agent.id} name={agent.name} onClose={() => setStopOpen(false)} />}
         {tagsMode && <TagsDialog agent={agent} mode={tagsMode} onClose={() => setTagsMode(null)} />}
         <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
@@ -1473,9 +1517,9 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
             ...(canStop(kind, agent.headlessState) ? [{ label: 'Stop agent…', description: 'End its process; it stays resumable', onClick: () => setStopOpen(true) }] : []),
-            ...(agent.local && (agent.status === 'missing' || agent.status === 'exited') ? [{ label: 'Forget agent', description: 'Drop its saved row (name, session); its number becomes free', onClick: () => forgetM.mutate() }] : []),
-            ...(agent.local && agent.status === 'paused' ? [{ label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => pauseM.mutate('resume') }] : []),
-            ...(agent.local && kind === 'pane' && agent.status !== 'paused' && agent.status !== 'missing' ? [{ label: 'Pause agent', description: 'Save it and close its tab; Resume brings it back with its session', onClick: () => pauseM.mutate('pause') }] : []),
+            ...(agent.local && (agent.status === 'missing' || agent.status === 'exited') ? [{ label: 'Forget agent', description: 'Drop its saved row (name, session); its number becomes free', onClick: () => forgetM.mutate() }, { label: 'Respawn agent', description: 'Start it again with its saved session', onClick: () => pauseM.mutate('resume') }] : []),
+            ...(agent.local && agent.status === 'paused' ? [{ label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => pauseM.mutate('resume') }, { label: 'Forget agent…', description: 'Drop its saved row and session', onClick: () => setAsk('forget') }] : []),
+            ...(agent.local && kind === 'pane' && agent.status !== 'paused' && agent.status !== 'missing' ? [{ label: 'Pause agent', description: 'Save it and close its tab; Resume brings it back with its session', onClick: () => setAsk('pause') }] : []),
             ...(agent.local && kind === 'pane' ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },

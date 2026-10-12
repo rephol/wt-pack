@@ -49,7 +49,7 @@ export function unread(s: DockState, r: Roster): Record<string, 'dot' | '!'> {
       else if (room?.lastAt && Date.parse(room.lastAt) > seen) out[i.key] = 'dot'
     } else {
       const a = r.agents.find((x) => x.key === i.key)
-      if (a && a.asks && a.status !== 'working') out[i.key] = '!'
+      if (a && a.asks && a.status !== 'working' && !['paused', 'missing', 'exited'].includes(a.status)) out[i.key] = '!' // WP-349: no pane, nothing to answer
       else if (a && (a.lastActivity || a.statusSince) > seen) out[i.key] = 'dot'
     }
   }
