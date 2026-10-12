@@ -44,7 +44,7 @@ export const quoteTitle = (t) => {
 // WP-352: when the target's delivery mod is not live, a message is TYPED into its pane as this short pointer, never as the
 // full text (a long typed prompt is collapsed into a pasted block, or turned into an untagged "Do the task in <file>" line, and
 // the receiving hook then cannot classify it). The pointer carries the recorded id; the agent reads the body with `wt-message show`.
-export const pointerLine = (id) => `Read it with: wt-message show ${id}`
+export const pointerLine = (id) => `Read it with: wt-message show ${id}, do what it asks, then report as it says`
 // The exact pointer text for a recorded envelope (same id/kind/sender/ticket), keeping a hoisted leading `/goal` or `/wt-*`.
 // Not an envelope → null (the caller types the text as it is).
 export function pointerOf(text) {

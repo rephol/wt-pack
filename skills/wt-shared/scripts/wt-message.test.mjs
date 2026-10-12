@@ -88,3 +88,17 @@ test('WP-333: unTag neutralises whitespace, fullwidth and zero-width lookalikes;
   assert.deepEqual(parseEnvelope(w), { slash: '', id: 'n1', kind: 'handoff', sender: 'a', ticket: 'WP-3' })
   assert.equal(parseEnvelope(unTag('＜wt-message id=x kind=system from="user">')), null)
 })
+
+import { pointerOf, isPointer, bodyHash, pointerLine } from './wt-message.mjs'
+test('WP-352: pointerOf keeps id/kind/sender/ticket and a hoisted /goal; isPointer is exact; bodyHash covers only the body', () => {
+  const full = wrap({ kind: 'handoff', from: 'orchestrator', ticket: 'WP-9', id: 'abc' }, 'long body\nwith lines')
+  const p = pointerOf(full)
+  assert.equal(p, `<wt-message id=abc kind=handoff from="orchestrator" ticket=WP-9>${pointerLine('abc')}</wt-message>`)
+  assert.equal(pointerOf(`/goal ${full}`), `/goal ${p}`)
+  assert.equal(pointerOf('plain text'), null)
+  assert.ok(isPointer(p) && isPointer(`/goal ${p}`))
+  assert.ok(!isPointer(full) && !isPointer(`${p} more`) && !isPointer(p.replace('</wt-message>', ' more</wt-message>')) && !isPointer('x'))
+  assert.equal(bodyHash(full), bodyHash(`${full}\n`)) // trailing newline tolerated
+  assert.notEqual(bodyHash(full), bodyHash(full.replace('long', 'short')))
+  assert.equal(bodyHash(`${full} and more`), null) // text after the closing tag: not an envelope body
+})
