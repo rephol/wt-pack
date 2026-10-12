@@ -9,7 +9,7 @@ import { existsSync, watch, realpathSync, statSync, readFileSync, writeFileSync,
 import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { wrap, unTag, parseEnvelope as parseWt } from '../wt-shared/scripts/wt-message.mjs'
+import { wrap, unTag, parseEnvelope as parseWt, pointerOf, bodyHash } from '../wt-shared/scripts/wt-message.mjs'
 import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
@@ -651,7 +651,7 @@ async function listAgents(m) {
       session,
       model: agentModel({ footerModel: p.model, footerEffort: p.effort, transcript: m.local ? await transcriptModel(session) : null, tokens: meta.tokens.get(a.pane_id), settings: m.local ? claudeSettings() : null }),
     }
-    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null, m.local ? keepwarm.info(kwKey(row.id), row.tags?.role, kwPaused(row.id)) : null, m.local ? agentTable.get(row.name) ?? null : null) // WP-313: the one typed shape, additive to the fields above
+    row.info = paneInfo(row, m.local ? await transcriptUsage(session) : null, session ? pids[session] ?? null : null, m.local ? keepwarm.info(kwKey(row.id), row.tags?.role, kwPaused(row.id)) : null, m.local ? agentTable.get(row.name) ?? null : null, m.local ? deliveries.live(row.id) : null) // WP-313: the one typed shape, additive to the fields above
     out.push(row)
   }
   if (m.local) syncTokens(out).catch((e) => console.error('tokens:', e.message))
@@ -1496,7 +1496,7 @@ async function spawnAgent(b) {
   if (typeof b.prompt === 'string' && b.prompt.trim()) {
     await herdr('agent', 'wait', pane, '--until', 'idle', '--timeout', '60000').catch(() => {})
     const first = spawnText(b) // WP-329: recorded before it is delivered, or the new agent's hook treats a tagged first prompt as unverified
-    await deliver({ id: pane }, first, () => herdr('agent', 'prompt', pane, first))
+    await deliver({ id: pane }, first, (t) => herdr('agent', 'prompt', pane, t))
     prompted = true
   }
   return { name, pane, machine, key: `${machine}/${pane}`, prompted }
@@ -2545,7 +2545,7 @@ const readyNotes = readyBatcher(async (project, ts) => {
   const m = await machineBy(a.machine)
   if (!m) throw new Error(`machine ${a.machine} unavailable`)
   const nudge = readyNudge(project, ts)
-  await deliver(a, nudge, () => herdrOn(m, 'agent', 'prompt', a.id, nudge)) // WP-329: recorded so the orchestrator's hook verifies it
+  await deliver(a, nudge, (t) => herdrOn(m, 'agent', 'prompt', a.id, t)) // WP-329: recorded so the orchestrator's hook verifies it
 })
 setInterval(() => readyNotes.flush(), 60_000).unref()
 // WP-159: 'ok'/'returned' once per ref, however Done was reached or left (manual move, merge reconcile, any
@@ -2609,12 +2609,17 @@ const deliveries = new Deliveries({ dir: DATA })
 // WP-257: the envelope record behind every send. Best effort: a record that cannot be written never blocks the send.
 const messages = new Messages({ dir: DATA })
 const msgSafe = (fn) => { try { return fn() } catch (e) { console.error('messages:', e.message) } }
+// WP-352: what is TYPED into a pane: the recorded pointer for an envelope, unless the pane has no key file (then `wt-message show` is refused
+// and the pointer could never be read: it gets the text as before and verifies through the grace path).
+const hasPaneKey = (pane) => { try { return readFileSync(join(PANE_KEYS, String(pane).replace(/[^\w.:-]/g, '_')), 'utf8').trim() !== '' } catch { return false } }
+const typedFor = (pane, text) => (envelopeOf(text) && hasPaneKey(pane) ? pointerOf(text) ?? text : text)
 async function deliver(a, text, paste, o = {}) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
   const env = envelopeOf(text)
   const mid = env && msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text }))?.row.id
   const mark = (to, extra) => mid && msgSafe(() => messages.move(mid, to, extra))
   if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' } // 'delivered' once the mod acks
-  try { await paste() } catch (e) { mark('failed', { error: e.message.slice(0, 200) }); throw e }
+  // WP-352: typed (no live mod) = a short recorded pointer, never the full text; paste(typed) receives it, a non-envelope stays as it is.
+  try { await paste(typedFor(a.id, text)) } catch (e) { mark('failed', { error: e.message.slice(0, 200) }); throw e }
   mark('delivered')
   return 'pasted'
 }
@@ -2623,40 +2628,44 @@ setInterval(async () => {
   for (const r of deliveries.stranded()) {
     if (!deliveries.settle(r.id, 'pasted')) continue // the mod got there first
     const env = envelopeOf(r.body)
-    try { await herdr('agent', 'prompt', r.pane, r.body); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
+    try { await herdr('agent', 'prompt', r.pane, typedFor(r.pane, r.body)); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
   }
 }, 15_000).unref()
 // WP-257 expiry: an unacknowledged handoff/dispatch is resent with the same envelope id, then flagged in the Inbox.
 // ponytail: "seen" = the target is working (on the card, when it has one); a ticketless message is only resent/flagged.
+// WP-352 (D7): a row's target / sender pane id may predate a renumber; match the listed agent by exact id, then by canonical id.
+const agentFor = async (ags, id) => ags.find((a) => a.id === id) ?? (id ? await canonicalPane(id).then((c) => ags.find((a) => a.id === c), () => undefined) : undefined)
 const messageSweep = async () => {
   const ags = await agents().catch(() => null)
   if (!ags) return
   await messages.sweep({
     pending: (row) => deliveries.live(row.target) && deliveries.queuedFor(row.target, row.id), // WP-258: queued behind a running turn, not lost
-    seen: async (row) => (await tickets.get(row.ticket).then((c) => movedOn(c, row), () => false)) || ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
+    seen: async (row) => (await tickets.get(row.ticket).then((c) => movedOn(c, row), () => false)) || await agentFor(ags, row.target).then((a) => !!a && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
     // WP-263: only our own project's agents are ever re-typed (other projects' agents don't know --ack); WT_MESSAGE_RESEND=off stops all resends.
-    resendable: (row) => cfg.get('WT_MESSAGE_RESEND') !== 'off' && ags.some((a) => a.id === row.target && a.project === REPO_PROJECT),
+    resendable: async (row) => cfg.get('WT_MESSAGE_RESEND') !== 'off' && (await agentFor(ags, row.target))?.project === REPO_PROJECT,
     resend: async (row) => {
-      if (!ags.some((a) => a.id === row.target && a.local !== false)) throw new Error(`${row.target} is gone`)
+      const t = await agentFor(ags, row.target)
+      if (!t || t.local === false) throw new Error(`${row.target} is gone`)
       const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message
-      await deliver({ id: row.target }, body, () => herdr('agent', 'prompt', row.target, body))
+      msgSafe(() => messages.reopen(row.id)) // WP-352: a resend is a new typed pointer for the same id; the first one's use-once mark must not refuse it
+      await deliver({ id: t.id }, body, (p) => herdr('agent', 'prompt', t.id, p))
     },
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
       body: `${row.attempts} send${row.attempts === 1 ? '' : 's'}, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
   }, { maxAttempts: 2 }) // WP-263: the original send plus one resend
   // WP-272: a handed-off agent that acked and went quiet while its card is still open gets ONE "continue" line, 4 min in.
   if (cfg.get('WT_NUDGE') !== 'off') await messages.nudges({
-    eligible: async (row) => nudgeEligible({ card: await tickets.get(row.ticket).catch(() => null), agent: ags.find((a) => a.id === row.target), project: REPO_PROJECT }),
-    send: (row) => {
-      const a = ags.find((x) => x.id === row.target)
+    eligible: async (row) => nudgeEligible({ card: await tickets.get(row.ticket).catch(() => null), agent: await agentFor(ags, row.target), project: REPO_PROJECT }),
+    send: async (row) => {
+      const a = await agentFor(ags, row.target)
       const text = wrap({ kind: 'system', from: 'wt-dashboard', ticket: row.ticket }, nudgeText(a?.tags?.role ?? a?.pool, row.ticket))
-      return deliver({ id: row.target }, text, () => herdr('agent', 'prompt', row.target, text))
+      return deliver({ id: a?.id ?? row.target }, text, (p) => herdr('agent', 'prompt', a?.id ?? row.target, p))
     },
   }).catch((e) => console.error('messages nudge:', e.message))
   // WP-261: acknowledged, then the agent went idle or vanished and the card never moved on and nothing was reported.
   await messages.unreported({
     moved: (row) => tickets.get(row.ticket).then((c) => movedOn(c, row), () => true),
-    busy: (row) => ags.some((a) => a.id === row.target && ['working', 'blocked'].includes(a.status)),
+    busy: async (row) => ['working', 'blocked'].includes((await agentFor(ags, row.target))?.status),
     flag: (row) => inbox.add({ kind: 'server', key: `message-unreported|${row.id}`, title: `${row.ticket}: ${row.target} finished without reporting`,
       body: `The ${row.kind} was acknowledged, but the agent is idle or gone and ${row.ticket} never moved on. Check the pane, or hand the card to someone else.`, target: { ticket: row.ticket } }),
   })
@@ -2842,7 +2851,10 @@ async function gateApi(req, res, url, parts) {
   const hash = String(b.hash ?? '')
   if (!/^[0-9a-f]{16}$/.test(hash)) return send(res, 400, { error: 'hash: 16 hex chars' })
   if (parts[2] === 'consume') return send(res, 200, { granted: gate.consume(author.pane, hash) })
-  const open = (await asks.list(undefined, true)).find((a) => a.gate && a.pane === author.pane && a.gate.hash === hash && Date.now() - Date.parse(a.created) < GRANT_MS)
+  let open = null
+  for (const a of await asks.list(undefined, true)) { // WP-352: an ask's pane id may predate a renumber
+    if (a.gate && a.gate.hash === hash && Date.now() - Date.parse(a.created) < GRANT_MS && (a.pane === author.pane || (await canonicalPane(a.pane).catch(() => null)) === author.pane)) { open = a; break }
+  }
   if (open) return send(res, 200, { id: open.id, deduped: true })
   const clip = (t, n) => String(t ?? '').replace(/\s+/g, ' ').slice(0, n)
   const project = (await agents()).find((a) => a.key === author.key)?.project ?? null
@@ -2982,7 +2994,10 @@ async function messagesApi(req, res, url, parts) {
     const row = messages.get(parts[2])
     const kind = url.searchParams.get('kind'), from = url.searchParams.get('from')
     const target = row && (rid ? row.target : await canonicalPane(row.target).catch(() => null))
-    const reason = !row ? 'unknown id' : target !== me ? 'not addressed to you' : row.kind !== kind ? 'kind mismatch' : row.sender !== from ? 'sender mismatch' : null
+    // WP-352: an inline envelope also proves its body (sha256 of what sits inside the tag) against the record; a pointer is verified once.
+    const sha = url.searchParams.get('sha'), pointer = url.searchParams.get('pointer') === '1'
+    const reason = !row ? 'unknown id' : target !== me ? 'not addressed to you' : row.kind !== kind ? 'kind mismatch' : row.sender !== from ? 'sender mismatch'
+      : sha && sha !== bodyHash(row.body) ? 'body does not match the record' : pointer && !messages.firstPointer(row.id) ? 'already delivered (a pointer verifies once)' : null
     if (reason) {
       const name = rid ? (hl().run(me)?.name ?? me) : ((await agents().catch(() => [])).find((x) => x.id === me)?.name ?? me)
       const key = `unverified|${me}|${parts[2]}`.slice(0, 200)
@@ -3004,7 +3019,7 @@ async function messagesApi(req, res, url, parts) {
       return send(res, 200, { verified: false, reason })
     }
     // WP-332: who the sender is, for the destructive-action gate: a server-sent row is 'server'; a pane-sent one is its sender's role.
-    const sp = row.sender_pane ? (await agents().catch(() => [])).find((x) => x.local && x.id === row.sender_pane) : null
+    const sp = row.sender_pane ? await agentFor((await agents().catch(() => [])).filter((x) => x.local), row.sender_pane) : null
     // WP-332 (c): a verified REPLY to an orchestrator is as good as the user's word when it is the current assignee's report on a
     // ticket this orchestrator handed off. All three facts come from the server's records, never from the message text.
     // WP-344: a server-sent reply from the user (their "Gate: Allow once" answer relayed by the dashboard: server token, no sender pane) is the user's own word.
@@ -3017,6 +3032,16 @@ async function messagesApi(req, res, url, parts) {
       replyAllowed = replyMayAct({ receiverRole: me?.tags?.role || me?.pool, handedByReceiver: !!handed, assigneePane: assignee, senderPane: row.sender_pane })
     }
     return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket, replyAllowed })
+  }
+  // WP-352 `wt-message show <id>`: the addressed pane (keyed: no grace path) reads the body of a message typed to it as a pointer.
+  if (req.method === 'GET' && parts.length === 3 && author.kind === 'agent') {
+    const row = messages.get(parts[2])
+    if (!row) return send(res, 404, { error: `no message ${parts[2]}` })
+    const mine = (await canonicalPane(row.target).catch(() => null)) === (await canonicalPane(author.pane).catch(() => author.pane))
+    if (!mine) return send(res, 403, { error: 'only the addressed pane reads it' })
+    let key = ''; try { key = readFileSync(join(PANE_KEYS, author.pane.replace(/[^\w.:-]/g, '_')), 'utf8').trim() } catch {}
+    if (!key) return send(res, 403, { error: 'pane has no key; respawn it' })
+    return send(res, 200, { id: row.id, kind: row.kind, sender: row.sender, ticket: row.ticket, body: row.body })
   }
   if (req.method === 'GET') {
     if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
@@ -3063,7 +3088,7 @@ const rooms = new Rooms({
   prompt: async (a, text) => {
     const m = await machineBy(a.machine)
     if (!m) throw new Error(`machine ${a.machine} unavailable`)
-    await deliver(a, text, () => promptOn(herdrOn, m, a.id, text, { confirm: true }))
+    await deliver(a, text, (t) => promptOn(herdrOn, m, a.id, t, { confirm: true }))
     store.delete('agents:local')
   },
 })
@@ -4010,7 +4035,7 @@ async function watchPrsEvent(req, res) {
   const a = id && (await agents()).find((x) => x.local && x.id === id)
   if (!a) return send(res, 404, { error: `unknown pane ${pane}` })
   const m = await machineBy(a.machine)
-  const how = await deliver(a, msg, () => promptOn(herdrOn, m, a.id, msg, { confirm: true }))
+  const how = await deliver(a, msg, (t) => promptOn(herdrOn, m, a.id, t, { confirm: true }))
   store.delete('agents:local')
   return send(res, 200, { ok: true, delivery: how })
 }
@@ -4103,7 +4128,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      const send = () => deliver(a, routineText(text, o), () => promptOn(herdrOn, m, a.id, routineText(text, o), { confirm: true }), { requestId: o?.requestId })
+      const send = () => deliver(a, routineText(text, o), (t) => promptOn(herdrOn, m, a.id, t, { confirm: true }), { requestId: o?.requestId })
       await (o?.requestId ? receipts.once(o.requestId, async () => (await send()) ?? '') : send()) // WP-251
       store.delete('agents:local')
     },

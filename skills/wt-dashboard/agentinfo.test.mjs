@@ -57,3 +57,9 @@ test('WP-348: paneInfo carries stableKey (the name) and its table row; no row â†
   assert.deepEqual(paneInfo(a, null, null, null, { state: 'idle', paused_at: null, gone_at: 5 }).table, { state: 'idle', pausedAt: null, goneAt: 5 })
   assert.equal(paneInfo({ ...a, id: null, status: 'paused' }, null, null, null, { state: 'paused', paused_at: 9 }).state, 'paused')
 })
+
+test('WP-352: paneInfo carries modLive (the delivery mod said hello recently); unknown stays null', () => {
+  const a = { key: 'k', name: 'w-01', status: 'idle', tags: {}, pool: 'worker', local: true, machine: 'local', id: 'w1:p1' }
+  assert.equal(paneInfo(a).modLive, null)
+  assert.equal(paneInfo(a, null, null, null, null, false).modLive, false)
+})

@@ -30,7 +30,7 @@ const core = (kind, f) => ({
 })
 
 // a: the /api/agents row for a pane (model = agentModel()), usage: transcript tail usage or null.
-export function paneInfo(a, usage = null, pid = null, keepwarm = null, row = null) { // pid: the live claude pid from `claude agents --json` (WP-324), null when unknown
+export function paneInfo(a, usage = null, pid = null, keepwarm = null, row = null, modLive = null) { // pid: the live claude pid from `claude agents --json` (WP-324), null when unknown
   return {
     ...core('pane', {
       key: a.key, name: a.name, role: a.tags?.role ?? (a.pool !== 'other' ? a.pool : null), persona: a.tags?.persona, cwd: a.cwd, project: a.project,
@@ -40,6 +40,7 @@ export function paneInfo(a, usage = null, pid = null, keepwarm = null, row = nul
     pane: { id: a.id, machine: a.machine, local: a.local, tags: a.tags ?? {}, dnd: Boolean(a.tags?.dnd), pair: a.tags?.pair ?? null, workspace: a.workspace ?? null, pid, routed: a.model?.routed ?? null },
     stableKey: a.name, // WP-348: the agents-table key; unlike `key` (pane based) it survives a pane-id change
     table: row ? { state: row.state, pausedAt: row.paused_at ?? null, goneAt: row.gone_at ?? null } : null, // WP-348: the agent's durable row
+    modLive, // WP-352: false = messages to this pane are typed as pointers (wt-message show), not pulled by its mod
     keepwarm, // WP-318: { state: warm|cold|off, nextAt, pingsToday, spentTokens, reason } or null when keepwarm does nothing for this pane
   }
 }

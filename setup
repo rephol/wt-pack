@@ -275,6 +275,16 @@ doctor() {
     for p in $(herdr agent list 2>/dev/null | jq -r '.result.agents[]?.pane_id // empty' 2>/dev/null); do [ -s "$kd/$p" ] || nk=$((nk + 1)); done
     [ "$nk" -eq 0 ] || opt "$nk agent pane(s) run without a pane key (grace) — respawn them (agents.sh spawn mints the key); WT_PANE_KEY_STRICT=1 refuses them once none are left"
   fi
+  # WP-352: an agent pane whose wt-deliver mod has not said hello lately gets messages typed as pointers (wt-message show), not pulled by the mod.
+  # Read from the running dashboard with the user's own session cookie; silent when it is down. Right after a dashboard restart every pane reads not-live for ~20 s.
+  if has curl && has jq; then
+    dd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}"
+    if [ -s "$dd/session" ]; then
+      nm=$(curl -sS --max-time 3 -H "cookie: hd_session=$(tr -d '\n' < "$dd/session")" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null \
+        | jq -r '[.[]? | select(.local and .info.kind == "pane" and .info.modLive == false and (.status | IN("paused", "missing", "exited") | not)) | .name] | join(", ")' 2>/dev/null)
+      [ -z "$nm" ] || opt "delivery mod not live for: $nm — their messages arrive as typed pointers (wt-message show); restart the session or /reload-plugins (just after a dashboard restart this clears within ~20 s)"
+    fi
+  fi
   has tailscale && ok "tailscale (optional, remote access)" || opt "tailscale not installed (optional, remote access)"
   has agent-browser && ok "agent-browser (optional, preferred for browser checks)" || opt "agent-browser not installed (optional, preferred for browser checks): npm i -g agent-browser && agent-browser install"
   has ccusage && ok "ccusage (optional, Usage live block)" || opt "ccusage not installed (optional, Usage live block): npm i -g ccusage"

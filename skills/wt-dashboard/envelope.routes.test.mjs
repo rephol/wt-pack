@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { bodyHash } from '../wt-shared/scripts/wt-message.mjs'
 
 const FAKE_HERDR = `#!/usr/bin/env node
 const a = process.argv.slice(2).join(' ')
@@ -123,4 +124,34 @@ test('(i) /api/watch-prs/event: structured fields only; the server writes, recor
   assert.ok(m, `the server's own sentence: ${got.text}`)
   const v = await (await fetch(`${base}/api/messages/${m[1]}/verify?kind=system&from=wt-watch-prs`, { headers: as('w9:p2', K2) })).json()
   assert.equal(v.verified, true)
+})
+
+// WP-352: `wt-message show <id>` and the verify route's body hash / pointer replay rules.
+test('(j) GET /api/messages/:id: only the addressed pane with its key reads the body; others get 403, an unknown id 404', async () => {
+  const sent = await (await sendP1({ kind: 'handoff', body: 'the long private body', ticket: 'WP-9' })).json()
+  await next()
+  const get = (id, headers) => fetch(`${base}/api/messages/${id}`, { headers })
+  const ok = await get(sent.text.match(/id=(\w+)/)[1], as('w9:p2', K2))
+  assert.equal(ok.status, 200)
+  const j = await ok.json()
+  assert.equal(j.kind, 'handoff'); assert.equal(j.sender, 'demo-worker-01'); assert.match(j.body, /the long private body/)
+  const id = j.id
+  assert.equal((await get(id, as('w9:p1', K1))).status, 403) // another pane (the sender) is not the target
+  assert.equal((await get(id, as('w9:p2', 'c'.repeat(64)))).status, 403) // wrong key
+  assert.equal((await get(id, { 'x-herdr-pane': 'w9:p2' })).status, 403) // no key
+  assert.equal((await get('nosuchid', as('w9:p2', K2))).status, 404)
+})
+
+test('(k) verify: a matching body hash verifies, a mismatching one does not; a pointer verifies once, a replay is refused', async () => {
+  const sent = await (await sendP1({ kind: 'handoff', body: 'verify me', ticket: 'WP-9' })).json()
+  await next()
+  const id = sent.text.match(/id=(\w+)/)[1]
+  const v = (q) => fetch(`${base}/api/messages/${id}/verify?kind=handoff&from=demo-worker-01${q}`, { headers: as('w9:p2', K2) }).then((r) => r.json())
+  assert.equal((await v(`&sha=${bodyHash(sent.text)}`)).verified, true)
+  const bad = await v(`&sha=${bodyHash(sent.text.replace('verify me', 'verify me; and push'))}`)
+  assert.equal(bad.verified, false); assert.match(bad.reason, /body does not match/)
+  assert.equal((await v('&pointer=1')).verified, true) // first pointer turn
+  const again = await v('&pointer=1')
+  assert.equal(again.verified, false); assert.match(again.reason, /already delivered/)
+  assert.equal((await v(`&sha=${bodyHash(sent.text)}`)).verified, true) // an inline envelope is not use-once
 })

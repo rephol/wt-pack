@@ -1,7 +1,7 @@
 // WP-104: the tag wt-pack wraps around everything it sends into an agent's pane (the sibling of rooms'
 // <room-message>), so an agent tells pack traffic from its user and answers through the channel the tag names.
 // Pure (no main-guard: the sidecar bundle rewrites import.meta.url); the CLI is wt-message-cli.mjs.
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 
 export const KINDS = ['handoff', 'dispatch', 'routine', 'reply', 'system']
 export const nonce = () => randomBytes(6).toString('hex')
@@ -39,4 +39,23 @@ export function parseEnvelope(text) {
 export const quoteTitle = (t) => {
   const one = unTag(String(t ?? '').replace(/\s+/g, ' ').replace(/["<>]/g, '').trim())
   return `"${one.length > 120 ? `${one.slice(0, 120)}…` : one}"`
+}
+
+// WP-352: when the target's delivery mod is not live, a message is TYPED into its pane as this short pointer, never as the
+// full text (a long typed prompt is collapsed into a pasted block, or turned into an untagged "Do the task in <file>" line, and
+// the receiving hook then cannot classify it). The pointer carries the recorded id; the agent reads the body with `wt-message show`.
+export const pointerLine = (id) => `Read it with: wt-message show ${id}, do what it asks, then report as it says`
+// The exact pointer text for a recorded envelope (same id/kind/sender/ticket), keeping a hoisted leading `/goal` or `/wt-*`.
+// Not an envelope → null (the caller types the text as it is).
+export function pointerOf(text) {
+  const e = parseEnvelope(text)
+  return e && `${e.slash ? `${e.slash} ` : ''}${wrap({ kind: e.kind, from: e.sender, ticket: e.ticket, id: e.id }, pointerLine(e.id))}`
+}
+// True only when the envelope body is byte-for-byte the pointer for its own id: any extra text makes it a different message.
+export const isPointer = (text) => { const p = pointerOf(text); return p !== null && String(text) === p }
+// sha256 of what sits between the opening tag and the closing `</wt-message>` — the body `/verify` compares with the record.
+export function bodyHash(text) {
+  const t = String(text ?? '').trimEnd(), i = t.indexOf('<wt-message '), open = i < 0 ? -1 : t.indexOf('>', i)
+  if (open < 0 || !t.endsWith('</wt-message>')) return null
+  return createHash('sha256').update(t.slice(open + 1, -'</wt-message>'.length)).digest('hex')
 }

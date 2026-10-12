@@ -84,6 +84,10 @@ export class Messages {
       .run(...[to, at, extra.error ?? null, ...(stamp ? [at] : []), id])
     return this.get(id)
   }
+  // WP-352: true only for the FIRST verified pointer turn of a message; a later one is a replay.
+  // A resend of the same id types a fresh pointer: it may verify once again.
+  reopen(id) { this.db.prepare('UPDATE wt_messages SET verified_at = NULL WHERE id = ?').run(id) }
+  firstPointer(id) { return this.db.prepare('UPDATE wt_messages SET verified_at = ? WHERE id = ? AND verified_at IS NULL').run(this.#at(), id).changes > 0 }
   // The target acknowledges (or answers) by id; only the addressed pane/name may (`who` null = the server itself).
   ack(id, who, to = 'acknowledged') {
     if (!['acknowledged', 'answered'].includes(to)) throw err(400, 'state: acknowledged|answered')

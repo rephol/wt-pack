@@ -5,7 +5,7 @@ import { kindOf, modelLabel, contextLabel, modelRows, keepwarmLabel, type AgentI
 // `satisfies AgentInfo` is the typecheck test: tsc (npm run typecheck:web) fails when the contract and a consumer drift.
 const core = { key: 'k', name: 'n', role: 'worker', persona: null, cwd: '/r', project: 'p', state: 'idle', model: { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5' }, effort: 'medium', effortSource: 'default',
   permissionMode: null, plugins: null, sessionId: null, commands: null, skills: null, contextUsed: null, contextWindow: null, contextPct: null, costUsd: null, turns: null, startedAt: null, lastActivity: null } as const
-const pane = { ...core, kind: 'pane', pane: { id: 'w1:p1', machine: 'm', local: true, tags: {}, dnd: false, pair: null, workspace: null, pid: null, routed: null }, keepwarm: null } satisfies AgentInfo
+const pane = { ...core, kind: 'pane', pane: { id: 'w1:p1', machine: 'm', local: true, tags: {}, dnd: false, pair: null, workspace: null, pid: null, routed: null }, keepwarm: null, modLive: null } satisfies AgentInfo
 const run = { ...core, kind: 'headless', permissionMode: 'default', plugins: ['wt-pack'], commands: ['compact'], skills: [], sessionId: 'abcdef123456', turns: 0, costUsd: 0.5, contextUsed: 40_000, contextWindow: 200_000, contextPct: 20,
   run: { id: 'hl-1', state: 'idle', resumes: 0, stuck: null, reason: null, pid: null, driver: 'cli' } } satisfies AgentInfo
 
@@ -29,4 +29,11 @@ test('keepwarmLabel: warm shows next ping and the day count, cold the reason, of
   assert.equal(keepwarmLabel(kw({ state: 'off' })), 'off')
   assert.deepEqual(modelRows(kw({ state: 'off' })).find((r) => r[0] === 'Keepwarm'), ['Keepwarm', 'off'])
   assert.equal(modelRows(pane).some((r) => r[0] === 'Keepwarm'), false)
+})
+
+test('WP-352: a live pane whose delivery mod is not live gets a Messages row; paused rows and unknown do not', () => {
+  const msg = (i: AgentInfo) => modelRows(i).find((r) => r[0] === 'Messages')?.[1]
+  assert.match(msg({ ...pane, modLive: false }) ?? '', /delivery mod not live/)
+  assert.equal(msg({ ...pane, modLive: true }), undefined); assert.equal(msg(pane), undefined)
+  assert.equal(msg({ ...pane, modLive: false, state: 'paused' }), undefined)
 })
