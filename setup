@@ -161,6 +161,14 @@ doctor() {
   if [ "$nm" -gt 0 ] && [ "$ns" -eq 0 ]; then ok "kill shim active in all $nm agent sessions"
   elif [ "$ns" -gt 0 ]; then opt "$ns of $nm agent sessions run without the pkill/pgrep/killall shim (spawned before WP-120) — wt-agents respawn --stale (in each repo)"; fi
 
+  # WP-354: a ticket's worktree lives under <main>/.claude/worktrees (worktree.sh); a sibling or /tmp one is stray.
+  if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+    main=$(dirname "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)")
+    stray=$(git -C "$main" worktree list --porcelain | sed -n 's/^worktree //p' | grep -vxF "$main" | grep -v "^$main/\.claude/worktrees/" || true)
+    if [ -n "$stray" ]; then opt "worktrees outside $main/.claude/worktrees: $(printf '%s' "$stray" | tr '\n' ' ') — create them with skills/wt-plan/scripts/worktree.sh; retire with wt-finish"
+    else ok "worktrees: all under .claude/worktrees"; fi
+  fi
+
   # WP-98: commits here use a GitHub noreply identity (repo-local git config), so no personal/work email ships.
   if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
     nr='(^|[+@])(users\.)?noreply\.github\.com$'
