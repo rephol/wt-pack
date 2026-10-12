@@ -208,7 +208,9 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
 // WP-277: working is violet (custom 'working' StatusDot variant, index.css): blue (accent) sat too close to the green done dot.
 const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error', paused: 'neutral', missing: 'error' }
 
-const lastActive = (a: Agent) => { const t = a.lastActivity || a.statusSince; return t > 0 ? shortAgo(new Date(t).toISOString()) : '—' } // WP-350: a stored row with no stamp has no age
+// WP-353: a stamp that is not milliseconds (0, unset, seconds) has no age
+const stampAgo = (t: number | null | undefined) => (t != null && t > 1e12 ? shortAgo(new Date(t).toISOString()) : '—')
+const lastActive = (a: Agent) => stampAgo(a.lastActivity || a.statusSince) // WP-350: a stored row with no stamp has no age
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
 const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
 // The right panel (agent or terminal): its handle is on the panel's LEFT edge, so dragging left must widen it
@@ -657,7 +659,7 @@ function AgentLink({ machine, name, pane }: { machine: string; name?: string; pa
 }
 // WP-353: the one-line replacement for the composer of a paused/missing/exited agent.
 function StoredBar({ agent, stored, act }: { agent: Agent; stored: NonNullable<ReturnType<typeof storedMode>>; act?: { onClick: () => void } }) {
-  const ago = agent.statusSince > 0 ? ` ${shortAgo(new Date(agent.statusSince).toISOString())}` : ''
+  const t = stampAgo(agent.statusSince), ago = t === '—' ? '' : ` ${t}`
   return (
     <HStack gap={2} align="center" justify="between" wrap="wrap" data-stored-bar="" style={{ padding: '8px 4px' }}>
       <Text type="supporting" size="sm">{stored.state === 'paused' ? `Paused${ago} — Resume to talk to it` : `Not running (${stored.state}${ago}) — Respawn to talk to it`}</Text>
@@ -720,7 +722,7 @@ function AgentSummary({ agent, task, dnd, onToggleDnd, stored }: { agent: Agent;
           <Tooltip content={workdir}><Text size="sm" maxLines={1}>{shortPath(workdir) ?? workdir}</Text></Tooltip>
         </SummaryRow>
         {stored && <>
-          <SummaryRow label="State"><Text size="sm">{`${agent.status}${agent.statusSince > 0 ? ` · ${shortAgo(new Date(agent.statusSince).toISOString())}` : ''}`}</Text></SummaryRow>
+          <SummaryRow label="State"><Text size="sm">{`${agent.status}${stampAgo(agent.statusSince) === '—' ? '' : ` · ${stampAgo(agent.statusSince)}`}`}</Text></SummaryRow>
           {agent.project && <SummaryRow label="Project"><Text size="sm">{agent.project}</Text></SummaryRow>}
           <SummaryRow label="Role"><Text size="sm">{agent.pool}</Text></SummaryRow>
           <SummaryRow label="Session">{agent.session
