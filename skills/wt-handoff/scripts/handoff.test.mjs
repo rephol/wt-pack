@@ -629,6 +629,13 @@ test('WP-354: a worker handoff carries the worktree line; a reviewer handoff doe
     execFileSync(join(here, 'handoff.sh'), ['--role', role, '--no-goal', repo], { input: 'do it', encoding: 'utf8', env })
     return execFileSync('cat', [join(msgs, execFileSync('ls', [msgs], { encoding: 'utf8' }).trim().split('\n')[0])], { encoding: 'utf8' })
   }
-  assert.match(sent('worker'), /Worktree: do the work in a worktree made with skills\/wt-plan\/scripts\/worktree\.sh .*never git worktree add beside the repo or in \/tmp/)
-  assert.doesNotMatch(sent('reviewer'), /Worktree: do the work/)
+  const line = sent('worker').match(/^Worktree: .*$/m)?.[0]
+  assert.match(line, /if this prompt names a worktree, work there; otherwise create one with \/\S+\/wt-plan\/scripts\/worktree\.sh <branch>/)
+  assert.ok(line.includes(`${realpathSync(join(here, '..', '..'))}/wt-plan/scripts/worktree.sh`)) // absolute, this install's own
+  assert.doesNotMatch(sent('reviewer'), /^Worktree: /m)
+  assert.doesNotMatch(sent('planner'), /^Worktree: /m)
+  // a plan-style prompt that already names its worktree gets no second, conflicting line
+  rmSync(msgs, { recursive: true, force: true })
+  execFileSync(join(here, 'handoff.sh'), ['--no-goal', repo], { input: 'Use wt-work on plan.md. Work in /x/.claude/worktrees/wp-1-foo', encoding: 'utf8', env })
+  assert.doesNotMatch(execFileSync('cat', [join(msgs, execFileSync('ls', [msgs], { encoding: 'utf8' }).trim().split('\n')[0])], { encoding: 'utf8' }), /^Worktree: /m)
 })
