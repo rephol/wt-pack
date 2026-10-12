@@ -299,7 +299,8 @@ if [ -n "$cancel" ]; then
   exit 0
 fi
 
-cwd=$1
+[ "$mode" = list ] || [ $# -gt 0 ] || { echo "usage: handoff.sh [--pane <id>|--new] [opts] <cwd> [prompt-file]" >&2; exit 2; }
+cwd=${1:-}
 [ "$mode" = list ] || prompt=$(cat "${2:-/dev/stdin}")
 [ -d "$cwd" ] || { echo "no such directory: $cwd" >&2; exit 1; }
 

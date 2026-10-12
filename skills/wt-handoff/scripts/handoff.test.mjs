@@ -613,3 +613,7 @@ test('WP-348: a paused team member still holds its seat (the dashboard counts it
   assert.equal(count(fake), '1')
   assert.equal(count(bin), '0') // the shared stub curl output is not the rows JSON, or the port is closed
 })
+
+test('WP-338: --pane with no cwd prints usage and exits 2 (no unbound variable)', () => {
+  assert.throws(() => run(['--pane', 'wW:p1']), (e) => { assert.equal(e.status, 2); assert.match(e.stderr, /usage: handoff\.sh/); return true })
+})
