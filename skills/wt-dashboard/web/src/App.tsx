@@ -8,7 +8,6 @@ import { SideNav, SideNavHeading, SideNavItem } from '@astryxdesign/core/SideNav
 import { Card } from '@astryxdesign/core/Card'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
-import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { Button } from '@astryxdesign/core/Button'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -38,7 +37,8 @@ import { agentKind, canStop, headlessBadge } from './headlessData'
 import { contextLabel, modelLabel, modelRows, type AgentInfo } from './agentInfo'
 import { tileCounts } from './overviewData'
 import { useDraft } from './draft'
-import { SpawnHost, RemoveHost, openSpawn, openRemove, takePrefill } from './spawn'
+import { useAgentOps } from './agentOps'
+import { SpawnHost, RemoveHost, openSpawn, takePrefill } from './spawn'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { TabList, Tab } from '@astryxdesign/core/TabList'
 import { Text } from '@astryxdesign/core/Text'
@@ -247,6 +247,21 @@ const idleFor = (a: Agent) => {
   if (!(a.statusSince > 0)) return '—'
   const m = Math.floor((Date.now() - a.statusSince) / 60_000)
   return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+// WP-351: the Agents list row menu; lifecycle items come from the same per-state helper as the panel menu.
+function RowMenu({ a, onOpen, onOpenFull }: { a: Agent; onOpen: (key: string) => void; onOpenFull: (key: string) => void }) {
+  const ops = useAgentOps(a)
+  return (
+    <span onClick={(e) => e.stopPropagation()}>
+      <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
+        { label: 'Open', onClick: () => onOpen(a.key) },
+        { label: 'Open full page', onClick: () => onOpenFull(a.key) },
+        ...ops.menu(),
+      ]} />
+      {ops.dialog}
+    </span>
+  )
 }
 
 // ---------- app ----------
@@ -895,15 +910,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
   const sortHead = (label: string, v: AgentSort) => (
     <button type="button" onClick={() => setSort(v)} aria-pressed={sort === v} style={{ all: 'unset', cursor: 'pointer', fontWeight: 600 }}>{`${label}${sort === v ? ' ▾' : ''}`}</button>
   )
-  const menu = (a: Agent) => (
-    <span onClick={(e) => e.stopPropagation()}>
-      <DropdownMenu button={{ label: `${a.name} actions`, icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
-        { label: 'Open', onClick: () => onOpen(a.key) },
-        { label: 'Open full page', onClick: () => onOpenFull(a.key) },
-        a.local ? { label: 'Remove agent…', onClick: () => openRemove(a) } : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
-      ]} />
-    </span>
-  )
+  const menu = (a: Agent) => <RowMenu a={a} onOpen={onOpen} onOpenFull={onOpenFull} />
   return (
     <VStack gap={6}>
       <MachinesStrip machines={data.machines} />
@@ -1280,24 +1287,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
     onSuccess: () => qc.invalidateQueries({ queryKey: ['overview'] }),
     onError: (e) => toast({ body: `Keepwarm not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
   })
-  // WP-348: pause despawns the agent (its row stays, with its session); resume respawns it with --resume.
-  const pauseM = useMutation({
-    mutationFn: async (what: 'pause' | 'resume') => {
-      const r = await fetch(`/api/agents/by-name/${encodeURIComponent(agent.name)}/${what}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['agents'] }) },
-    onError: (e) => toast({ body: `Not changed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
-  })
-  const [ask, setAsk] = useState<'pause' | 'forget' | null>(null)
-  const forgetM = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/agents/by-name/${encodeURIComponent(agent.name)}/forget`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`)
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['agents'] }) },
-    onError: (e) => toast({ body: `Not forgotten: ${e instanceof Error ? e.message : e}`, type: 'error' }),
-  })
+  const ops = useAgentOps(agent, { canStop: canStop(kind, agent.headlessState), onStop: () => setStopOpen(true) }) // WP-351: per-state lifecycle items
   const send = useMutation({
     mutationFn: (body: { text?: string; keys?: string[] }) => postAgent(agent, body),
     onSuccess: (_d, body) => {
@@ -1452,9 +1442,7 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
   if (mode === 'dock') return <VStack gap={2} height="100%" padding={2}>{conversation}</VStack>
   return (
       <VStack gap={3} height="100%" padding={page ? 0 : 4} data-agent-panel={page ? undefined : ''} data-agent-page={page ? '' : undefined}>
-        {ask && <AlertDialog isOpen onOpenChange={(o) => !o && setAsk(null)} title={ask === 'pause' ? `Pause ${agent.name}?` : `Forget ${agent.name}?`} actionLabel={ask === 'pause' ? 'Pause agent' : 'Forget agent'} actionVariant={ask === 'forget' ? 'destructive' : undefined}
-          description={ask === 'pause' ? 'Its pane closes. Resume restarts it with its saved session in its saved folder (one cold cache write).' : 'Drops its saved row, including its session; it cannot be resumed afterwards.'}
-          onAction={() => { if (ask === 'pause') pauseM.mutate('pause'); else forgetM.mutate(); setAsk(null) }} />}
+        {ops.dialog}
         {stopOpen && <HeadlessStopDialog id={agent.id} name={agent.name} onClose={() => setStopOpen(false)} />}
         {tagsMode && <TagsDialog agent={agent} mode={tagsMode} onClose={() => setTagsMode(null)} />}
         <HStack justify="between" align="center" gap={2} style={{ minWidth: 0, flexWrap: 'nowrap' }}>
@@ -1482,19 +1470,14 @@ export function AgentPanelBody({ agent, task, onCollapse, onExpand, onAsPanel, m
           <DropdownMenu button={{ label: 'Agent actions', icon: <span aria-hidden>⋯</span>, isIconOnly: true, size: 'sm', variant: 'ghost' }} hasChevron={false} alignment="end" items={[
             ...(page ? [] : [{ label: 'Open full page', onClick: () => onExpand?.() }]),
             { label: allDetails ? 'Hide message details' : 'Show message details', onClick: () => setShowAllDetails(!allDetails) },
-            ...(canStop(kind, agent.headlessState) ? [{ label: 'Stop agent…', description: 'End its process; it stays resumable', onClick: () => setStopOpen(true) }] : []),
-            ...(agent.local && (agent.status === 'missing' || agent.status === 'exited') ? [{ label: 'Forget agent', description: 'Drop its saved row (name, session); its number becomes free', onClick: () => forgetM.mutate() }, { label: 'Respawn agent', description: 'Start it again with its saved session', onClick: () => pauseM.mutate('resume') }] : []),
-            ...(agent.local && agent.status === 'paused' ? [{ label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => pauseM.mutate('resume') }, { label: 'Forget agent…', description: 'Drop its saved row and session', onClick: () => setAsk('forget') }] : []),
-            ...(agent.local && kind === 'pane' && agent.status !== 'paused' && agent.status !== 'missing' ? [{ label: 'Pause agent', description: 'Save it and close its tab; Resume brings it back with its session', onClick: () => setAsk('pause') }] : []),
+            ...ops.menu().filter((m) => !m.id.startsWith('remove')),
             ...(agent.local && kind === 'pane' ? [
               { label: 'Change role…', description: `Now: ${byId(agent.pool).name}`, onClick: () => setTagsMode('role') },
               { label: 'Edit tags…', description: 'Ticket, branch', onClick: () => setTagsMode('tags') },
               { label: dnd ? 'Clear Do Not Disturb' : 'Do Not Disturb', description: dnd ? undefined : 'Skip this agent for free-pick hand-offs', onClick: () => dndM.mutate(!dnd) },
               { label: kwOn ? 'Keepwarm off' : 'Keepwarm on', description: kwOn ? 'Stop pinging its prompt cache' : 'Keep its prompt cache warm while idle (Settings › Keepwarm sets the budget)', onClick: () => kwM.mutate(kwOn ? 'off' : 'arm') },
             ] : []),
-            agent.local
-              ? { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent) }
-              : { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
+            ...ops.menu().filter((m) => m.id.startsWith('remove')),
           ]} />
           {!page && !narrow && onExpand && <IconButton label="Open full page" icon={<ExpandIcon />} size="sm" variant="ghost" tooltip="Open full page (⌘⇧↩)" onClick={onExpand} style={{ flexShrink: 0 }} />}
           {!page && <IconButton label="Close panel" icon={<Icon icon="close" />} size={narrow ? 'md' : 'sm'} variant="ghost" tooltip="Close (Esc)" onClick={onCollapse} style={{ flexShrink: 0, minWidth: narrow ? 44 : undefined, minHeight: narrow ? 44 : undefined }} />}
