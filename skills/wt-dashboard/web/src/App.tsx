@@ -207,7 +207,7 @@ const STATE: Record<TaskState, { label: string; dot: Dot; group: 'active' | 'rev
 // WP-277: working is violet (custom 'working' StatusDot variant, index.css): blue (accent) sat too close to the green done dot.
 const AGENT_DOT: Record<AgentStatus, Dot> = { working: 'working', idle: 'neutral', blocked: 'error', done: 'success', unknown: 'neutral', exited: 'error', paused: 'neutral', missing: 'error' }
 
-const lastActive = (a: Agent) => shortAgo(new Date(a.lastActivity || a.statusSince).toISOString())
+const lastActive = (a: Agent) => { const t = a.lastActivity || a.statusSince; return t > 0 ? shortAgo(new Date(t).toISOString()) : '—' } // WP-350: a stored row with no stamp has no age
 const BackIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
 const ExpandIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
 // The right panel (agent or terminal): its handle is on the panel's LEFT edge, so dragging left must widen it
@@ -244,6 +244,7 @@ function ActivityRow({ agent, lastTool }: { agent: Agent; lastTool: string | nul
 }
 
 const idleFor = (a: Agent) => {
+  if (!(a.statusSince > 0)) return '—'
   const m = Math.floor((Date.now() - a.statusSince) / 60_000)
   return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
 }
@@ -460,35 +461,6 @@ export default function App() {
     return () => removeEventListener('keydown', on)
   })
 
-  const qc = useQueryClient()
-  const toast = useToast()
-  const resumeP = useMutation({
-    mutationFn: async (p: string) => {
-      const r = await fetch(`/api/projects/${encodeURIComponent(p)}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(j.error ?? r.statusText)
-      return j as { resumed?: number; failed: { name: string; error: string }[] }
-    },
-    onSuccess: (r) => {
-      toast(r.failed.length ? { body: `Resumed with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: `Resumed ${r.resumed ?? 0} agent(s)` })
-      for (const k of ['projects', 'overview', 'agents', 'project-pause']) qc.invalidateQueries({ queryKey: [k] })
-    },
-    onError: (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
-  })
-  const [pauseAsk, setPauseAsk] = useState<string | null>(null)
-  const pauseP = useMutation({
-    mutationFn: async (p: string) => {
-      const r = await fetch(`/api/projects/${encodeURIComponent(p)}/pause`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-      const j = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(j.error ?? r.statusText)
-      return j as { agents?: number; failed: { name: string; error: string }[] }
-    },
-    onSuccess: (r) => {
-      toast(r.failed.length ? { body: `Paused with ${r.failed.length} failure(s): ${r.failed.map((f) => `${f.name}: ${f.error}`).join('; ')}`, type: 'error' } : { body: `Paused: ${r.agents} agent(s) saved` })
-      setPauseAsk(null); for (const k of ['projects', 'overview', 'agents', 'project-pause']) qc.invalidateQueries({ queryKey: [k] })
-    },
-    onError: (e) => toast({ body: `Failed: ${e instanceof Error ? e.message : e}`, type: 'error' }),
-  })
   const projectRows = [['all', 'All projects', counts.all] as const, ...counts.by.map(([p, c]) => [p, p, c] as const)]
   const current = projectRows.find(([v]) => v === project) ?? projectRows[0]
   const countsEnd = (c: typeof counts.all) => (
@@ -501,12 +473,9 @@ export default function App() {
   const projectIcon = (v: string, label: string, dot: boolean) => initialsIcon(v === 'all' ? '*' : initials(label), dot)
   const projectPicker = (
     <div className="hd-project-picker"><DropdownMenu hasChevron={!navCollapsed} menuWidth={260}
-      button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: current[0] === 'all' && !navCollapsed ? undefined : <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
-      items={projectRows.map(([v, label, c]) => ({ id: v, label: pausedProjects.has(v) ? `${label} (paused)` : label, icon: projectIcon(v, label, false),
-        endContent: <HStack gap={1} align="center">{v !== 'all' && !pausedProjects.has(v) && c.agents > 0 && <Button label="Pause" size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setPauseAsk(v) }} />}{pausedProjects.has(v) && <Button label="Resume" size="sm" variant="primary" isDisabled={resumeP.isPending} onClick={(e) => { e.stopPropagation(); resumeP.mutate(v) }} />}<Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip></HStack>,
-        onClick: () => setProject(v) }))} />
+      button={{ label: navCollapsed ? `Project: ${current[1]}` : current[1], icon: !navCollapsed ? undefined : <Icon icon={projectIcon(current[0], current[1], navCollapsed && current[2].needs > 0)} />, isIconOnly: navCollapsed, size: 'sm', variant: 'ghost', width: navCollapsed ? undefined : '100%' }}
+      items={projectRows.map(([v, label, c]) => ({ id: v, label: pausedProjects.has(v) ? `${label} (paused)` : label, endContent: <Tooltip content={countTooltip(c)}>{countsEnd(c)}</Tooltip>, onClick: () => setProject(v) }))} />
       {/* WP-110: the picked project's settings, one click from the sidebar (hidden for All projects) */}
-      {pausedProjects.has(project) && !navCollapsed && <Button label="Resume" size="sm" variant="primary" isDisabled={resumeP.isPending} onClick={() => resumeP.mutate(project)} />}
       {project !== 'all' && !navCollapsed && <IconButton label="Project settings" tooltip={`${current[1]} settings`} icon={<GearIcon />} size="sm" variant="ghost" onClick={() => openProjectSettings(project)} />}</div>
   )
   const nav = (
@@ -614,9 +583,6 @@ export default function App() {
           </>
         ) : undefined}
       />
-      {pauseAsk && <AlertDialog isOpen onOpenChange={(o) => !o && setPauseAsk(null)} title={`Pause ${pauseAsk}?`} actionLabel="Pause project"
-        description={`Saves and closes its ${counts.by.find(([p]) => p === pauseAsk)?.[1].agents ?? 0} live agent(s). Dispatch, routines and keepwarm skip it until you Resume; each agent resumes with its session.`}
-        isActionLoading={pauseP.isPending} onAction={() => pauseP.mutate(pauseAsk)} />}
       <SettingsHost project={project} agents={(all?.agents ?? []).filter(isLive)} />
       <SpawnHost agents={(all?.agents ?? []).filter(isLive)} project={project} onOpenAgent={open} />
       <RemoveHost />

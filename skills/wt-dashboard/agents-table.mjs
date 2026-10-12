@@ -119,8 +119,8 @@ export function reconcile(rows, live, panes, now = Date.now()) {
 
 // A row with no live pane, shaped like an agents() row for the list API and team views (consumers that act on a pane never see it).
 export const rowAsAgent = (r) => ({
-  key: `local/${r.name}`, id: null, machine: 'local', local: true, name: r.name, status: r.state, state: r.state, statusSince: r.paused_at ?? r.gone_at ?? r.seen_at,
-  lastActivity: r.paused_at ?? r.gone_at ?? r.seen_at, cwd: r.cwd, project: r.project, session: r.session, pool: r.role ?? 'other', roleBy: 'token',
+  key: `local/${r.name}`, id: null, machine: 'local', local: true, name: r.name, status: r.state, state: r.state, statusSince: r.paused_at ?? r.gone_at ?? r.seen_at ?? r.created_at, // WP-350: an imported row may have no stamp
+  lastActivity: r.paused_at ?? r.gone_at ?? r.seen_at ?? r.created_at, cwd: r.cwd, project: r.project, session: r.session, pool: r.role ?? 'other', roleBy: 'token',
   tags: { ...r.tags, ...(r.role ? { role: r.role } : {}), ...(r.persona ? { persona: r.persona } : {}), ...(r.project ? { project: r.project } : {}), ...(r.ticket ? { ticket: r.ticket } : {}) },
   paneTokens: {}, workspace: null, asks: false, picker: null, midTurn: r.mid_turn, stored: true,
 })
