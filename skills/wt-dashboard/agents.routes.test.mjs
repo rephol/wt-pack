@@ -48,5 +48,20 @@ test('by-name returns the row without tags; forget: a pane may forget itself or 
   assert.equal((await fetch(`${base}/api/agents/by-name/demo-worker-08`)).status, 404)
   assert.equal((await forget('demo-worker-09', pane('w9:p1'))).status, 200) // a pane may forget a row whose agent is no longer live
   const cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
+  // WP-353: a stored row streams its saved transcript once (user only); no session/file is a fast 404; a live row is 409
+  const db2 = new DatabaseSync(join(root, 'data', 'wt.db'))
+  db2.prepare("UPDATE agents SET session = ? WHERE name = ?").run('sess-saved', 'demo-worker-07')
+  db2.prepare("INSERT INTO agents (name, state, created_at) VALUES (?, ?, 1)").run('demo-worker-10', 'missing'); db2.close()
+  mkdirSync(join(root, '.claude', 'projects', 'p'), { recursive: true })
+  writeFileSync(join(root, '.claude', 'projects', 'p', 'sess-saved.jsonl'), JSON.stringify({ type: 'user', uuid: 'a', timestamp: 't', message: { content: 'hello saved' } }) + '\n')
+  const stream = (n, h = { cookie }) => fetch(`${base}/api/agents/by-name/${n}/stream?since=0`, { headers: h })
+  const ok = await stream('demo-worker-07')
+  assert.equal(ok.status, 200)
+  const body = await ok.text() // ends by itself: a snapshot, not a live stream
+  assert.match(body, /hello saved/); assert.match(body, /event: end/)
+  const t0 = Date.now(), none = await stream('demo-worker-10')
+  assert.equal(none.status, 404); assert.match((await none.json()).error, /no saved transcript/); assert.ok(Date.now() - t0 < 1500)
+  assert.equal((await stream('demo-worker-01')).status, 409)
+  assert.equal((await stream('demo-worker-07', pane('w9:p1'))).status, 403)
   assert.equal((await forget('demo-worker-07', { cookie })).status, 200) // the user
 })
