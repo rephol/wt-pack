@@ -57,3 +57,13 @@ test('WP-348: a paused project is never enabled, whatever was armed or globally 
   assert.equal(k.effective('b', 'planner', true).enabled, false)
   assert.equal(k.info('a', 'worker', true)?.state ?? 'off', 'off')
 })
+
+test('WP-358: arming again after Off clears the stale off run (state cold, enabled) and keeps the day\'s pings', () => {
+  const k = new Keepwarm()
+  k.set('p1', 'arm'); k.report('p1', { event: 'ping', usage: { read: 100, write: 5 }, nextAt: 9 })
+  k.set('p1', 'off'); assert.equal(k.info('p1', 'worker').state, 'off'); assert.equal(k.effective('p1', 'worker').enabled, false)
+  k.set('p1', 'arm')
+  const i = k.info('p1', 'worker')
+  assert.equal(i.state, 'cold'); assert.equal(k.effective('p1', 'worker').enabled, true)
+  assert.deepEqual([i.nextAt, i.pingsToday, i.spentTokens, i.reason], [null, 1, 105, 'armed, no ping yet'])
+})

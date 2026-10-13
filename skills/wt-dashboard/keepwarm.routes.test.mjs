@@ -18,7 +18,7 @@ else if (a === 'machine list') console.log('')
 else process.exit(1)
 `
 const K1 = 'a'.repeat(64), K2 = 'b'.repeat(64)
-let child, base, cookie
+let child, base, cookie, root
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 const as = (pane, key) => ({ 'x-herdr-pane': pane, 'x-wt-pane-key': key, 'content-type': 'application/json' })
 const post = (path, headers, body) => fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(body ?? {}) })
@@ -27,7 +27,7 @@ const next = async () => (await (await fetch(`${base}/api/deliveries/next`, { he
 const rows = async () => (await (await fetch(`${base}/api/messages`, { headers: { cookie } })).json())
 
 before(async () => {
-  const root = mkdtempSync(join(tmpdir(), 'wt-kwroutes-'))
+  root = mkdtempSync(join(tmpdir(), 'wt-kwroutes-'))
   const bin = join(root, 'bin')
   mkdirSync(join(root, 'data'), { recursive: true }); mkdirSync(bin); mkdirSync(join(root, 'pane-keys'))
   writeFileSync(join(bin, 'herdr'), FAKE_HERDR); chmodSync(join(bin, 'herdr'), 0o755)
@@ -75,4 +75,25 @@ test('/wt keepwarm off (a stop report with off:true) persists as the user\'s Off
   assert.equal((await me('w9:p1', K1, '/api/keepwarm/me/report', 'POST', { event: 'stop', off: true, reason: 'turned off' })).status, 200)
   const c = await (await me('w9:p1', K1)).json()
   assert.deepEqual([c.enabled, c.state], [false, 'off'])
+})
+
+test('WP-358: the user turns an agent off then arms it again: the agent\'s keepwarm state leaves off, and keepwarm.json says armed', async () => {
+  const state = async () => (await (await user('/api/agents', 'GET')).json()).find((a) => a.id === 'w9:p1').info?.keepwarm
+  assert.equal((await user('/api/keepwarm/w9:p1', 'POST', { action: 'off' })).status, 200)
+  assert.equal((await state())?.state, 'off')
+  assert.equal((await user('/api/keepwarm/w9:p1', 'POST', { action: 'arm' })).status, 200)
+  assert.notEqual((await state())?.state, 'off')
+  const ov = JSON.parse(readFileSync(join(root, 'data', 'keepwarm.json'), 'utf8')).overrides
+  assert.equal((ov['demo-worker-01'] ?? ov['w9:p1'])?.armed, true) // keyed by agent name once the agents table has the row, else by pane
+})
+
+test('WP-358: /wt keepwarm on (an arm report) undoes /wt keepwarm off for that pane only; no pane key is refused', async () => {
+  assert.equal((await me('w9:p1', K1, '/api/keepwarm/me/report', 'POST', { event: 'stop', off: true, reason: 'turned off' })).status, 200)
+  assert.deepEqual(await me('w9:p1', K1).then((r) => r.json()).then((c) => [c.enabled, c.state]), [false, 'off'])
+  assert.equal((await me('w9:p1', 'c'.repeat(64), '/api/keepwarm/me/report', 'POST', { event: 'arm' })).status, 403) // wrong key
+  assert.equal((await fetch(`${base}/api/keepwarm/me/report`, { method: 'POST', headers: { 'x-herdr-pane': 'w9:p1', 'content-type': 'application/json' }, body: '{"event":"arm"}' })).status, 403) // no key
+  assert.deepEqual(await me('w9:p1', K1).then((r) => r.json()).then((c) => [c.enabled, c.state]), [false, 'off']) // still off
+  assert.equal((await me('w9:p1', K1, '/api/keepwarm/me/report', 'POST', { event: 'arm' })).status, 200)
+  assert.deepEqual(await me('w9:p1', K1).then((r) => r.json()).then((c) => [c.enabled, c.state]), [true, 'cold'])
+  assert.equal((await me('w9:p2', K2).then((r) => r.json())).enabled, false) // the other pane was not armed
 })
