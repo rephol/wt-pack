@@ -65,8 +65,9 @@ const WHERE = 'test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude-plu
 // first: only a command that could be gated pays for the process.
 const MAYBE_GATED = /\bgit\b[^|;&\n]*\b(push|merge|branch|worktree)\b|\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
 const gateDeny = (stdout: string) => {
-  let g: { action?: string; asked?: boolean } = {}
+  let g: { action?: string; asked?: boolean; peer?: boolean } = {}
   try { g = JSON.parse(stdout) } catch { /* the text below still denies */ }
+  if (g.peer) return `wt-pack gate: ${g.action ?? 'this action'} was requested by a peer session (another Claude session, not the user). Do not retry it; ask the user in chat.` // WP-357: no Inbox ask exists for it
   return `wt-pack gate: ${g.action ?? 'this action'} needs the user's OK (this turn was not typed by the user or a verified handoff/dispatch/routine from the orchestrator). ` +
     (g.asked ? 'I asked them in the Inbox; wait for their answer, then retry the same command. Do not retry before it arrives.' : 'The dashboard could not be reached to ask; ask the user in chat and wait.')
 }

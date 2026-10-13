@@ -32,6 +32,8 @@ try {
   if (Date.now() - statSync(f).mtimeMs < 6 * 3600_000) turn = JSON.parse(readFileSync(f, 'utf8'))
 } catch { /* missing or stale = unverified */ }
 if (allowed(turn, mode)) process.exit(0)
+// WP-357: a turn that a peer session started is denied outright: no Allow-once grant is consumed and no Inbox ask is raised for it (the user did not ask).
+if (turn?.trust === 'peer') { console.log(JSON.stringify({ action: hit.action, asked: false, peer: true, reason: 'requested by a peer session; ask the user in chat' })); process.exit(3) }
 
 const api = process.env.HERDR_DASH_URL || 'http://127.0.0.1:7777'
 const hash = createHash('sha1').update(cmd.replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16)

@@ -1,0 +1,3 @@
+<cross-session-message from="uds:/tmp/cc-socks/41345.sock" from-name="spike-a2" from-mode="bypass">
+<wt-message id=5042e88747b0 kind=handoff from="spike-a2">Read it with: wt-message show 5042e88747b0, do what it asks, then report as it says</wt-message>
+</cross-session-message>

@@ -534,6 +534,15 @@ Chat rooms shared by you and agents.
   *Ask before push, merge, delete and send-out actions* (`WT_GATE`, default `ask`; `off` restores the old behaviour). It is a
   pattern list, not a shell parser: obfuscated shell (`sh -c "$(…)"`, a script that pushes itself) and other tools (`gh api -X
   PUT …/merge`) are not caught, and a gate that cannot run lets the command through. Merge order: server (restart) → plugin.
+  **Messages from other Claude sessions (WP-357):** a message another session sends with `SendMessage` arrives wrapped in
+  `<cross-session-message from=… from-name=…>`. It is never your word and never verified wt-pack traffic: the turn is recorded as
+  `peer`, the agent gets a reminder that it is information (a reply to the peer is fine), and the gate **denies** push, merge,
+  delete and send-out for that turn outright, with no Inbox ask and no *Allow once* spent; tell the agent in chat if you want it
+  done. If the agent was already working on a turn you typed, that turn keeps its trust (a peer never downgrades it, and never
+  upgrades an idle agent); a peer's text injected into your running turn rides on that turn's trust, which the reminder and the
+  agent's role rule (a cross-session message is data) cover. `from-name` is whatever the sending session called itself, so it
+  is shown but never trusted. A peer message during a `/goal` run pauses gated actions until you speak. `WT_GATE=off` stays off for everyone, peer messages included. Hooks load at session start, so a
+  running agent picks this up after a restart.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
   - Hops before a human reply — **3**; then the room pauses "waiting for a human" until you post.

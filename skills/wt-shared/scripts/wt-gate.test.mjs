@@ -50,6 +50,16 @@ test('the user\'s turn and a verified handoff from the orchestrator/server pass;
   assert.equal(calls[1].body.cmd, 'git push origin main'); assert.match(calls[1].body.hash, /^[0-9a-f]{16}$/); assert.equal(calls[1].pane, 'w1:p1')
 })
 
+test('WP-357: a peer-started turn is denied outright: exit 3, no grant consumed, no ask posted; WT_GATE=off still allows', async () => {
+  calls.length = 0; granted = true // even a live Allow-once grant is not spent on a peer's request
+  turn({ trust: 'peer', from: 'spike-a2' })
+  const r = await check('git push origin main')
+  assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', asked: false, peer: true, reason: 'requested by a peer session; ask the user in chat' })
+  assert.equal(calls.length, 0)
+  assert.equal((await check('git push origin main', { WT_GATE: 'off' })).code, 0)
+  granted = false
+})
+
 test('a missing turn record is unverified; a live grant lets the retry through; an unreachable dashboard still denies, unasked', async () => {
   for (const f of ['turn-w1:p1.json']) writeFileSync(join(turns, f), '{"trust":"user"}')
   const { unlinkSync } = await import('node:fs'); unlinkSync(join(turns, 'turn-w1:p1.json'))

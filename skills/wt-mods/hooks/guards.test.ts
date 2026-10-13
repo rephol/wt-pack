@@ -111,6 +111,14 @@ test('WP-332: a gated command is denied with the reason, after asking wt-gate', 
   expect(un.deny).toMatch(/needs the user's OK/)
 })
 
+test('WP-357: a peer-requested action is denied with the peer reason, not "I asked them in the Inbox"', async ($, on) => {
+  gateRig(on, () => ({ exitCode: 3, stdout: '{"action":"git push","asked":false,"peer":true,"reason":"requested by a peer session; ask the user in chat"}\n' }))
+  const r: any = await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
+  expect(r.deny).toMatch(/git push was requested by a peer session/)
+  expect(r.deny).toMatch(/ask the user in chat/)
+  expect(r.deny).not.toMatch(/Inbox/)
+})
+
 test('WP-332: an ordinary command never spawns the gate; allowed (exit 0) and a broken gate both let it run', async ($, on) => {
   const runs = gateRig(on, () => ({ exitCode: 0, stdout: '' }))
   for (const command of ['npm test', 'git status', 'git commit skills/a -m "push"', 'ls -la']) {

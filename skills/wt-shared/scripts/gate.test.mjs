@@ -49,6 +49,8 @@ test('allowed: the user, or a verified handoff/dispatch/routine from the orchest
   assert.ok(!allowed(v('reply', 'orchestrator')))
   assert.ok(!allowed({ trust: 'unverified' }))
   assert.ok(!allowed(undefined) && !allowed({}))
+  assert.ok(!allowed({ trust: 'peer' }, 'ask') && !allowed({ trust: 'peer', from: 'orchestrator' }), 'WP-357: a peer session is never the user, whatever name it sends under')
+  assert.ok(allowed({ trust: 'peer' }, 'off'), 'WT_GATE=off stays off for everyone, peer included (the user\'s explicit choice)')
   assert.ok(allowed({ trust: 'unverified' }, 'off') && allowed(undefined, 'off'), 'WT_GATE=off allows everything')
 })
 
