@@ -25,7 +25,7 @@ export const COMMANDS: Record<string, Cmd> = {
   ticket: { description: 'wt-ticket: show|move|list|comment … (e.g. show WP-12)', hint: '<show|move|list|…> …', script: 'wt-ticket/scripts/wt-ticket', argv: a => (a.length ? a : ['list', '--mine']) },
   dnd: { description: 'Do-not-disturb for this agent: on [--for 2h] | off | (status)', hint: '[on|off]', script: 'wt-agents/scripts/agents.sh', argv: (a, pane) => ['dnd', pane, ...a] },
   herd: { description: 'List the herdr agents (wt-agents list; /agents is built in)', hint: '[role] [--json]', script: 'wt-agents/scripts/agents.sh', argv: a => ['list', ...a] },
-  keepwarm: { description: 'Prompt-cache keepwarm for this agent: status | off (arm it in the dashboard)', hint: '[status|off]', script: 'wt-mods/scripts/wt-keepwarm', argv: a => (a.length === 0 || a[0] === 'status' ? ['status'] : a[0] === 'off' ? ['off'] : 'usage: /wt keepwarm [status|off]') },
+  keepwarm: { description: 'Prompt-cache keepwarm for this agent: status | on | off', hint: '[status|on|off]', script: 'wt-mods/scripts/wt-keepwarm', argv: a => (a.length === 0 || a[0] === 'status' ? ['status'] : a[0] === 'on' ? ['on'] : a[0] === 'off' ? ['off'] : 'usage: /wt keepwarm [status|on|off]') },
   watch: { description: 'PR poller status (wt-watch-prs poller-status)', hint: 'status', script: 'wt-watch-prs/scripts/watch-prs.sh', argv: a => (a.length === 0 || a[0] === 'status' ? ['poller-status', ...a.slice(1)] : 'usage: /wt watch status') },
 }
 

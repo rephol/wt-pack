@@ -3,7 +3,8 @@
 #   wt-keepwarm config            print this pane's effective config as JSON (the mod follows it)
 #   wt-keepwarm report [json|-]   post a ping/stop report ({event:'ping',usage:{read,write},nextAt} | {event:'stop',reason,off?})
 #   wt-keepwarm status            one human line: warm|cold|off, next ping, pings today
-#   wt-keepwarm off               turn keepwarm off for this agent until it is armed again in the dashboard
+#   wt-keepwarm on                arm keepwarm for this agent (undoes off)
+#   wt-keepwarm off               turn keepwarm off for this agent until it is armed again (in the dashboard or with on)
 # Identity: $HERDR_PANE_ID (+ $WT_PANE_KEY). Exit: 0 ok, 1 API error / dashboard down, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
@@ -18,7 +19,8 @@ call() { # <method> <path> [json]
 case "${1:-}" in
   config) call GET /api/keepwarm/me ;;
   report) body=${2:--}; [ "$body" = - ] && body=$(cat); call POST /api/keepwarm/me/report "$body" >/dev/null ;;
-  off) call POST /api/keepwarm/me/report '{"event":"stop","off":true,"reason":"turned off"}' >/dev/null && echo "keepwarm off for this agent (arm it again in the dashboard)" ;;
+  on) call POST /api/keepwarm/me/report '{"event":"arm"}' >/dev/null && echo "keepwarm armed for this agent" ;;
+  off) call POST /api/keepwarm/me/report '{"event":"stop","off":true,"reason":"turned off"}' >/dev/null && echo "keepwarm off for this agent (arm it again in the dashboard or with /wt keepwarm on)" ;;
   status)
     out=$(call GET /api/keepwarm/me) || exit 1
     node -e '
