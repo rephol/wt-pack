@@ -38,7 +38,11 @@ export class Keepwarm {
 
   // The user arms or turns off one pane. windowH is capped by the global ceiling (12 h) by clean().
   set(pane, action, windowH) {
-    if (action === 'arm') this.overrides[pane] = { armed: true, ...(windowH === undefined ? {} : { windowH: int('windowH', windowH, 1, 12) }) }
+    if (action === 'arm') {
+      this.overrides[pane] = { armed: true, ...(windowH === undefined ? {} : { windowH: int('windowH', windowH, 1, 12) }) }
+      // WP-358: turning off left a run {state:'off'} behind that info() kept showing once armed again; drop it (pings and spent stay for the day)
+      this.runs.set(pane, { ...this.#run(pane), state: 'cold', nextAt: null, reason: 'armed, no ping yet' })
+    }
     else if (action === 'off') { this.overrides[pane] = { armed: false }; this.runs.set(pane, { ...this.#run(pane), state: 'off', nextAt: null, reason: 'turned off' }) }
     else throw bad('action: arm or off')
   }

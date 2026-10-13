@@ -4073,6 +4073,7 @@ async function keepwarmApi(req, res, parts) {
     if (req.method === 'POST' && parts[3] === 'report') {
       const b = await json()
       if (b.event === 'stop' && b.off) { keepwarm.set(kwKey(author.pane), 'off'); await kwSave() } // /wt keepwarm off: stays off until armed again
+      else if (b.event === 'arm') { keepwarm.set(kwKey(author.pane), 'arm'); await kwSave() } // WP-358 /wt keepwarm on: the pane arms only itself (author.pane is its verified identity)
       else keepwarm.report(kwKey(author.pane), b)
       return send(res, 200, { ok: true })
     }
