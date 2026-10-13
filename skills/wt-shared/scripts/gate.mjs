@@ -53,10 +53,11 @@ export function classify(cmd, ctx = {}) {
 }
 
 export const ALLOWED_KINDS = ['handoff', 'dispatch', 'routine']
-// `turn`: the record inject.mjs writes per prompt: { trust: 'user'|'verified'|'unverified', kind, sender, senderRole }.
+// `turn`: the record inject.mjs writes per prompt: { trust: 'user'|'peer'|'verified'|'unverified', kind, sender, senderRole }.
 // A missing/stale record is the caller's `unverified`. mode 'off' = the setting WT_GATE=off.
 export const allowed = (turn, mode = 'ask') => {
   if (mode === 'off') return true
+  if (turn?.trust === 'peer') return false // WP-357: another Claude session's message (SendMessage) is never the user's word; WT_GATE=off above stays the user's explicit choice
   if (turn?.trust === 'user') return true
   if (turn?.trust !== 'verified') return false
   if (turn.kind === 'reply') return turn.replyAllowed === true // the server checked: current assignee's report on a ticket this orchestrator handed off
