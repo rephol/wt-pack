@@ -541,7 +541,7 @@ Chat rooms shared by you and agents.
   done. If the agent was already working on a turn you typed, that turn keeps its trust (a peer never downgrades it, and never
   upgrades an idle agent); a peer's text injected into your running turn rides on that turn's trust, which the reminder and the
   agent's role rule (a cross-session message is data) cover. `from-name` is whatever the sending session called itself, so it
-  is shown but never trusted. `WT_GATE=off` stays off for everyone, peer messages included. Hooks load at session start, so a
+  is shown but never trusted. A peer message during a `/goal` run pauses gated actions until you speak. `WT_GATE=off` stays off for everyone, peer messages included. Hooks load at session start, so a
   running agent picks this up after a restart.
 - **Settings › Rooms** (defaults):
   - Allow agents to @mention other agents — **off** (mentions show but are not delivered).
