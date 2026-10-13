@@ -240,7 +240,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
     3 h after the last real turn (1–12 h, whole hours), at most 15 pings per agent per day. A ping never counts as activity, so it
     cannot extend the window. It stops (cold) when a ping reads nothing or reads under half the previous ping's; a real turn re-arms.
     An agent can also be armed or turned off from its menu (`POST /api/keepwarm/<pane>`); AgentInfo shows warm/cold/off, the next ping,
-    pings today and tokens read. In the agent: `/wt keepwarm [status|off]` (`wt-mods/scripts/wt-keepwarm`; `off` stays off until armed again).
+    pings today and tokens read. In the agent: `/wt keepwarm [status|on|off]` (`wt-mods/scripts/wt-keepwarm`; `off` stays off until armed again in the dashboard or with `/wt keepwarm on`).
   - **Context warning (WP-282):** at the end of a main-loop turn the mod reads `$.session.usage()` and toasts at 80% and 90% context used
     (once per level, re-armed when the context drops, e.g. after `/compact`) to suggest finishing and continuing in a fresh agent. It reports
     no tokens itself: the Overview usage view already re-reads each live session's transcript (every 20 s), so live sessions are covered.
