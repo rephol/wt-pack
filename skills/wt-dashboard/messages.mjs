@@ -60,12 +60,18 @@ export class Messages {
 
   byRequest(requestId) { return requestId ? this.db.prepare('SELECT * FROM wt_messages WHERE request_id = ?').get(requestId) ?? null : null }
 
-  // → { row, duplicate }. A known id or request_id returns the existing row untouched.
-  record({ id, sender, target, kind, ticket = null, requestId = null, body, state = 'queued', senderPane = null }) {
+  // → { row, duplicate }. A known id or request_id returns the existing row, never a second one, and never resets its
+  // state or acked_at. WP-360: recording it again is a REDELIVERY (the same envelope typed again: a sender retry), so it
+  // bumps `attempts`; the receiving hook reads that from /verify and says so in its reminder. `bump: false` for a caller
+  // that counts the attempt itself (the sweep's resend).
+  record({ id, sender, target, kind, ticket = null, requestId = null, body, state = 'queued', senderPane = null }, { bump = true } = {}) {
     if (!id || !target || !kind || typeof body !== 'string') throw err(400, 'id, target, kind, body required')
     if (!STATES.includes(state)) throw err(400, `state: ${STATES.join('|')}`)
     const dup = this.get(id) ?? (requestId ? this.db.prepare('SELECT * FROM wt_messages WHERE request_id = ?').get(requestId) : null)
-    if (dup) return { row: dup, duplicate: true }
+    if (dup) {
+      if (bump) this.db.prepare('UPDATE wt_messages SET attempts = attempts + 1, updated = ? WHERE id = ?').run(this.#at(), dup.id)
+      return { row: bump ? this.get(dup.id) : dup, duplicate: true }
+    }
     const at = this.#at()
     this.db.prepare(`INSERT INTO wt_messages (id, sender, target, kind, ticket, request_id, body, state, created, updated, delivered_at, sender_pane)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, String(sender ?? ''), target, kind, ticket, requestId, body.slice(0, 100_000), state, at, at, state === 'delivered' ? at : null, senderPane)
@@ -131,12 +137,14 @@ export class Messages {
         await Promise.resolve(flag?.(this.get(row.id))).catch((e) => this.log(`messages flag ${row.id}: ${e.message}`))
         done.push({ id: row.id, did: 'expired' }); continue
       }
+      // WP-360: the attempt is counted BEFORE the resend types it, so the target's hook (which reads it from /verify) sees send N.
+      this.db.prepare('UPDATE wt_messages SET attempts = attempts + 1, updated = ? WHERE id = ?').run(this.#at(), row.id)
       try {
-        await resend(row)
-        this.db.prepare("UPDATE wt_messages SET attempts = attempts + 1, state = 'delivered', updated = ?, error = NULL WHERE id = ?").run(this.#at(), row.id)
+        await resend(this.get(row.id))
+        this.db.prepare("UPDATE wt_messages SET state = 'delivered', updated = ?, error = NULL WHERE id = ?").run(this.#at(), row.id)
         done.push({ id: row.id, did: 'resent' })
       } catch (e) {
-        this.db.prepare('UPDATE wt_messages SET attempts = attempts + 1, updated = ?, error = ? WHERE id = ?').run(this.#at(), e.message.slice(0, 200), row.id)
+        this.db.prepare('UPDATE wt_messages SET updated = ?, error = ? WHERE id = ?').run(this.#at(), e.message.slice(0, 200), row.id)
         done.push({ id: row.id, did: 'resend-failed' })
       }
     }

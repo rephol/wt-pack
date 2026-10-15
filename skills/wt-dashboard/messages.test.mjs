@@ -257,3 +257,27 @@ test('WP-352: a pointer verifies once; a resend of the same id reopens it', asyn
   m.reopen('a1') // the sweep types a fresh pointer for the same id
   assert.equal(m.firstPointer('a1'), true)
 })
+
+// WP-360: a redelivery is marked by the server record.
+test('WP-360: recording an existing id bumps attempts, never resets acked_at or state, and creates no second row', async () => {
+  const { m, clock, draft } = await setup()
+  m.record(draft({ requestId: 'r1' }))
+  m.move('a1', 'delivered'); m.ack('a1', 'w1:p1')
+  const acked = m.get('a1').acked_at
+  clock.t += 60_000
+  const again = m.record(draft({ requestId: 'r1' })) // a sender retry with the same id
+  assert.equal(again.duplicate, true)
+  assert.equal(again.row.attempts, 2)
+  assert.equal(m.get('a1').acked_at, acked); assert.equal(m.get('a1').state, 'acknowledged')
+  assert.equal(m.record(draft({ id: 'other', requestId: 'r1' })).row.id, 'a1') // the same request id under a new id: still the one row
+  assert.equal(m.get('a1').attempts, 3); assert.equal(m.get('other'), null)
+  assert.equal(m.record(draft(), { bump: false }).row.attempts, 3) // a caller that counts itself
+})
+test('WP-360: the sweep resend sees attempt 2 (counted before it types) and the resend path does not count it twice', async () => {
+  const { m, clock, draft } = await setup()
+  m.record(draft({ state: 'delivered' }))
+  const seen = []
+  clock.t += 6 * 60_000
+  await m.sweep({ resend: async (row) => { seen.push(row.attempts); m.record(draft(), { bump: false }) } })
+  assert.deepEqual(seen, [2]); assert.equal(m.get('a1').attempts, 2)
+})
