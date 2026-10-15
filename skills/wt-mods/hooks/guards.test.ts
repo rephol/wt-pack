@@ -100,9 +100,11 @@ const gateRig = (on: any, answer: (argv: string[]) => { exitCode: number; stdout
 }
 
 test('WP-332: a gated command is denied with the reason, after asking wt-gate', async ($, on) => {
-  const runs = gateRig(on, () => ({ exitCode: 3, stdout: '{"action":"git push","asked":true}\n' }))
+  const runs = gateRig(on, () => ({ exitCode: 3, stdout: '{"action":"git push","rule":"push","segment":"git push origin main","asked":true}\n' }))
   const r: any = await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
   expect(r.deny).toMatch(/git push needs the user's OK/)
+  expect(r.deny).toMatch(/\[rule: push, segment: `git push origin main`\]/) // WP-361
+  expect(r.deny).toMatch(/run the other parts of the command as their own command/)
   expect(r.deny).toMatch(/asked them in the Inbox/)
   expect(runs.length).toBe(1)
   expect(runs[0].slice(-3)).toEqual(['check', '--', 'git push origin main'])

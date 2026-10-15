@@ -4,6 +4,7 @@ import type { Register } from 'claude-code'
 
 const SENDS = /handoff\.sh|wt-room|\broom\s+post|\bherdr\b|wt-ticket|wt-ask/ // commands whose strings reach another agent or a card
 const words = (seg: string) => [...seg.matchAll(/"[^"]*"|'[^']*'|\S+/g)].map((m) => m[0])
+const clip = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > 120 ? t.slice(0, 119) + '…' : t }
 const TAKES_VALUE = new Set('FGgPstUucJjMNd'.split('')) // pkill/pgrep options that consume the next word
 const SKILLS_PATH = /(~|\$HOME|\$\{HOME\}|\/Users\/[^/\s]+|\/home\/[^/\s]+)\/\.claude\/skills\//
 
@@ -39,19 +40,20 @@ const branchSwitch = (w: string[]) => {
 // and their own commit habits.
 export const guard = (cmd: string, here = true, main = here): string | null => {
   for (const seg of cmd.split(/&&|\|\||[;\n]/)) {
+    const tag = (rule: string, msg: string) => `${msg} [rule: ${rule}, segment: \`${clip(seg)}\`]` // WP-361: name the rule and the part that matched
     const bare = seg.replace(/"[^"]*"|'[^']*'/g, '""') // flags inside a message are not flags
     const gh = /\bgh\s+pr\s+create\b/.test(bare) && /(^|\s)(--draft|-d)(\s|=|$)/.test(bare)
-    if (gh && here) return 'wt-pack: no draft PRs. Drop --draft: review, merge to main, push.'
+    if (gh && here) return tag('no-draft-pr', 'wt-pack: no draft PRs. Drop --draft: review, merge to main, push.')
     if (here && /\bgit\s+(?:-c\s+\S+\s+|-\S+\s+)*commit\b/.test(seg)) {
-      if (/\bcommit\b[^|]*\s-[a-zA-Z]*a[a-zA-Z]*(\s|$)|--all\b/.test(bare)) return 'wt-pack: never `git commit -a`. Commit only your own paths: `git commit <paths>`.'
-      if (/--author\b|\s-c\s+user\.(name|email)|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)=/.test(bare)) return 'wt-pack: commits use the repo-local git identity. Drop --author / -c user.* / GIT_AUTHOR_*; fix it with `./setup doctor`.'
+      if (/\bcommit\b[^|]*\s-[a-zA-Z]*a[a-zA-Z]*(\s|$)|--all\b/.test(bare)) return tag('commit-all', 'wt-pack: never `git commit -a`. Commit only your own paths: `git commit <paths>`.')
+      if (/--author\b|\s-c\s+user\.(name|email)|GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)=/.test(bare)) return tag('commit-identity', 'wt-pack: commits use the repo-local git identity. Drop --author / -c user.* / GIT_AUTHOR_*; fix it with `./setup doctor`.')
     }
     const w = words(bare)
-    if (here && forcePush(w)) return 'wt-pack: no force-push. Push normally (the orchestrator merges and pushes); --force-with-lease only if you must.'
-    if (here && broadKill(words(seg))) return 'wt-pack: pkill/pgrep -f needs a specific pattern (6+ characters, not a flag) — a short one matches every agent and Chrome (WP-120). Kill by recorded pid.'
-    if (main && branchSwitch(w)) return 'wt-pack: never change branch in the main checkout. Work in a worktree: `git worktree add .claude/worktrees/<slug> -b <branch> main`.'
-    if (here && w.some((t, k) => /(^|\/)wt-ticket$/.test(t) && w[k + 1] === 'new' && /^(--help|-h|help)$/.test(w[k + 2] ?? ''))) return 'wt-pack: `wt-ticket new --help` creates a ticket titled "--help". Run `wt-ticket` with no arguments for usage.'
-    if (SENDS.test(seg) && SKILLS_PATH.test(seg)) return 'wt-pack: never write ~/.claude/skills/… in sent strings. Refer to the skill by name or a repo-relative path.'
+    if (here && forcePush(w)) return tag('force-push', 'wt-pack: no force-push. Push normally (the orchestrator merges and pushes); --force-with-lease only if you must.')
+    if (here && broadKill(words(seg))) return tag('broad-kill', 'wt-pack: pkill/pgrep -f needs a specific pattern (6+ characters, not a flag) — a short one matches every agent and Chrome (WP-120). Kill by recorded pid.')
+    if (main && branchSwitch(w)) return tag('branch-switch', 'wt-pack: never change branch in the main checkout. Work in a worktree: `git worktree add .claude/worktrees/<slug> -b <branch> main`.')
+    if (here && w.some((t, k) => /(^|\/)wt-ticket$/.test(t) && w[k + 1] === 'new' && /^(--help|-h|help)$/.test(w[k + 2] ?? ''))) return tag('ticket-help', 'wt-pack: `wt-ticket new --help` creates a ticket titled "--help". Run `wt-ticket` with no arguments for usage.')
+    if (SENDS.test(seg) && SKILLS_PATH.test(seg)) return tag('skills-path', 'wt-pack: never write ~/.claude/skills/… in sent strings. Refer to the skill by name or a repo-relative path.')
   }
   return null
 }
@@ -64,12 +66,15 @@ const WHERE = 'test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude-plu
 // origin by `wt-gate` (the policy is wt-shared/scripts/gate.mjs; the mod has no Node and no env, so it asks the CLI). Cheap prefilter
 // first: only a command that could be gated pays for the process.
 const MAYBE_GATED = /\bgit\b[^|;&\n]*\b(push|merge|branch|worktree)\b|\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+// WP-361: a gate deny names the rule id and the matched segment (wt-gate sends both) and says how to get the rest of a compound command through.
+const SPLIT = ' Only that segment is gated: run the other parts of the command as their own command.'
 const gateDeny = (stdout: string) => {
-  let g: { action?: string; asked?: boolean; peer?: boolean } = {}
+  let g: { action?: string; rule?: string; segment?: string; asked?: boolean; peer?: boolean } = {}
   try { g = JSON.parse(stdout) } catch { /* the text below still denies */ }
-  if (g.peer) return `wt-pack gate: ${g.action ?? 'this action'} was requested by a peer session (another Claude session, not the user). Do not retry it; ask the user in chat.` // WP-357: no Inbox ask exists for it
-  return `wt-pack gate: ${g.action ?? 'this action'} needs the user's OK (this turn was not typed by the user or a verified handoff/dispatch/routine from the orchestrator). ` +
-    (g.asked ? 'I asked them in the Inbox; wait for their answer, then retry the same command. Do not retry before it arrives.' : 'The dashboard could not be reached to ask; ask the user in chat and wait.')
+  const at = g.rule ? ` [rule: ${g.rule}${g.segment ? `, segment: \`${clip(g.segment)}\`` : ''}]` : ''
+  if (g.peer) return `wt-pack gate${at}: ${g.action ?? 'this action'} was requested by a peer session (another Claude session, not the user). Do not retry it; ask the user in chat.${SPLIT}` // WP-357: no Inbox ask exists for it
+  return `wt-pack gate${at}: ${g.action ?? 'this action'} needs the user's OK (this turn was not typed by the user or a verified handoff/dispatch/routine from the orchestrator). ` +
+    (g.asked ? 'I asked them in the Inbox; wait for their answer, then retry the same command. Do not retry before it arrives.' : 'The dashboard could not be reached to ask; ask the user in chat and wait.') + SPLIT
 }
 
 export const registerGuards = (on: Parameters<Register>[0], skills: (root: string) => string) => {
