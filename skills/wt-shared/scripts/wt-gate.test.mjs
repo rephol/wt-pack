@@ -44,7 +44,7 @@ test('the user\'s turn and a verified handoff from the orchestrator/server pass;
   assert.equal(calls.length, 0)
   for (const t of [{ trust: 'unverified' }, { trust: 'verified', kind: 'handoff', senderRole: 'worker' }, { trust: 'verified', kind: 'system', senderRole: 'server' }]) {
     turn(t); const r = await check('git push origin main')
-    assert.equal(r.code, 3, JSON.stringify(t)); assert.deepEqual(JSON.parse(r.out), { action: 'git push', asked: true })
+    assert.equal(r.code, 3, JSON.stringify(t)); assert.deepEqual(JSON.parse(r.out), { action: 'git push', rule: 'push', segment: 'git push origin main', asked: true })
   }
   assert.deepEqual(calls.map((c) => c.url).slice(0, 2), ['/api/gate/consume', '/api/gate/ask'])
   assert.equal(calls[1].body.cmd, 'git push origin main'); assert.match(calls[1].body.hash, /^[0-9a-f]{16}$/); assert.equal(calls[1].pane, 'w1:p1')
@@ -54,7 +54,7 @@ test('WP-357: a peer-started turn is denied outright: exit 3, no grant consumed,
   calls.length = 0; granted = true // even a live Allow-once grant is not spent on a peer's request
   turn({ trust: 'peer', from: 'spike-a2' })
   const r = await check('git push origin main')
-  assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', asked: false, peer: true, reason: 'requested by a peer session; ask the user in chat' })
+  assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', rule: 'push', segment: 'git push origin main', asked: false, peer: true, reason: 'requested by a peer session; ask the user in chat' })
   assert.equal(calls.length, 0)
   assert.equal((await check('git push origin main', { WT_GATE: 'off' })).code, 0)
   granted = false
@@ -68,5 +68,5 @@ test('a missing turn record is unverified; a live grant lets the retry through; 
   assert.equal((await check('git push')).code, 0); assert.deepEqual(calls.map((c) => c.url), ['/api/gate/consume']) // consumed, no new ask
   granted = false
   const r = await check('git push', { HERDR_DASH_URL: 'http://127.0.0.1:1' })
-  assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', asked: false })
+  assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', rule: 'push', segment: 'git push', asked: false })
 })

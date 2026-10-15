@@ -33,7 +33,7 @@ try {
 } catch { /* missing or stale = unverified */ }
 if (allowed(turn, mode)) process.exit(0)
 // WP-357: a turn that a peer session started is denied outright: no Allow-once grant is consumed and no Inbox ask is raised for it (the user did not ask).
-if (turn?.trust === 'peer') { console.log(JSON.stringify({ action: hit.action, asked: false, peer: true, reason: 'requested by a peer session; ask the user in chat' })); process.exit(3) }
+if (turn?.trust === 'peer') { console.log(JSON.stringify({ action: hit.action, rule: hit.rule, segment: hit.segment, asked: false, peer: true, reason: 'requested by a peer session; ask the user in chat' })); process.exit(3) }
 
 const api = process.env.HERDR_DASH_URL || 'http://127.0.0.1:7777'
 const hash = createHash('sha1').update(cmd.replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16)
@@ -49,5 +49,5 @@ try {
   await post('/api/gate/ask', { hash, action: hit.action, cmd })
   asked = true
 } catch (e) { console.error(`wt-gate: could not reach the dashboard (${e.message}); not asked`) }
-console.log(JSON.stringify({ action: hit.action, asked }))
+console.log(JSON.stringify({ action: hit.action, rule: hit.rule, segment: hit.segment, asked }))
 process.exit(3)
