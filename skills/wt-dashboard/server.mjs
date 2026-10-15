@@ -4268,7 +4268,9 @@ async function runHousekeeping(dryRun = false) {
     memCache: join(CACHE, 'wt-memory'), agentsCache: join(CACHE, 'wt-agents'),
     live: local && { sessions: new Set(local.map((a) => a.session).filter(Boolean)), names: new Set(local.map((a) => a.name).filter(Boolean)) },
     agentRows: agentTable.list(), forgetAgent: (n) => agentTable.remove(n), projectPaused: (p) => projectStore.isPaused(p),
-    ticketOpen: async (id) => { const c = await tickets.get(id); return !isClosed(c.column) }, // an unknown card throws → treated as not open
+    agentRow: (n) => agentTable.get(n),
+    // only 'no such card' (404) counts as not open; any other error propagates and the sweep keeps the row
+    ticketOpen: async (id) => { try { return !isClosed((await tickets.get(id)).column) } catch (e) { if (e.status === 404) return false; throw e } },
     settings: hk.settings, dryRun,
   })
   if (sum.forgotAgents && !dryRun) store.delete('agents:local')

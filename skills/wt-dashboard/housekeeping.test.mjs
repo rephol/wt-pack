@@ -113,8 +113,8 @@ test('sweep: an aged missing or exited row is forgotten; a younger one is kept',
   assert.deepEqual(out, ['old', 'old-exited', 'no-stamp']); assert.deepEqual(removed, out)
 })
 test('sweep: paused rows, rows of a paused project, live names and open-card rows are kept; a done card is forgotten', async () => {
-  const rows = [row('p', { state: 'paused' }), row('pp', { project: 'frozen' }), row('back', {}), row('open', { ticket: 'WP-1' }), row('done', { ticket: 'WP-2' }), row('ghost', { ticket: 'WP-404' })]
-  const { out } = await sweep(rows, { projectPaused: (p) => p === 'frozen', liveNames: new Set(['back']), ticketOpen: async (id) => { if (id === 'WP-404') throw new Error('no card'); return id === 'WP-1' } })
+  const rows = [row('p', { state: 'paused' }), row('pp', { project: 'frozen' }), row('back', {}), row('open', { ticket: 'WP-1' }), row('done', { ticket: 'WP-2' }), row('ghost', { ticket: 'WP-404' }) /* resolves false: no such card */]
+  const { out } = await sweep(rows, { projectPaused: (p) => p === 'frozen', liveNames: new Set(['back']), ticketOpen: async (id) => id === 'WP-1' })
   assert.deepEqual(out, ['done', 'ghost'])
 })
 test('sweep: missingAgentHours 0 forgets nothing; a dry run reports without removing', async () => {
@@ -128,4 +128,14 @@ test('housekeep runs the sweep and reports it; settings bound missingAgentHours 
   assert.deepEqual(removed, ['old']); assert.equal(s.forgotAgents, 1); assert.deepEqual(logs, ['housekeeping: forgot 1 missing agents'])
   assert.equal(cleanSettings({ missingAgentHours: 0 }).missingAgentHours, 0)
   assert.throws(() => cleanSettings({ missingAgentHours: 721 })); assert.throws(() => cleanSettings({ missingAgentHours: -1 }))
+})
+
+test('sweep fails closed: a ticket lookup error keeps the row', async () => {
+  const { out } = await sweep([row('err', { ticket: 'WP-9' }), row('plain')], { ticketOpen: async () => { throw new Error('db busy') } })
+  assert.deepEqual(out, ['plain'])
+})
+test('sweep re-reads the row before each remove: one that is live, paused or already gone is skipped', async () => {
+  const now = { a: { state: 'missing' }, b: { state: 'idle' }, c: { state: 'paused' } }
+  const { out, removed } = await sweep([row('a'), row('b'), row('c'), row('d')], { current: (n) => now[n] }) // d: gone meanwhile (undefined)
+  assert.deepEqual(out, ['a']); assert.deepEqual(removed, ['a'])
 })

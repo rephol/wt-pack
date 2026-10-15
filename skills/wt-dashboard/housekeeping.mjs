@@ -24,7 +24,7 @@ export function cleanSettings(b = {}) {
 // WP-364: forget agents-table rows that have been missing/exited longer than `hours`. Kept: a paused row, a row of a
 // paused project (Resume respawns from it), a row whose ticket card is still open (the work may resume), a name that
 // is live again. The watcher stays a pure mirror; this is the only automatic delete. Returns the names forgotten.
-export async function sweepMissingAgents({ rows, hours, now = Date.now(), projectPaused = () => false, ticketOpen = async () => false, liveNames = new Set(), remove, dryRun = false }) {
+export async function sweepMissingAgents({ rows, hours, now = Date.now(), projectPaused = () => false, ticketOpen = async () => false, liveNames = new Set(), current = null, remove, dryRun = false }) {
   if (!hours || hours <= 0) return []
   const out = []
   for (const r of rows) {
@@ -32,7 +32,11 @@ export async function sweepMissingAgents({ rows, hours, now = Date.now(), projec
     const at = r.gone_at ?? r.seen_at ?? r.created_at
     if (!at || now - at <= hours * 3_600_000) continue
     if (liveNames.has(r.name) || (r.project && projectPaused(r.project))) continue
-    if (r.ticket && await ticketOpen(r.ticket).catch(() => false)) continue
+    // fail closed: ticketOpen resolves false only for a card that is known to be closed or absent; any error keeps the row
+    if (r.ticket && await ticketOpen(r.ticket).catch(() => true)) continue
+    // re-read just before the delete: a respawn or pause may have landed since `rows` was listed
+    const fresh = current ? current(r.name) : r
+    if (!fresh || !['missing', 'exited'].includes(fresh.state)) continue
     if (!dryRun) remove(r.name)
     out.push(r.name)
   }
@@ -111,7 +115,7 @@ export async function housekeep(ctx) {
   // 5. WP-364: missing/exited agent rows past `missingAgentHours`.
   if (ctx.agentRows) {
     try {
-      const gone = await sweepMissingAgents({ rows: ctx.agentRows, hours: s.missingAgentHours, now, projectPaused: ctx.projectPaused, ticketOpen: ctx.ticketOpen, liveNames: ctx.live?.names, remove: ctx.forgetAgent, dryRun: ctx.dryRun })
+      const gone = await sweepMissingAgents({ rows: ctx.agentRows, hours: s.missingAgentHours, now, projectPaused: ctx.projectPaused, ticketOpen: ctx.ticketOpen, liveNames: ctx.live?.names, current: ctx.agentRow, remove: ctx.forgetAgent, dryRun: ctx.dryRun })
       sum.forgotAgents = gone.length
       if (gone.length) { sum.actions.push(`forget ${gone.length} missing agents`); if (!ctx.dryRun) (ctx.log ?? console.log)(`housekeeping: forgot ${gone.length} missing agents`) }
     } catch (e) { sum.errors.push(`agents: ${e.message}`) }
