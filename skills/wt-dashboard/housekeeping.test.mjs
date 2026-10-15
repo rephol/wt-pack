@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, utimes, readFile, readdir, symlink, stat } f
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { housekeep, cleanSettings } from './housekeeping.mjs'
+import { housekeep, cleanSettings, sweepMissingAgents } from './housekeeping.mjs'
 import { Inbox } from './inbox.mjs'
 import { Rooms } from './rooms.mjs'
 
@@ -98,7 +98,34 @@ test('path guard: nothing outside the roots, no symlinks', async () => {
 })
 
 test('settings validation', () => {
-  assert.deepEqual(cleanSettings({}), { uploadsDays: 30, resolvedDays: 14, rotateMB: 5, rotateKeep: 2, cacheDays: 7 })
+  assert.deepEqual(cleanSettings({}), { uploadsDays: 30, resolvedDays: 14, rotateMB: 5, rotateKeep: 2, cacheDays: 7, missingAgentHours: 24 })
   assert.throws(() => cleanSettings({ uploadsDays: 0 }))
   assert.throws(() => cleanSettings({ rotateMB: '5' }))
+})
+
+// WP-364: auto-forget of missing/exited agent rows.
+const H = 3_600_000, NOW = 1_000 * H
+const row = (name, o = {}) => ({ name, state: 'missing', gone_at: NOW - 48 * H, project: null, ticket: null, ...o })
+const sweep = async (rows, o = {}) => { const removed = []; const out = await sweepMissingAgents({ rows, hours: 24, now: NOW, remove: (n) => removed.push(n), ...o }); return { out, removed } }
+
+test('sweep: an aged missing or exited row is forgotten; a younger one is kept', async () => {
+  const { out, removed } = await sweep([row('old'), row('old-exited', { state: 'exited' }), row('young', { gone_at: NOW - 2 * H }), row('no-stamp', { gone_at: null, seen_at: NOW - 30 * H, created_at: 1 })])
+  assert.deepEqual(out, ['old', 'old-exited', 'no-stamp']); assert.deepEqual(removed, out)
+})
+test('sweep: paused rows, rows of a paused project, live names and open-card rows are kept; a done card is forgotten', async () => {
+  const rows = [row('p', { state: 'paused' }), row('pp', { project: 'frozen' }), row('back', {}), row('open', { ticket: 'WP-1' }), row('done', { ticket: 'WP-2' }), row('ghost', { ticket: 'WP-404' })]
+  const { out } = await sweep(rows, { projectPaused: (p) => p === 'frozen', liveNames: new Set(['back']), ticketOpen: async (id) => { if (id === 'WP-404') throw new Error('no card'); return id === 'WP-1' } })
+  assert.deepEqual(out, ['done', 'ghost'])
+})
+test('sweep: missingAgentHours 0 forgets nothing; a dry run reports without removing', async () => {
+  assert.deepEqual((await sweep([row('old')], { hours: 0 })).removed, [])
+  const d = await sweep([row('old')], { dryRun: true })
+  assert.deepEqual([d.out, d.removed], [['old'], []])
+})
+test('housekeep runs the sweep and reports it; settings bound missingAgentHours to 0–720', async () => {
+  const removed = [], logs = []
+  const s = await housekeep({ roots: [], settings: { missingAgentHours: 24 }, now: NOW, agentRows: [row('old')], forgetAgent: (n) => removed.push(n), log: (l) => logs.push(l) })
+  assert.deepEqual(removed, ['old']); assert.equal(s.forgotAgents, 1); assert.deepEqual(logs, ['housekeeping: forgot 1 missing agents'])
+  assert.equal(cleanSettings({ missingAgentHours: 0 }).missingAgentHours, 0)
+  assert.throws(() => cleanSettings({ missingAgentHours: 721 })); assert.throws(() => cleanSettings({ missingAgentHours: -1 }))
 })

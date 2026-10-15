@@ -10,7 +10,7 @@ import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { SettingsCard, SettingsRow } from './settingsRows'
 
-type Settings = { uploadsDays: number; resolvedDays: number; rotateMB: number; rotateKeep: number; cacheDays: number }
+type Settings = { uploadsDays: number; resolvedDays: number; rotateMB: number; rotateKeep: number; cacheDays: number; missingAgentHours: number }
 type Run = { at: string; files: number; bytes: number; actions: string[]; errors: string[] }
 type State = { settings: Settings; defaults: Settings; lastRun: Run | null; memory: { rss: number; heapUsed: number; heapTotal: number } }
 
@@ -20,6 +20,7 @@ const FIELDS: [keyof Settings, string][] = [
   ['rotateMB', 'Rotate logs at (MB)'],
   ['rotateKeep', 'Rotated logs to keep'],
   ['cacheDays', 'Delete caches of gone agents after (days)'],
+  ['missingAgentHours', 'Forget missing agents after (hours, 0 = off; paused projects and open cards are kept)'],
 ]
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`
 const size = (n: number) => (n >= 1024 * 1024 ? mb(n) : `${Math.round(n / 1024)} KB`)

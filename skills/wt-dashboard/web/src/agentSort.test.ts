@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { sortAgents, initialSort } from './agentSort.ts'
+import { sortAgents, initialSort, splitStored, storedFooter, forgetStoredText } from './agentSort.ts'
 
 const a = (name: string, status: 'working' | 'idle' | 'blocked' | 'done', extra = {}) => ({ name, status, asks: false, statusSince: 0, ...extra })
 const L = [a('planner-10', 'idle', { lastActivity: 50 }), a('planner-02', 'working', { lastActivity: 10 }), a('planner-3', 'idle', { asks: true, statusSince: 99 }), a('planner-1', 'done', { lastActivity: 70 })]
@@ -47,4 +47,18 @@ test('projectList: stored-only paused, agents-only, cards-only, deduped', () => 
   const l = projectList([{ name: 'porto', paused: true }, { name: 'both' }], [row('x', 'idle', 'agentsonly'), row('y', 'idle', 'both')], ['cardsonly', 'both'])
   assert.deepEqual(l.by.map((p) => `${p.name}${p.paused ? '*' : ''}`).slice().sort(), ['agentsonly', 'both', 'cardsonly', 'porto*'])
   assert.equal(l.by.at(-1)?.name, 'porto') // paused sorts last
+})
+
+test('WP-364 splitStored: missing and exited rows are stored, live and paused rows are visible; the header counts visible', () => {
+  const list = [{ status: 'working' }, { status: 'idle' }, { status: 'paused' }, { status: 'missing' }, { status: 'exited' }, { status: 'exited', headless: true }]
+  const { visible, stored } = splitStored(list)
+  assert.equal(visible.length, 4) // header: Workers (4)
+  assert.deepEqual(stored.map((a) => a.status), ['missing', 'exited'])
+  assert.deepEqual(splitStored([{ status: 'missing' }]), { visible: [], stored: [{ status: 'missing' }] }) // only a header + footer
+})
+test('WP-364 footer and confirm text', () => {
+  assert.equal(storedFooter(3, false), '3 not running · Show')
+  assert.equal(storedFooter(3, true), '3 not running · Hide')
+  assert.equal(forgetStoredText(1), 'Forget 1 agent that is not running? Their transcripts stay.')
+  assert.equal(forgetStoredText(4), 'Forget 4 agents that are not running? Their transcripts stay.')
 })
