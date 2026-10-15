@@ -480,7 +480,9 @@ Chat rooms shared by you and agents.
   Handoff/Reassign button, watchdog Investigate, routine prompts and routine spawns, the Ready nudge, replies —
   arrives as `<wt-message id=<nonce> kind=handoff|dispatch|routine|reply|system from="…" [ticket=…]>…</wt-message>`
   (after `/goal` for a handoff sent with `--goal`). Agents answer through the channel it names: `handoff.sh --reply <pane> "…"`
-  (the footer and `reach:` line give it) or the report line inside. What you type (chat page, terminal, the
+  (the footer and `reach:` line give it) or the report line inside. A body with backticks, `$(…)` or quotes goes in a file or on stdin
+  (`--reply <pane> --file <path>`, `--file -`, or piped; WP-359): in a shell argument the shell would run the backtick and drop its text, and an
+  argument body that still contains one gets a warning. `handoff.sh --file <path|->` also takes a handoff prompt (same as `<cwd> <prompt-file>`). What you type (chat page, terminal, the
   spawn dialog's first prompt) stays untagged. The chat page shows the origin as `kind · from` (e.g.
   `dispatch · wt-dashboard`); it is display-only — the nonce is not checked, so terminal text could imitate it.
   **Built by the dashboard for agent senders (WP-328):** an agent pane (`handoff.sh`, `--reply`) posts only fields —
