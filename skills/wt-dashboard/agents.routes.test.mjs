@@ -65,3 +65,31 @@ test('by-name returns the row without tags; forget: a pane may forget itself or 
   assert.equal((await stream('demo-worker-07', pane('w9:p1'))).status, 403)
   assert.equal((await forget('demo-worker-07', { cookie })).status, 200) // the user
 })
+
+test('WP-364 forget-stored: the user forgets missing/exited rows and skips live/paused ones; a pane is refused; >200 names is 400', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'wt-agents-fs-')), bin = join(root, 'bin')
+  mkdirSync(join(root, 'data'), { recursive: true }); mkdirSync(bin); mkdirSync(join(root, 'pane-keys'))
+  writeFileSync(join(bin, 'herdr'), FAKE_HERDR); chmodSync(join(bin, 'herdr'), 0o755)
+  const port = 30000 + Math.floor(Math.random() * 20000), base = `http://127.0.0.1:${port}`
+  children.push(spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'],
+    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root, PATH: `${bin}:${process.env.PATH}` } }))
+  for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
+  let first
+  for (let i = 0; i < 20; i++) { first = await fetch(`${base}/api/agents`); if (first.status === 200) break; await new Promise((r) => setTimeout(r, 250)) }
+  assert.equal(first.status, 200)
+  const db = new DatabaseSync(join(root, 'data', 'wt.db'))
+  const ins = db.prepare('INSERT INTO agents (name, state, created_at) VALUES (?, ?, 1)')
+  ins.run('gone-a', 'missing'); ins.run('gone-b', 'exited'); ins.run('keep-paused', 'paused'); db.close()
+  const cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
+  const post = (names, h = { cookie }) => fetch(`${base}/api/agents/forget-stored`, { method: 'POST', body: JSON.stringify({ names }), headers: { 'content-type': 'application/json', ...h } })
+  assert.equal((await post(['gone-a'], { 'x-herdr-pane': 'w9:p1' })).status, 403) // a pane
+  assert.equal((await post(Array.from({ length: 201 }, (_, i) => `n${i}`))).status, 400)
+  const r = await post(['gone-a', 'gone-b', 'keep-paused', 'demo-worker-01', 'nobody'])
+  assert.equal(r.status, 200)
+  const out = await r.json()
+  assert.equal(out.forgot, 2)
+  assert.deepEqual(out.skipped.map((s) => s.name).sort(), ['demo-worker-01', 'keep-paused', 'nobody'])
+  assert.equal((await fetch(`${base}/api/agents/by-name/gone-a`)).status, 404)
+  assert.equal((await fetch(`${base}/api/agents/by-name/keep-paused`)).status, 200)
+  assert.equal((await fetch(`${base}/api/agents/by-name/demo-worker-01`)).status, 200)
+})

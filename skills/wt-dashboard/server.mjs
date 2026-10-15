@@ -52,6 +52,7 @@ import { ProjectStore } from './project-store.mjs'
 import { AgentTable, reconcile, rowAsAgent } from './agents-table.mjs'
 import { pauseAgent, resumeAgent, pauseProject, resumeProject } from './pause.mjs'
 import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
+import { isClosed } from './contracts.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
 import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
@@ -3650,6 +3651,26 @@ async function agentByNameApi(req, res, name, sub) {
   store.delete('agents:local')
   send(res, 200, { ok: true })
 }
+// POST /api/agents/forget-stored {names} (WP-364), the dashboard user only: forget the rows still missing/exited, skip the rest.
+const FORGET_MAX = 200
+async function forgetStoredApi(req, res) {
+  if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
+  await rooms.load()
+  if ((await roomAuthor(req)).kind !== 'user') return send(res, 403, { error: 'dashboard only' })
+  const b = JSON.parse((await body(req)) || '{}')
+  if (!Array.isArray(b.names) || !b.names.every((n) => typeof n === 'string')) return send(res, 400, { error: 'names: an array of agent names' })
+  if (b.names.length > FORGET_MAX) return send(res, 400, { error: `at most ${FORGET_MAX} names` })
+  let forgot = 0
+  const skipped = []
+  for (const name of new Set(b.names)) {
+    const row = agentTable.get(name)
+    if (!row) skipped.push({ name, why: 'no such agent' })
+    else if (!['missing', 'exited'].includes(row.state)) skipped.push({ name, why: `${row.state}, not missing or exited` })
+    else { agentTable.remove(name); forgot++ }
+  }
+  if (forgot) store.delete('agents:local')
+  send(res, 200, { forgot, skipped })
+}
 // POST /api/agents/by-name/:n/pause|resume (WP-348), the dashboard user only.
 async function agentPauseApi(req, res, name, sub) {
   if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
@@ -3902,6 +3923,7 @@ const server = http.createServer(async (req, res) => {
         const [code, out] = await handoffTask(decodeURIComponent(parts[2]), b.mode).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
         return send(res, code, out)
       }
+      if (url.pathname === '/api/agents/forget-stored') return await forgetStoredApi(req, res).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'agents' && parts[2] === 'by-name' && parts[3]) return await agentByNameApi(req, res, decodeURIComponent(parts[3]), parts[4]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'agents') {
         if (!parts[2]) { // WP-348: paused and missing agents stay listed (no pane), so they never disappear
@@ -4245,8 +4267,13 @@ async function runHousekeeping(dryRun = false) {
     ],
     memCache: join(CACHE, 'wt-memory'), agentsCache: join(CACHE, 'wt-agents'),
     live: local && { sessions: new Set(local.map((a) => a.session).filter(Boolean)), names: new Set(local.map((a) => a.name).filter(Boolean)) },
+    agentRows: agentTable.list(), forgetAgent: (n) => agentTable.remove(n), projectPaused: (p) => projectStore.isPaused(p),
+    agentRow: (n) => agentTable.get(n),
+    // only 'no such card' (404) counts as not open; any other error propagates and the sweep keeps the row
+    ticketOpen: async (id) => { try { return !isClosed((await tickets.get(id)).column) } catch (e) { if (e.status === 404) return false; throw e } },
     settings: hk.settings, dryRun,
   })
+  if (sum.forgotAgents && !dryRun) store.delete('agents:local')
   // WP-138: drop room members not-running for over 24h (their messages stay). `all` is every known agent
   // (local and remote, running or not) — the same set room membership itself is drawn from, so a remote or
   // merely-idle member is never mistaken for gone.

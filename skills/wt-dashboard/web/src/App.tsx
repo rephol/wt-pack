@@ -18,13 +18,14 @@ import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { ServerStatus } from './status'
 import { ImageRow, FileCards, useAttachments, AttachmentChip, ATTACH_ACCEPT, MAX_IMAGES, type SharedFile } from './attachments'
 import { useToast } from '@astryxdesign/core/Toast'
+import { AlertDialog } from '@astryxdesign/core/AlertDialog'
 import { useDesktop, isPrimaryWindow } from './desktop'
 import { Dock } from './ChatDock'
 import { dockReducer, load as loadDock, save as saveDock, unread as dockUnread, dockKind } from './dock'
 import { SettingsHost, openSettings } from './settings'
 import { openProjectSettings } from './projects-settings'
 import { InboxButton, InboxHost } from './inbox'
-import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier } from './rooms'
+import { RoomsPage, RoomView, useRoomsList, DOCK_LIMIT, ShowEarlier, api } from './rooms'
 import { PinnedBar, SavedButton, SavedHost, useJumpRequest } from './pins'
 import { agentChat } from './pinState'
 import { ChatMessageRow, useShowAllDetails, setShowAllDetails } from './chatMessage'
@@ -59,7 +60,7 @@ import { VirtualRows } from './virtual'
 import { TerminalsPage, TerminalView, useTermSettings } from './terminals'
 import { PwaHost, InstallHint, UpdateBanner } from './pwa'
 import { openInbox } from './inbox'
-import { sortAgents, initialSort, activityOf, projectList, extraAgent, mergeAgents, isLive, countTooltip, type AgentSort } from './agentSort'
+import { sortAgents, initialSort, activityOf, projectList, extraAgent, mergeAgents, isLive, countTooltip, splitStored, storedFooter, forgetStoredText, type AgentSort } from './agentSort'
 import { shortAgo } from './notifyGate'
 import { storedMode } from './storedMode'
 import { QuickSwitcher, rememberRecent } from './switcher'
@@ -928,6 +929,21 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
     setCollapsed(next)
     try { localStorage.setItem('agentGroupsCollapsed', JSON.stringify(next)) } catch { /* private mode */ }
   }
+  // WP-364: missing/exited rows sit behind a per-section footer; the toggle is per viewer.
+  const [showStored, setShowStored] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('agentStoredShown') ?? '[]') } catch { return [] } })
+  const toggleStored = (k: string) => {
+    const next = showStored.includes(k) ? showStored.filter((x) => x !== k) : [...showStored, k]
+    setShowStored(next)
+    try { localStorage.setItem('agentStoredShown', JSON.stringify(next)) } catch { /* private mode */ }
+  }
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [forgetAsk, setForgetAsk] = useState<string[] | null>(null)
+  const forgetAll = useMutation({
+    mutationFn: (names: string[]) => api<{ forgot: number; skipped: unknown[] }>('/api/agents/forget-stored', { method: 'POST', body: JSON.stringify({ names }) }),
+    onSuccess: (r) => { toast({ body: `Forgot ${r.forgot}${r.skipped.length ? `, skipped ${r.skipped.length}` : ''}` }); for (const k of ['overview', 'agents', 'projects']) qc.invalidateQueries({ queryKey: [k] }) },
+    onError: (e) => toast({ body: `Not forgotten: ${e instanceof Error ? e.message : e}`, type: 'error' }),
+  })
   const phone = useNarrow('(max-width: 639px)')
   const [cols, setColsState] = useState<ColConfig>(loadCols)
   const setCols = (c: ColConfig) => { setColsState(c); try { localStorage.setItem('agentCols', JSON.stringify(c)) } catch { /* private mode */ } }
@@ -962,12 +978,21 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
       </HStack>
       {[...roles, OTHER].map((role) => { const key = role.id, title = plural(role)
         const pool = data.agents.filter((a) => a.pool === key)
-        const rows = sortAgents(pool.filter((a) => AGENT_FILTERS[filter](a, taskOf(a)) && (machine === 'all' || a.machine === machine)), sort)
+        const matched = sortAgents(pool.filter((a) => AGENT_FILTERS[filter](a, taskOf(a)) && (machine === 'all' || a.machine === machine)), sort)
+        const { visible, stored } = splitStored(matched)
+        const storedOpen = showStored.includes(key)
+        const rows = storedOpen ? matched : visible
         if (!pool.length) return null
+        const footer = stored.length > 0 && (
+          <HStack gap={2} align="center" style={{ padding: '6px 4px' }}>
+            <Button label={storedFooter(stored.length, storedOpen)} variant="ghost" size="sm" onClick={() => toggleStored(key)} />
+            <Button label="Forget all" variant="ghost" size="sm" onClick={() => setForgetAsk(stored.map((a) => a.name))} />
+          </HStack>
+        )
         return (
           <Collapsible key={key} isOpen={!collapsed.includes(key)} onOpenChange={(o) => toggleGroup(key, o)} chevronPosition="start"
-            trigger={<Heading level={2}>{`${title} (${pool.length})`}</Heading>}>
-            {rows.length === 0 ? (
+            trigger={<Heading level={2}>{`${title} (${splitStored(pool).visible.length})`}</Heading>}>
+            {rows.length === 0 && stored.length > 0 ? footer : rows.length === 0 ? (
               <Text type="supporting">No agents match this filter.</Text>
             ) : phone ? (
               <VStack gap={0}>
@@ -1061,9 +1086,14 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
               </Table>
               </div>
             )}
+            {rows.length > 0 && footer}
           </Collapsible>
         )
       })}
+      {forgetAsk && (
+        <AlertDialog isOpen onOpenChange={(o) => !o && setForgetAsk(null)} title="Forget agents?" actionLabel="Forget all" actionVariant="destructive"
+          description={forgetStoredText(forgetAsk.length)} onAction={() => { forgetAll.mutate(forgetAsk); setForgetAsk(null) }} />
+      )}
     </VStack>
   )
 }

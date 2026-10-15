@@ -57,3 +57,14 @@ export function projectList(stored: { name: string; paused?: boolean }[], agents
   const by = c.by.map(([name, counts]): ProjectItem => ({ name, paused: paused.has(name), counts })).sort((x, y) => Number(x.paused) - Number(y.paused))
   return { all: c.all, by }
 }
+
+// WP-364: a missing/exited saved row is "stored": hidden behind a footer by default (paused stays visible: Resume lives
+// there; a headless run is not an agents-table row). visible = live + paused + headless; the section header counts visible.
+export const isStoredRow = (a: { status: string; headless?: boolean }) => !a.headless && (a.status === 'missing' || a.status === 'exited')
+export function splitStored<T extends { status: string; headless?: boolean }>(list: T[]): { visible: T[]; stored: T[] } {
+  const visible: T[] = [], stored: T[] = []
+  for (const a of list) (isStoredRow(a) ? stored : visible).push(a)
+  return { visible, stored }
+}
+export const storedFooter = (n: number, open: boolean) => `${n} not running · ${open ? 'Hide' : 'Show'}`
+export const forgetStoredText = (n: number) => `Forget ${n} agent${n === 1 ? '' : 's'} that ${n === 1 ? 'is' : 'are'} not running? Their transcripts stay.`
