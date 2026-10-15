@@ -3355,7 +3355,15 @@ export async function roomAttachments(author, b) {
   for (const { path: p, name: origName } of list) {
     let real
     try { real = realpathSync(p) } catch { throw Object.assign(new Error(`no such file: ${p}`), { status: 400 }) }
-    if (!statSync(real).isFile()) throw Object.assign(new Error(`${p}: not a file`), { status: 400 })
+    const st = statSync(real)
+    // An agent's path is checked against its roots before anything is read, and every refusal there is the same
+    // generic error (no probing which files exist or what they are).
+    if (author.kind !== 'user') {
+      const a = (await agents()).find((x) => x.key === author.key)
+      const roots = [a?.cwd, '/tmp', '/private/tmp'].filter(Boolean).map((d) => { try { return realpathSync(d) } catch { return d } })
+      if (!st.isFile() || !roots.some((d) => real.startsWith(d + '/'))) throw Object.assign(new Error('only images and text under your cwd or /tmp'), { status: 400 })
+    } else if (!st.isFile()) throw Object.assign(new Error(`${p}: not a file`), { status: 400 })
+    if (st.size > (author.kind === 'user' ? MAX_UPLOAD_BIG : MAX_UPLOAD)) throw Object.assign(new Error(`${p}: unsupported file type or too large`), { status: 400 })
     const buf = await readFile(real)
     const img = Object.entries(IMG).find(([, v]) => v.ok(buf))
     // WP-170: a non-image file has no reliable magic-byte signature to sniff, so it's recognised by its
@@ -3373,9 +3381,6 @@ export async function roomAttachments(author, b) {
       out.push({ path: real, type: type.mime, size: buf.length, ...(origName ? { name: sanitizeFilename(origName) } : {}) })
       continue
     }
-    const a = (await agents()).find((x) => x.key === author.key)
-    const roots = [a?.cwd, '/tmp', '/private/tmp'].filter(Boolean).map((d) => { try { return realpathSync(d) } catch { return d } })
-    if (!roots.some((d) => real.startsWith(d + '/'))) throw Object.assign(new Error(`${p}: only images and text under your cwd or /tmp`), { status: 400 })
     const day = new Date().toISOString().slice(0, 10)
     await mkdir(join(UPLOADS, day), { recursive: true, mode: 0o700 })
     const dest = join(UPLOADS, day, `${randomUUID()}.${type.ext}`)

@@ -106,6 +106,13 @@ test('roomAttachments: an agent text attachment is refused when binary, invalid 
   await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [big] }), /unsupported file type or too large/)
 })
 
+test('roomAttachments: an agent path outside its cwd and /tmp is refused before the file is read, with one generic error', async () => {
+  const outside = join(tmp, 'secret.md') // tmpdir() is /var/folders/…, not under /tmp or the agent's cwd
+  writeFileSync(outside, '# private')
+  await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [outside] }), (e) => e.status === 400 && e.message === 'only images and text under your cwd or /tmp')
+  await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [tmp] }), (e) => e.message === 'only images and text under your cwd or /tmp')
+})
+
 test('roomAttachments: only a file already inside UPLOADS is attachable for a user (no arbitrary path)', async () => {
   const outside = join(tmp, 'outside.txt')
   writeFileSync(outside, 'x')
