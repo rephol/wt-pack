@@ -674,3 +674,42 @@ test('WP-352: no recorded row (no pane identity or token) or a pane without a ke
   assert.match(calls, /^herdr agent prompt wW:p3 <wt-message id=\w+ kind=reply[^>]*>short answer/m)
   assert.doesNotMatch(calls, /Read it with/)
 })
+
+// WP-359: the body from --file / stdin ("-") carries backticks, $( and quotes verbatim; an argument body with them warns; every old form still works.
+const NASTY = 'ran `date` and $(whoami) then "quoted" and \'single\' $HOME'
+const runRaw = (args, input = '') => spawnSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8',
+  env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off' } })
+test('WP-359: --reply --file <path> and --reply - (stdin) send a nasty body verbatim, with no warning', () => {
+  const f = join(tmp, 'reply-body.txt'); writeFileSync(f, `${NASTY}\nsecond line\n`)
+  for (const [args, input] of [[['--reply', 'wW:p1', '--file', f, '--dry-run'], ''], [['--reply', 'wW:p1', '--file', '-', '--dry-run'], NASTY + '\nsecond line\n'],
+    [['--reply', 'wW:p1', '--dry-run', '-'], NASTY + '\nsecond line\n'], [['--reply', 'wW:p1', '--dry-run'], NASTY + '\nsecond line\n']]) {
+    const r = runRaw(args, input)
+    assert.equal(r.status, 0, r.stderr)
+    assert.ok(r.stdout.includes(NASTY) && r.stdout.includes('second line'), `${args.join(' ')}: ${r.stdout}`)
+    assert.doesNotMatch(r.stderr, /warning/)
+  }
+})
+test('WP-359: a reply body passed as an argument that contains a backtick or $( warns on stderr but still sends; a plain one does not warn', () => {
+  for (const t of ['kept `date` literally', 'kept $(whoami) literally']) {
+    const r = runRaw(['--reply', 'wW:p1', '--dry-run', t])
+    assert.equal(r.status, 0); assert.ok(r.stdout.includes(t))
+    assert.match(r.stderr, /warning: the reply text contains a backtick or \$\(.*--file <path> or stdin/)
+  }
+  assert.doesNotMatch(runRaw(['--reply', 'wW:p1', '--dry-run', 'plain text, 100% fine']).stderr, /warning/)
+})
+test('WP-359: --file errors: a missing path and an empty body exit non-zero with a clear message', () => {
+  assert.match(runRaw(['--reply', 'wW:p1', '--file', join(tmp, 'nope.txt'), '--dry-run']).stderr, /--file: cannot read/)
+  assert.equal(runRaw(['--reply', 'wW:p1', '--file', join(tmp, 'nope.txt'), '--dry-run']).status, 2)
+  assert.equal(runRaw(['--reply', 'wW:p1', '--file', '-', '--dry-run'], '').status, 2) // empty stdin: "--reply: no text"
+  assert.equal(runRaw(['--reply', 'wW:p1', '--file']).status, 2)
+})
+test('WP-359: a handoff prompt from --file <path> or --file - equals the old <cwd> <prompt-file> and stdin forms', () => {
+  const f = join(tmp, 'prompt-body.txt'); writeFileSync(f, NASTY)
+  const norm = (o) => o.replace(/id=\w+/g, 'id=X').replace(/ref \w+#0/g, 'ref X')
+  const old = norm(runRaw(['--role', 'reviewer', '--no-goal', '--dry-run', repo, f]).stdout)
+  const viaFile = norm(runRaw(['--role', 'reviewer', '--no-goal', '--dry-run', '--file', f, repo]).stdout)
+  const viaStdin = norm(runRaw(['--role', 'reviewer', '--no-goal', '--dry-run', '--file', '-', repo], NASTY).stdout)
+  const oldStdin = norm(runRaw(['--role', 'reviewer', '--no-goal', '--dry-run', repo], NASTY).stdout)
+  assert.equal(viaFile, old); assert.equal(viaStdin, old); assert.equal(oldStdin, old)
+  assert.equal(runRaw(['--no-goal', '--dry-run', '--file', join(tmp, 'nope.txt'), repo]).status, 1)
+})
