@@ -17,8 +17,9 @@ work both from the `./setup` links and from a plugin install (WP-122).
 ```bash
 scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
 printf '%s\n' "$PROMPT" | scripts/handoff.sh \
-  [--pane <id> [--clear] | --new] [--goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] <cwd>
+  [--pane <id> [--clear] | --new] [--goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] [--file <path|->] <cwd>
 scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
+scripts/handoff.sh --reply <pane> --file <path|->   # WP-359: the body from a file or stdin, verbatim (use it for any text with backticks, $(…) or quotes)
 scripts/handoff.sh --ack <id> [--answered]   # WP-257: acknowledge a wt-message by its id (the id in its tag)
 scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
 ```
@@ -29,7 +30,10 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   server callers (Dispatch passes `--kind dispatch --from wt-dashboard`). The wrap counts toward the 4000 cap.
 - **`--reply <pane> "text"`** answers whoever sent you a wt-message: a plain `kind=reply` prompt, no `/goal`,
   no tokens, no worker selection. Raw `herdr agent prompt` still works but arrives untagged — describe it only
-  as the fallback when `handoff.sh` is unavailable.
+  as the fallback when `handoff.sh` is unavailable. **Put a body with backticks, `$(…)` or quotes in a file (`--file <path>`) or pipe it
+  (`… | handoff.sh --reply <pane>`, or `--file -`)** — in a shell argument the shell runs a backtick or `$(…)` first and silently
+  drops its text (WP-359); an argument body that still contains one prints a warning. For a handoff, `--file <path|->` is the same as the
+  `<cwd> <prompt-file>` form (no file and no `--file` still reads stdin).
 - **`--cancel <pane|name> ["why"]`** actually stops a `/goal`-driven agent (WP-132): a goal keeps an agent
   working toward its condition no matter what's typed at it — a plain "stop" is not enough (the WP-131
   incident: two agents told to stop kept going). It sends Escape to interrupt whatever the agent is

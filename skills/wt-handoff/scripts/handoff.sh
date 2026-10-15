@@ -4,7 +4,9 @@
 #   handoff.sh --list <cwd>                              # free workers, one per line
 #   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--effort low|medium|high] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh ... [--request-id <id>] ...               # WP-251: a repeat of the same id prints the first run's output and sends nothing
-#   handoff.sh --reply <pane> ["text"]                   # answer a wt-message (text or stdin), kind=reply
+#   handoff.sh --reply <pane> ["text"|-]                  # answer a wt-message (text, or stdin: no text or "-"), kind=reply
+#   handoff.sh --reply <pane> --file <path|->            # WP-359: the body from a file ("-" = stdin); safe for backticks, $(…), quotes
+#   handoff.sh [opts] --file <path|-> <cwd>              # WP-359: the prompt from a file ("-" = stdin), same as <cwd> <prompt-file>
 #   handoff.sh --cancel <pane|name> ["why"]               # stop an agent: escape, end its /goal if any,
 #                                                          # clear task/ticket tokens, return its card if assigned
 #
@@ -72,6 +74,7 @@ clear=0
 kind=handoff
 from_arg=
 reply=
+body_file= # WP-359: --file <path|-> body for --reply and for a handoff prompt
 cancel=
 PANE_RE='^[A-Za-z0-9:_][A-Za-z0-9:_-]*$'
 # WP-341: absolute at start — a later `cd` (spawn does one) would break a relative $0.
@@ -130,6 +133,7 @@ while :; do
     --kind)  kind=$2; shift 2
              case "$kind" in handoff|dispatch|routine|reply|system) ;; *) echo "--kind: handoff, dispatch, routine, reply or system" >&2; exit 2 ;; esac ;;
     --from)  from_arg=$2; shift 2 ;;
+    --file)  body_file=${2:-}; [ -n "$body_file" ] || { echo "--file: needs a path (or - for stdin)" >&2; exit 2; }; shift 2 ;;
     --goal)  goal=1; shift ;;   # WP-272: arm a /goal on the target (the old default)
     --no-goal) goal=0; shift ;; # accepted: now the default
     --task)  task=$2; shift 2 ;;
@@ -227,8 +231,20 @@ fi
 
 # --reply: a plain answer to whoever sent us a wt-message — no /goal, no tokens, no worker selection.
 if [ -n "$reply" ]; then
-  text=${1:-}
-  [ -n "$text" ] || { [ -t 0 ] && { echo "--reply <pane> \"text\" (or text on stdin)" >&2; exit 2; }; text=$(cat); }
+  # WP-359: a body typed into a shell argument is run by the shell first (a backtick or $( is executed and its text silently dropped);
+  # --file <path> and stdin ("-", or no text) carry it verbatim.
+  if [ -n "$body_file" ]; then
+    if [ "$body_file" = - ]; then text=$(cat); else [ -r "$body_file" ] || { echo "--file: cannot read $body_file" >&2; exit 2; }; text=$(cat "$body_file"); fi
+  else
+    text=${1:-}
+    if [ "$text" = - ]; then text=$(cat)
+    elif [ -z "$text" ]; then
+      [ -t 0 ] && { echo "--reply <pane> \"text\" (or --file <path>, or the text on stdin)" >&2; exit 2; }
+      text=$(cat)
+    else
+      case "$text" in *'`'*|*'$('*) echo "warning: the reply text contains a backtick or \$( - a shell may already have run it as a command and dropped its text; use --file <path> or stdin (cat <<'EOF' | handoff.sh --reply <pane>) to send it verbatim" >&2 ;; esac
+    fi
+  fi
   [ -n "$text" ] || { echo "--reply: no text" >&2; exit 2; }
   me=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
   nm=$( [ -n "$me" ] && name_of "$me" || true)
@@ -312,9 +328,13 @@ if [ -n "$cancel" ]; then
   exit 0
 fi
 
-[ "$mode" = list ] || [ $# -gt 0 ] || { echo "usage: handoff.sh [--pane <id>|--new] [opts] <cwd> [prompt-file]" >&2; exit 2; }
+[ "$mode" = list ] || [ $# -gt 0 ] || { echo "usage: handoff.sh [--pane <id>|--new] [opts] [--file <path|->] <cwd> [prompt-file]" >&2; exit 2; }
 cwd=${1:-}
-[ "$mode" = list ] || prompt=$(cat "${2:-/dev/stdin}")
+if [ "$mode" != list ]; then # WP-359: --file <path|-> or the second argument; no file = stdin
+  pf=${body_file:-${2:-/dev/stdin}}; [ "$pf" = - ] && pf=/dev/stdin
+  [ "$pf" = /dev/stdin ] || [ -r "$pf" ] || { echo "cannot read the prompt file: $pf" >&2; exit 1; }
+  prompt=$(cat "$pf")
+fi
 [ -d "$cwd" ] || { echo "no such directory: $cwd" >&2; exit 1; }
 
 # The main checkout of this repo: a worktree's git-common-dir points back at the
