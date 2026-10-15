@@ -1,12 +1,14 @@
 // Run: node --test skills/wt-dashboard/uploads.test.mjs — WP-170 upload/room-attachment type + security checks.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 
 const tmp = mkdtempSync(join(tmpdir(), 'wt-uploads-'))
+const agentDir = mkdtempSync('/tmp/wt-uploads-agent-') // an agent may attach only from its cwd or /tmp
+process.on('exit', () => rmSync(agentDir, { recursive: true, force: true }))
 process.env.WT_DASHBOARD_DATA = tmp
 const { saveUpload, roomAttachments, sanitizeFilename } = await import('./server.mjs')
 
@@ -81,9 +83,27 @@ test('roomAttachments: a user can attach an uploaded text file; the original nam
   // a bare-string attachment (an agent's own wt-room --attach shape) still works, just with no name.
 })
 
-test('roomAttachments: an agent room --attach stays images-only, unchanged (a text file is refused)', async () => {
-  const [, up] = await saveUpload(fakeReq({ 'x-filename': encodeURIComponent('notes2.txt') }, 'hi'))
-  await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [up.path] }), /unsupported file type or too large/)
+test('roomAttachments: an agent can attach a .md/.txt file under its cwd/tmp (copied, name kept); non-text is refused', async () => {
+  const md = join(agentDir, 'notes.md')
+  writeFileSync(md, '# hi\nplain *markdown*')
+  const out = await roomAttachments({ kind: 'agent', key: 'x' }, { attach: [md] })
+  assert.equal(out.length, 1)
+  assert.equal(out[0].name, 'notes.md')
+  assert.match(out[0].path, /\.md$/)
+  assert.notEqual(out[0].path, md)
+  for (const [n, body] of [['bad.html', '<script>1</script>'], ['bad.svg', '<svg/>'], ['bad.zip', 'PK']]) {
+    const f = join(agentDir, n); writeFileSync(f, body)
+    await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [f] }), /unsupported file type or too large/)
+  }
+})
+
+test('roomAttachments: an agent text attachment is refused when binary, invalid UTF-8 or over 1MB', async () => {
+  const bin = join(agentDir, 'bin.md'); writeFileSync(bin, Buffer.from([0x23, 0x00, 0x41]))
+  await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [bin] }), /does not match its type/)
+  const bad = join(agentDir, 'bad.txt'); writeFileSync(bad, Buffer.from([0xff, 0xfe, 0x41]))
+  await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [bad] }), /does not match its type/)
+  const big = join(agentDir, 'big.md'); writeFileSync(big, 'a'.repeat(1024 * 1024 + 1))
+  await assert.rejects(roomAttachments({ kind: 'agent', key: 'x' }, { attach: [big] }), /unsupported file type or too large/)
 })
 
 test('roomAttachments: only a file already inside UPLOADS is attachable for a user (no arbitrary path)', async () => {

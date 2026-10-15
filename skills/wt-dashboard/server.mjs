@@ -3336,6 +3336,11 @@ async function roomAuthor(req) {
 // Room attachments: the user attaches files already uploaded (paths inside UPLOADS); an agent attaches
 // images from its own cwd or /tmp, which are validated by content and COPIED into uploads.
 const MAX_ROOM_ATTS = 5
+// WP-362: an agent's `room post --attach` also takes plain text/markdown (extension allowlist + a content check:
+// valid UTF-8, no NUL byte, so a binary renamed .md is refused), capped at 1MB. Never html/svg; served as a download.
+const MAX_AGENT_TEXT = 1024 * 1024
+const AGENT_TEXT_EXT = new Set(['txt', 'md', 'markdown', 'log', 'csv', 'json'])
+const isPlainText = (b) => { if (b.includes(0)) return false; try { new TextDecoder('utf-8', { fatal: true }).decode(b); return true } catch { return false } }
 export async function roomAttachments(author, b) {
   const raw = author.kind === 'user' ? b.attachments : b.attach
   if (raw === undefined) return []
@@ -3356,9 +3361,11 @@ export async function roomAttachments(author, b) {
     // WP-170: a non-image file has no reliable magic-byte signature to sniff, so it's recognised by its
     // already-server-assigned extension instead — user attachments only. An agent's own room --attach stays
     // images-only, unchanged: it points at arbitrary cwd/tmp paths, not a sanitized-filename upload.
-    const docExt = !img && author.kind === 'user' ? extname(real).slice(1).toLowerCase() : null
-    const doc = docExt ? DOC_EXT[docExt] : null
-    const type = img ? { mime: img[0], max: MAX_UPLOAD, ext: img[1].ext } : doc ? { mime: doc.mime, max: doc.max, ext: docExt } : null
+    const ext = extname(real).slice(1).toLowerCase()
+    const docExt = !img && author.kind === 'user' ? ext : null
+    const agentText = !img && author.kind !== 'user' && AGENT_TEXT_EXT.has(ext)
+    const doc = docExt ? DOC_EXT[docExt] : agentText ? { ...DOC_EXT[ext], max: MAX_AGENT_TEXT, ok: isPlainText } : null
+    const type = img ? { mime: img[0], max: MAX_UPLOAD, ext: img[1].ext } : doc ? { mime: doc.mime, max: doc.max, ext: docExt ?? ext } : null
     if (!type || buf.length > type.max) throw Object.assign(new Error(`${p}: unsupported file type or too large`), { status: 400 })
     if (doc?.ok && !doc.ok(buf)) throw Object.assign(new Error(`${p}: file content does not match its type`), { status: 400 })
     if (author.kind === 'user') {
@@ -3368,12 +3375,12 @@ export async function roomAttachments(author, b) {
     }
     const a = (await agents()).find((x) => x.key === author.key)
     const roots = [a?.cwd, '/tmp', '/private/tmp'].filter(Boolean).map((d) => { try { return realpathSync(d) } catch { return d } })
-    if (!roots.some((d) => real.startsWith(d + '/'))) throw Object.assign(new Error(`${p}: only images under your cwd or /tmp`), { status: 400 })
+    if (!roots.some((d) => real.startsWith(d + '/'))) throw Object.assign(new Error(`${p}: only images and text under your cwd or /tmp`), { status: 400 })
     const day = new Date().toISOString().slice(0, 10)
     await mkdir(join(UPLOADS, day), { recursive: true, mode: 0o700 })
     const dest = join(UPLOADS, day, `${randomUUID()}.${type.ext}`)
     await writeFile(dest, buf, { mode: 0o600 })
-    out.push({ path: dest, type: type.mime, size: buf.length })
+    out.push({ path: dest, type: type.mime, size: buf.length, ...(agentText ? { name: sanitizeFilename(basename(real)) } : {}) })
   }
   return out
 }
