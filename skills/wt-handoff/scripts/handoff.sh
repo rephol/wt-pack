@@ -489,7 +489,8 @@ hand_to() {
   fi
   # WP-352: the row is recorded before anything is typed (the receiving hook verifies the pointer against it); the full body is
   # read by the target with `wt-message show <id>`, and kept in the mode-600 file as a local copy.
-  [ "${server_recorded:-0}" -eq 1 ] || { record_message "$1" "$send" delivered; server_recorded=$recorded; }
+  if [ "${server_recorded:-0}" -eq 1 ]; then :; elif [ "${rec_done:-0}" -eq 1 ]; then server_recorded=1 # queue_pulled recorded it
+  else record_message "$1" "$send" delivered; server_recorded=$recorded; fi
   save_message >/dev/null || true
   typed=$(ptr "$1" "$send" "$server_recorded")
   if [ "$typed" = "$send" ]; then # no pointer (no recorded row, or a keyless pane): paste the full text as before
@@ -537,7 +538,7 @@ queue_pulled() { # <pane>
   else
     qid=
     queue_prompt "$1" "$send" || return 1 # not live: nothing queued, nothing recorded (finish records it delivered once typed)
-    record_message "$1" "$send" queued
+    record_message "$1" "$send" queued; rec_done=$recorded # WP-360: recorded once; a later record of the same id would count as a redelivery
   fi
   n=0; max=${WT_PULL_WAIT_S:-30}
   while [ "$n" -lt "$max" ]; do

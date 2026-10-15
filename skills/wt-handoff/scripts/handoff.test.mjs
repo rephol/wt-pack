@@ -713,3 +713,24 @@ test('WP-359: a handoff prompt from --file <path> or --file - equals the old <cw
   assert.equal(viaFile, old); assert.equal(viaStdin, old); assert.equal(oldStdin, old)
   assert.equal(runRaw(['--no-goal', '--dry-run', '--file', join(tmp, 'nope.txt'), repo]).status, 1)
 })
+
+// WP-360: a --new handoff types its message exactly once: agents.sh spawn gets no prompt, and the one send carries the id.
+test('WP-360: --new spawns without the prompt and types the message exactly once', () => {
+  const root = join(tmp, 'tree360'), spawnLog = join(tmp, 'spawn360.log')
+  mkdirSync(join(root, 'wt-handoff', 'scripts'), { recursive: true }); mkdirSync(join(root, 'wt-agents', 'scripts'), { recursive: true })
+  writeFileSync(join(root, 'wt-handoff', 'scripts', 'handoff.sh'), readFileSync(join(here, 'handoff.sh')), { mode: 0o755 })
+  execFileSync('ln', ['-s', join(here, '..', '..', 'wt-shared'), join(root, 'wt-shared')])
+  for (const d of ['wt-ticket', 'wt-plan', 'wt-memory', 'wt-room', 'wt-dashboard']) execFileSync('ln', ['-s', join(here, '..', '..', d), join(root, d)]) // handoff.sh reads its siblings
+  writeFileSync(join(root, 'wt-agents', 'scripts', 'agents.sh'), `#!/bin/sh\necho "agents.sh $*" >> ${spawnLog}\necho "demo-worker-09 wW:p9"\n`, { mode: 0o755 })
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+  const before = existsSyncSafe(log) ? readFileSync(log, 'utf8').length : 0
+  const marker = 'MARKER-WP360-FIRST-PROMPT'
+  const out = execFileSync(join(root, 'wt-handoff', 'scripts', 'handoff.sh'), ['--new', '--role', 'worker', '--no-goal', repo], { input: marker, encoding: 'utf8', env: ptrEnv })
+  assert.match(out, /created demo-worker-09 wW:p9/)
+  const spawns = readFileSync(spawnLog, 'utf8')
+  assert.match(spawns, /agents\.sh spawn worker/); assert.doesNotMatch(spawns, new RegExp(marker)) // spawn is never given the prompt
+  const sends = readFileSync(log, 'utf8').slice(before).split('\n').filter((l) => /^herdr (agent prompt|pane send-text) /.test(l) && l.includes('wW:p9') && !/\/clear|\/goal clear/.test(l))
+  const ids = sends.map((l) => l.match(/wt-message id=(\w+)/)?.[1]).filter(Boolean)
+  assert.equal(ids.length, 1, sends.join('\n')) // one typed send, one envelope id
+})
+function existsSyncSafe(f) { try { statSync(f); return true } catch { return false } }

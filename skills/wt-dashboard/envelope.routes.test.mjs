@@ -155,3 +155,20 @@ test('(k) verify: a matching body hash verifies, a mismatching one does not; a p
   assert.equal(again.verified, false); assert.match(again.reason, /already delivered/)
   assert.equal((await v(`&sha=${bodyHash(sent.text)}`)).verified, true) // an inline envelope is not use-once
 })
+
+test('(l) WP-360 verify: attempt, ackedAt and sentAt come from the record; a used pointer answers a duplicate reason with its time', async () => {
+  const sent = await (await sendP1({ kind: 'handoff', body: 'redeliver me', ticket: 'WP-9', requestId: 'wp360-req' })).json()
+  await next()
+  const id = sent.text.match(/id=(\w+)/)[1]
+  const v = (q) => fetch(`${base}/api/messages/${id}/verify?kind=handoff&from=demo-worker-01${q}`, { headers: as('w9:p2', K2) }).then((r) => r.json())
+  const first = await v(`&sha=${bodyHash(sent.text)}`)
+  assert.equal(first.attempt, 1); assert.equal(first.ackedAt, null); assert.match(first.sentAt, /^\d{4}-\d\d-\d\dT/)
+  await post(`/api/messages/${id}/ack`, as('w9:p2', K2), { state: 'acknowledged' })
+  const retry = await (await sendP1({ kind: 'handoff', body: 'redeliver me', ticket: 'WP-9', requestId: 'wp360-req' })).json() // a sender retry: same id again
+  assert.equal(retry.text.match(/id=(\w+)/)[1], id)
+  const again = await v(`&sha=${bodyHash(sent.text)}`)
+  assert.equal(again.attempt, 2); assert.match(again.ackedAt, /^\d{4}-/)
+  assert.equal((await v('&pointer=1')).verified, true)
+  const dup = await v('&pointer=1')
+  assert.deepEqual([dup.verified, dup.duplicate], [false, true]); assert.match(dup.reason, /^duplicate: already delivered and verified at \d\d:\d\d$/)
+})

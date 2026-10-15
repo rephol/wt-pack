@@ -2616,7 +2616,7 @@ const hasPaneKey = (pane) => { try { return readFileSync(join(PANE_KEYS, String(
 const typedFor = (pane, text) => (envelopeOf(text) && hasPaneKey(pane) ? pointerOf(text) ?? text : text)
 async function deliver(a, text, paste, o = {}) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
   const env = envelopeOf(text)
-  const mid = env && msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text }))?.row.id
+  const mid = env && msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text }, { bump: !o.resend }))?.row.id
   const mark = (to, extra) => mid && msgSafe(() => messages.move(mid, to, extra))
   if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' } // 'delivered' once the mod acks
   // WP-352: typed (no live mod) = a short recorded pointer, never the full text; paste(typed) receives it, a non-envelope stays as it is.
@@ -2649,7 +2649,7 @@ const messageSweep = async () => {
       if (!t || t.local === false) throw new Error(`${row.target} is gone`)
       const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message
       msgSafe(() => messages.reopen(row.id)) // WP-352: a resend is a new typed pointer for the same id; the first one's use-once mark must not refuse it
-      await deliver({ id: t.id }, body, (p) => herdr('agent', 'prompt', t.id, p))
+      await deliver({ id: t.id }, body, (p) => herdr('agent', 'prompt', t.id, p), { resend: true }) // the sweep already counted this attempt
     },
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
       body: `${row.attempts} send${row.attempts === 1 ? '' : 's'}, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
@@ -2997,8 +2997,12 @@ async function messagesApi(req, res, url, parts) {
     const target = row && (rid ? row.target : await canonicalPane(row.target).catch(() => null))
     // WP-352: an inline envelope also proves its body (sha256 of what sits inside the tag) against the record; a pointer is verified once.
     const sha = url.searchParams.get('sha'), pointer = url.searchParams.get('pointer') === '1'
+    // WP-360: a pointer already used (and not reopened by a resend) is a DUPLICATE of something this pane already received: still
+    // unverified (the trust rule is unchanged), but the hook is told so and says "ignore it" instead of asking the user about a pasted order.
+    const usedAt = row?.verified_at ?? null
     const reason = !row ? 'unknown id' : target !== me ? 'not addressed to you' : row.kind !== kind ? 'kind mismatch' : row.sender !== from ? 'sender mismatch'
-      : sha && sha !== bodyHash(row.body) ? 'body does not match the record' : pointer && !messages.firstPointer(row.id) ? 'already delivered (a pointer verifies once)' : null
+      : sha && sha !== bodyHash(row.body) ? 'body does not match the record' : pointer && !messages.firstPointer(row.id) ? `duplicate: already delivered and verified at ${hhmm(usedAt)}` : null
+    if (reason?.startsWith('duplicate:')) return send(res, 200, { verified: false, reason, duplicate: true, verifiedAt: usedAt }) // no Inbox card: not a forgery
     if (reason) {
       const name = rid ? (hl().run(me)?.name ?? me) : ((await agents().catch(() => [])).find((x) => x.id === me)?.name ?? me)
       const key = `unverified|${me}|${parts[2]}`.slice(0, 200)
@@ -3032,7 +3036,8 @@ async function messagesApi(req, res, url, parts) {
       const assignee = card?.assignee?.pane ? await canonicalPane(card.assignee.pane).catch(() => null) : null
       replyAllowed = replyMayAct({ receiverRole: me?.tags?.role || me?.pool, handedByReceiver: !!handed, assigneePane: assignee, senderPane: row.sender_pane })
     }
-    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket, replyAllowed })
+    return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket, replyAllowed,
+      attempt: row.attempts, ackedAt: row.acked_at ?? null, sentAt: row.delivered_at ?? row.created }) // WP-360: server facts for the hook's REDELIVERY / sent-at lines
   }
   // WP-352 `wt-message show <id>`: the addressed pane (keyed: no grace path) reads the body of a message typed to it as a pointer.
   if (req.method === 'GET' && parts.length === 3 && author.kind === 'agent') {
@@ -4149,6 +4154,7 @@ async function removeAgent(pane, { force = false, confirmName } = {}) {
 
 // ponytail: in-memory window; resets on restart — fine for a flood guard
 const verifyFlood = new Map()
+const hhmm = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '?' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 // WP-104: a routine's prompt goes out as <wt-message kind=routine from="<routine name>">.
 export const routineText = (text, o) => (o?.routine ? wrap({ kind: 'routine', from: o.routine, hoist: true }, text) : text)
 // WP-104: the Ready nudge to an orchestrator, as wt-pack system traffic (the tag replaces the old [wt-dashboard] prefix).
