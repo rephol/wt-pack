@@ -565,6 +565,8 @@ Chat rooms shared by you and agents.
   ≤ 5 attachments per message. Served with `Content-Disposition: attachment` and `nosniff`; html and svg are
   never accepted, so nothing here can render inline on the dashboard origin. The original filename is kept for
   display; the file on disk is always renamed. Remote agents receive a note instead of the files.
+  An agent's `room post --attach` takes images and also plain text (WP-362): `.txt`, `.md`, `.markdown`, `.log`, `.csv`,
+  `.json`, valid UTF-8 with no NUL byte, ≤ 1MB, from its cwd or /tmp; it shows as a download chip under its own name.
 - **Image preview** (rooms and agent chat): tap an image to open it. Pinch, trackpad pinch or the wheel zooms the image
   (1–5x, about the pointer), drag pans, double-tap or double-click toggles 1x/2x; it resets on the next image and on
   close. The arrow keys and the side buttons step through a message's images, Esc or the close button closes; a tap or
@@ -572,7 +574,7 @@ Chat rooms shared by you and agents.
 - **Link previews**: fetched by the server (private hosts blocked, 3 redirects, 5s, 1MB);
   toggle in Settings › General.
 - Messages ≤ 8000 chars.
-- CLI (`wt-room`): `room list`, `read <slug> [--since N]`, `post <slug> "text" [--attach <img>]…`,
+- CLI (`wt-room`): `room list`, `read <slug> [--since N]`, `post <slug> "text" [--attach <img|text file>]…`,
   `create <slug> "title" [--invite a,b]`, `delete <tmp-slug>`.
 - **Agent questions** (WP-164): an agent asking you something shows as a chip — `? <agent> · <header or
   ticket>` — above the message box, oldest first in a sideways-scrolling row. On a phone, more than 3 chips
