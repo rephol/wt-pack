@@ -16,17 +16,16 @@ const SECRET_VAR = /\$\{?[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]
 export const SEGMENT_MAX = 120
 const clip = (seg) => { const t = seg.replace(/\s+/g, ' ').trim(); return t.length > SEGMENT_MAX ? t.slice(0, SEGMENT_MAX - 1) + '…' : t }
 
-// WP-361 localhost exemption: curl/wget whose every URL host is literally 127.0.0.1, localhost or [::1] reach only this machine, so a
+// WP-361 localhost exemption: curl (not wget: it follows redirects and re-sends headers by default) whose every URL host is literally 127.0.0.1, localhost or [::1] reach only this machine, so a
 // pane-key header or token in it is not "sent off the machine". Strict on purpose: any proxy / connection-rewriting flag, any redirect
 // follow (-L: the target is unknowable), any config/input file, any non-http(s) scheme, any glob or userinfo trick, and no URL at all
 // all fall back to the normal rules; uploads are never exempt. nc/scp/rsync never are.
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
 const CURL_VALUE = new Set('HXdoumAebcwFTDEKQrtyYzC'.split('')) // curl short options that consume the next word
 const CURL_VALUE_LONG = /^--(header|request|data|data-raw|data-binary|data-urlencode|output|user|max-time|connect-timeout|retry|retry-delay|user-agent|referer|cookie|cookie-jar|write-out|json|form|url|oauth2-bearer|range|limit-rate)$/
-const WGET_VALUE = /^(-O|-t|-T|-w|-U|--header|--user|--password|--timeout|--tries|--output-document|--user-agent|--post-data)$/
 const NO_EXEMPT = /^(--proxy\S*|--preproxy|--socks\S*|--haproxy\S*|--connect-to|--resolve|--unix-socket|--abstract-unix-socket|--location\S*|--config|--next|--input-file|--execute|--base|--force-html|--ftp-proxy)(=|$)/
 const localOnly = (name, raw, env) => {
-  if ((name !== 'curl' && name !== 'wget') || env.some((e) => /proxy=/i.test(e))) return false
+  if (name !== 'curl' || env.some((e) => /proxy=/i.test(e))) return false
   const urls = []
   for (let k = 0; k < raw.length; k++) {
     const t = raw[k]
@@ -34,10 +33,10 @@ const localOnly = (name, raw, env) => {
       if (NO_EXEMPT.test(t)) return false
       if (t.startsWith('--url=')) urls.push(t.slice(6))
       else if (t === '--url') urls.push(raw[++k] ?? '')
-      else if (!t.includes('=') && (name === 'curl' ? CURL_VALUE_LONG.test(t) : WGET_VALUE.test(t))) k++
+      else if (!t.includes('=') && CURL_VALUE_LONG.test(t)) k++
     } else if (t.startsWith('-') && t.length > 1) {
-      if (name === 'curl' ? /^-[a-zA-Z]*[xLK]/.test(t) : /^-[a-zA-Z]*[ei]/.test(t)) return false
-      if (name === 'curl' ? CURL_VALUE.has(t[t.length - 1]) && !t.includes('=') : WGET_VALUE.test(t)) k++
+      if (/^-[a-zA-Z]*[xLK]/.test(t)) return false
+      if (CURL_VALUE.has(t[t.length - 1]) && !t.includes('=')) k++
     } else urls.push(t)
   }
   if (!urls.length) return false

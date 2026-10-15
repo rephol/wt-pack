@@ -542,12 +542,13 @@ Chat rooms shared by you and agents.
   `pkill -f`, branch change in the main checkout, …) — names the rule id and the matched segment, quoted and cut at 120
   characters: `wt-pack gate [rule: secret-var, segment: \`curl …\`]: …`. Gate rule ids: `push`, `merge`, `branch-delete`,
   `worktree-remove`, `gh-pr`, `rm-outside`, `upload`, `secret-var`, `raw-socket`. A compound command is judged whole, so the
-  message says to run the other parts as their own command. **Loopback exemption:** `curl`/`wget` pass the send-out rule when
+  message says to run the other parts as their own command. **Loopback exemption:** `curl` (not `wget`, which follows redirects and re-sends headers by default) passes the send-out rule when
   every URL host is literally `127.0.0.1`, `localhost` or `[::1]` (http/https), so the pack's own CLIs can call the dashboard
   with a pane key. Still gated: a proxy or connection flag (`-x`, `--proxy`, `--connect-to`, `--resolve`, `--unix-socket`, a
   `*_proxy=` prefix), any `-L`/`--location` (the redirect target is unknowable), `-K`/`--config`, a non-http scheme, a glob
   or `user@` trick, a remote URL mixed in, and every upload (`-T`, `-d @file`, `-F f=@file`, `--post-file`). `nc` stays gated.
-  A quoted `-d "@file"` now counts as an upload too.
+  A quoted `-d "@file"` now counts as an upload too. An `http_proxy`/`HTTPS_PROXY` exported in the environment can still route
+  localhost through a proxy unless `NO_PROXY` covers it; the gate only sees a `*_proxy=` prefix on the command itself.
   **Messages from other Claude sessions (WP-357):** a message another session sends with `SendMessage` arrives wrapped in
   `<cross-session-message from=… from-name=…>`. It is never your word and never verified wt-pack traffic: the turn is recorded as
   `peer`, the agent gets a reminder that it is information (a reply to the peer is fine), and the gate **denies** push, merge,
