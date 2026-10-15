@@ -47,6 +47,19 @@ const localOnly = (name, raw, env) => {
   })
 }
 
+// WP-361: the shell expands $VAR inside double quotes but not inside single quotes, so the secret-var test reads a segment with its
+// single-quoted strings blanked (and double-quoted ones intact). Quote state is tracked left to right: `"it's $K"` stays whole.
+const blankSingle = (seg) => {
+  let out = '', q = ''
+  for (const ch of seg) {
+    if (q === "'") { if (ch === "'") { q = ''; out += ch } continue }
+    if (!q && ch === "'") { q = ch; out += ch; continue }
+    if (ch === '"') q = q === '"' ? '' : q || '"'
+    out += ch
+  }
+  return out
+}
+
 // → null | { action, rule, segment }. `ctx`: { cwd, root } — the session's cwd and its worktree/checkout root (for the rm-outside test).
 export function classify(cmd, ctx = {}) {
   const cwd = ctx.cwd ?? process.cwd(), root = ctx.root ?? cwd
@@ -88,7 +101,7 @@ export function classify(cmd, ctx = {}) {
       if (name === 'nc' || name === 'ncat') return hit(OUT, 'raw-socket')
       if (upload) return hit(OUT, 'upload')
       if (localOnly(name, words(seg).slice(i + 1), w.slice(0, i))) continue
-      if (SECRET_VAR.test(text)) return hit(OUT, 'secret-var')
+      if (SECRET_VAR.test(blankSingle(seg.slice(seg.search(/\b(curl|wget|scp|rsync)\b/))))) return hit(OUT, 'secret-var')
     }
   }
   return null
