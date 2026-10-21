@@ -377,6 +377,11 @@ test('WP-157/160: floor never spawns a role on haiku, in any mode — every role
   // A role floor above sonnet (planner -> opus) still wins and reports as role-floor, not session-floor.
   const planner = JSON.parse(run(['floor', '--role', 'planner', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
   assert.equal(planner.tier, 'opus'); assert.equal(planner.source, 'role-floor')
+  // WP-368: the ticket lead's agent file is opus, so its spawn floor is opus in every mode.
+  for (const mode of ['live', 'shadow', 'off']) {
+    const lead = JSON.parse(run(['floor', '--role', 'lead', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: mode }))
+    assert.equal(lead.tier, 'opus'); assert.equal(lead.source, 'role-floor') // effort follows the routing mode; handoff pins low explicitly
+  }
   // A misconfigured role floor BELOW sonnet (e.g. haiku) is still raised to the session floor, not honored.
   writeFileSync(join(repo, '.wt-pack', 'model-routing.json'), JSON.stringify({ roleFloors: { worker: 'haiku' } }))
   const misfloored = JSON.parse(run(['floor', '--role', 'worker', '--cwd', repo, '--json'], { WT_MODEL_ROUTING: 'live' }))
