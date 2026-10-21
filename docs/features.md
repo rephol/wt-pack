@@ -132,8 +132,8 @@ header, remembered per viewer and defaulting to the global project; picking ther
   moves its own card (wt-plan → Planning, the worker's prompt → Building). One card per board per tick.
 - **Lead label (WP-368):** a card labelled **`lead`** goes to ONE ticket-lead agent instead of a planner then a
   worker: `wt-handoff --role lead` always spawns a fresh `wt-pack:wt-lead` (opus/low, never a reused pane) whose prompt is
-  `/wt-run <ID>`; the card is moved to Planning by that prompt, teams and the pairing buddy are skipped. Cards without
-  the label behave exactly as above. See *Ticket lead and named agents*.
+  `/wt-run <ID>`; the card is moved to Planning by that prompt, teams and the pairing buddy are skipped. There is no pool cap on leads (each labelled card gets its own), so
+  label deliberately. Cards without the label behave exactly as above. See *Ticket lead and named agents*.
 - An agent already **holding a ticket** is never picked (worker reuse, buddy, pair replacement): it is the
   assignee of an open card, or its `task`/`ticket` pane token names one. A card moved to **Ready** (by the user
   or an agent) loses its assignee and dispatch state, so Dispatch can pick it up again; a gone assignee is only
@@ -1133,7 +1133,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   (`<project>-web-engineer`). `claude agents` lists what exists.
 - **`/wt-run <TICKET> [--resume]`** (skill `wt-run`) is the lead's driver: plan → **gate A** → work → review → QA → **gate B** → ship →
   babysit → **gate C**. The lead only sequences subagents; it never edits repo files, merges or pushes. Its resumable
-  run-state is `~/.local/share/wt-lead/<repo>/<TICKET>.json` (`scripts/state.mjs`: `init get set start done gate next`). At a gate the lead
+  run-state is `~/.local/share/wt-lead/<repo>/<TICKET>.json` (`scripts/state.mjs`: `init path get set start done gate next`). At a gate the lead
   writes the gate status and `open_questions`, sends one `handoff.sh --reply` line to the orchestrator and stops; the orchestrator
   answers `approved A` and the lead resumes. A rejected gate reruns the phases it guards.
 - **Start one** with `agents.sh spawn lead [cwd] --agent wt-pack:wt-lead` (role token `lead`; `--agent` is accepted only for

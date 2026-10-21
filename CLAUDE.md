@@ -10,7 +10,7 @@ User-facing feature reference: `docs/features.md` — a user-visible change upda
 Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory, not here.
 
 ## Layout
-- `agents/wt-*.md` — the plugin's named agents (`wt-pack:wt-lead` etc., WP-368; test `test/plugin-agents.test.mjs`);
+- `agents/wt-*.md` — the plugin's named agents (`wt-pack:wt-lead` etc., WP-368; test `test/plugin-agents.test.mjs`).
 - `skills/wt-*` — the skills; `.claude-plugin/marketplace.json` — local marketplace `wt-pack` (serves the root
   plugin; also setup's marker for a wt-pack checkout); `setup` — installer;
   `docs/` — features, handoff, `plans/` (point-in-time, not rewritten). Root `.claude-plugin/plugin.json` +
