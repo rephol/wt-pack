@@ -33,12 +33,23 @@ changed (grouped by section). SessionStart (also after `/clear` and compaction) 
 `<session>.ctx` (written wherever `.hash` is written, `inject.mjs:146-147`, both events). On `UserPromptSubmit`
 when `prev !== hash`:
 
-- prior text readable: compute a line diff per `## <section>` of the previous vs current `ctx` (set difference on
+- prior text readable AND its hash equals `prev` (`sha256(.ctx).slice(0,16) === prev`, the same digest as
+  `inject.mjs:130`; review: two best-effort writes can leave a `.ctx` that is not the text `prev` describes, and a
+  diff against it would miss a line added then removed in between): compute a line diff per `## <section>` of the previous vs current `ctx` (set difference on
   trimmed non-empty lines; a section that appears or vanishes lists all of its lines as added or removed) and emit
   `Preferences changed (lines added +, removed -; everything else you already have is unchanged):` followed by the
   sections that differ, each with `+ <line>` / `- <line>`. A line edited in place shows as one `-` and one `+`.
-- prior text missing (a session whose state predates this change, deleted cache, first prompt with `prev === null`
-  and non-empty ctx): fall back to today's full `Preferences updated:\n\n<ctx>`.
+  The header says plainly that a `-` line no longer applies (stop following it) and a `+` line now applies, so a
+  bullet line (`- Never merge …` becomes `- - Never merge …`) is not misread; exact wording is the engineer's,
+  pinned by the hook test.
+- a transient role lookup failure is NOT a change (review decision, see U1b): on `UserPromptSubmit` the hook calls
+  `wt-memory context --strict-pane`; when `HERDR_PANE_ID` is set, role or project was still unresolved, and
+  `herdr pane get` threw or timed out, `context` prints nothing and exits 75. The hook already treats a failed
+  `context` as "no preferences this prompt" (`inject.mjs:128`: `ctxOut == null` emits only the reminder and
+  writes no state), so `.hash`/`.ctx` keep the last good text and the next prompt diffs against it.
+  SessionStart does not pass the flag (its output stays byte-identical, DoD).
+- prior text missing or not matching `prev` (a session whose state predates this change, deleted cache, a failed
+  write, first prompt with `prev === null` and non-empty ctx): fall back to today's full `Preferences updated:\n\n<ctx>`.
 - everything removed (`ctx` empty, `prev` set): keep today's `(all standing preferences were removed)` wording.
 - The change detection (hash) and the SessionStart text are untouched. The diff is a pure function in a new module
   `skills/wt-memory/claude-plugin/hooks/prefdiff.mjs` (imported by `inject.mjs` the same way `paths.mjs` is) so it
@@ -46,8 +57,10 @@ when `prev !== hash`:
 
 Alternatives rejected: diffing in the `wt-memory` CLI (`context --since`): the CLI runs for Codex/Gemini too and a
 new flag is more surface than a hook-local cache; storing the text in `.hash` itself: breaks the `.hash` file's
-existing meaning for anything reading it. [unsourced: no other reader of `.hash` was searched beyond the repo
-grep for `.hash`, which shows only `inject.mjs`]
+existing meaning for anything reading it. (Review corrected the earlier "only `inject.mjs`" claim:
+`skills/wt-dashboard/housekeeping.mjs:112` prunes the cache by file name,
+`f.match(/^(.+)\.hash$/) && !ctx.live.sessions.has(m[1])`, older than `cacheDays`; it never reads content. So `.ctx`
+needs the same pruning, U3.)
 
 ## Implementation units
 
@@ -68,25 +81,60 @@ between calls):
 - hook: UserPromptSubmit with no `.ctx` but a stale `.hash` (older state): falls back to full `Preferences updated:`.
 - hook: no change between two prompts: no preference text (existing behaviour kept).
 - hook: all preference files emptied after a SessionStart: `(all standing preferences were removed)`.
+- hook: `.ctx` present but written for an older hash (overwrite `.ctx` with different text, keep `.hash`): falls
+  back to full `Preferences updated:`, never a diff against the stale text.
+Use a test-local `WT_MEMORY_HOME` (not the shared `home` other tests mutate). Red proof: the hook tests asserting
+`Preferences changed` and the stale-`.ctx` fallback are written and run first, and fail on the current
+`inject.mjs` (it always sends `Preferences updated:`); keep that failing output for the review.
+
+### U1b: a failed role lookup is not a preference change (review decision)
+Owner: wt-pack:wt-engineer
+Files: `skills/wt-memory/scripts/wt-memory` (`infer`, `context`, `flags`), `inject.mjs` (pass the flag on
+UserPromptSubmit only), `skills/wt-memory/scripts/wt-memory.test.mjs`.
+Goal: the `--strict-pane` behaviour in Approach. `infer` records that the `herdr pane get` call threw (today it is
+swallowed at `wt-memory:64`, `} catch {}`); `context --strict-pane` then prints nothing and exits 75. Without the
+flag, `context` and `hash` behave exactly as today (backward compatible CLI, CLAUDE.md). A pane whose lookup
+succeeds but carries no `role` token is not a failure. `WT_ROLE` set (headless, `wt-memory:56`) skips the herdr call
+and is unaffected. The `recall` subprocess is unchanged.
+Tests (PATH-shimmed fake `herdr` in a temp dir, `HERDR_PANE_ID=p1`; never the real herdr, CLAUDE.md Traps):
+- red proof first: shim returns `{"result":{"pane":{"tokens":{"role":"worker"}}}}`; SessionStart, then shim exits 1;
+  UserPromptSubmit. Before U1b this prints `-` lines for every worker line (after U1) or the role-less full list
+  (today); after U1b it prints no preference text and `.hash` is unchanged. Then shim succeeds again and an edited
+  worker line yields only that line's `-`/`+`.
+- `wt-memory context --strict-pane` with the failing shim exits 75 with empty stdout; without the flag exits 0 with
+  global + project (today's output).
+- shim succeeds with no `role` token: `--strict-pane` exits 0.
+
+### U3: prune `.ctx` with `.hash`
+Owner: wt-pack:wt-engineer
+Files: `skills/wt-dashboard/housekeeping.mjs:112`, `skills/wt-dashboard/housekeeping.test.mjs`.
+Goal: the stale-cache matcher takes `^(.+)\.(hash|ctx)$`, same liveness and age rule. Test: a dead session's old
+`.ctx` is deleted, a live or fresh one kept (extend the existing fixture at `housekeeping.test.mjs:23-24`, adjust
+the file count at `:80`). Red proof: the new `dead.ctx` assertion fails before the regex change. Own commit
+(wt-dashboard is another skill).
 
 ### U2: pin and document the role/project scoping that already exists
 Owner: wt-pack:wt-engineer
 Files: `skills/wt-memory/scripts/wt-memory.test.mjs`, `skills/wt-memory/SKILL.md` (the Claude Code paragraph at
-~line 44-47), `docs/features.md` (the Memory entry at ~line 715).
+~line 44-47), `docs/features.md` (the `## wt-memory` section, ~line 1025: "injected at session start (re-injected when they
+change)"; review: ~715 is the Settings tab list, not this feature).
 Goal: no behaviour change. Add tests that `wt-memory context --role worker` never contains text from
 `roles/orchestrator.md` and that a project file only appears for its own `--project`; assert the same through the
 hook (`WT_ROLE=worker`) for both SessionStart and the changed-lines message. Document: "re-injected as changed lines
 only; SessionStart keeps the full list; the context already holds only global + the agent's own role + its own
 project".
-Same commit as U1 (one area, one skill, per CLAUDE.md "one commit per skill touched"): the order is U1 then U2.
+Same commit as U1 and U1b (one area, one skill, per CLAUDE.md "one commit per skill touched"): the order is U1,
+U1b, U2. U3 is a separate wt-dashboard commit; `docs/features.md` goes with the wt-memory commit.
 
 ## Files
 - `docs/plans/wp-369-prefs-diff-plan.md` (this plan)
 - `skills/wt-memory/claude-plugin/hooks/prefdiff.mjs` (new)
 - `skills/wt-memory/claude-plugin/hooks/inject.mjs`
+- `skills/wt-memory/scripts/wt-memory` (U1b)
 - `skills/wt-memory/scripts/wt-memory.test.mjs`
 - `skills/wt-memory/SKILL.md`
 - `docs/features.md`
+- `skills/wt-dashboard/housekeeping.mjs`, `skills/wt-dashboard/housekeeping.test.mjs` (U3)
 
 ## Definition of Done
 - `node --test skills/wt-memory/scripts/*.test.mjs` passes, including the new tests above.
@@ -95,10 +143,17 @@ Same commit as U1 (one area, one skill, per CLAUDE.md "one commit per skill touc
 - In a session with a stored `.ctx`, editing one preference line produces a UserPromptSubmit message that contains
   only that line's `+`/`-` and contains no other preference line (checked by the hook test, string absence).
 - SessionStart output is byte-identical to before for the same inputs (existing hook tests unchanged and green).
-- A missing `.ctx` yields the old full `Preferences updated:` text, not an empty or error output.
+- A missing `.ctx`, or one whose hash is not the stored `.hash`, yields the old full `Preferences updated:` text,
+  not an empty or error output.
+- A failed `herdr pane get` on UserPromptSubmit yields no preference text and leaves `.hash`/`.ctx` unchanged; the
+  CLI without `--strict-pane` is unchanged (U1b tests).
+- `cd skills/wt-dashboard && npm test` passes with the `.ctx` prune test (U3).
+- Each new guard (diff, stale-`.ctx` fallback, `--strict-pane`, `.ctx` prune) has a red proof: its test's failing
+  output on the pre-change code, quoted in the unit's commit or the review reply.
 - `skills/wt-memory/SKILL.md` and `docs/features.md` describe changed-lines-only re-injection and the existing
   role/project scoping; neither says role filtering is new.
-- One commit for wt-memory (code, tests, SKILL.md) and the docs line in the same merge; plan file already committed.
+- One commit for wt-memory (code, tests, SKILL.md, docs line), one for wt-dashboard (U3), in the same merge; plan
+  file already committed.
 
 ## QA brief
 A user (the QA agent) in a throwaway `WT_MEMORY_HOME` and `HOME` (never the live `~/.config/wt-memory`, never a real
@@ -110,15 +165,22 @@ Evidence kept (nothing else): the three hook stdout JSONs plus the SessionStart 
 ticket, and the `node --test` summary line. Expected: SessionStart has all of global + worker + project and never
 orchestrator text; first prompt shows only the changed worker line as `-`/`+`; second prompt (orchestrator edit)
 produces no preference text for the worker; the deleted-`.ctx` case shows the full list under `Preferences updated:`.
+Role-loss case: with a PATH-shim `herdr` in a temp dir (never the real herdr) and `HERDR_PANE_ID` set instead of
+`WT_ROLE`, make the shim fail for one prompt after a preference edit: that prompt has no preference text; the next
+(shim healthy) shows only the edited line.
 
 ## Risks and deferred
-- `infer()` can lose the role transiently (herdr call timeout). Today that already flips the hash and re-sends the
-  list; with diffs it would send a spurious `-` for the whole role section and a `+` when it returns. Not fixed here
-  (a separate defect in `infer`); the message wording says lines are "removed from your preferences" only as a diff,
-  and the next prompt restores them. Acceptable; note it in the commit.
+- `infer()` can lose the role transiently (herdr call timeout, 500 ms at `wt-memory:53`). Review decision: in scope
+  (U1b). Reason: a diff turns the lost role section into an explicit "these lines no longer apply" for every role
+  rule (for the orchestrator that includes its merge/push gates), which an agent can act on for a whole turn; today's
+  full re-send is ambiguous but never says "stop". The guard is one flag and one exit code, no extra subprocess, and
+  it also removes today's spurious full re-send. SessionStart keeps today's behaviour on a failed lookup (role-less
+  list); not changed here.
+- A multi-line preference (bullet with a continuation line) edited in one line shows only that line without its
+  bullet; accepted, the line is the unit.
 - Diff granularity is the line; a reordered line is not a change (set difference), a duplicated line is not either.
-- Cache files `<session>.ctx` grow the cache dir by up to a few KB per session; `.hash` files are never pruned
-  today either. Pruning is deferred.
+- Cache files `<session>.ctx` are a few KB per session; pruned with `.hash` by the dashboard's housekeeping (U3).
+  Without the dashboard (plugin-only install) neither is pruned, as today.
 - Deferred, awaiting the open question: tagging role- or project-specific lines inside shared files.
 
 ## Open questions for the user
