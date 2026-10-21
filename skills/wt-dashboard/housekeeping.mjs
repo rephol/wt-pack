@@ -109,7 +109,7 @@ export async function housekeep(ctx) {
         if (st && now - st.mtimeMs > s.cacheDays * DAY) await del(p)
       }
     }
-    if (ctx.memCache) await stale(ctx.memCache, (f) => { const m = f.match(/^(.+)\.hash$/); return m && !ctx.live.sessions.has(m[1]) })
+    if (ctx.memCache) await stale(ctx.memCache, (f) => { const m = f.match(/^(.+)\.(?:hash|ctx)$/); return m && !ctx.live.sessions.has(m[1]) })
     if (ctx.agentsCache) await stale(ctx.agentsCache, (f) => { const m = f.match(/^mcp-(.+)\.json$/); return m && !ctx.live.names.has(m[1]) })
   }
   // 5. WP-364: missing/exited agent rows past `missingAgentHours`.

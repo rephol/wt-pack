@@ -712,7 +712,7 @@ Projects, Terminals, Usage, Observability, Server, About.
 - **Notifications**: see [Inbox](#inbox).
 - **Rooms**, **Roles**: see above.
 - **Per-prompt recall** (WP-235): on every prompt the wt-memory hook also runs `wt-memory recall "<prompt>"` — keyword match (no LLM) of the prompt against the agent-kept memories of the agent's own global, role and project scope; up to 5 matches are added as "Memories that match this prompt", each id at most once per session (SessionStart, which also fires after a compaction, clears the list). Each recall is logged (session, ids) to `~/.local/share/wt-memory/reads.jsonl`. Same 2 s budget as the context read.
-- **Memory**: wt-memory notes by scope (Global / Roles / Projects); remove agent entries (the list scrolls in its own box as it grows), Accept/Reject pending
+- **Memory**: wt-memory notes by scope (Global / Roles / Projects); entries show their `[role]`/`[project]` line tags and each editor hints the tag syntax (WP-369); remove agent entries (the list scrolls in its own box as it grows), Accept/Reject pending
   global proposals, **Preview for agent…** shows what an agent receives. Warns when the plugin is missing.
 - **Projects** (WP-107): per-project overrides, opened only from Settings › Projects or the gear next to the sidebar project picker (a project picked; phone top bar too —
   WP-110); pages carry no settings button of their own (WP-123). Order: server env var › project ›
@@ -1022,8 +1022,12 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 ## wt-memory
 
 - Notes in `~/.config/wt-memory/` (`global.md`, `roles/<id>.md`, `projects/<repo>.md`; `$WT_MEMORY_HOME`
-  overrides), merged global → role → project and injected at session start (re-injected when they change)
-  by the wt-pack Claude plugin, which also offers MCP tools remember / forget / list / context.
+  overrides), merged global → role → project and injected at session start (the full list) by the wt-pack Claude plugin, which also offers MCP tools remember / forget / list / context;
+  when they change mid-session only the added/removed lines are re-sent (WP-369, "Preferences changed"; the full list
+  returns if the session's stored copy is missing; a failed pane lookup sends no preference text). The context holds only global +
+  the agent's own role + its own project. A line starting `[role: a, b]` / `[project: p]` reaches only matching agents
+  (role tags match the persona too; the tag is not shown to the agent; `wt-memory remember --role/--project` writes
+  such a tag when the flag does not pick the file; `list --json` has `tags`).
 - CLI: `wt-memory context | remember "<note>" --scope role|project|global | forget | list | accept | reject`.
 - A **global** note is never written directly: it waits as a proposal for Accept in the Inbox or
   `wt-memory accept`.

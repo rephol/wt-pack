@@ -11,7 +11,7 @@ const scope = { type: 'string', enum: ['role', 'project', 'global'], description
 const TOOLS = {
   remember: {
     description: 'Store a standing user preference (concise imperative, one line) so future agent sessions follow it. Use when the user says always/never/from now on/stop doing. Not for one-off task details. Afterwards tell the user in one line: "Remembered: <what>".',
-    inputSchema: { type: 'object', properties: { note: str('The preference, one line, <=500 chars'), scope, role: str('Role id (optional)'), project: str('Repo name (optional)') }, required: ['note'] },
+    inputSchema: { type: 'object', properties: { note: str('The preference, one line, <=500 chars'), scope, role: str('Role id (optional). If it does not select the file (scope project/global), it is written as a [role: id] line tag so only that role gets the note'), project: str('Repo name (optional). If it does not select the file (scope role/global), it is written as a [project: name] line tag') }, required: ['note'] },
     args: (a) => ['remember', a.note, ...opt(a, 'scope', 'role', 'project')],
   },
   forget: {
@@ -25,7 +25,7 @@ const TOOLS = {
     args: (a) => ['list', '--json', ...opt(a, 'scope')],
   },
   context: {
-    description: 'The merged standing preferences (global → role → project) this session should follow.',
+    description: 'The merged standing preferences (global → role → project) this session should follow. Lines tagged [role: x] / [project: y] appear only for matching agents.',
     inputSchema: { type: 'object', properties: { role: str('Role id (optional)'), project: str('Repo name (optional)') } },
     args: (a) => ['context', ...opt(a, 'role', 'project')],
   },

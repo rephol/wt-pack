@@ -22,6 +22,8 @@ async function fixture() {
   await mkdir(mem); await mkdir(ag)
   for (const f of ['dead.hash', 'live.hash']) { await writeFile(join(mem, f), 'h'); await age(join(mem, f), 10) }
   await writeFile(join(mem, 'fresh-dead.hash'), 'h')
+  for (const f of ['dead.ctx', 'live.ctx']) { await writeFile(join(mem, f), 'c'); await age(join(mem, f), 10) }
+  await writeFile(join(mem, 'fresh-dead.ctx'), 'c')
   for (const f of ['mcp-gone.json', 'mcp-alive.json']) { await writeFile(join(ag, f), '{}'); await age(join(ag, f), 10) }
   const log = join(root, 'server.log')
   await writeFile(log, 'L'.repeat(2 * 1024 * 1024))
@@ -75,15 +77,15 @@ test('real run: uploads, inbox, rotation, caches', async () => {
   assert.equal(await readFile(f.log + '.2', 'utf8'), 'one') // kept 2; 'two' dropped
   assert.ok(!existsSync(f.log + '.3'))
   assert.ok(!existsSync(f.audit) && existsSync(f.audit + '.1'))
-  assert.deepEqual((await readdir(f.mem)).sort(), ['fresh-dead.hash', 'live.hash'])
+  assert.deepEqual((await readdir(f.mem)).sort(), ['fresh-dead.ctx', 'fresh-dead.hash', 'live.ctx', 'live.hash'])
   assert.deepEqual(await readdir(f.ag), ['mcp-alive.json'])
-  assert.equal(s.files, 5) // 2 uploads, server.log.2, dead.hash, mcp-gone.json (rotation moves, it does not free)
+  assert.equal(s.files, 6) // 2 uploads, server.log.2, dead.hash, dead.ctx, mcp-gone.json (rotation moves, it does not free)
 })
 
 test('unknown liveness leaves caches alone', async () => {
   const f = await fixture()
   await housekeep(f.ctx({ live: null }))
-  assert.equal((await readdir(f.mem)).length, 3)
+  assert.equal((await readdir(f.mem)).length, 6)
 })
 
 test('path guard: nothing outside the roots, no symlinks', async () => {

@@ -1253,7 +1253,7 @@ async function memoryApi(req, res, url, parts) {
   }
   if (parts[2] === 'preview' && req.method === 'GET') {
     const args = ['context']
-    for (const k of ['role', 'project']) { const v = url.searchParams.get(k); if (v && MEMORY_NAME.test(v)) args.push(`--${k}`, v) }
+    for (const k of ['role', 'project', 'persona']) { const v = url.searchParams.get(k); if (v && MEMORY_NAME.test(v)) args.push(`--${k}`, v) }
     if (!MEMORY_BIN) return send(res, 200, { text: '', error: 'wt-memory not found' })
     // --cwd / so an unset project is not guessed from the SERVER's directory.
     return send(res, 200, { text: (await run(process.execPath, [MEMORY_BIN, ...args, '--cwd', '/'], undefined, 5000, { HERDR_PANE_ID: '' }).catch(() => '')).trim() })

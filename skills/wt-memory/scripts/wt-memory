@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Tool-agnostic agent preferences: plain markdown files any agent runtime can be fed.
 //
-//   wt-memory context [--role R] [--project P] [--cwd D]   # merged markdown: global → role → project → project-role files (.wt-pack/roles/, WP-204)
+//   wt-memory context [--role R] [--project P] [--cwd D] [--strict-pane]   # --strict-pane: herdr pane lookup failed → print nothing, exit 75 (WP-369)
+//   (a store line may start with [role: a, b] / [project: p] tags: only matching agents get it, WP-369)
+//   # merged markdown: global → role → project → project-role files (.wt-pack/roles/, WP-204)
 //   wt-memory hash    [same flags]                         # short content hash of that output
 //   wt-memory path    [global | role R | project P]        # the store dir, or one file's path
 //   wt-memory remember "<note>" [--scope role|project|global] [--role R] [--project P] [--strict]
@@ -32,10 +34,49 @@ const body = (s) => s.replace(/ *<!--[\s\S]*?-->/g, '').replace(/\n{3,}/g, '\n\n
 const TRAILER = / *<!-- wtm:([^>]*?) *-->/
 const strip = (s) => s.replace(/ *<!-- wtm:[^>]*?-->/g, '')
 
+// WP-369 line tags: after an optional bullet, groups `[role: a, b]` / `[project: p]` (values match NAME). Anything else in
+// brackets is ordinary text (fail open). tagsOf is the one parser: merge, entries and recall all use it.
+const TAG = /\[(role|project):([^\]\n]*)\]\s*/y
+function tagsOf(line) {
+  const pre = line.match(/^\s*(?:[-*]\s+)?/)[0]
+  const tags = {}
+  let i = pre.length
+  for (;;) {
+    TAG.lastIndex = i
+    const m = TAG.exec(line)
+    if (!m) break
+    const vals = m[2].split(',').map((v) => v.trim())
+    if (!vals.length || !vals.every((v) => NAME.test(v))) return { tags: {}, text: line, pre }
+    tags[m[1]] = [...new Set([...(tags[m[1]] ?? []), ...vals])]
+    i = TAG.lastIndex
+  }
+  return i === pre.length ? { tags: {}, text: line, pre } : { tags, text: line.slice(i), pre }
+}
+const tagStr = (t = {}) => ['role', 'project'].filter((k) => t[k]?.length).map((k) => `[${k}: ${t[k].join(', ')}]`).join(' ')
+const sameTags = (a = {}, b = {}) => tagStr(a) === tagStr(b)
+// OR within a kind, AND across kinds; a role tag matches the role or the persona. Unknown role/project → no match.
+const tagsMatch = (t, { role, persona, project }) =>
+  (!t.role || [role, persona].some((x) => x && t.role.includes(x))) && (!t.project || (project && t.project.includes(project)))
+// Drops lines (and their indented continuations) addressed to someone else; strips the tags from the rest.
+function applyTags(text, ctx) {
+  let changed = false, skipping = false
+  const out = []
+  for (const l of text.split('\n')) {
+    if (skipping && (!l.trim() || /^\s/.test(l))) { changed = true; continue } // blank lines and indented continuations belong to the dropped bullet
+    skipping = false
+    const { tags, text: rest, pre } = tagsOf(l)
+    if (!tagStr(tags)) { out.push(l); continue }
+    changed = true
+    if (tagsMatch(tags, ctx)) out.push(pre + rest); else skipping = true
+  }
+  return changed ? out.join('\n').replace(/\n{3,}/g, '\n\n').trim() : text
+}
+
 async function merge({ role, project, persona, cwd }) {
-  const parts = [['Global preferences', body((read(file('global'))))]]
-  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, body((read(file('role', role))))])
-  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, body((read(file('project', project))))])
+  const ctx = { role, persona, project }
+  const parts = [['Global preferences', applyTags(body((read(file('global')))), ctx)]]
+  if (role && NAME.test(role)) parts.push([`Role preferences (${role})`, applyTags(body((read(file('role', role)))), ctx)])
+  if (project && NAME.test(project)) parts.push([`Project preferences (${project})`, applyTags(body((read(file('project', project)))), ctx)])
   // WP-204: project-role files from the repo's main checkout. Dynamic import: only `context` needs wt-shared.
   if (role || persona) {
     try {
@@ -52,6 +93,7 @@ async function merge({ role, project, persona, cwd }) {
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] })
 function infer({ role, project, cwd, persona }) {
+  let paneFailed = false
   // WT_ROLE / WT_PERSONA: set by a headless run (WP-307), which has no herdr pane token to read them from.
   role ||= process.env.WT_ROLE; persona ||= process.env.WT_PERSONA
   if ((!role || !project) && process.env.HERDR_PANE_ID) {
@@ -61,12 +103,12 @@ function infer({ role, project, cwd, persona }) {
       project ||= p.tokens?.project
       persona ||= p.tokens?.persona
       cwd ||= p.cwd
-    } catch {}
+    } catch { paneFailed = true }
   }
   if (!project) {
     try { project = basename(dirname(sh('git', ['-C', cwd || process.cwd(), 'rev-parse', '--path-format=absolute', '--git-common-dir']).trim())) } catch {}
   }
-  return { role, project, persona, cwd }
+  return { role, project, persona, cwd, paneFailed }
 }
 
 function flags(argv) {
@@ -75,6 +117,7 @@ function flags(argv) {
     if (/^--(role|project|cwd|scope|persona|session|limit)$/.test(argv[i])) o[argv[i].slice(2)] = argv[++i]
     else if (argv[i] === '--json') o.json = true
     else if (argv[i] === '--strict') o.strict = true
+    else if (argv[i] === '--strict-pane') o.strictPane = true
     else o._.push(argv[i])
   }
   return o
@@ -102,20 +145,25 @@ function entries() {
   const out = []
   for (const f of files()) for (const line of read(f.file).split('\n')) {
     const m = line.match(TRAILER)
-    if (m) { const a = attrs(m[1]); out.push({ ...f, id: a.id, by: a.by, at: a.at, text: strip(line).replace(/^\s*[-*]\s*/, '') }) }
+    if (m) {
+      const a = attrs(m[1]), t = tagsOf(strip(line).replace(/^\s*[-*]\s*/, ''))
+      out.push({ ...f, id: a.id, by: a.by, at: a.at, text: t.text, ...(tagStr(t.tags) ? { tags: t.tags } : {}) })
+    }
   }
   return out
 }
 function pending() {
   try { return readdirSync(PENDING).filter((f) => f.endsWith('.json')).map((f) => { try { return { ...JSON.parse(readFileSync(join(PENDING, f), 'utf8')), scope: 'global', pending: true } } catch { return null } }).filter(Boolean) } catch { return [] }
 }
-const line = (e) => `- ${e.text} <!-- wtm:id=${e.id} by=${e.by} at=${e.at} -->`
+const line = (e) => `- ${tagStr(e.tags) ? tagStr(e.tags) + ' ' : ''}${e.text} <!-- wtm:id=${e.id} by=${e.by} at=${e.at} -->`
 function append(f, e) {
   const cur = read(f)
   atomic(f, `${cur ? cur + '\n' : ''}${line(e)}\n`)
 }
 // Near-identical: same words ignoring case and punctuation, in the target file (any line) or pending.
-const dup = (f, text, extra = []) => [...read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')), ...extra].some((l) => norm(l) === norm(text))
+// Same words AND same tags (the same rule for two roles is two entries). extra: [{text, tags}] (pending proposals).
+const dup = (f, text, tags = {}, extra = []) => [...read(f).split('\n').map((l) => tagsOf(strip(l).replace(/^\s*[-*]\s*/, ''))).map((t) => ({ text: t.text, tags: t.tags })), ...extra]
+  .some((l) => norm(l.text) === norm(text) && sameTags(l.tags, tags))
 
 // Jev near-duplicate / conflict check (WT_JEV_MEMORY_DUP, default on): prints what it found; --strict refuses.
 // Any failure (no pack, no key, timeout) → no check, as before.
@@ -136,25 +184,35 @@ async function jevDup(text, existing, strict) {
 }
 
 async function remember(o) {
-  const text = o._.join(' ').replace(/\s+/g, ' ').trim()
+  const raw = o._.join(' ').replace(/\s+/g, ' ').trim()
+  if (!raw) throw new Error('remember: a note is required')
+  const own = tagsOf(raw) // tags written in the note itself: stored as tags, never as text
+  const text = own.text.trim()
   if (!text) throw new Error('remember: a note is required')
-  if (text.includes('<!--') || text.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
+  if (raw.includes('<!--') || raw.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
   const { role, project } = infer(o)
   const scope = o.scope || (project ? 'project' : role ? 'role' : null)
   if (!['role', 'project', 'global'].includes(scope)) throw new Error('remember: --scope role|project|global (none inferable)')
   const name = scope === 'role' ? role : scope === 'project' ? project : null
   if (scope !== 'global' && !name) throw new Error(`remember: no ${scope} inferable; pass --${scope}`)
   const f = file(scope, name)
-  const e = { id: randomBytes(3).toString('hex'), by: author().replace(/\s+/g, '_'), at: today(), text }
+  // WP-369: an explicit --role/--project that does not select the file becomes a line tag (it used to be ignored).
+  const tags = {}
+  if (o.role && scope !== 'role') tags.role = [o.role]
+  if (o.project && scope !== 'project') tags.project = [o.project]
+  for (const [k, v] of Object.entries(own.tags)) tags[k] = [...new Set([...(tags[k] ?? []), ...v])]
+  for (const [k, v] of Object.entries(tags)) if (!NAME.test(v[0])) throw new Error(`remember: bad ${k} name: ${v[0]}`)
+  const e = { id: randomBytes(3).toString('hex'), by: author().replace(/\s+/g, '_'), at: today(), text, ...(tagStr(tags) ? { tags } : {}) }
   const lines = (g) => read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')).filter((l) => l.trim()).concat(g)
+  const pend = scope === 'global' ? pending() : []
   // Before either exact-dup branch, so global (proposed) and scoped remembers both get it.
-  if (!dup(f, text, scope === 'global' ? pending().map((p) => p.text) : [])) await jevDup(text, lines(scope === 'global' ? pending().map((p) => p.text) : []), o.strict)
+  if (!dup(f, text, tags, pend)) await jevDup(text, lines(pend.map((p) => p.text)), o.strict)
   if (scope === 'global') {
-    if (dup(f, text, pending().map((p) => p.text))) return console.log('already remembered (global)')
+    if (dup(f, text, tags, pending())) return console.log('already remembered (global)')
     atomic(join(PENDING, `${e.id}.json`), JSON.stringify(e, null, 2) + '\n')
     return console.log(`proposed (awaiting approval) ${e.id}: ${text}`)
   }
-  if (dup(f, text)) return console.log(`already remembered (${scope} ${name})`)
+  if (dup(f, text, tags)) return console.log(`already remembered (${scope} ${name})`)
   append(f, e)
   console.log(`remembered (${scope} ${name}) ${e.id}: ${text}`)
 }
@@ -173,7 +231,7 @@ function accept(id) {
   if (!ID.test(id ?? '')) throw new Error('bad id')
   const p = join(PENDING, `${id}.json`)
   const e = JSON.parse(readFileSync(p, 'utf8'))
-  if (!dup(file('global'), e.text)) append(file('global'), e)
+  if (!dup(file('global'), e.text, e.tags)) append(file('global'), e)
   unlinkSync(p)
   console.log(`accepted ${id}: ${e.text}`)
 }
@@ -184,11 +242,11 @@ const words = (t) => new Set(norm(t).split(' ').filter((w) => w.length >= 4 && !
 // Entries of this agent's scopes (global, its role, its project) that share a word with the prompt, best first,
 // minus the ids already recalled in this session (state in ~/.cache/wt-memory, cleared by SessionStart's inject).
 function recall(prompt, o) {
-  const { role, project } = infer(o)
+  const { role, project, persona } = infer(o)
   const seen = join(process.env.WT_MEMORY_CACHE || join(homedir(), '.cache', 'wt-memory'), `${String(o.session ?? 'none').replace(/[^\w-]/g, '_')}.recalled`)
   const shown = new Set(read(seen).split('\n'))
   const pw = words(prompt.slice(0, 4000))
-  const hits = entries().filter((e) => e.id && !shown.has(e.id) && (e.scope === 'global' || (e.scope === 'role' && e.name === role) || (e.scope === 'project' && e.name === project)))
+  const hits = entries().filter((e) => e.id && !shown.has(e.id) && (e.scope === 'global' || (e.scope === 'role' && e.name === role) || (e.scope === 'project' && e.name === project)) && tagsMatch(e.tags ?? {}, { role, persona, project }))
     .map((e) => ({ e, n: [...words(e.text)].filter((w) => pw.has(w)).length })).filter((x) => x.n > 0)
     .sort((a, b) => b.n - a.n).slice(0, Math.min(Number(o.limit) || 5, 5)).map((x) => x.e)
   if (!hits.length) return ''
@@ -204,7 +262,11 @@ function recall(prompt, o) {
   const [cmd, ...rest] = process.argv.slice(2)
   if (cmd === 'context' || cmd === 'hash') {
     let out = ''
-    try { out = await merge(infer(flags(rest))) } catch {}
+    try {
+      const o = flags(rest), i = infer(o)
+      if (cmd === 'context' && o.strictPane && i.paneFailed) process.exit(75) // WP-369: a lost pane lookup is not a preference change
+      out = await merge(i)
+    } catch {}
     if (cmd === 'hash') console.log(createHash('sha256').update(out).digest('hex').slice(0, 16))
     else if (out) console.log(out)
   } else if (cmd === 'recall') { // like context: never fails loudly
@@ -218,7 +280,7 @@ function recall(prompt, o) {
       else {
         const all = [...entries(), ...pending()].filter((e) => !o.scope || e.scope === o.scope)
         if (o.json) console.log(JSON.stringify(all.map(({ file: _, ...e }) => e)))
-        else for (const e of all) console.log(`${e.id}  ${e.pending ? 'global (pending)' : e.scope + (e.name ? ' ' + e.name : '')}  ${e.by} ${e.at}  ${e.text}`)
+        else for (const e of all) console.log(`${e.id}  ${e.pending ? 'global (pending)' : e.scope + (e.name ? ' ' + e.name : '')}  ${e.by} ${e.at}  ${tagStr(e.tags) ? tagStr(e.tags) + ' ' : ''}${e.text}`)
       }
     } catch (e) { console.error(e.message); process.exit(1) }
   } else if (cmd === 'path') {

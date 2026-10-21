@@ -38,12 +38,25 @@ preference or corrects a recurring behaviour ("always / never / from now on / st
 imperative, role or project scope; global only for what holds across every project and role. Not one-off
 task details. Tell the user in one line what was remembered.
 
+**Line tags:** start a line (after the optional `- `) with `[role: a, b]` and/or `[project: p]` in any store file
+(`global.md`, `roles/*.md`, `projects/*.md`) to send it only to matching agents. A role tag matches the agent's role
+or persona; several values are alternatives, role AND project tags must both match; an agent with no known role or
+project gets no line tagged for it. The tag is removed from the injected text, indented continuation lines follow
+their bullet, and anything else in brackets (`[WIP]`, a bad name) is plain text. `remember --role R` / `--project P`
+that does not select the file (e.g. `--scope project --role R`, `--scope global --project P`) writes the tag
+(a global proposal keeps it until `accept`); `list --json` gives each entry's `text` without the tag plus
+`tags: {role?: [...], project?: [...]}` only when tagged; `recall` applies the same filter.
+
 **Dashboard:** role/project entries raise an inbox notice with Undo (forget); global proposals raise one with
 Accept / Reject. Settings › Memory lists agent entries (author, date, remove) and pending proposals.
 
 **Claude Code:** the `wt-memory` plugin (`claude-plugin/`, marketplace `wt-pack` at the repo root) injects
-`context` at SessionStart and, on UserPromptSubmit, re-injects it prefixed "Preferences updated:" only when its
-hash changed since the last injection for that session (state in `~/.cache/wt-memory/`). The plugin also
+`context` at SessionStart (the full list, also after `/clear` and compaction) and, on UserPromptSubmit, only when its
+hash changed since the last injection for that session (state `<session>.hash` and `<session>.ctx` in
+`~/.cache/wt-memory/`): the message "Preferences changed" lists just the lines added (`+`) and removed (`-`) per
+section; without a matching stored `.ctx` it falls back to the full "Preferences updated:" list. A prompt whose
+`herdr pane get` lookup failed sends no preference text, only recall and reminders (`context --strict-pane` exits 75) so a lost role is not read as a change.
+The context already holds only global + the agent's own role + its own project; a worker never gets `roles/orchestrator.md`. The plugin also
 registers the MCP server below, so Claude gets `remember`/`forget`/`list`/`context` tools.
 
 **MCP server** `mcp/server.mjs` (stdio, Node stdlib): tools `remember {note, scope?, role?, project?}`,
