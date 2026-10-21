@@ -215,7 +215,7 @@ list)
 spawn|mcp-args|mcp-file)
   # --mcp a,b may sit anywhere; the rest stay positional (role, cwd).
   # --label/--resume are respawn's (WP-125): keep the old name, resume its claude session.
-  extra=; model=; effort=; fixed=; resume=; team=; n=$#
+  extra=; model=; effort=; fixed=; resume=; team=; agent=; n=$#
   while [ "$n" -gt 0 ]; do
     a=$1; shift; n=$((n - 1))
     if [ "$a" = --mcp ]; then extra=$1; shift; n=$((n - 1))
@@ -224,8 +224,13 @@ spawn|mcp-args|mcp-file)
     elif [ "$a" = --label ]; then fixed=$1; shift; n=$((n - 1))
     elif [ "$a" = --resume ]; then resume=$1; shift; n=$((n - 1))
     elif [ "$a" = --team ]; then team=$1; shift; n=$((n - 1))
+    elif [ "$a" = --agent ]; then agent=$1; shift; n=$((n - 1))
     else set -- "$@" "$a"; fi
   done
+  # WP-368: --agent <name> starts claude as that agent definition (e.g. wt-pack:wt-lead); only the `lead` role takes it.
+  if [ -n "$agent" ]; then
+    case "$agent" in ''|*[!A-Za-z0-9:_.-]*|[!A-Za-z0-9]*) echo "--agent: an agent name ([A-Za-z0-9][A-Za-z0-9:_.-]*)" >&2; exit 2 ;; esac
+  fi
   if [ -n "$team" ] && { [ "${#team}" -gt 24 ] || case "$team" in [a-z]*) case "$team" in *[!a-z0-9-]*) true ;; *) false ;; esac ;; *) true ;; esac; }; then
     echo "--team: a team name ([a-z][a-z0-9-]*, <= 24 chars)" >&2; exit 2
   fi
@@ -249,7 +254,7 @@ TEAM_MEMBERS
   # spawns into its BASE role's pool with role=<base> and a persona token, so retire, DND/pair gates and Dispatch
   # still see it. Its model/effort/mcp are defaults (explicit flags win; a persona model only raises the floor, WP-298).
   persona= pmodel=
-  case "$role" in orchestrator|planner|worker|auditor|reviewer) ;; *)
+  case "$role" in orchestrator|planner|worker|auditor|reviewer|lead) ;; *)
     if pj=$(node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$role" --cwd "$(cd "${2:-$PWD}" 2>/dev/null && pwd)" 2>/dev/null); then
       persona=$role; role=$(printf '%s' "$pj" | jq -r .base)
       # WP-298: the persona's model is only a request to `floor` (--persona-model): it may raise its base role's floor, never lower it.
@@ -263,9 +268,10 @@ TEAM_MEMBERS
     fi ;;
   esac
   lrole=${persona:-$role}
+  [ -z "$agent" ] || [ "$role" = lead ] || { echo "--agent: only for the lead role (spawn lead --agent <name>)" >&2; exit 2; }
   # WP-205: `frontend-worker` with no valid role file would silently become a brand-new role and pool.
-  if [ -z "$persona" ] && [ "$cmd" = spawn ]; then case "$role" in orchestrator|planner|worker|auditor|reviewer) ;;
-    *-orchestrator|*-planner|*-worker|*-auditor|*-reviewer) echo "warning: no valid .wt-pack/roles/$role.md (wt-roles check); spawning it as a plain role with its own pool" >&2
+  if [ -z "$persona" ] && [ "$cmd" = spawn ]; then case "$role" in orchestrator|planner|worker|auditor|reviewer|lead) ;;
+    *-orchestrator|*-planner|*-worker|*-auditor|*-reviewer|*-lead) echo "warning: no valid .wt-pack/roles/$role.md (wt-roles check); spawning it as a plain role with its own pool" >&2
       # WP-289: say where personas are looked up and which exist, so a user-level persona is not mistaken for absent
       rr=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" roots 2>/dev/null | jq -r '"searched: \(.repo) and \(.user) (in effect: \(.in_effect))"') && echo "  $rr" >&2
       kp=$(cd "${2:-$PWD}" 2>/dev/null && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" list 2>/dev/null | jq -r '[.[] | select(.base != .name) | .name] | join(", ")') && echo "  known personas: ${kp:-none}" >&2
@@ -434,6 +440,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # leaves the session itself unnamed wherever claude lists its own sessions.
   set -- --name "$label"
   [ -z "$resume" ] || set -- "$@" --resume "$resume"
+  [ -z "$agent" ] || set -- "$@" --agent "$agent"
   if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
   # WP-128/137: an explicit tier/effort wins; else the role floor and its effort (WP-160: in every routing
   # mode, not just live — spawn has no task to route in the first place). WP-158: floor also returns the
