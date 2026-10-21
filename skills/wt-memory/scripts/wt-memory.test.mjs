@@ -387,3 +387,31 @@ test('scoping (WP-369 U2): worker context never has orchestrator text; a project
   assert.doesNotMatch(cc('--role', 'worker', '--project', 'p2'), /P1-X/)
   assert.doesNotMatch(h('SessionStart'), /ORCH-X|orch-only-line/)
 })
+
+// ---- WP-369 review fixes ----
+test('hook (WP-369 review): a failed pane lookup still emits the recall block, no preference text, .hash kept', () => {
+  const { wm, cache, h } = hookEnv()
+  const ok = paneShim('ok'), bad = paneShim('bad')
+  const pe = (d) => ({ WT_ROLE: '', HERDR_PANE_ID: 'p1', PATH: `${d}:${process.env.PATH}` })
+  h('SessionStart', {}, pe(ok))
+  const before = readFileSync(join(cache, 'sx.hash'), 'utf8')
+  writeFileSync(join(wm, 'global.md'), 'GLOBAL-LINE\n- Always run the zebra linter <!-- wtm:id=aaaa1111 by=x at=2026-01-01 -->\n')
+  const out = h('UserPromptSubmit', { prompt: 'please run the zebra linter' }, pe(bad))
+  assert.match(out, /Memories that match this prompt/); assert.match(out, /zebra linter/)
+  assert.doesNotMatch(out, /Preferences (updated|changed)|GLOBAL-LINE/)
+  assert.equal(readFileSync(join(cache, 'sx.hash'), 'utf8'), before)
+})
+test('tags: a blank line inside a dropped tagged bullet does not end the skip', () => {
+  const t = mkdtempSync(join(tmpdir(), 'wp369-blank-'))
+  writeFileSync(join(t, 'global.md'), '- [project: x] secret\n\n  more after blank\n- plain\n')
+  const out = runRaw(['context', '--cwd', '/', '--project', 'y'], { WT_MEMORY_HOME: t, WT_ROLE: '' }).out
+  assert.doesNotMatch(out, /secret|more after blank/); assert.match(out, /- plain/)
+})
+test('remember: tags written in the note text are parsed once and dedupe on the second call', () => {
+  const t = mkdtempSync(join(tmpdir(), 'wp369-nt-')); mkdirSync(join(t, 'projects'))
+  const r = (a) => runRaw(a, { WT_MEMORY_HOME: t, WT_ROLE: '' }).out
+  assert.match(r(['remember', '[role: orchestrator] x', '--scope', 'project', '--project', 'p']), /^remembered/)
+  assert.match(r(['remember', '[role: orchestrator] x', '--scope', 'project', '--project', 'p']), /already remembered/)
+  assert.equal(readFileSync(join(t, 'projects', 'p.md'), 'utf8').trim().split('\n').length, 1)
+  assert.match(readFileSync(join(t, 'projects', 'p.md'), 'utf8'), /^- \[role: orchestrator\] x </)
+})

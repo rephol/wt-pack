@@ -62,7 +62,7 @@ function applyTags(text, ctx) {
   let changed = false, skipping = false
   const out = []
   for (const l of text.split('\n')) {
-    if (skipping && /^\s+\S/.test(l)) { changed = true; continue }
+    if (skipping && (!l.trim() || /^\s/.test(l))) { changed = true; continue } // blank lines and indented continuations belong to the dropped bullet
     skipping = false
     const { tags, text: rest, pre } = tagsOf(l)
     if (!tagStr(tags)) { out.push(l); continue }
@@ -184,9 +184,12 @@ async function jevDup(text, existing, strict) {
 }
 
 async function remember(o) {
-  const text = o._.join(' ').replace(/\s+/g, ' ').trim()
+  const raw = o._.join(' ').replace(/\s+/g, ' ').trim()
+  if (!raw) throw new Error('remember: a note is required')
+  const own = tagsOf(raw) // tags written in the note itself: stored as tags, never as text
+  const text = own.text.trim()
   if (!text) throw new Error('remember: a note is required')
-  if (text.includes('<!--') || text.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
+  if (raw.includes('<!--') || raw.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
   const { role, project } = infer(o)
   const scope = o.scope || (project ? 'project' : role ? 'role' : null)
   if (!['role', 'project', 'global'].includes(scope)) throw new Error('remember: --scope role|project|global (none inferable)')
@@ -197,6 +200,7 @@ async function remember(o) {
   const tags = {}
   if (o.role && scope !== 'role') tags.role = [o.role]
   if (o.project && scope !== 'project') tags.project = [o.project]
+  for (const [k, v] of Object.entries(own.tags)) tags[k] = [...new Set([...(tags[k] ?? []), ...v])]
   for (const [k, v] of Object.entries(tags)) if (!NAME.test(v[0])) throw new Error(`remember: bad ${k} name: ${v[0]}`)
   const e = { id: randomBytes(3).toString('hex'), by: author().replace(/\s+/g, '_'), at: today(), text, ...(tagStr(tags) ? { tags } : {}) }
   const lines = (g) => read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')).filter((l) => l.trim()).concat(g)

@@ -1022,12 +1022,12 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 ## wt-memory
 
 - Notes in `~/.config/wt-memory/` (`global.md`, `roles/<id>.md`, `projects/<repo>.md`; `$WT_MEMORY_HOME`
-  overrides), merged global → role → project and injected at session start (the full list) by the wt-pack Claude plugin;
+  overrides), merged global → role → project and injected at session start (the full list) by the wt-pack Claude plugin, which also offers MCP tools remember / forget / list / context;
   when they change mid-session only the added/removed lines are re-sent (WP-369, "Preferences changed"; the full list
   returns if the session's stored copy is missing; a failed pane lookup sends nothing). The context holds only global +
   the agent's own role + its own project. A line starting `[role: a, b]` / `[project: p]` reaches only matching agents
   (role tags match the persona too; the tag is not shown to the agent; `wt-memory remember --role/--project` writes
-  such a tag when the flag does not pick the file; `list --json` has `tags`), which also offers MCP tools remember / forget / list / context.
+  such a tag when the flag does not pick the file; `list --json` has `tags`).
 - CLI: `wt-memory context | remember "<note>" --scope role|project|global | forget | list | accept | reject`.
 - A **global** note is never written directly: it waits as a proposal for Accept in the Inbox or
   `wt-memory accept`.

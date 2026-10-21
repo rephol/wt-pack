@@ -126,7 +126,14 @@ try {
     event === 'UserPromptSubmit' && input.prompt ? new Promise((res) => execFile(process.execPath, [bin, 'recall', String(input.prompt).slice(0, 4000), '--session', sess, ...(input.cwd ? ['--cwd', input.cwd] : [])], { encoding: 'utf8', timeout: 2000 }, (e, out) => res(e ? '' : out.trim()))) : '',
   ])
   const remind = await remindP
-  if (ctxOut == null) { out(remind); process.exit(0) }
+  // recall (already logged in .recalled), remind and hint go out on every path, in this order.
+  const tail = (text) => {
+    if (recall) text = `${text ? text + '\n\n' : ''}Memories that match this prompt:\n${recall}`
+    if (remind) text = `${text ? text + '\n\n' : ''}${remind}`
+    if (hint) text = `${text ? text + '\n\n' : ''}This message looks like a standing preference. If it is, run \`${bin} remember "<concise imperative>" --scope <role|project|global>\` and tell the user in one line: "Remembered: <what>".`
+    return text
+  }
+  if (ctxOut == null) { out(tail('')); process.exit(0) }
   const ctx = ctxOut.trim()
   const hash = createHash('sha256').update(ctx).digest('hex').slice(0, 16)
   const dir = join(homedir(), '.cache', 'wt-memory')
@@ -147,9 +154,7 @@ try {
     const trusted = ctx && prior !== null && prev !== null && createHash('sha256').update(prior).digest('hex').slice(0, 16) === prev
     text = trusted ? (diffPrefs(prior, ctx) ?? '') : `Preferences updated:\n\n${ctx || '(all standing preferences were removed)'}`
   }
-  if (recall) text = `${text ? text + '\n\n' : ''}Memories that match this prompt:\n${recall}`
-  if (remind) text = `${text ? text + '\n\n' : ''}${remind}`
-  if (hint) text = `${text ? text + '\n\n' : ''}This message looks like a standing preference. If it is, run \`${bin} remember "<concise imperative>" --scope <role|project|global>\` and tell the user in one line: "Remembered: <what>".`
+  text = tail(text)
   mkdirSync(dir, { recursive: true })
   writeFileSync(state, hash)
   try { writeFileSync(ctxFile, ctx) } catch {}
