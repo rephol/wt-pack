@@ -293,3 +293,21 @@ test('WP-327: spawn sweeps key files of panes that are no longer live agents (he
     assert.ok(existsSync(join(tmp, 'pane-keys', 'w1:p5')) && existsSync(join(tmp, 'pane-keys', 'w1:p9')))
   } finally { writeFileSync(join(bin, 'herdr'), orig) }
 })
+
+test('WP-368: spawn lead --agent <name> passes --agent to claude, tags role=lead, keeps the floor in every mode; --agent is lead-only and validated', () => {
+  const start = (s) => s.calls.find((l) => l.startsWith('herdr agent start')) ?? ''
+  for (const mode of ['off', 'shadow', 'live']) {
+    const s = spawn(['spawn', 'lead', '--agent', 'wt-pack:wt-lead'], { WT_MODEL_ROUTING: mode })
+    assert.match(s.out, /^demo-lead-01 /)
+    assert.match(start(s), / -- --name demo-lead-01 --agent wt-pack:wt-lead /)
+    assert.match(start(s), /--model claude-(sonnet|opus)-5-5/) // never haiku: the floor still applies
+    assert.match(start(s), /--effort \w+/)
+    assert.ok(s.calls.some((l) => l.startsWith('herdr pane report-metadata') && l.includes('--token role=lead')))
+  }
+  assert.match(start(spawn(['spawn', 'lead', '--agent', 'wt-pack:wt-lead', '--model', 'opus', '--effort', 'low'])), /--agent wt-pack:wt-lead .*--model claude-opus-5-5 --effort low/)
+  assert.doesNotMatch(start(spawn(['spawn', 'lead'])), /--agent/)
+  const fails = (args) => assert.throws(() => spawn(args), (e) => e.status === 2)
+  fails(['spawn', 'worker', '--agent', 'wt-pack:wt-lead'])
+  fails(['spawn', 'lead', '--agent', '../x'])
+  fails(['spawn', 'lead', '--agent', 'a b'])
+})

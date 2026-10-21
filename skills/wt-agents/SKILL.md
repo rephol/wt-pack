@@ -23,6 +23,7 @@ scripts/agents.sh list [role] [--json]    # name, pane, status, cwd, dnd (+until
                                            # (--json: + raw pane tokens, plus dnd:{on,until} and pair)
 scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
 scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
+scripts/agents.sh spawn lead [cwd] --agent wt-pack:wt-lead  # WP-368: per-ticket coordinator, role=lead, <repo>-leads; --agent starts claude as that agent definition
 scripts/agents.sh spawn auditor           # PM+QA, read-only: <repo>-auditors, main checkout (wt-audit)
 scripts/agents.sh spawn <persona> [cwd]   # WP-204: a name with a role file (<repo>/.wt-pack/roles/ or ~/.config/wt-pack/projects/<repo>/roles/, `wt-roles where`) spawns in its BASE role's pool,
                                           # role=<base> persona=<name>, the file's model/effort/mcp as defaults

@@ -32,7 +32,7 @@ All take `--cwd <dir>` (default: here). The CLI is `scripts/wt-roles` in this sk
 | every worker/reviewer/… in this repo to behave differently | an **override**: `worker.md`, `reviewer.md` … |
 | a *kind* of worker (frontend, QA, migrations) with its own model, tools and routing | a **persona**: `frontend-worker.md` |
 
-An **override** is named after a base role (`orchestrator`, `planner`, `worker`, `auditor`, `reviewer`) and
+An **override** is named after a base role (`orchestrator`, `planner`, `worker`, `auditor`, `reviewer`, `lead`) and
 applies to every agent of that role. A **persona** has any other name, declares `base:`, and applies only to
 agents spawned as it. A persona's agent gets both: the base override first, then the persona file.
 

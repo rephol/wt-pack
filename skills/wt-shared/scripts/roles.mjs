@@ -14,7 +14,7 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const BASES = ['orchestrator', 'planner', 'worker', 'auditor', 'reviewer']
+export const BASES = ['orchestrator', 'planner', 'worker', 'auditor', 'reviewer', 'lead']
 export const NAME = /^[a-z][a-z0-9-]{0,23}$/
 export const CAP = 6 * 1024
 const KEYS = { base: 'str', model: ['haiku', 'sonnet', 'opus'], effort: ['low', 'medium', 'high'], mcp: 'list', skills: 'list', labels: 'list' }
