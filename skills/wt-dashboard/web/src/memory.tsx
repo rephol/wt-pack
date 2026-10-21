@@ -13,11 +13,12 @@ import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/Segme
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { useRoles } from './roles'
+import { entryLine, TAG_HINT, type EntryTags } from './memoryTags'
 import { Delayed, LoadError, FieldsSkeleton } from './skeletons'
 
 type Memory = { dir: string; cli: string | null; plugin: { installed: boolean; enabled: boolean; version: string | null }
   global: string; roles: Record<string, string>; projects: Record<string, string>; entries: Entry[] }
-type Entry = { id: string; scope: 'global' | 'role' | 'project'; name: string | null; by: string; at: string; text: string; pending?: boolean }
+type Entry = { id: string; scope: 'global' | 'role' | 'project'; name: string | null; by: string; at: string; text: string; pending?: boolean; tags?: EntryTags }
 type AgentLite = { key: string; name: string; pool: string; project: string | null; tags?: Record<string, string> }
 type Tab = 'global' | 'roles' | 'projects'
 
@@ -119,7 +120,7 @@ function Entries({ entries }: { entries: Entry[] }) {
     <HStack key={e.id} justify="between" align="center" gap={2}>
       <VStack gap={0}>
         <Text size="sm">{e.text}</Text>
-        <Text type="supporting" size="sm">{`${e.pending ? 'global' : e.name ? `${e.scope} ${e.name}` : e.scope} · ${e.by} · ${e.at}`}</Text>
+        <Text type="supporting" size="sm">{entryLine(e)}</Text>
       </VStack>
       <HStack gap={1}>{acts}</HStack>
     </HStack>
@@ -161,6 +162,7 @@ function Editor({ path, label, initial: raw }: { path: string; label: string; in
   return (
     <VStack gap={1}>
       <TextArea label={label} value={text} onChange={setText} rows={6} placeholder="Markdown, e.g. - Answer in English." />
+      <Text type="supporting" size="sm">{TAG_HINT}</Text>
       <HStack justify="end"><Button label="Save" size="sm" variant="primary" isDisabled={text === initial} isLoading={save.isPending} onClick={() => save.mutate()} /></HStack>
     </VStack>
   )
@@ -172,10 +174,11 @@ function Preview() {
   const a = agents.data?.find((x) => x.key === key)
   const role = a && a.pool !== 'other' ? a.pool : ''
   const project = a?.tags?.project ?? a?.project ?? ''
+  const persona = a?.tags?.persona ?? ''
   const preview = useQuery({
-    queryKey: ['memory-preview', role, project],
+    queryKey: ['memory-preview', role, project, persona],
     enabled: !!a,
-    queryFn: () => api<{ text: string }>(`/api/memory/preview?${new URLSearchParams({ role, project })}`),
+    queryFn: () => api<{ text: string }>(`/api/memory/preview?${new URLSearchParams({ role, project, persona })}`),
   })
   return (
     <VStack gap={2}>
