@@ -2,7 +2,7 @@
 # Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
-#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--effort low|medium|high] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
+#   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer|lead] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--effort low|medium|high] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
 #   handoff.sh ... [--request-id <id>] ...               # WP-251: a repeat of the same id prints the first run's output and sends nothing
 #   handoff.sh --reply <pane> ["text"|-]                  # answer a wt-message (text, or stdin: no text or "-"), kind=reply
 #   handoff.sh --reply <pane> --file <path|->            # WP-359: the body from a file ("-" = stdin); safe for backticks, $(…), quotes
@@ -138,7 +138,7 @@ while :; do
     --no-goal) goal=0; shift ;; # accepted: now the default
     --task)  task=$2; shift 2 ;;
     --role)  role=$2; shift 2
-             case "$role" in worker|planner|reviewer) ;; *) echo "--role: worker, planner or reviewer" >&2; exit 2 ;; esac ;;
+             case "$role" in worker|planner|reviewer|lead) ;; *) echo "--role: worker, planner, reviewer or lead" >&2; exit 2 ;; esac ;;
     --persona) persona=$2; shift 2   # WP-204: only agents tagged persona=<name>, or a spawn of that persona
              printf '%s' "$persona" | grep -qE '^[a-z][a-z0-9-]{0,23}$' || { echo "--persona: a name like frontend-worker" >&2; exit 2; } ;;
     --team)  team=$2; shift 2   # WP-238: only agents tagged team=<name> (a plain handoff skips team agents), spawns join it
@@ -410,7 +410,7 @@ fi
 # WP-204: a persona's base role comes from its project-role file when --role is not given.
 if [ -n "$persona" ] && [ -z "$role" ]; then
   role=$(node "$SELFDIR/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
-  case "$role" in worker|planner|reviewer) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner or reviewer base" >&2; exit 2 ;; esac
+  case "$role" in worker|planner|reviewer|lead) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner, reviewer or lead base" >&2; exit 2 ;; esac
 elif [ -n "$persona" ]; then
   pbase=$(node "$SELFDIR/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
   [ -z "$pbase" ] || [ "$pbase" = "$role" ] || { echo "--persona $persona is a $pbase, not a $role" >&2; exit 2; }
@@ -428,6 +428,7 @@ if [ -z "$role" ] && [ "$mode" = auto ]; then
   esac
 fi
 role=${role:-worker}
+lead_agent=; [ "$role" != lead ] || lead_agent=${WT_LEAD_AGENT:-wt-pack:wt-lead} # WP-368
 # Every role but worker has its own pool "<repo>-<role>s" and starts in the main checkout (as `agents.sh spawn
 # <role>` does): a planner makes its own worktree, a reviewer (WP-121) reviews by SHA without one.
 [ "$role" = worker ] || ws_label=${HANDOFF_WORKSPACE:-$(basename "${main_checkout:-$cwd}")-${role}s}
@@ -724,6 +725,9 @@ dry() {  # <what would happen>
 # WP-204: a persona's own model/effort (its role file, applied by agents.sh spawn) outranks the routed tier, so a
 # persona agent is reused by persona, never by tier.
 [ -z "$persona" ] || { route_tier=; route_effort=; }
+# WP-368: a lead is the wt-pack:wt-lead agent (opus/low, its definition's own tier): never routed, never reused, and
+# pinned to that tier even against --model/--effort (WT_LEAD_AGENT overrides the agent name).
+[ "$role" != lead ] || { route_tier=opus; route_effort=low; }
 
 if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id>
   [ "$dry" -eq 1 ] && dry "would hand to headless ${hl#* } (${hl%% *})"
@@ -768,7 +772,7 @@ if [ "$mode" = pane ]; then
   exit 0
 fi
 
-if [ "$mode" = auto ]; then
+if [ "$mode" = auto ] && [ "$role" != lead ]; then # WP-368: one fresh lead per ticket, never a reused pane
   tab=$(printf '\t')
   reuse=$(candidates | while IFS="$tab" read -r p _ _ cmodel ceffort; do
     [ -z "$route_tier" ] || { [ "$cmodel" = "$route_tier" ] && { [ -z "$route_effort" ] || [ "$ceffort" = "$route_effort" ]; }; } || continue
@@ -823,10 +827,10 @@ if [ -n "$team" ]; then
   fi
 fi
 
-[ "$dry" -eq 1 ] && dry "would spawn a ${persona:+$persona }$role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}"
+[ "$dry" -eq 1 ] && dry "would spawn a ${persona:+$persona }$role in $spawn_cwd${mcp:+ with --mcp $mcp}${route_tier:+ with --model $route_tier}${route_effort:+ --effort $route_effort}${lead_agent:+ --agent $lead_agent}"
 # Spawning, the numbering and the naming all live in agents.sh, so the pool has
 # one definition of what a worker is called. It names the repo from $PWD, so run it from the target.
-created=$(cd "$spawn_cwd" && "$SELFDIR/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"} ${team:+--team "$team"})
+created=$(cd "$spawn_cwd" && "$SELFDIR/../../wt-agents/scripts/agents.sh" spawn "${persona:-$role}" "$spawn_cwd" ${mcp:+--mcp "$mcp"} ${route_tier:+--model "$route_tier"} ${route_effort:+--effort "$route_effort"} ${team:+--team "$team"} ${lead_agent:+--agent "$lead_agent"})
 label=${created%% *}
 pane=${created##* }
 

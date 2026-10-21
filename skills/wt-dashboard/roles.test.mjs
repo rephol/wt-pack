@@ -75,5 +75,13 @@ test('RoleStore: a saved roles.json gains a new default once; a deleted default 
   assert.ok(!(await new RoleStore(dir).load()).roles.some((r) => r.id === 'reviewer'))
   const old = await mkdtemp(join(tmpdir(), 'roles-')) // auditor deleted before retired-roles.json existed
   await writeFile(join(old, 'roles.json'), JSON.stringify(DEFAULT_ROLES.filter((r) => r.id !== 'reviewer' && r.id !== 'auditor')))
-  assert.deepEqual((await new RoleStore(old).load()).roles.map((r) => r.id), ['orchestrator', 'planner', 'worker', 'reviewer'])
+  assert.deepEqual((await new RoleStore(old).load()).roles.map((r) => r.id), ['orchestrator', 'planner', 'worker', 'lead', 'reviewer'])
+})
+
+test('WP-368: a lead role exists by default, matches only a *-leads workspace or the role token (never a tech-lead by name)', async () => {
+  assert.ok(DEFAULT_ROLES.some((r) => r.id === 'lead'))
+  assert.doesNotThrow(() => validateRoles(DEFAULT_ROLES))
+  assert.equal(resolveRole(DEFAULT_ROLES, { token: 'lead' }).id, 'lead')
+  assert.equal(resolveRole(DEFAULT_ROLES, { workspace: 'wt-pack-leads', name: 'x' }).id, 'lead')
+  assert.equal(resolveRole(DEFAULT_ROLES, { name: 'wt-pack-tech-lead-02' }).id, 'other')
 })

@@ -10,6 +10,7 @@ User-facing feature reference: `docs/features.md` — a user-visible change upda
 Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory, not here.
 
 ## Layout
+- `agents/wt-*.md` — the plugin's named agents (`wt-pack:wt-lead` etc., WP-368; test `test/plugin-agents.test.mjs`).
 - `skills/wt-*` — the skills; `.claude-plugin/marketplace.json` — local marketplace `wt-pack` (serves the root
   plugin; also setup's marker for a wt-pack checkout); `setup` — installer;
   `docs/` — features, handoff, `plans/` (point-in-time, not rewritten). Root `.claude-plugin/plugin.json` +
@@ -40,6 +41,7 @@ Role rules (orchestrator, planner, worker, auditor, reviewer) live in wt-memory,
 |---|---|
 | wt-agents | herdr pools, `spawn <role>`, `list --json`, pane tokens |
 | wt-handoff | `--task`, sender/target tokens, reply footer (`skills/wt-plan/scripts/handoff.sh` is a shim) |
+| wt-run | the ticket lead's driver `/wt-run <ID>` (WP-368): phases + gates A/B/C, run-state `~/.local/share/wt-lead/<repo>/<ID>.json` via `scripts/state.mjs`; started by `agents.sh spawn lead --agent wt-pack:wt-lead` or Dispatch's `lead` label |
 | wt-plan · wt-work · wt-review · wt-pr · wt-ship · wt-simplify · wt-compound · wt-research | ticket pipeline |
 | wt-finish | retire worktree; clears `task` token |
 | wt-babysit | watch PR to merge-ready |

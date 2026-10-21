@@ -17,8 +17,12 @@ export const DEFAULT_ROLES = [
   // Watches the repo's open PRs and posts reviews (wt-watch-prs, WP-116); reads refs, never checks out.
   { id: 'reviewer', name: 'Reviewer', color: 'teal', letter: 'R', match: { workspace: '*-reviewers', name: '*reviewer*' },
     spawn: { start: 'main', workspace: '<repo>-reviewers', projects: [] } },
+  // WP-368: one per ticket that carries the `lead` label (wt-run); runs the ticket with subagents. Workspace match only:
+  // a name glob like *lead* would also catch every tech-lead.
+  { id: 'lead', name: 'Lead', color: 'pink', letter: 'L', match: { workspace: '*-leads', name: '' },
+    spawn: { start: 'main', workspace: '<repo>-leads', projects: [] } },
 ]
-export const ADDED_DEFAULTS = ['reviewer'] // defaults added after roles.json shipped; append new ones here
+export const ADDED_DEFAULTS = ['reviewer', 'lead'] // defaults added after roles.json shipped; append new ones here
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in the agents table row's tags and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
 // alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.

@@ -13,8 +13,11 @@ const HANDOFF = fileURLToPath(new URL('../wt-handoff/scripts/handoff.sh', import
 // WP-238: a card a planner already took through Planning (its history moved it there) is planned: size L / needs-plan
 // still say "planner", so without this it came back from Ready to a planner a second time (WP-236).
 export const planned = (t) => t.column !== 'planning' && (t.history ?? []).some((h) => h.kind === 'move' && h.to === 'planning')
-// Size L or the needs-plan label (set by hand or by Jev triage) → planner, until it has been planned; anything else → worker.
-export const roleFor = (t) => (!planned(t) && (t.size === 'L' || t.labels?.includes('needs-plan')) ? 'planner' : 'worker')
+// WP-368: the `lead` label opts a ticket into ONE ticket-lead agent (wt-pack:wt-lead, /wt-run) that runs it end to end with
+// subagents, instead of a planner then a worker. Else size L or the needs-plan label (set by hand or by Jev triage) →
+// planner, until it has been planned; anything else → worker.
+export const isLead = (t) => (t.labels ?? []).some((l) => String(l).toLowerCase() === 'lead')
+export const roleFor = (t) => (isLead(t) ? 'lead' : !planned(t) && (t.size === 'L' || t.labels?.includes('needs-plan')) ? 'planner' : 'worker')
 // WP-238 teams. The stage a Ready card is handed to (plan for a planner role, else build), the persona a team puts on a
 // stage (its stage map, else the base role of that stage), the team's capacity (members of its build persona), and the
 // rule every agent pick shares: an agent's team token must equal the ticket's team (none = none), so work never crosses teams.
@@ -77,6 +80,10 @@ export const gateLine = (t, gates = []) => !gates.length ? '' :
 export function dispatchPrompt(t, role, report = null, gates = []) {
   const line = gateLine(t, gates) + reportLine(report)
   const ack = ` First, acknowledge this message: \`handoff.sh --ack <the id in the wt-message tag>\` (wt-handoff).`
+  // WP-368: the lead runs the whole ticket through wt-run; this dispatch is the one authority to move its card.
+  if (role === 'lead') return `You are the ticket lead for ${t.id} ${quoteTitle(t.title)} (\`wt-ticket show ${t.id}\`). Run \`/wt-run ${t.id}\`.\n\n` +
+    `First move the card: \`wt-ticket move ${t.id} planning\` (this dispatch authorizes that one move; later status is the orchestrator's).${ack} ` +
+    `Stop at each gate and report to the orchestrator; never merge or push.\n` + line
   if (role === 'planner') return `Use wt-plan to plan ${t.id} ${quoteTitle(t.title)} from the local board (\`wt-ticket show ${t.id}\`), then hand it off as wt-plan does.${ack}\n` + line
   const branch = `${t.id.toLowerCase()}-<short-slug>`
   return `Implement ${t.id} ${quoteTitle(t.title)} (\`wt-ticket show ${t.id}\`).\n\n` +
@@ -213,8 +220,9 @@ export class Dispatch {
     if (!repo) { s.waiting = `no checkout for ${project}`; return }
     // WP-238: with team files, a card is owned by one team — its own, else the least-loaded with room — and this stage
     // goes to that team's persona for it. No teams = today's behaviour.
-    const teams = (await this.deps.teamsOf?.(repo).catch(() => [])) ?? []
     const stageRole = roleFor(next)
+    const teams = stageRole === 'lead' ? [] : (await this.deps.teamsOf?.(repo).catch(() => [])) ?? [] // a lead is its own team
+
     let team = null, tpersona = null
     if (teams.length) {
       team = next.team ? teams.find((x) => x.name === next.team) : pickTeam(teams, (await this.tickets.list(project)).tickets)
@@ -472,7 +480,7 @@ export class Dispatch {
 export const dispatchRequestId = (t, role) => `dispatch:${t.id}:${role}:${(t.history ?? []).filter((h) => h.kind === 'move').length}`
 // WP-251/252: recovery stamps the id of the dispatch it is re-sending on the card (`requestId`), so the next send of that
 // card carries it; #sent clears it. Two sweeps of one interruption stamp the same id, hence send once.
-export const recoveryRequestId = (t) => dispatchRequestId(t, t.column === 'planning' ? 'planner' : 'worker')
+export const recoveryRequestId = (t) => dispatchRequestId(t, isLead(t) ? 'lead' : t.column === 'planning' ? 'planner' : 'worker')
 export const runHandoff = (execFile, bin, env = {}) => (args, prompt, cwd) => new Promise((resolve, reject) => {
   const child = execFile(bin, args, { cwd, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '', ...env } },
     (err, o, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(o))

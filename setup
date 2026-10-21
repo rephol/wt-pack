@@ -401,7 +401,7 @@ plugin_check() {
   # Plugin-only install (wt-pack@wt-pack from the marketplace): its cache copy is stale once the checkout moves on.
   if printf '%s\n' "$ids" | grep -qx 'wt-pack@wt-pack'; then
     mp=$(market_path); riv=$(plugin_ver wt-pack@wt-pack); rsv=$(checkout_commit "${mp:-$REPO}")
-    if [ -n "$rsv" ] && ! plugin_current "$riv" "${mp:-$REPO}" skills hooks .claude-plugin; then bad "plugin wt-pack@wt-pack $(printf '%.12s' "$riv") installed, checkout is at $(printf '%.12s' "$rsv") — claude plugin update wt-pack@wt-pack (then restart agents)"; fi
+    if [ -n "$rsv" ] && ! plugin_current "$riv" "${mp:-$REPO}" skills hooks agents .claude-plugin; then bad "plugin wt-pack@wt-pack $(printf '%.12s' "$riv") installed, checkout is at $(printf '%.12s' "$rsv") — claude plugin update wt-pack@wt-pack (then restart agents)"; fi
     [ -n "$mp" ] && { [ -d "$mp/.claude/worktrees" ] || [ -d "$mp/node_modules" ] || [ -d "$mp/skills/wt-dashboard/node_modules" ]; } \
       && opt "wt-pack@wt-pack was installed from the working checkout $mp — its worktrees and node_modules went into the plugin cache; install from GitHub (rephol/wt-pack) or a clean clone"
   fi

@@ -25,6 +25,15 @@ test('new: persona from the template, override from a default, refuses clobber a
   assert.ok(!existsSync(join(repo, '.wt-pack', 'x.md')))
 })
 
+test('WP-368: lead is a base role: an override from its default, a persona with --base lead', () => {
+  assert.equal(run('new', 'lead', '--from-default').code, 0)
+  assert.match(readFileSync(f('lead'), 'utf8'), /Coordinate one ticket/)
+  assert.equal(run('new', 'web-lead', '--base', 'lead').code, 0)
+  assert.match(readFileSync(f('web-lead'), 'utf8'), /^---\nbase: lead\n/)
+  assert.match(run('list').out, /^lead\s+override/m)
+  rmSync(f('lead')); rmSync(f('web-lead'))
+})
+
 test('check ok for the fresh files; errors exit 1; list shows kind and status', () => {
   assert.match(run('check').out, /^ok$|warn/m)
   assert.equal(run('check').code, 0)

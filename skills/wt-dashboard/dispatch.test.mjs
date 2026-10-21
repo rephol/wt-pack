@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets } from './tickets.mjs'
-import { Dispatch, mergeIds, dispatchPrompt, gateLine, resolveReport, personaFor, roleFor, planned, pickTeam, capacity, stagePersona } from './dispatch.mjs'
+import { Dispatch, mergeIds, dispatchPrompt, gateLine, resolveReport, personaFor, roleFor, isLead, planned, pickTeam, capacity, stagePersona } from './dispatch.mjs'
 
 const user = { name: 'Rep' }
 const tagTicket = (a) => a.tags?.ticket ?? null
@@ -806,4 +806,28 @@ test('WP-348: a card marked paused keeps its assignee when its (paused) agent is
   for (let i = 0; i < 4; i++) await d.tick()
   const T = await tickets.get(t.id)
   assert.deepEqual([T.column, T.assignee?.name], ['building', 'wt-pack-worker-07'])
+})
+
+test('WP-368: the `lead` label hands the card to ONE lead (--role lead, /wt-run), whatever its size, skipping teams and the buddy', async () => {
+  const teams = async () => { throw new Error('a lead ticket must not look at teams') }
+  const { tickets, d, calls } = await setup({ extra: { teamsOf: teams } })
+  const l = await ready(tickets, 'big and led', { size: 'L', labels: ['Lead', 'needs-plan'] })
+  await d.tick(); await d.tick()
+  assert.equal(calls.length, 1, 'one handoff for the ticket')
+  assert.deepEqual(calls[0].args.slice(0, 2), ['--role', 'lead'])
+  assert.ok(!calls[0].args.includes('--buddy') && !calls[0].args.includes('--team'))
+  assert.match(calls[0].prompt, /\/wt-run WP-\d+/)
+  assert.match(calls[0].prompt, /wt-ticket move WP-\d+ planning/)
+  assert.doesNotMatch(calls[0].prompt, /Use wt-plan|wt-work/)
+  const T = await tickets.get(l.id)
+  assert.equal(T.dispatch.state, 'sent')
+  assert.equal(T.assignee.name, 'wt-pack-worker-09')
+})
+
+test('WP-368: roleFor is lead only with the label; other tickets keep planner / worker (backward compatible)', () => {
+  assert.equal(roleFor({ labels: ['lead'] }), 'lead')
+  assert.equal(roleFor({ labels: ['ui'], size: 'L' }), 'planner')
+  assert.equal(roleFor({ labels: ['ui'], size: 'M' }), 'worker')
+  assert.equal(roleFor({}), 'worker')
+  assert.equal(isLead({ labels: ['leader'] }), false)
 })

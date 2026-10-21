@@ -65,7 +65,7 @@ const TIER_BASE_EFFORT = { haiku: 'low', sonnet: 'medium', opus: 'high' }
 export const DEFAULTS = {
   mode: 'shadow', skills: {},
   floors: { correctness: 'sonnet', security: 'sonnet', data: 'sonnet', migration: 'sonnet' },
-  roleFloors: { planner: 'opus' },
+  roleFloors: { planner: 'opus', lead: 'opus' }, // WP-368: the lead's agent file is opus/low; the spawn floor must not undercut it
   // WP-298: a per-role CEILING on the routed tier — Jev may raise effort for the role, not its tier — unless the
   // request carries `effort: 'high'` (the tech-lead's per-unit effort) or an explicit model. Deterministic, so
   // like `floor` it holds in every mode. A role without an entry is unchanged.

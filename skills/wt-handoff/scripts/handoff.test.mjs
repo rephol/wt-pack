@@ -734,3 +734,14 @@ test('WP-360: --new spawns without the prompt and types the message exactly once
   assert.equal(ids.length, 1, sends.join('\n')) // one typed send, one envelope id
 })
 function existsSyncSafe(f) { try { statSync(f); return true } catch { return false } }
+
+test('WP-368: --role lead always spawns a fresh wt-pack:wt-lead on opus/low and never reuses an idle lead', () => {
+  writeFileSync(join(tmp, 'agents.json'), JSON.stringify({ result: { agents: [
+    { name: 'demo-lead-01', pane_id: 'wR:p1', tab_id: 't2', agent_status: 'idle', workspace_id: 'wR', cwd: repo }] } }))
+  const out = run(['--role', 'lead', '--no-goal', '--dry-run', repo], '/wt-run WP-9')
+  assert.doesNotMatch(out, /would reuse/)
+  assert.match(out, new RegExp(`would spawn a lead in ${repo} with --model opus --effort low --agent wt-pack:wt-lead`))
+  assert.match(run(['--role', 'lead', '--no-goal', '--dry-run', repo], '/wt-run WP-9'), /--model opus --effort low --agent/) // route is opus/low
+  assert.doesNotMatch(run(['--role', 'worker', '--no-goal', '--dry-run', repo]), /--agent/)
+  writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
+})
