@@ -94,3 +94,10 @@ test('repo defaults to the main checkout dir name from a worktree-less cwd', asy
   const { stdout } = await exec('node', [script, 'path', 'WP-3'], { env, cwd: dir })
   assert.equal(stdout.trim(), join(dir, dir.split('/').at(-1), 'WP-3.json'))
 })
+
+test('an approved gate cannot be reopened (a restarted lead must not re-block itself)', async () => {
+  const r = await run('gate', 'WP-1', 'A', 'open')
+  assert.equal(r.code, 1)
+  assert.match(r.err, /already approved/)
+  assert.equal((await run('gate', 'WP-1', 'A')).out, 'approved')
+})

@@ -113,6 +113,7 @@ function main(argv) {
     const gate = st.gates[g]
     if (!verb) return out(gate.status)
     if (verb === 'open') {
+      if (gate.status === 'approved') die(`gate ${g} is already approved`)
       const i = rest.indexOf('--packet')
       Object.assign(gate, { status: 'open', openedAt: new Date().toISOString(), ...(i > 0 ? { packet: rest[i + 1] } : {}) })
       st.phase = `gate${g}`
