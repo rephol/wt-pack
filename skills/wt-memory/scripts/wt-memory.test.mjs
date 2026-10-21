@@ -173,7 +173,7 @@ test('hook (WP-236): SessionStart appends one kind:inject line to the read log; 
 
 // WP-204: project-role files from the repo's main checkout.
 process.env.WT_TRUSTED_PROJECTS = join(home, 'trusted.json') // WP-334: repo role files load for trusted projects only
-writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ rolerepo: join(realpathSync(home), 'rolerepo') }))
+writeFileSync(process.env.WT_TRUSTED_PROJECTS, JSON.stringify({ rolerepo: join(realpathSync(home), 'rolerepo'), leadrepo: join(realpathSync(home), 'leadrepo') }))
 test('project-role files: override, persona via token, cap note, and no dir = unchanged output', () => {
   const repo = join(home, 'rolerepo')
   mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
@@ -188,6 +188,16 @@ test('project-role files: override, persona via token, cap note, and no dir = un
   assert.match(withPersona, /Run lint first\.[\s\S]*## Project role \(frontend-worker, \.wt-pack\/roles\/frontend-worker\.md\)\n\nUI only\./)
   writeFileSync(join(repo, '.wt-pack', 'roles', 'worker.md'), 'line\n'.repeat(1500)) // 7.5 KB
   assert.match(run(['context', '--role', 'worker', '--cwd', repo]), /… truncated \(\d+ bytes over the 6 KB cap; see the file\)$/)
+})
+test('WP-368: role lead gets its role preferences and a lead.md project override', () => {
+  const repo = join(home, 'leadrepo')
+  mkdirSync(join(repo, '.wt-pack', 'roles'), { recursive: true })
+  execFileSync('git', ['init', '-q', repo])
+  writeFileSync(join(home, 'roles', 'lead.md'), 'L1')
+  writeFileSync(join(repo, '.wt-pack', 'roles', 'lead.md'), 'Stop at every gate.')
+  const out = run(['context', '--role', 'lead', '--cwd', repo])
+  assert.match(out, /## Role preferences \(lead\)\n\nL1/)
+  assert.ok(out.endsWith('## Project role (lead, .wt-pack/roles/lead.md)\n\nStop at every gate.'))
 })
 test('an untrusted repo with role files gets one notice and no role section (WP-334)', () => {
   const repo = join(home, 'untrusted')
