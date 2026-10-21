@@ -130,6 +130,10 @@ header, remembered per viewer and defaulting to the global project; picking ther
   free agent via `wt-handoff --role`: size **L** or label **`needs-plan` → planner** (wt-plan), anything else **→ worker** (wt-work →
   wt-ship → commit and report the branch; the orchestrator merges and pushes, WP-226). Dispatch only **assigns** the card (and tags its dispatch state); the agent
   moves its own card (wt-plan → Planning, the worker's prompt → Building). One card per board per tick.
+- **Lead label (WP-368):** a card labelled **`lead`** goes to ONE ticket-lead agent instead of a planner then a
+  worker: `wt-handoff --role lead` always spawns a fresh `wt-pack:wt-lead` (opus/low, never a reused pane) whose prompt is
+  `/wt-run <ID>`; the card is moved to Planning by that prompt, teams and the pairing buddy are skipped. Cards without
+  the label behave exactly as above. See *Ticket lead and named agents*.
 - An agent already **holding a ticket** is never picked (worker reuse, buddy, pair replacement): it is the
   assignee of an open card, or its `task`/`ticket` pane token names one. A card moved to **Ready** (by the user
   or an agent) loses its assignee and dispatch state, so Dispatch can pick it up again; a gone assignee is only
@@ -1119,6 +1123,24 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   - **Add to team.** A member row with a free seat lists the project's agents that are on no team (a hand-started persona agent); picking one tags it `team=<name>` (and `persona=<name>` for a custom persona; a base-role seat needs an agent of that role). `POST /api/teams/<project>/<team>/adopt {agent, persona}`, session only. There is no auto-adopt.
   - **Routines and room mentions.** A routine skips a team agent unless the routine names that agent. An `@mention` in a room to a team agent is allowed: it names one agent, so a person chose it, and a room turn is conversation, not ticket work.
 
+## Ticket lead and named agents (WP-368)
+
+- **Named agents** ship in the plugin's `agents/` folder and load in any project that has wt-pack, as
+  `wt-pack:wt-<name>`: `wt-lead` (opus/low, per-ticket coordinator), `wt-product-planner`, `wt-tech-lead` (opus), `wt-engineer`,
+  `wt-qa-auditor`, `wt-qa-lead` (opus/low; splits QA across auditors on one stack) and `wt-reviewer`. They are project-agnostic:
+  each one orients from the project's `CLAUDE.md` and its role file (`wt-roles`), and a project adds or overrides one with a
+  same-named file in its own `.claude/agents/` (project scope beats the plugin) or adds domain engineers
+  (`<project>-web-engineer`). `claude agents` lists what exists.
+- **`/wt-run <TICKET> [--resume]`** (skill `wt-run`) is the lead's driver: plan → **gate A** → work → review → QA → **gate B** → ship →
+  babysit → **gate C**. The lead only sequences subagents; it never edits repo files, merges or pushes. Its resumable
+  run-state is `~/.local/share/wt-lead/<repo>/<TICKET>.json` (`scripts/state.mjs`: `init get set start done gate next`). At a gate the lead
+  writes the gate status and `open_questions`, sends one `handoff.sh --reply` line to the orchestrator and stops; the orchestrator
+  answers `approved A` and the lead resumes. A rejected gate reruns the phases it guards.
+- **Start one** with `agents.sh spawn lead [cwd] --agent wt-pack:wt-lead` (role token `lead`; `--agent` is accepted only for
+  the lead role; the model/effort floors still apply) or by labelling a card `lead` with Dispatch on. The Agents page shows it as a
+  **Lead** row; its subagents run inside its session, not as panes. The planner/worker/reviewer pools are unchanged.
+- `lead` is also a base role: wt-memory applies role preferences to it, and `wt-roles new <name> --base lead` makes a persona.
+
 ## wt MCP server (WP-255)
 
 The plugin registers a second MCP server, `wt` (`skills/wt-shared/mcp/wt-server.mjs`, stdio, no dependencies), that gives an
@@ -1157,6 +1179,7 @@ current repo; `--json` on any command. Exit 0 ok, 1 API error / server down, 2 u
 
 | Skill | One line |
 |---|---|
+| wt-run | The ticket lead's driver (`/wt-run <ID>`): phases, gates A/B/C, resumable run-state in `~/.local/share/wt-lead/` |
 | wt-plan | Ticket → worktree → research → plan → review → commit → handoff |
 | wt-research | Sharded evidence gathering with verdicts |
 | wt-work | Implement a plan unit by unit to its Definition of Done |
