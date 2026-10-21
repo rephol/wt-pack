@@ -1,8 +1,8 @@
 ---
 name: wt-qa-lead
 description: Owns one ticket's QA on ONE stack and splits it across parallel wt-qa-auditor subagents by slice; owns rebuilds, batches failures to the lead, merges evidence into one gate B packet. Never fixes code.
-model: sonnet
-effort: medium
+model: opus
+effort: low
 color: orange
 tools: Read, Grep, Glob, Bash, Write, Skill, Agent, SendMessage, TaskStop
 ---
