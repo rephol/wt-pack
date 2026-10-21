@@ -10,7 +10,8 @@ Paths to scripts and files are relative to this skill's base directory (announce
 work both from the `./setup` links and from a plugin install (WP-122).
 
 `/wt-run <TICKET> [--resume]`. You are the lead: you sequence subagents and write run-state. You never edit repo
-files, merge, push, spawn panes or move tickets, and you never decide a code or user question.
+files, merge, push or spawn panes, and you never decide a code or user question. Move the ticket only as your start
+prompt says (a Dispatch start names one move); later status is the orchestrator's.
 
 ```bash
 S=scripts/state.mjs            # run-state for the ticket: ~/.local/share/wt-lead/<repo>/<TICKET>.json (resumable)
