@@ -410,7 +410,7 @@ fi
 # WP-204: a persona's base role comes from its project-role file when --role is not given.
 if [ -n "$persona" ] && [ -z "$role" ]; then
   role=$(node "$SELFDIR/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
-  case "$role" in worker|planner|reviewer) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner or reviewer base" >&2; exit 2 ;; esac
+  case "$role" in worker|planner|reviewer|lead) ;; *) echo "--persona $persona: no .wt-pack/roles/$persona.md with a worker, planner, reviewer or lead base" >&2; exit 2 ;; esac
 elif [ -n "$persona" ]; then
   pbase=$(node "$SELFDIR/../../wt-shared/scripts/roles.mjs" resolve "$persona" --cwd "$cwd" 2>/dev/null | jq -r '.base // empty' 2>/dev/null || true)
   [ -z "$pbase" ] || [ "$pbase" = "$role" ] || { echo "--persona $persona is a $pbase, not a $role" >&2; exit 2; }
@@ -725,7 +725,8 @@ dry() {  # <what would happen>
 # WP-204: a persona's own model/effort (its role file, applied by agents.sh spawn) outranks the routed tier, so a
 # persona agent is reused by persona, never by tier.
 [ -z "$persona" ] || { route_tier=; route_effort=; }
-# WP-368: a lead is the wt-pack:wt-lead agent (opus/low, its definition's own tier): never routed, never reused.
+# WP-368: a lead is the wt-pack:wt-lead agent (opus/low, its definition's own tier): never routed, never reused, and
+# pinned to that tier even against --model/--effort (WT_LEAD_AGENT overrides the agent name).
 [ "$role" != lead ] || { route_tier=opus; route_effort=low; }
 
 if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id>
