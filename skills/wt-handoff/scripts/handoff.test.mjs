@@ -741,6 +741,7 @@ test('WP-368: --role lead always spawns a fresh wt-pack:wt-lead on opus/low and 
   const out = run(['--role', 'lead', '--no-goal', '--dry-run', repo], '/wt-run WP-9')
   assert.doesNotMatch(out, /would reuse/)
   assert.match(out, new RegExp(`would spawn a lead in ${repo} with --model opus --effort low --agent wt-pack:wt-lead`))
+  assert.match(run(['--role', 'lead', '--no-goal', '--dry-run', repo], '/wt-run WP-9'), /--model opus --effort low --agent/) // route is opus/low
   assert.doesNotMatch(run(['--role', 'worker', '--no-goal', '--dry-run', repo]), /--agent/)
   writeFileSync(join(tmp, 'agents.json'), '{"result":{"agents":[]}}')
 })
