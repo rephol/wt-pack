@@ -23,8 +23,11 @@ chmodSync(join(fakeBin, 'herdr'), 0o755)
 // Run it once now: macOS scans a new executable on its first launch (~0.7s), past the CLI's 500ms herdr timeout.
 execFileSync(join(fakeBin, 'herdr'))
 
+// A hermetic child env: nothing of the pane this suite runs in (HERDR_*, WT_PANE_KEY) reaches the CLI under test.
+const baseEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^HERDR_/.test(k) && k !== 'WT_PANE_KEY'))
+
 // Jev off unless a test turns it on with a stub judge: tests never call the real API.
-const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', WT_JEV_MEMORY_SUGGEST: 'off', ...env } }).trimEnd()
+const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...baseEnv(), HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', WT_JEV_MEMORY_SUGGEST: 'off', ...env } }).trimEnd()
 
 test('merges global → role → project with headings', () => {
   assert.equal(run(['context', '--role', 'planner', '--project', 'demo', '--cwd', '/']),
@@ -91,7 +94,7 @@ test('MCP server: initialize, tools/list, remember, list, error', () => {
   ]
   const out = execFileSync(new URL('../mcp/server.mjs', import.meta.url).pathname, {
     input: reqs.map((r) => JSON.stringify(r)).join('\n') + '\n', encoding: 'utf8',
-    env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: h, WT_JEV_MEMORY_DUP: 'off' },
+    env: { ...baseEnv(), HERDR_PANE_ID: '', WT_MEMORY_HOME: h, WT_JEV_MEMORY_DUP: 'off' },
   }).trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(out.map((m) => m.id), [1, 2, 3, 4, 5])
   assert.equal(out[0].result.protocolVersion, '2025-06-18')
@@ -120,7 +123,7 @@ test('remember + Jev: similar/conflict printed and still written; --strict refus
 
 const HOOK = new URL('../claude-plugin/hooks/inject.mjs', import.meta.url).pathname
 const hook = (input, env) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(input), encoding: 'utf8',
-  env: { ...process.env, HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_MEMORY_BIN: BIN, HOME: mkdtempSync(join(tmpdir(), 'hook-home-')), ...env } })
+  env: { ...baseEnv(), HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_MEMORY_BIN: BIN, HOME: mkdtempSync(join(tmpdir(), 'hook-home-')), ...env } })
 test('hook + Jev suggest: a standing preference adds the remember hint; off or no answer adds nothing', () => {
   const ev = { hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'from now on always answer in English', cwd: '/' }
   const on = hook(ev, { WT_JEV_MEMORY_SUGGEST: 'on', WT_TYPESAFE_MODULE: stubAnswers({ standing: { noul: 0.93 } }) })
@@ -257,7 +260,7 @@ function hookEnv() {
   writeFileSync(join(wm, 'projects', 'demo.md'), '- demo-line\n')
   const cache = join(hh, '.cache', 'wt-memory')
   const h = (event, extra = {}, env = {}) => { const o = execFileSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: event, session_id: 'sx', cwd: '/', prompt: 'hello', ...extra }), encoding: 'utf8',
-    env: { ...process.env, HERDR_PANE_ID: '', WT_ROLE: 'worker', WT_MEMORY_HOME: wm, WT_MEMORY_BIN: BIN, HOME: hh, WT_JEV_MEMORY_SUGGEST: 'off', ...env } }); return o ? JSON.parse(o).hookSpecificOutput.additionalContext : '' }
+    env: { ...baseEnv(), HERDR_PANE_ID: '', WT_ROLE: 'worker', WT_MEMORY_HOME: wm, WT_MEMORY_BIN: BIN, HOME: hh, WT_JEV_MEMORY_SUGGEST: 'off', ...env } }); return o ? JSON.parse(o).hookSpecificOutput.additionalContext : '' }
   return { wm, hh, cache, h }
 }
 test('hook (WP-369): edit after SessionStart → only the changed lines, not the rest', () => {
@@ -304,7 +307,7 @@ function paneShim(ok) {
   chmodSync(join(d, 'herdr'), 0o755); try { execFileSync(join(d, 'herdr'), { stdio: 'ignore' }) } catch {}
   return d
 }
-const runRaw = (args, env) => { try { return { code: 0, out: execFileSync(BIN, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', ...env } }).trimEnd() } } catch (e) { return { code: e.status, out: String(e.stdout ?? '') } } }
+const runRaw = (args, env) => { try { return { code: 0, out: execFileSync(BIN, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...baseEnv(), WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', ...env } }).trimEnd() } } catch (e) { return { code: e.status, out: String(e.stdout ?? '') } } }
 test('context --strict-pane: failing herdr → exit 75, empty; without the flag unchanged; no role token is not a failure', () => {
   const bad = paneShim('bad'), none = paneShim('norole')
   const env = (d) => ({ HERDR_PANE_ID: 'p1', WT_ROLE: '', PATH: `${d}:${process.env.PATH}` })
