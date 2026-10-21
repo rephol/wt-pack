@@ -55,7 +55,7 @@ Accept / Reject. Settings › Memory lists agent entries (author, date, remove) 
 hash changed since the last injection for that session (state `<session>.hash` and `<session>.ctx` in
 `~/.cache/wt-memory/`): the message "Preferences changed" lists just the lines added (`+`) and removed (`-`) per
 section; without a matching stored `.ctx` it falls back to the full "Preferences updated:" list. A prompt whose
-`herdr pane get` lookup failed sends nothing (`context --strict-pane` exits 75) so a lost role is not read as a change.
+`herdr pane get` lookup failed sends no preference text, only recall and reminders (`context --strict-pane` exits 75) so a lost role is not read as a change.
 The context already holds only global + the agent's own role + its own project; a worker never gets `roles/orchestrator.md`. The plugin also
 registers the MCP server below, so Claude gets `remember`/`forget`/`list`/`context` tools.
 
