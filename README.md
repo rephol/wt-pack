@@ -131,7 +131,7 @@ Inside Claude Code, "set up wt-pack" runs the `wt-setup` skill, which drives the
 
 ```sh
 sudo apt-get install -y jq gh                                   # drop sudo when you are root
-# install hc (herdr-core) and put it on PATH; `hc update` keeps it current
+# hc (herdr-core) is installed with herdr-app; put hc on PATH, `hc update` keeps it current
 gh auth login
 hc server start                                                 # the dashboard never starts the core itself
 npm --prefix ~/wt-pack/skills/wt-dashboard start  # the dashboard, instead of launchd

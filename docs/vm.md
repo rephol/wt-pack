@@ -11,7 +11,7 @@ As in the README's Linux quick start, on the VM (Debian/Ubuntu shown; use `sudo`
 
 ```sh
 sudo apt-get install -y git curl jq gh                          # plus Node ≥ 22.13 (nodesource or nvm)
-# install hc (herdr-core) and put it on PATH; `hc update` keeps it current
+# hc (herdr-core) is installed with herdr-app; put hc on PATH, `hc update` keeps it current
 npm i -g @anthropic-ai/claude-code && claude                    # log in once
 gh auth login
 git clone https://github.com/rephol/wt-pack.git ~/wt-pack

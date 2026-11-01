@@ -7,7 +7,7 @@ started before the switch lose their identity (messages, asks, gate evidence). T
 agents from before the switch are simply not seen afterwards.
 
 1. Finish what you need from the running agents first (open handoffs, unsent replies, pending PRs).
-2. Install `hc`, then start its core once: `hc server start`. Nothing in wt-pack starts it for you, and
+2. Install herdr-app (it installs `hc`; put `hc` on PATH, `hc update` keeps it current), then start the core once: `hc server start`. Nothing in wt-pack starts it for you, and
    `./setup doctor` only reports whether it is running.
 3. Stop the old agents. Pull or merge the new wt-pack and push if the checkout has a remote.
 4. Restart the dashboard once: `npm run service:restart` in `skills/wt-dashboard` (do not restart it repeatedly).

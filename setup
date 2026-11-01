@@ -120,7 +120,7 @@ pkg() { if [ "$OS" = Darwin ]; then echo "brew install $1"; elif has apt-get; th
 # probed with wt-shared's hc.mjs core-up (it connects to the core's socket and starts nothing).
 hc_check() {
   if ! has hc; then
-    $1 "hc (herdr-core) — needed for agents, handoffs and rooms; install it and put hc on PATH ('hc update' keeps it current)"; return
+    $1 "hc (herdr-core) — needed for agents, handoffs and rooms; it is installed with herdr-app; put hc on PATH ('hc update' keeps it current)"; return
   fi
   ok "$(hc --version 2>/dev/null | head -1) (key names and 'send --force' are version-bound; developed against hc 0.1.16)"
   [ "${2:-0}" = 1 ] || return 0
