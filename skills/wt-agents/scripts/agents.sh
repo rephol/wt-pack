@@ -44,7 +44,7 @@
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
 # A pool is the label wt.pool="<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners); $WT_AGENTS_WORKSPACE overrides it.
-# herdr-app shows a terminal only when it carries herdr.space=<id>, so every pool also gets one herdr-app space, looked up by
+# herdr-app shows a terminal only when it carries herdr.space=<id>, so every REPO gets one herdr-app space (all its roles share it, one named tab per agent), looked up by
 # name or made under a per-pool lock (agents-hc.mjs space); when herdr-app is missing or fails the agent runs hidden and the
 # spawn still succeeds. A persona (WP-204: a name with a project-role
 # file <repo>/.wt-pack/roles/<name>.md or, at user level, ~/.config/wt-pack/projects/<repo>/roles/<name>.md; the repo
@@ -383,7 +383,7 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   # WP-143: the labels record what this agent actually runs (post-floor), so reuse and idle-retirement can match on it.
 
   # herdr-app: one space per pool (looked up by name, made under a lock). A failure runs the agent hidden, never fails the spawn.
-  space_json=$(node "$ah" space "$pool" "$main" 2>&2) || space_json='{}'
+  space_json=$(node "$ah" space "$repo" "$main" 2>&2) || space_json='{}'
   space_id=$(printf '%s' "$space_json" | jq -r '.space // empty' 2>/dev/null || true)
   stray=$(printf '%s' "$space_json" | jq -r '.stray // empty' 2>/dev/null || true)
 

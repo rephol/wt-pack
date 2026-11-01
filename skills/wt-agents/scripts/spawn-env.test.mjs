@@ -27,7 +27,7 @@ const harnesses = []
 after(() => { core.stop(); for (const h of harnesses) h.fake.cleanup(); rmSync(tmp, { recursive: true, force: true }) })
 
 const spaces = (...names) => ({ exit: 0, stdout: JSON.stringify({ spaces: names.map((n, i) => ({ id: `sp${i + 1}-${n}`, name: n, machine: null, tabs: [] })), recent: [] }) })
-const DEFAULT_APP = { ls: spaces('demo-workers', 'demo-planners', 'demo-orchestrators', 'demo-leads', 'demo-frontend-workers', 'demo-nofiles', 'demo-ghost-workers', 'other-orchestrators') }
+const DEFAULT_APP = { ls: spaces('demo', 'other') }
 
 // One agents.sh run. cases = fake hc cases; app = fake herdr-app cases; rows = what hc already holds (terminal.list).
 const spawn = (args = ['spawn', 'worker'], { env = {}, cases = {}, app = DEFAULT_APP, rows = [], cwd = repo } = {}) => {
@@ -97,7 +97,7 @@ test('the program is the launcher, the terminal outlives its spawner and tells n
   assert.equal(p.name, 'demo-worker-01'); assert.equal(p.cwd, realpathSync(repo))
   assert.equal(p.labels['wt.pool'], 'demo-workers'); assert.equal(p.labels.role, 'worker'); assert.equal(p.labels.project, 'demo')
   assert.equal(p.labels.spawned_by, 'wt-agents'); assert.match(p.labels.created, /^\d{4}-\d\d-\d\d$/)
-  assert.equal(p.labels['herdr.space'], 'sp1-demo-workers')
+  assert.equal(p.labels['herdr.space'], 'sp1-demo')
   assert.deepEqual(s.claude.slice(0, 3), ['claude', '--name', 'demo-worker-01'])
   assert.ok(!('PATH' in p.env), 'PATH is the login shell\'s; hc-launch re-prepends the shim dir')
 })
@@ -156,12 +156,12 @@ test('core down: spawn, list, dnd, rm and respawn refuse and make NO hc call (a 
 
 test('herdr-app: a pool\'s space is looked up by name (lowest id when two match), made once under the lock when missing, and a failure runs the agent hidden', () => {
   // found: no space.new, the label names it
-  let s = ok(spawn(undefined, { app: { ls: spaces('demo-workers', 'demo-workers') } }))
-  assert.equal(s.run.labels['herdr.space'], 'sp1-demo-workers'); assert.ok(!s.app.calls().some((a) => a[0] === 'do'))
+  let s = ok(spawn(undefined, { app: { ls: spaces('demo', 'demo') } }))
+  assert.equal(s.run.labels['herdr.space'], 'sp1-demo'); assert.ok(!s.app.calls().some((a) => a[0] === 'do'))
   // missing: made with the pool name and the main checkout; its first shell is closed after the agent exists
   s = ok(spawn(undefined, { app: { ls: spaces() }, cases: { get: 'keep_shell' } }))
   const made = s.app.calls().find((a) => a[0] === 'do')
-  assert.deepEqual(made.slice(0, 4), ['do', 'space.new', '--name', 'demo-workers']); assert.equal(made[5], realpathSync(repo))
+  assert.deepEqual(made.slice(0, 4), ['do', 'space.new', '--name', 'demo']); assert.equal(made[5], realpathSync(repo))
   assert.match(s.run.labels['herdr.space'], /^sp[0-9a-f]+$/)
   const verbs = s.calls.map((c) => `${c.args[0]} ${c.args.at(-1)}`)
   assert.ok(verbs.indexOf('kill t6') > -1 && verbs.indexOf('rm t6') > verbs.indexOf('kill t6'), `stray shell t6 retired: ${verbs}`)
@@ -230,7 +230,7 @@ test('WP-199: a cwd (before or after --model/--effort) wins — the pool, name a
     const s = ok(spawn(args)) // run from `demo`
     assert.match(s.out, /^other-orchestrator-01 /, args.join(' '))
     assert.equal(s.run.labels['wt.pool'], 'other-orchestrators'); assert.equal(s.run.labels.project, 'other'); assert.equal(realpathSync(s.run.cwd), realpathSync(other))
-    assert.equal(s.run.labels['herdr.space'], 'sp8-other-orchestrators')
+    assert.equal(s.run.labels['herdr.space'], 'sp2-other')
     if (args.includes('--model')) assert.match(s.claude.join(' '), /--model claude-opus-5-5 --effort low/)
   }
 })
