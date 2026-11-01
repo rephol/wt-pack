@@ -8,21 +8,21 @@ description: Durable agent preferences shared by every agent runtime — global,
 Plain markdown, one file per scope, merged global → role → project:
 
 - `~/.config/wt-memory/global.md` — every agent
-- `~/.config/wt-memory/roles/<role-id>.md` — agents whose herdr `role` token is that id (Settings › Roles ids)
+- `~/.config/wt-memory/roles/<role-id>.md` — agents whose hc `role` label is that id (Settings › Roles ids)
 - `~/.config/wt-memory/projects/<repo>.md` — agents in that repo (a worktree counts as its main repo)
 
 `$WT_MEMORY_HOME` overrides the directory. Edit the files directly or in wt-dashboard Settings › Memory.
 
 `scripts/wt-memory`:
 - `context [--role R] [--project P] [--cwd D]` — the merged markdown an agent gets; without flags inferred
-  from `$HERDR_PANE_ID` (pane tokens role/project, pane cwd), project falling back to the cwd's git repo.
+  from `$HC_TERMINAL_ID` (terminal labels role/project, its cwd), project falling back to the cwd's git repo.
   Empty scopes (or ones holding only `<!-- comments -->`) are skipped; nothing at all prints nothing.
   Never fails loudly: it runs in hooks.
 - `hash [same flags]` — 16-hex hash of that output, for change detection.
 - `path [global | role R | project P]` — the store dir, or one file.
 - `remember "<note>" [--scope role|project|global] [--role R] [--project P] [--strict]` — agents maintain memory
   themselves. Default scope: project if inferable, else role. Appends one bullet
-  `- <note> <!-- wtm:id=ab12cd by=<agent> at=YYYY-MM-DD -->` (author = herdr agent name of `$HERDR_PANE_ID`);
+  `- <note> <!-- wtm:id=ab12cd by=<agent> at=YYYY-MM-DD -->` (author = hc terminal name of `$HC_TERMINAL_ID`);
   `context` strips the trailer. Near-identical notes (same words ignoring case/punctuation) are skipped.
   With `WT_JEV_MEMORY_DUP` on (default), Jev compares the note with the scope's newest 40 entries and prints
   `similar to: …` / `conflicts with: …`; the note is still written unless `--strict`, which refuses (exit 1).
@@ -55,7 +55,7 @@ Accept / Reject. Settings › Memory lists agent entries (author, date, remove) 
 hash changed since the last injection for that session (state `<session>.hash` and `<session>.ctx` in
 `~/.cache/wt-memory/`): the message "Preferences changed" lists just the lines added (`+`) and removed (`-`) per
 section; without a matching stored `.ctx` it falls back to the full "Preferences updated:" list. A prompt whose
-`herdr pane get` lookup failed sends no preference text, only recall and reminders (`context --strict-pane` exits 75) so a lost role is not read as a change.
+`hc get` lookup failed sends no preference text, only recall and reminders (`context --strict-pane` exits 75) so a lost role is not read as a change.
 The context already holds only global + the agent's own role + its own project; a worker never gets `roles/orchestrator.md`. The plugin also
 registers the MCP server below, so Claude gets `remember`/`forget`/`list`/`context` tools.
 
