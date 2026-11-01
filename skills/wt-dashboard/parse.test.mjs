@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, planUsageFromLimits, projectName } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, planUsageFromLimits, projectName } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -36,7 +36,7 @@ test('answerPlan maps one picker question to keys', async () => {
   assert.deepEqual(answerPlan(single, { other: 'Purple' }), [{ keys: ['4'] }, { text: 'Purple' }, { keys: ['enter'] }])
   const multi = { multiSelect: true, cursor: 1, other: null, options: [{ label: 'Cat', checked: false }, { label: 'Dog', checked: true }, { label: 'Fish', checked: false }] }
   assert.deepEqual(answerPlan(multi, { selected: ['Cat', 'Dog'] }), [{ keys: ['1'] }, { keys: ['down', 'down', 'down', 'down', 'enter'] }])
-  assert.deepEqual(answerPlan(multi, { selected: [], other: 'Bird' }), [{ keys: ['2'] }, { keys: ['4'] }, { keys: ['down', 'down', 'down'] }, { text: 'Bird' }, { keys: ['down', 'enter'] }])
+  assert.deepEqual(answerPlan(multi, { selected: [], other: 'Bird' }), [{ keys: ['2'] }, { keys: ['down', 'down', 'down'] }, { text: 'Bird' }, { ensure: 'Bird' }, { keys: ['down', 'enter'] }])
   assert.throws(() => answerPlan(single, { selected: ['Nope'] }))
 })
 
@@ -257,23 +257,6 @@ test('rooms: @user from an agent needs you until the user replies; the handle is
   const q = R.mentionStatus(m, { deliver: ['k'] }, [{ key: 'k', name: 'a' }], 'User')
   assert.deepEqual(q, { queuedFor: ['a'], notified: true })
   assert.equal(R.mentionStatus({ author: { kind: 'user' }, mentions: ['user'] }, { deliver: [] }, [], 'user').notified, false)
-})
-
-test('canonicalPane (WP-378): an hc terminal address is confirmed against hc; the herdr pane-id form, flags and unknown terminals are null; a miss is not cached', async () => {
-  const { canonicalPane } = await import('./server.mjs')
-  let calls = 0
-  const get = async (id) => { calls++; if (id === 't7') return 't7'; throw new Error('no such terminal') }
-  const cache = new Map()
-  assert.equal(await canonicalPane('t7', get, cache, 0), 't7')
-  assert.equal(await canonicalPane('t7', get, cache, 1000), 't7')
-  assert.equal(calls, 1) // cached
-  assert.equal(await canonicalPane('t7', get, cache, 40_000), 't7')
-  assert.equal(calls, 2) // TTL expired, re-checked
-  assert.equal(await canonicalPane('t99', get, cache, 0), null)
-  assert.equal(await canonicalPane('t99', get, cache, 1), null)
-  assert.equal(calls, 4) // a miss is looked up again
-  for (const bad of ['w4:pM', '--help', 'machine/t7', 't7 ', 'T7', '']) assert.equal(await canonicalPane(bad, get, cache, 0), null, bad)
-  assert.equal(calls, 4) // never reaches hc
 })
 
 test('rooms routing: mention > responder > broadcast > nobody', async () => {
@@ -719,10 +702,12 @@ test('terminals: key whitelist maps to hc key names and refuses anything else', 
   assert.throws(() => hcKeys(['__proto__']), /not allowed/)
   assert.throws(() => hcKeys([]), /1–32/)
 })
-test('terminals (WP-378): typing without Enter goes key by key, only characters hc keys types faithfully (no shifted ones: they arrive lowercase or not at all)', () => {
+test('terminals (WP-378): typing without Enter goes key by key, only characters hc keys types faithfully (capitals via shift+<letter>; shifted punctuation and non-ASCII stay refused)', () => {
   assert.deepEqual(typeKeys('ls -la /tmp'), ['l', 's', 'space', '-', 'l', 'a', 'space', '/', 't', 'm', 'p'])
   assert.deepEqual(typeKeys('a=1,b.c'), ['a', '=', '1', ',', 'b', '.', 'c'])
-  for (const bad of ['Ls', 'a<b', 'echo "x"', 'a:b', 'a_b', 'a&b', 'é']) assert.throws(() => typeKeys(bad), (e) => e.status === 400 && /cannot be typed/.test(e.message), bad)
+  assert.deepEqual(typeKeys('Ab;'), ['shift+a', 'b', ';'])
+  assert.deepEqual(typeKeys('Zz]`'), ['shift+z', 'z', ']', '`'])
+  for (const bad of ['a<b', 'echo "x"', 'a:b', 'a_b', 'a&b', 'é']) assert.throws(() => typeKeys(bad), (e) => e.status === 400 && /cannot be typed/.test(e.message), bad)
   assert.throws(() => typeKeys(''), /1–/)
   assert.throws(() => typeKeys('a'.repeat(65)), /1–/)
 })
@@ -1157,20 +1142,16 @@ test('stripSelfMention: an agent opening with @itself loses the prefix (WP-13)',
   assert.equal(stripSelfMention('@wp-worker please rebase', 'wp'), '@wp-worker please rebase') // a longer name is someone else
 })
 
-test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed local → <cwd>-<pane>', () => {
-  assert.equal(remoteName('code-reviewer', '/work/projects/acmeapp', 'w5:p8'), 'code-reviewer-acmeapp-p8')
-  assert.equal(remoteName('Herdr Box', '/x/My Repo', 'w1:p2'), 'herdr-box-my-repo-p2')
-  assert.equal(remoteName('box', undefined, 'w1:p3'), 'box-agent-p3')
-  const a = remoteName('code-reviewer', '/w/a-very-long-repository-name-here', 'w5:p8')
-  const b = remoteName('code-reviewer', '/w/a-very-long-repository-name-here', 'w5:p9')
+test('agentName (WP-378): the hc name wins; else a name-shaped title; else <cwd slug>-<terminal address>, at most 32 characters', () => {
+  const m = { local: true }
+  assert.equal(agentName(m, { name: 'wt-pack-worker-03', pane_id: 't1' }, '/w'), 'wt-pack-worker-03')
+  assert.equal(agentName(m, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 't1' }, '/x/acmeapp-product-ops'), 'acmeapp-product-ops-t1')
+  assert.equal(agentName(m, { pane_id: 't1' }, undefined), 'agent-t1')
+  assert.equal(agentName(m, { terminal_title_stripped: 'acmeapp-orchestrator', pane_id: 't9' }, '/x/acmeapp'), 'acmeapp-orchestrator')
+  assert.equal(agentName(m, { terminal_title_stripped: 'Some Topic', pane_id: 't12' }, '/x/My Repo'), 'my-repo-t12')
+  const a = agentName(m, { pane_id: 't8' }, '/w/a-very-long-repository-name-here-and-more')
+  const b = agentName(m, { pane_id: 't9' }, '/w/a-very-long-repository-name-here-and-more')
   assert.ok(a.length <= 32 && b.length <= 32 && a !== b && /^[a-z0-9_-]+$/.test(a), a)
-  const rem = { local: false, label: 'code-reviewer' }
-  assert.equal(agentName(rem, { name: 'pinned', pane_id: 'w5:p8' }, '/w/u'), 'pinned')
-  assert.equal(agentName(rem, { terminal_title_stripped: 'Some Topic', pane_id: 'w5:p8' }, '/w/u'), 'code-reviewer-u-p8')
-  assert.equal(agentName({ local: true }, { name: 'wt-pack-worker-03', pane_id: 'w1:p1' }, '/w'), 'wt-pack-worker-03')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 'w1:p1' }, '/x/acmeapp-product-ops'), 'acmeapp-product-ops-p1')
-  assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, undefined), 'agent-p1')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'acmeapp-orchestrator', pane_id: 'wP:p1' }, '/x/acmeapp'), 'acmeapp-orchestrator')
 })
 
 // WP-38: the delivery queue is in memory; a restart must not silently lose mentions waiting for a busy agent.

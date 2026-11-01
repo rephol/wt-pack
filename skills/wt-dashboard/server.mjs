@@ -432,7 +432,7 @@ function parsePickerText(text) {
       : null
   }
   const options = []
-  let multiSelect = false, cursor = 1, other = null
+  let multiSelect = false, cursor = 1, other = null, otherChecked = false
   for (let i = first; i < foot; i++) {
     const m = lines[i].match(OPT)
     if (m) {
@@ -444,7 +444,7 @@ function parsePickerText(text) {
       options.push({ label: label.replace(/\s*✔\s*$/, ''), description: '', checked: chosen })
     } else if (/^\s*Submit\s*$/.test(lines[i])) {
       // multiSelect: the row right above "Submit" is "Type something" holding custom text, not an option.
-      if (multiSelect && options.length) other = options.pop().label
+      if (multiSelect && options.length) { const o = options.pop(); other = o.label; otherChecked = o.checked }
       break
     } else if (/^\s*─{10,}/.test(lines[i])) {
       break
@@ -454,7 +454,7 @@ function parsePickerText(text) {
       if (d) o.description = (o.description ? o.description + ' ' : '') + d
     }
   }
-  return question && options.length ? { review: false, tabs, current: tabs.findIndex((t) => !t.done), question, multiSelect, options, other, cursor } : null
+  return question && options.length ? { review: false, tabs, current: tabs.findIndex((t) => !t.done), question, multiSelect, options, other, ...(other !== null ? { otherChecked } : {}), cursor } : null
 }
 
 // WP-378: `hc read` is plain text only (no ANSI). A blocked agent's scrollback can't be read by --lines (alternate screen):
@@ -576,20 +576,14 @@ async function syncTokens(agents) {
   if (backfilled) await roleStore.saveTags().catch((e) => console.error('agent-tags:', e.message))
 }
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
-export function remoteName(label, cwd, paneId) {
-  const tail = slug(String(paneId).split(':').pop()) || 'p'
-  if (!label) return `${slug(String(cwd ?? '').split('/').filter(Boolean).pop() ?? '').slice(0, 31 - tail.length).replace(/-$/, '') || 'agent'}-${tail}`
-  const head = slug(label)
-  const mid = slug(String(cwd ?? '').split('/').filter(Boolean).pop() ?? '') || 'agent'
-  const room = 32 - head.length - tail.length - 2 // truncate the cwd part first so machine and pane stay distinct
-  return room > 0 ? `${head}-${mid.slice(0, room).replace(/-$/, '')}-${tail}` : `${head.slice(0, 32 - tail.length - 1)}-${tail}`
-}
 export function agentName(m, a, cwd) {
   // An hc terminal always has a name (fixed at `hc run --name`); the fallbacks are for a row without one: a name-shaped title,
-  // else <cwd>-<terminal>.
+  // else <cwd slug>-<terminal>.
   if (a.name) return a.name
   const t = a.terminal_title_stripped?.trim()
-  return m.local && t && /^[a-z0-9_-]{1,32}$/.test(t) ? t : remoteName(m.local ? '' : m.label, cwd, a.pane_id)
+  if (t && /^[a-z0-9_-]{1,32}$/.test(t)) return t
+  const tail = slug(String(a.pane_id)) || 't'
+  return `${slug(String(cwd ?? '').split('/').filter(Boolean).pop() ?? '').slice(0, 31 - tail.length).replace(/-$/, '') || 'agent'}-${tail}`
 }
 
 // WP-172: a picker (AskUserQuestion) can appear on an idle/blocked agent with no state_change_seq bump — the
@@ -2220,12 +2214,14 @@ export function answerPlan(pk, { selected = [], other = null }) {
   pk.options.forEach((o, i) => { if (o.checked !== idx.includes(i + 1)) steps.push({ keys: [String(i + 1)] }) }) // toggle the difference
   if (other) {
     if (pk.other) throw Object.assign(new Error('custom text already typed in the terminal; edit it there'), { status: 409 })
-    steps.push({ keys: [String(n + 1)] }, { keys: move(pk.cursor, n + 1) }, { text: other }, { keys: ['down', 'enter'] })
+    // D26 (checked live on hc 0.1.16): the forced paste+Enter commits the text but leaves the row unticked, so no digit first; `ensure` re-reads
+    // the screen and presses Enter once more if the Other row is not ticked with the text, and refuses to go on (409) when it still is not.
+    steps.push({ keys: move(pk.cursor, n + 1) }, { text: other }, { ensure: other }, { keys: ['down', 'enter'] })
   } else {
     if (pk.other) steps.push({ keys: [String(n + 1)] }) // untick custom text typed earlier
     steps.push({ keys: [...move(pk.cursor, n + 2), 'enter'] })
   }
-  return steps.filter((st) => st.text || st.keys.length)
+  return steps.filter((st) => st.text || st.ensure || st.keys.length)
 }
 // WP-203: answer EVERY tab in one request, then submit. The client holds each tab's answer until Submit; this walks
 // the terminal picker from tab 0, planning each tab off a fresh read (answerPlan needs the live checked/cursor state),
@@ -2284,10 +2280,24 @@ async function answerQuestion(a, req) {
   const pk = parsePicker(stripAnsi(raw), raw, track)
   if (!pk) return [409, { error: 'no question is waiting on screen' }]
   const sendSteps = async (steps) => {
-    // A free-text answer would have to be typed into a BLOCKED agent: `hc send` refuses that (and the pack never forces it), and `hc keys`
-    // cannot type arbitrary characters. Refused before any key is pressed, so the picker is left as the user saw it.
-    if (steps.some((st) => st.text)) throw Object.assign(new Error('a typed answer cannot be sent through hc to a waiting question — answer it in the terminal'), { status: 409 })
-    for (const st of steps) { await pressKeys(a.id, ...st.keys); await sleep(150) }
+    // WP-378 D26: a free-text answer is `hc send --force` (paste + Enter) into the waiting question's Other field. Force is allowed HERE ONLY: this
+    // route needs the session cookie, so it is the user's own act; every delivery, sweep and queue flush refuses to force. A {text} step is
+    // followed by the Enter that submits it, which the forced send already presses.
+    for (let i = 0; i < steps.length; i++) {
+      const st = steps[i]
+      if (st.text) {
+        await hcSendRaw(a.id, st.text, { force: true })
+        if (steps[i + 1]?.keys?.[0] === 'enter') { const rest = steps[i + 1].keys.slice(1); if (rest.length) steps[i + 1] = { keys: rest }; else i++ }
+      } else if (st.ensure) { // multi-select Other: ticked with the text, or stop before Submit
+        for (let k = 0; k < 2; k++) {
+          const r = await readPane(m, a.id, '80'), now = parsePicker(stripAnsi(r), r, track)
+          if (now?.other && now.otherChecked) break
+          if (k) throw Object.assign(new Error('could not tick the custom text — finish this question in the terminal'), { status: 409 })
+          await pressKeys(a.id, 'enter'); await sleep(250)
+        }
+      } else await pressKeys(a.id, ...st.keys)
+      await sleep(150)
+    }
   }
   const io = { read: async () => { const r = await readPane(m, a.id, '80'); return parsePicker(stripAnsi(r), r, track) }, send: sendSteps }
   if (req.action === 'scan') return [200, { questions: await scanTabs(io) }]
@@ -2599,8 +2609,8 @@ setInterval(async () => {
 }, 15_000).unref()
 // WP-257 expiry: an unacknowledged handoff/dispatch is resent with the same envelope id, then flagged in the Inbox.
 // ponytail: "seen" = the target is working (on the card, when it has one); a ticketless message is only resent/flagged.
-// WP-352 (D7): a row's target / sender pane id may predate a renumber; match the listed agent by exact id, then by canonical id.
-const agentFor = async (ags, id) => ags.find((a) => a.id === id) ?? (id ? await canonicalPane(id).then((c) => ags.find((a) => a.id === c), () => undefined) : undefined)
+// WP-352 (D7): match the listed agent by exact id.
+const agentFor = async (ags, id) => ags.find((a) => a.id === id)
 const messageSweep = async () => {
   const ags = await agents().catch(() => null)
   if (!ags) return
@@ -2819,8 +2829,8 @@ async function gateApi(req, res, url, parts) {
   if (!/^[0-9a-f]{16}$/.test(hash)) return send(res, 400, { error: 'hash: 16 hex chars' })
   if (parts[2] === 'consume') return send(res, 200, { granted: gate.consume(author.pane, hash) })
   let open = null
-  for (const a of await asks.list(undefined, true)) { // WP-352: an ask's pane id may predate a renumber
-    if (a.gate && a.gate.hash === hash && Date.now() - Date.parse(a.created) < GRANT_MS && (a.pane === author.pane || (await canonicalPane(a.pane).catch(() => null)) === author.pane)) { open = a; break }
+  for (const a of await asks.list(undefined, true)) {
+    if (a.gate && a.gate.hash === hash && Date.now() - Date.parse(a.created) < GRANT_MS && a.pane === author.pane) { open = a; break }
   }
   if (open) return send(res, 200, { id: open.id, deduped: true })
   const clip = (t, n) => String(t ?? '').replace(/\s+/g, ' ').slice(0, n)
@@ -2897,7 +2907,7 @@ async function deliveriesApi(req, res, url, parts) {
     return send(res, 200, out)
   }
   if (req.method === 'POST' && parts.length === 2) {
-    const pane = await canonicalPane(String(b.pane ?? ''))
+    const pane = (await liveAgent(String(b.pane ?? '')))?.id
     if (!pane) return send(res, 404, { error: `unknown pane ${b.pane}` })
     let text = String(b.text ?? ''), env = null
     if (userVoiceDenied(req, envelopeOf(text)?.sender)) return send(res, 403, { error: "from=user is reserved for the dashboard's own relays (WP-337)" })
@@ -2940,7 +2950,7 @@ async function messagesApi(req, res, url, parts) {
   if (req.method === 'GET' && parts[2] === 'check-finish') {
     if (author.kind !== 'agent') return send(res, 403, { error: 'the pane itself asks (x-herdr-pane)' })
     if (cfg.get('WT_NUDGE') === 'off' || !deliveries.live(author.pane)) return send(res, 200, { queued: false })
-    const pane = (await canonicalPane(author.pane).catch(() => null)) ?? author.pane
+    const pane = author.pane
     const row = await messages.remindable(pane, async (r) => CARD_OPEN(await tickets.get(r.ticket).catch(() => null)))
     if (!row) return send(res, 200, { queued: false })
     const a = (await agents().catch(() => [])).find((x) => x.id === pane)
@@ -2960,7 +2970,7 @@ async function messagesApi(req, res, url, parts) {
     const me = rid ? String(rid) : author.pane
     const row = messages.get(parts[2])
     const kind = url.searchParams.get('kind'), from = url.searchParams.get('from')
-    const target = row && (rid ? row.target : await canonicalPane(row.target).catch(() => null))
+    const target = row && row.target
     // WP-352: an inline envelope also proves its body (sha256 of what sits inside the tag) against the record; a pointer is verified once.
     const sha = url.searchParams.get('sha'), pointer = url.searchParams.get('pointer') === '1'
     // WP-360: a pointer already used (and not reopened by a resend) is a DUPLICATE of something this pane already received: still
@@ -2999,7 +3009,7 @@ async function messagesApi(req, res, url, parts) {
       const me = (await agents().catch(() => [])).find((x) => x.local && x.id === author.pane)
       const handed = messages.db.prepare("SELECT 1 FROM wt_messages WHERE ticket = ? AND kind IN ('handoff', 'dispatch') AND sender_pane = ? LIMIT 1").get(row.ticket, author.pane)
       const card = await tickets.get(row.ticket).catch(() => null)
-      const assignee = card?.assignee?.pane ? await canonicalPane(card.assignee.pane).catch(() => null) : null
+      const assignee = card?.assignee?.pane ?? null
       replyAllowed = replyMayAct({ receiverRole: me?.tags?.role || me?.pool, handedByReceiver: !!handed, assigneePane: assignee, senderPane: row.sender_pane })
     }
     return send(res, 200, { verified: true, sender: row.sender, senderPane: row.sender_pane ?? null, senderRole: row.sender_pane ? (sp?.tags?.role || sp?.pool || 'agent') : 'server', kind: row.kind, ticket: row.ticket, replyAllowed,
@@ -3009,7 +3019,7 @@ async function messagesApi(req, res, url, parts) {
   if (req.method === 'GET' && parts.length === 3 && author.kind === 'agent') {
     const row = messages.get(parts[2])
     if (!row) return send(res, 404, { error: `no message ${parts[2]}` })
-    const mine = (await canonicalPane(row.target).catch(() => null)) === (await canonicalPane(author.pane).catch(() => author.pane))
+    const mine = row.target === author.pane
     if (!mine) return send(res, 403, { error: 'only the addressed pane reads it' })
     let key = ''; try { key = readFileSync(join(PANE_KEYS, author.pane.replace(/[^\w.:-]/g, '_')), 'utf8').trim() } catch {}
     if (!key) return send(res, 403, { error: 'pane has no key; respawn it' })
@@ -3025,13 +3035,13 @@ async function messagesApi(req, res, url, parts) {
     if (author.kind !== 'agent') return send(res, 403, { error: 'the addressed pane acks (x-herdr-pane)' })
     const row = messages.get(parts[2])
     if (!row) return send(res, 404, { error: `no message ${parts[2]}` })
-    const mine = (await canonicalPane(row.target).catch(() => null)) === (await canonicalPane(author.pane).catch(() => author.pane))
+    const mine = row.target === author.pane
     if (!mine) return send(res, 403, { error: 'only the addressed pane acks (WP-328)' }) // finding 7
     return send(res, 200, messages.ack(parts[2], row.target, b.state ?? 'acknowledged'))
   }
   if (parts.length !== 2) return send(res, 404, { error: 'not found' })
   if (!srv) return send(res, 403, { error: 'pane callers record through /api/deliveries (WP-328)' })
-  const target = await canonicalPane(String(b.target ?? '')).catch(() => null)
+  const target = (await liveAgent(String(b.target ?? '')))?.id
   if (!target) return send(res, 404, { error: `unknown pane ${b.target}` })
   const env = envelopeOf(String(b.body ?? ''))
   if (userVoiceDenied(req, env?.sender ?? b.sender)) return send(res, 403, { error: "from=user is reserved for the dashboard's own relays (WP-337)" })
@@ -3072,20 +3082,8 @@ const roomsLoop = async () => {
 }
 // Who is posting: an agent names its pane (x-herdr-pane, set by the wt-room CLI from $HC_TERMINAL_ID) and must be a
 // live local agent reached on 127.0.0.1 itself; anything else must be the dashboard page (Origin present).
-// WP-378: $HC_TERMINAL_ID is the terminal's address (`t7`), the same form `hc` lists, so there is no stable-vs-display id to
-// reconcile; the lookup only confirms hc knows the terminal. `get` is injectable for the test (returns the address, or throws).
-const paneIds = new Map() // address -> { id, at }
-// ponytail: 30s TTL for a hit; a miss is never cached, so a terminal started a moment ago is found on the next call.
-export async function canonicalPane(id, get = async (x) => (await hcGet(x)).id, cache = paneIds, now = Date.now()) {
-  if (!/^t\d+$/.test(id)) return null
-  const hit = cache.get(id)
-  if (hit && now - hit.at < 30_000) return hit.id
-  try {
-    const got = await get(id) ?? null
-    if (got) cache.set(id, { id: got, at: now })
-    return got
-  } catch { return null }
-}
+// WP-378: $HC_TERMINAL_ID is the terminal's address (`t7`), the same form `hc` lists: an id is compared as is.
+const liveAgent = async (id) => (/^t\d+$/.test(id) ? (await agents().catch(() => [])).find((x) => x.local && x.id === id) : undefined)
 // WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
 // POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS / _DRIVER (cli|sdk, read by Headless).
 let headless
@@ -3295,8 +3293,7 @@ async function roomAuthor(req) {
     const addr = req.socket.remoteAddress ?? ''
     if (!/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(addr) || !/^127\.0\.0\.1:\d+$/.test(req.headers.host ?? ''))
       throw Object.assign(new Error('agents post via 127.0.0.1 only'), { status: 403 })
-    const id = await canonicalPane(pane)
-    const a = (await agents().catch(() => [])).find((x) => x.local && x.id === id) // core down: no pane can be verified -> 403, not 500
+    const a = await liveAgent(String(pane)) // core down: no pane can be verified -> 403, not 500
     if (!a) throw Object.assign(new Error(`unknown pane ${pane}`), { status: 403 })
     paneKeyCheck(a.id, req.headers['x-wt-pane-key'])
     return { kind: 'agent', name: a.name, machine: a.machine, pane: a.id, key: a.key }
@@ -4011,8 +4008,7 @@ async function watchPrsEvent(req, res) {
   if (req.method !== 'POST') return send(res, 405, { error: 'POST' })
   const { pane, ...fields } = JSON.parse((await body(req)) || '{}')
   const msg = wrap({ kind: 'system', from: 'wt-watch-prs' }, composeWatchPrs(fields)) // throws a 400 for anything off the templates
-  const id = await canonicalPane(String(pane ?? '')).catch(() => null)
-  const a = id && (await agents()).find((x) => x.local && x.id === id)
+  const a = await liveAgent(String(pane ?? ''))
   if (!a) return send(res, 404, { error: `unknown pane ${pane}` })
   const how = await deliver(a, msg, (t) => promptOn(hcIo, a.id, t, { confirm: true }))
   store.delete('agents:local')
@@ -4059,8 +4055,8 @@ async function keepwarmApi(req, res, parts) {
   }
   if (sub && sub !== 'me' && req.method === 'POST' && parts.length === 3) {
     if (author.kind !== 'user') return send(res, 403, { error: 'user only' })
-    const pane = await canonicalPane(decodeURIComponent(sub))
-    if (!pane || !(await agents()).some((a) => a.local && a.id === pane)) return send(res, 404, { error: `unknown pane ${sub}` })
+    const pane = (await liveAgent(decodeURIComponent(sub)))?.id
+    if (!pane) return send(res, 404, { error: `unknown pane ${sub}` })
     const b = await json()
     keepwarm.set(kwKey(pane), b.action, b.windowH); await kwSave(); store.delete('agents:local')
     return send(res, 200, { ok: true })

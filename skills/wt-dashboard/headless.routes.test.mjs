@@ -183,6 +183,7 @@ test('auth: an agent pane may only spawn and message; no cookie is refused; Host
   const as = (pane) => ({ method: 'POST', auth: false, headers: { 'x-herdr-pane': pane }, body: {} })
   for (const sub of ['resume', 'answer']) for (const pane of ['t1', 't2']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as(pane))).status, 403, sub)
   for (const sub of ['interrupt', 'stop']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as('t3'))).status, 403, `other pane ${sub}`)
+  await state(r.id, 'idle') // the fake claude answers the message first (the interrupt must meet an idle run)
   assert.equal((await call(`/api/headless/${r.id}/interrupt`, as('t1'))).status, 409) // its own run: allowed, but it is idle, not working
   const mine = await json('/api/headless', { method: 'POST', auth: false, headers: { ...PANE, 'x-herdr-pane': 't1' }, body: { role: 'worker', cwd: root, name: 'mine' } })
   assert.equal((await json('/api/headless')).find((x) => x.id === mine.id).spawner, 't1')

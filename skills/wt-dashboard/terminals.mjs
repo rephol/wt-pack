@@ -20,15 +20,18 @@ export const shellsLabel = (project) => `${project}-shells`
 export const SHELL_POOL = 'wt.pool', SHELL_TITLE = 'wt.title' // labels: the pool (hcagents.mjs POOL_LABEL) and the tab name the user gave
 export const isShellTerminal = (t) => Boolean(t && t.alive && String(t.labels?.[SHELL_POOL] ?? '').endsWith('-shells'))
 
-// Typing WITHOUT Enter: hc has no raw-text verb (`send` pastes and submits), so it goes through `hc keys`, which names a key per character and
-// cannot make a shifted one: a capital arrives lowercase, `< > " : ( & _` are refused. Only what was checked to arrive intact is allowed
-// (a-z 0-9 space and / = . - , single-quote backslash open-bracket); anything else is refused so a line is never silently changed. A full line goes through `send`.
-const TYPEABLE = new Set([...'abcdefghijklmnopqrstuvwxyz0123456789/=.-,\'\\['])
+// Typing WITHOUT Enter: hc has no raw-text verb (`send` pastes and submits), so it goes through `hc keys`, which names a key per character.
+// Checked on hc 0.1.16: `shift+<letter>` arrives as the capital, `a` as lowercase; `; ] backtick` arrive intact; shifted punctuation
+// (`! @ # $ % ^ & * ( ) _ + { } | : " < > ? ~`) is refused or arrives unshifted, and non-ASCII is refused. Only what arrives intact is
+// allowed (A-Z via shift+, a-z 0-9 space and / = . - , ; single-quote backslash brackets backtick); anything else is refused so a line is never
+// silently changed. A full line (any character) goes through `send`.
+const TYPEABLE = new Set([...'abcdefghijklmnopqrstuvwxyz0123456789/=.-,\'\\[;]`'])
 export function typeKeys(text) {
   const chars = [...String(text)]
   if (!chars.length || chars.length > 64) throw Object.assign(new Error('text: 1–64 characters without Enter (use the input line for more)'), { status: 400 })
   return chars.map((c) => {
     if (c === ' ') return 'space'
+    if (c >= 'A' && c <= 'Z') return `shift+${c.toLowerCase()}`
     if (!TYPEABLE.has(c)) throw Object.assign(new Error(`${JSON.stringify(c)} cannot be typed key by key through hc; enter the line with Enter instead`), { status: 400 })
     return c
   })

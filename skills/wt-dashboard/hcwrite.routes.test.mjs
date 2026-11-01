@@ -24,6 +24,8 @@ const LABEL = hostname()
 const J = { 'content-type': 'application/json' }
 const post = (path, body, headers = {}) => fetch(`${base}${path}`, { method: 'POST', headers: { ...J, cookie, ...headers }, body: JSON.stringify(body ?? {}) })
 const sent = (verb, t) => hc.calls().filter((c) => c.args[0] === verb && c.args.includes(t))
+const plain = (t) => sent('send', t).filter((c) => !c.args.includes('--force'))
+const forced = () => hc.calls().filter((c) => c.args.includes('--force'))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 before(async () => {
@@ -72,20 +74,45 @@ test('keys and Stop go through `hc keys` (hc names), Stop only to a working agen
   assert.equal((await post(`/api/agents/${LABEL}/t2/stop`, {})).status, 409) // idle: Esc would clear its input
 })
 
-test('a free-text picker answer is refused before any key (it would have to be typed into a blocked agent); a plain option is just keys', async () => {
+test('a free-text single-select picker answer: key [n+1] then ONE forced `hc send` (paste + Enter); a plain option is just keys (D26)', async () => {
   const screen = readFileSync(new URL('./test-fixtures/picker-single-question.txt', import.meta.url), 'utf8')
   const pk = parsePicker(screen)
   hc.screen('t3', screen)
-  const before = sent('keys', 't3').length
   const r = await post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: pk.question, selected: [], other: 'my own words' })
   const out = await r.json()
-  assert.equal(r.status, 409, JSON.stringify(out))
-  assert.match(out.error, /terminal/)
-  assert.equal(sent('keys', 't3').length, before, 'no key pressed')
-  assert.equal(sent('send', 't3').length, 0)
+  assert.equal(r.status, 200, JSON.stringify(out))
+  assert.deepEqual(sent('keys', 't3').at(-1).args, ['keys', '--json', 't3', String(pk.options.length + 1)])
+  const s = sent('send', 't3')
+  assert.equal(s.length, 1)
+  assert.deepEqual(s[0].args, ['send', '--json', '--force', 't3', 'my own words'])
+  assert.equal(sent('keys', 't3').filter((c) => c.args.includes('enter')).length, 0, 'the forced send submits: no separate Enter')
   const ok = await post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: pk.question, selected: [pk.options[0].label] })
   assert.equal(ok.status, 200)
   assert.deepEqual(sent('keys', 't3').at(-1).args, ['keys', '--json', 't3', '1'])
+})
+
+// The multi-select picker as hc 0.1.16 draws it (captured live, D26): a forced paste+Enter commits the Other text but leaves its row unticked.
+const LINE = '─'.repeat(100)
+const multi = (other) => ['❯ Pick sides, please.', LINE, '←  ☐ Sides  ✔ Submit  →', 'Pick sides?', '',
+  '❯ 1. [ ] Fries', '         Fries side', '  2. [ ] Salad', '         Salad side', `  3. [${other?.[0] ?? ' '}] ${other?.[1] ?? 'Type something'}`, '     Submit', LINE, '  4. Chat about this', '', 'Enter to select · ↑/↓ to navigate · Esc to cancel', ''].join('\n')
+test('a multi-select free-text answer: toggles, move to Other, ONE forced send, a re-read, Enter only if Other is not ticked, then Submit (D26)', async () => {
+  const ask = () => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: 'Pick sides?', selected: ['Salad'], other: 'no dressing' })
+  const run = async (screens) => { hc.screens('t3', screens); const k0 = sent('keys', 't3').length; const f0 = forced().length; const r = await ask(); return { r, keys: sent('keys', 't3').slice(k0).map((c) => c.args.slice(3).join(' ')), forced: forced().slice(f0) } }
+  // unticked after the paste: one more Enter ticks it, then down + enter
+  let o = await run([multi(), multi([' ', 'no dressing']), multi(['✔', 'no dressing'])])
+  assert.equal(o.r.status, 200, JSON.stringify(await o.r.clone().json()))
+  assert.deepEqual(o.keys, ['2', 'down down', 'enter', 'down enter'])
+  assert.deepEqual(o.forced.map((c) => c.args), [['send', '--json', '--force', 't3', 'no dressing']])
+  // already ticked: no extra Enter
+  o = await run([multi(), multi(['✔', 'no dressing'])])
+  assert.equal(o.r.status, 200, JSON.stringify(await o.r.clone().json()))
+  assert.deepEqual(o.keys, ['2', 'down down', 'down enter'])
+  // never ticks: the answer stops before Submit
+  o = await run([multi(), multi([' ', 'no dressing'])])
+  assert.equal(o.r.status, 409)
+  assert.match((await o.r.json()).error, /terminal/)
+  assert.deepEqual(o.keys, ['2', 'down down', 'enter'])
+  hc.screens('t3', [])
 })
 
 test('a server send to a blocked agent is queued: no send, the row stays queued with 0 attempts; once unblocked it is typed and counted', async () => {
@@ -93,7 +120,8 @@ test('a server send to a blocked agent is queued: no send, the row stays queued 
   const ev = await r.json()
   assert.equal(r.status, 200, JSON.stringify(ev))
   assert.equal(ev.delivery, 'queued')
-  assert.equal(sent('send', 't3').length, 0)
+  assert.equal(plain('t3').length, 0)
+  assert.deepEqual(forced().map((c) => c.args.at(-1)), ['my own words', 'no dressing', 'no dressing', 'no dressing'], 'a delivery to a blocked target never carries --force: only the picker answers did')
   const rows = await (await fetch(`${base}/api/messages`, { headers: { cookie } })).json()
   const row = rows.find((m) => m.target === 't3')
   assert.ok(row, JSON.stringify(rows))
@@ -101,9 +129,9 @@ test('a server send to a blocked agent is queued: no send, the row stays queued 
   // the agent answers its dialog and goes idle; the queue (flushed every 10 s) types it, once
   const rowsT = hc.rows(); rowsT.find((t) => t.address === 't3').status = { app: 'claude-code', state: 'idle' }; hc.set(rowsT)
   hc.screen('t3', '❯ earlier prompt\n\n──────────────────────────────\n❯ \n──────────────────────────────\n')
-  for (let i = 0; i < 40 && !sent('send', 't3').length; i++) await sleep(500)
-  assert.equal(sent('send', 't3').length, 1)
-  assert.ok(!hc.calls().some((c) => c.args.includes('--force')))
+  for (let i = 0; i < 40 && !plain('t3').length; i++) await sleep(500)
+  assert.equal(plain('t3').length, 1)
+  assert.deepEqual([...new Set(forced().map((c) => c.args.at(-1)))], ['my own words', 'no dressing'])
   for (let i = 0; i < 20; i++) { const m = (await (await fetch(`${base}/api/messages`, { headers: { cookie } })).json()).find((x) => x.target === 't3'); if (m.state === 'delivered') { assert.equal(m.attempts, 1); return } await sleep(250) }
   assert.fail('the queued row was never marked delivered')
 })
@@ -127,10 +155,12 @@ test('Terminals: create, list, type, keys, rename and close a shell on hc (plain
   assert.deepEqual(sent('keys', made.pane)[0].args, ['keys', '--json', made.pane, 'ctrl+c'])
   assert.equal((await inp({ text: 'ls' })).status, 200) // no Enter: key by key
   assert.deepEqual(sent('keys', made.pane)[1].args, ['keys', '--json', made.pane, 'l', 's'])
-  assert.equal((await inp({ text: 'Ls' })).status, 400) // a capital would arrive lowercase: refused, not changed
-  assert.equal(sent('keys', made.pane).length, 2)
+  assert.equal((await inp({ text: 'Ls' })).status, 200) // a capital is shift+<letter>
+  assert.deepEqual(sent('keys', made.pane)[2].args, ['keys', '--json', made.pane, 'shift+l', 's'])
+  assert.equal((await inp({ text: 'a_b' })).status, 400) // shifted punctuation is refused, not changed
+  assert.equal(sent('keys', made.pane).length, 3)
   assert.equal((await inp({ submit: true })).status, 200)
-  assert.deepEqual(sent('keys', made.pane)[2].args.slice(-1), ['enter'])
+  assert.deepEqual(sent('keys', made.pane)[3].args.slice(-1), ['enter'])
   assert.equal((await post(`/api/terminals/t1/input`, { text: 'x', submit: true })).status, 404) // t1 is an agent
   assert.equal((await post(`/api/terminals/t4/input`, { text: 'x', submit: true })).status, 404) // t4 is somebody's shell, not ours
   assert.equal(sent('send', 't1').length + sent('send', 't4').length, 0)

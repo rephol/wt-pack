@@ -56,11 +56,12 @@ if (args[0] === 'connect') {
 } else if (args[0] === 'send') {
   // hc send [--json] [--if idle|working] <t> <text>: the recorded refusals (blocked 9, status_mismatch 10, finished 11); a shell has no status
   const rest = args.slice(1).filter((a) => a !== '--json'); let cond = null
+  const force = rest.includes('--force'); if (force) rest.splice(rest.indexOf('--force'), 1)
   if (rest[0] === '--if') { cond = rest[1]; rest.splice(0, 2) }
   const r = find(rest[0]); if (!r) bad('not_found', 'no terminal', 3)
   const st = r.status && r.status.state
   if (r.state === 'finished') bad('finished', r.address + ' has finished', 11)
-  if (st === 'blocked') bad('blocked', r.address + ' is blocked (' + (r.status.kind || 'permission') + ')', 9)
+  if (st === 'blocked' && !force) bad('blocked', r.address + ' is blocked (' + (r.status.kind || 'permission') + ')', 9)
   if (cond && st !== cond) bad('status_mismatch', r.address + ' is ' + (st || 'silent') + ', not ' + cond, 10)
   process.stdout.write(JSON.stringify({ started: true, status: st || null, turn: r.turn || 0 }) + '\\n')
 } else if (args[0] === 'keys') {
@@ -74,6 +75,9 @@ if (args[0] === 'connect') {
   const i = rows.findIndex((r) => r.address === args[2] || r.name === args[2]); if (i < 0) bad('not_found', 'no terminal', 3)
   const [r] = rows.splice(i, 1); wr('terminals.json', rows); process.stdout.write(JSON.stringify({ removed: r.address }) + '\\n')
 } else if (args[0] === 'read') {
+  // screens/<t>.seq.json (an array): one screen per --lines 80 read (the picker answer's own; background reads of the pane get the .txt screen), the last one stays (a screen that changes while the server works)
+  const q = path.join(dir, 'screens', args[1] + '.seq.json'), seq = rd('screens/' + args[1] + '.seq.json', null)
+  if (seq && seq.length && args.includes('80')) { process.stdout.write(seq.length > 1 ? seq.shift() : seq[0]); if (fs.existsSync(q)) wr('screens/' + args[1] + '.seq.json', seq); process.exit(0) }
   const f = path.join(dir, 'screens', args[1] + '.txt'); process.stdout.write(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '')
 } else if (args[0] === 'server' && args[1] === 'status') {
   process.stdout.write(JSON.stringify({ core: rd('core.json', { id: 'core-a', name: 'host' }), live: rows.length, pid: 1, uptime_ms: 1, version: '0.1.16' }) + '\\n')
@@ -102,6 +106,7 @@ export async function hcStub({ root, terminals = [], sessions = {}, core = { id:
     set: (t) => writeFileSync(join(dir, 'terminals.json'), JSON.stringify(t)),
     rows: () => JSON.parse(readFileSync(join(dir, 'terminals.json'), 'utf8')),
     screen: (t, text) => writeFileSync(join(dir, 'screens', `${t}.txt`), text),
+    screens: (t, list) => writeFileSync(join(dir, 'screens', `${t}.seq.json`), JSON.stringify(list)),
     sessions: (list) => writeFileSync(join(dir, 'claude-agents.json'), JSON.stringify(list)),
     core: (c) => writeFileSync(join(dir, 'core.json'), JSON.stringify(c)),
     calls: () => (existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []),
