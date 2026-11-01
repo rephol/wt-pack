@@ -307,7 +307,7 @@ test('WP-378 F8: a flag word of 32 KB (sh -ccc…) classifies fast', () => {
 // WP-378 F8: fixtures/gate-cases.mjs is the one list of commands the gate asks about. wt-mods' guards.test.ts reads the same file and requires its prefilter (MAYBE_GATED)
 // to let every one through to wt-gate; a new gate class with no prefilter path fails there. Add a case here with the class, never only inline above.
 import { readFileSync } from 'node:fs'
-import CASES from './fixtures/gate-cases.mjs'
+import CASES, { variants } from './fixtures/gate-cases.mjs'
 
 test('WP-378 F8: every command in fixtures/gate-cases.mjs classifies as its rule', () => {
   assert.ok(CASES.length > 150)
@@ -320,4 +320,32 @@ test('WP-378 F8: the fixture holds at least one case per rule id the gate can em
   assert.ok(ids.size >= 14, [...ids].join())
   const have = new Set(CASES.map((c) => c.rule))
   for (const id of ids) assert.ok(have.has(id), `no case for rule ${id}`)
+})
+
+// WP-378 F9: a stray apostrophe (comment, heredoc body, `echo it's`) must not hide a later command; quote state only decides a lone `&`. A quoted tool word is read.
+test('WP-378 F9: every fixture case keeps its class under a quoted tool word, a comment apostrophe, a heredoc apostrophe', () => {
+  let n = 0
+  const kinds = new Set()
+  for (const { cmd, rule } of CASES) for (const v of variants(cmd)) { n++; kinds.add(v.kind); assert.equal(classify(v.cmd, ctx)?.rule, rule, `${v.kind}: ${JSON.stringify(v.cmd.slice(0, 100))}`) }
+  assert.ok(n > 400, String(n))
+  assert.deepEqual([...kinds].sort(), ['comment-apostrophe', "heredoc-apostrophe", 'quoted-"', "quoted-'"])
+})
+
+test('WP-378 F9: a backslash-newline continuation is joined; a quoted & is still not a separator; an unbalanced quote resets at the newline', () => {
+  assert.equal(classify('git \\\npush', ctx)?.rule, 'push')
+  assert.equal(classify('gh \\\npr merge 1', ctx)?.rule, 'gh-pr')
+  assert.equal(classify('curl "http://127.0.0.1/?a=1&b=2"', ctx), null)
+  assert.equal(classify("echo 'a\ngit push", ctx)?.rule, 'push')
+})
+
+test('WP-378 F9: ID_UNSET is bounded (unset unset … of 32 KB is fast)', () => {
+  for (const c of ['unset '.repeat(5400), 'unset x'.repeat(4600) + ' ', 'unset ' + 'a '.repeat(16000)]) {
+    const t = Date.now(); classify(c, ctx); const ms = Date.now() - t
+    assert.ok(ms < 50, `${ms} ms`)
+  }
+  assert.equal(classify('unset FOO HC_TERMINAL_ID; hc send t3 x', ctx)?.rule, 'hc-forged-send')
+})
+
+test('WP-378 F9: a commit message that only mentions a tool word is allowed (the prefilter now spawns the gate for it)', () => {
+  for (const c of ['git commit skills/a -m "push"', 'git commit -m "docs: A & git merge notes"', 'git commit -m "hc kill t3"', 'echo "git push"']) assert.equal(classify(c, ctx), null, c)
 })

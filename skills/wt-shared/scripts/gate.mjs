@@ -49,6 +49,8 @@ const localOnly = (name, raw, env) => {
 
 // WP-361: the shell expands $VAR inside double quotes but not inside single quotes, so the secret-var test reads a segment with its
 // single-quoted strings blanked (and double-quoted ones intact). Quote state is tracked left to right: `"it's $K"` stays whole.
+// The segment from its network tool on, starting at the quote that opens a quoted tool word (`'curl' …`), so the quotes stay balanced.
+const fromTool = (seg) => { const at = seg.search(/\b(curl|wget|scp|rsync)\b/); return seg.slice(at > 0 && /['"]/.test(seg[at - 1]) ? at - 1 : at) }
 const blankSingle = (seg) => {
   let out = '', q = ''
   for (const ch of seg) {
@@ -63,7 +65,7 @@ const blankSingle = (seg) => {
 // WP-378: the hc terminal runner. Pack scripts call `env -u HC_TERMINAL_ID hc send` INSIDE their own process (D5: the tag-free route), which this
 // never sees; a Bash command that does it itself is an agent forging an untagged message. `hcCall` finds the `hc` command of a segment (after
 // VAR=val / env / sudo wrappers and their flags) → { verb, sub, args, wrap } or null.
-const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|--unset(?:=|\s+)HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
+const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|--unset(?:=|\s+)HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]{0,512}\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
 // Wrappers that run their next word as a command, and the flags of each that take a VALUE as the next word (`-uNAME` attached needs none).
 const WRAP_VAL = { env: ['-u', '-C', '-S', '--unset', '--chdir', '--split-string'], sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], command: [], nohup: [], time: ['-f', '-o'], exec: ['-a'],
   timeout: ['-s', '-k', '--signal', '--kill-after'], nice: ['-n', '--adjustment'], xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '-J'], eval: [] }
@@ -121,21 +123,25 @@ function hcCall(w) {
   return null
 }
 
-// Command separators: && || |& ; newline | always, and a lone & (not >& &> <& 2>&1) only OUTSIDE quotes and not escaped: `curl "…?a=1&b=2"` is one command.
-const splitSegs = (s) => {
+// Command separators: && || |& ; newline | ALWAYS split (pre-F7 behaviour: a stray apostrophe in a comment, heredoc body or `echo it's` must never hide the next command).
+// Quote state decides ONLY whether a lone & (not >& &> <& 2>&1) separates: `curl "…?a=1&b=2"` is one command. It is reset at every newline, so an unbalanced quote
+// on one line cannot reach the next. A backslash-newline continuation is joined first (`git \\\npush` is `git push`).
+const splitSegs = (src) => {
+  const s = src.replace(/\\\n/g, '')
   const out = []
   let q = '', from = 0
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]
-    if (q === "'") { if (ch === "'") q = ''; continue }
-    if (ch === '\\') { i++; continue }
-    if (ch === '"') { q = q ? '' : '"'; continue }
-    if (!q && ch === "'") { q = "'"; continue }
+    if (ch === '\n') q = ''
+    else if (q === "'") { if (ch === "'") q = '' }
+    else if (ch === '\\' && /["'\\]/.test(s[i + 1] ?? '')) { i++; continue } // an escaped quote or backslash changes no state; an escaped ; | & still splits (pre-F7)
+    else if (ch === '"') q = q ? '' : '"'
+    else if (!q && ch === "'") q = "'"
     let n = 0
     if (ch === '&' && s[i + 1] === '&') n = 2
     else if (ch === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) n = 2
     else if (ch === ';' || ch === '\n' || ch === '|') n = 1
-    else if (ch === '&' && !q && !'>&<'.includes(s[i - 1] ?? ' ') && !'>&'.includes(s[i + 1] ?? ' ')) n = 1
+    else if (ch === '&' && !q && s[i - 1] !== '\\' && !'>&<'.includes(s[i - 1] ?? ' ') && !'>&'.includes(s[i + 1] ?? ' ')) n = 1
     if (!n) continue
     out.push(s.slice(from, i)); from = i + n; i += n - 1
   }
@@ -224,7 +230,7 @@ export function classify(cmd, ctx = {}, carry = {}) {
       if (name === 'nc' || name === 'ncat') return hit(OUT, 'raw-socket')
       if (upload) return hit(OUT, 'upload')
       if (localOnly(name, words(seg).slice(i + 1), w.slice(0, i))) continue
-      if (SECRET_VAR.test(blankSingle(seg.slice(seg.search(/\b(curl|wget|scp|rsync)\b/))))) return hit(OUT, 'secret-var')
+      if (SECRET_VAR.test(blankSingle(fromTool(seg)))) return hit(OUT, 'secret-var')
     }
   }
   return null

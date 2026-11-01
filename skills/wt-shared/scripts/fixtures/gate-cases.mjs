@@ -221,5 +221,46 @@ export default [
   {"cmd":"hc run -- hc run -- hc run -- hc run -- hc run -- hc run -- hc run -- git push","rule":"long-command"},
   {"cmd":"hc run -- hc run -- hc run -- hc run -- hc run -- hc run -- git push","rule":"push"},
   {"cmd":"hc run -- hc run -- hc run -- hc run -- hc run -- hc run -- hc run -- hc run -- ls","rule":"long-command"},
-  {"cmd":"hc run --name w1 -- git push","rule":"push"}
+  {"cmd":"hc run --name w1 -- git push","rule":"push"},
+  {"cmd":"# don't forget\ngit push origin main\necho 'done'","rule":"push"},
+  {"cmd":"git commit -F - <<'EOF'\nfix: it's done\nEOF\ngit push","rule":"push"},
+  {"cmd":"cat <<EOF\ndon't\nEOF\nrm -rf /etc/x","rule":"rm-outside"},
+  {"cmd":"# can't\nhc kill t3\necho 'x'","rule":"hc-kill"},
+  {"cmd":"echo it's; git push","rule":"push"},
+  {"cmd":"echo hi # don't\ngit push","rule":"push"},
+  {"cmd":"git \\\npush","rule":"push"},
+  {"cmd":"gh \\\npr merge 1","rule":"gh-pr"},
+  {"cmd":"\"git\" push","rule":"push"},
+  {"cmd":"git \"push\"","rule":"push"},
+  {"cmd":"'git' push","rule":"push"},
+  {"cmd":"git 'branch' -D x","rule":"branch-delete"},
+  {"cmd":"gh \"pr\" merge 1","rule":"gh-pr"},
+  {"cmd":"\"rm\" -rf /etc/x","rule":"rm-outside"},
+  {"cmd":"sudo \"rm\" -rf /etc/x","rule":"rm-outside"},
+  {"cmd":"\"curl\" -T f url","rule":"upload"},
+  {"cmd":"\"scp\" a b:c","rule":"upload"},
+  {"cmd":"echo \\\"; git push; echo \\\"","rule":"push"},
+  {"cmd":"echo it\\'s; git push; echo 'x'","rule":"push"}
 ]
+
+// WP-378 F9: variants of every case that must keep its class AND still pass the Bash hook's prefilter (gate.test.mjs and wt-mods' guards.test.ts both generate them).
+// A quoted tool word, an apostrophe in a comment, an apostrophe in a heredoc body: none may hide a gated command. `[]` = no variant applies.
+const TOOL = /\b(?:hc|git|gh|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+// Cases a variant cannot be built for, with the reason (explicit, never silent):
+//  - quote: the first tool word sits inside a quoted payload (`sh -c '…'`, `hc run "…"`, `eval "…"`, a `-H "…"` value) or after a heredoc/quote, so wrapping it in quotes changes the payload, not the command word;
+//    also a tool word that is a flag value or operand rather than the command (`-x`, `--name w1 -- git`), and a tool word glued to a `$(`/`(`/`{` opener.
+const quotable = (cmd, at) => {
+  const before = cmd.slice(0, at)
+  if (/["'\\]/.test(before) || /[({`]$/.test(before) || /\$$/.test(before)) return false
+  if (/\b(?:sh|bash|zsh|eval|run|exec|xargs|timeout|nice)\b/.test(before)) return false // the word is carried by a wrapper that reads its own argv
+  if (/\s-\S*\s+$/.test(before) && !/^(?:[A-Za-z_]\w*=\S+\s+)*(?:sudo\s+|env\s+)*$/.test(before)) return false // a flag's value
+  return true
+}
+export const variants = (cmd) => {
+  const out = []
+  const m = TOOL.exec(cmd)
+  if (m && quotable(cmd, m.index)) for (const q of ['"', "'"]) out.push({ kind: 'quoted-' + q, cmd: cmd.slice(0, m.index) + q + m[0] + q + cmd.slice(m.index + m[0].length) })
+  out.push({ kind: 'comment-apostrophe', cmd: "# it's\n" + cmd })
+  out.push({ kind: 'heredoc-apostrophe', cmd: "cat <<EOF\ndon't\nEOF\n" + cmd })
+  return out
+}
