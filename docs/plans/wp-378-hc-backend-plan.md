@@ -558,3 +558,11 @@ Tests:
   bash 5 path cannot run on this host; the verify route's exited `me` filter is unreachable defence in depth; `hcagents.test` has a self-comparing fixture check
   and `hc.test` an existence-only recordings check; the recorded herdr-app `one_space` fixture is unused and `space_close` holds a placeholder; the `hc-launch`
   test's DENY list and the server/web resting predicates are hand-kept twins.
+
+## Ship decisions (tech lead, from the orchestrator at gate B; tip 454aaa7)
+- **U-Q1 (D27) answered (a), accepted, no follow-up ticket.** The Terminals view's direct typing limit stands (no shifted punctuation or non-ASCII
+  without Enter; such text goes through the input line, interactive programs needing those keys are used from herdr-app). `docs/features.md` already states it.
+- **Install text answered: hc is "installed with herdr-app", no URL** (closes the open docs question above). `docs/hc-cutover.md`, README, `docs/vm.md`,
+  setup's missing-hc hint and the `test/docker/Dockerfile` prose say so.
+- **herdr-app live checks run after merge**, not before: the pool-space view, a `space.new` shell kill, `hc kill` on a kept terminal, and the
+  respawn/watchdog Resume check (accepted residual above). They need this branch's plugin loaded and the dashboard restarted on it.
