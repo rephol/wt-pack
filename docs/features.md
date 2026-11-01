@@ -44,7 +44,7 @@ Projects live in `wt.db` (`projects`: name, root, added_at). Every project the d
 
 ## Agents table and pause (WP-346, WP-348)
 
-Every local agent terminal has one durable row in `wt.db` (`agents`), keyed by its name: role or persona, project, folder, session id, current pane, ticket, mirrored tags and a state — `running`, `idle`, `paused`, `exited` or `missing`. The hc core is something the dashboard watches, not the source of truth: a watcher reconciles the rows with hc's terminal list and `claude agents --json` on every fresh agent listing (the 3 s cache, driven by the 4 s tick; one hc call per tick). A new terminal gets a row; a terminal-address change moves the row to the new address (matched by session id); a crashed claude becomes `exited`; an agent gone from hc becomes `missing`. When the core's identity changes (a different core, not a restart) the rows and pane keys of the old one are dropped. A row is never deleted by the watcher — only a deliberate `agents.sh rm` (or **Forget**) removes it. Tags never include `task`, `task_state`, `handoff_*`, `dnd`, `pair` or a pane key. The old `agent-tags.json`, `watchdog.json` `lastSeen` and `project_pauses` were imported once and are no longer read (left on disk for rollback). There are no remote machines under hc yet: the dashboard's machine UI says so, and no remote code remains.
+Every local agent terminal has one durable row in `wt.db` (`agents`), keyed by its name: role or persona, project, folder, session id, current pane, ticket, mirrored tags and a state — `running`, `idle`, `paused`, `exited` or `missing`. The hc core is something the dashboard watches, not the source of truth: a watcher reconciles the rows with hc's terminal list and `claude agents --json` on every fresh agent listing (the 3 s cache, driven by the 4 s tick; one hc call per tick). A new terminal gets a row; a terminal-address change moves the row to the new address (matched by session id); a crashed claude becomes `exited`; an agent gone from hc becomes `missing`. When the core's identity changes (a different core, not a restart) the pane keys of the old one are dropped, and so are its rows, except a paused row and a missing row that carries a session (Resume needs them): those keep their session and folder and lose only their old address. A row is never deleted by the watcher — only a deliberate `agents.sh rm` (or **Forget**) removes it. Tags never include `task`, `task_state`, `handoff_*`, `dnd`, `pair` or a pane key. The old `agent-tags.json`, `watchdog.json` `lastSeen` and `project_pauses` were imported once and are no longer read (left on disk for rollback). There are no remote machines under hc yet: the dashboard's machine UI says so, and no remote code remains.
 
 **Pause** (Agent actions › Pause agent, or Settings › Projects › Pause for every agent of the project) saves the row as `paused`, then closes the pane (`agents.sh rm --keep-row`) or stops the headless run. Agents caught mid-turn are marked and get one `continue` on resume. Cards stay In progress, marked `paused`. A paused agent stays listed (no pane); Dispatch, routines, recovery and handoff never pick it, and team refill counts it as filling its seat. A paused project is flagged on the project (Dispatch, routines and refill skip it) and stays in the project list, marked `(paused)`, even when hidden. **Resume** respawns the agent under its old name with `--resume <session>`, model, effort and tags (fresh pane key); one cold cache write per agent. A failed despawn or respawn is listed; a retry resumes only the rest. If a saved folder is gone (its worktree was removed after the merge), Resume restarts the agent in the project's main checkout on a fresh session and lists it in the result (`fallbacks`); only a missing role fails.
 
@@ -135,7 +135,7 @@ header, remembered per viewer and defaulting to the global project; picking ther
   `/wt-run <ID>`; the card is moved to Planning by that prompt, teams and the pairing buddy are skipped. There is no pool cap on leads (each labelled card gets its own), so
   label deliberately. Cards without the label behave exactly as above. See *Ticket lead and named agents*.
 - An agent already **holding a ticket** is never picked (worker reuse, buddy, pair replacement): it is the
-  assignee of an open card, or its `task`/`ticket` pane token names one. A card moved to **Ready** (by the user
+  assignee of an open card, or its `task`/`ticket` label names one. A card moved to **Ready** (by the user
   or an agent) loses its assignee and dispatch state, so Dispatch can pick it up again; a gone assignee is only
   unassigned, the column is left alone.
 - **Report to** (Automation sheet, while Dispatch is on): where a dispatched agent posts its one-line result —
@@ -197,7 +197,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 
 - A ticket can hold a **worker + buddy** pair (`pair: { worker, buddy }`), shown as a chip on the board card and
   read-only under `paired · <TICKET>` on the paired agents' Summary tab; editable as a **Buddy** dropdown in the
-  ticket drawer (needs an assignee first). Both members get a `pair` pane token, which — like DND — makes them
+  ticket drawer (needs an assignee first). Both members get a `pair` label, which — like DND — makes them
   invisible to every free-agent pick until the ticket is Done.
 - **Setting it**: `wt-handoff --buddy <pane|self>` (`self` = the sending pane) at the moment the worker is
   chosen — wt-plan's handoff pairs the worker with the planner itself. Dispatch pairs a worker-role ticket with
@@ -305,12 +305,12 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   `skills/wt-plan/scripts/worktree.sh <branch>` — never a `../<repo>-*` sibling or `/tmp`. It is in the worker and planner
   role rules (wt-memory), in the `Worktree:` line `wt-handoff` appends to every worker prompt, and in wt-work and wt-finish.
   `./setup doctor` warns about any worktree of the repo outside that folder.
-- **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
-  closes; a worktree it used stays on disk.
+- **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The terminal
+  ends; a worktree it used stays on disk.
 - **Model and effort** (WP-198): the Summary tab's **Model** section shows what the session actually runs, e.g.
   `Sonnet 5.5 · medium` (tooltip: the exact id). The name comes from the transcript's last assistant `model` id
   (local sessions) or, without one, the pane footer's `Model:`; the effort from the footer's `Thinking:` (a narrow pane truncates the footer), then the spawn-time `effort`
-  pane token, then the `~/.claude/settings.json` default for that model (`modelSettings[id].effortLevel`, else the
+  label, then the `~/.claude/settings.json` default for that model (`modelSettings[id].effortLevel`, else the
   top-level `effortLevel`), shown as `low (default)`; the name falls back to the spawn-time `model` token. When the spawn token names a different tier than the
   one running it adds `routed opus, running sonnet`. The Agents list has an optional **Model** column (hidden by
   default, like Context) and the phone rows carry the model name.
@@ -325,7 +325,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   instead of a flat `1`, cleared by the 4s server tick once it's past.
 - `wt-agents list` (plain and `--json`) shows DND (with its expiry, when set) and `pair` per agent — `--json`
   adds structured `dnd:{on,until}` and `pair` fields alongside the existing raw pane `tokens` map.
-- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: a new terminal with current kill shims + plugin guard; hc cannot start a program into an existing terminal, so the old one ends first; keeps name, role, cwd, labels and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). The terminal outlives the shell that spawned it (`--outlive-parent`), starts with `--no-notify`, and carries a `WT_PANE_KEY` and the kill-shim `PATH` that the launcher re-applies after the user's shell rc. If `herdr-app` is installed the agent shows as a tab in its pool's space (labels `herdr.space`/`herdr.tab`); if the app is unreachable the spawn prints a warning and the agent runs hidden. `spawn` and `respawn` refuse with "hc core is down" rather than starting the core. `list --json` also carries `session` (claude's full session id) and `pid` (the live claude pid from `claude agents --json`, WP-324; `null` = hc lists an agent claude does not know, or claude is absent). The dashboard's `AgentInfo` for a pane carries the same as `pane.pid` (cached 3 s, local machine only, `null` when unknown). `spawn` waits for claude to start (8 tries with backoff, WP-319); if it never does, it fails with hc's last error text (shown in the dashboard) and removes the orphan terminal and its labels.
+- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]` (a pack agent only: a plain shell or any other terminal is refused), `respawn <name|pane>|--stale [--force]` (WP-125: a new terminal with current kill shims + plugin guard; hc cannot start a program into an existing terminal, so the old one ends first; keeps name, role, cwd, labels and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). The terminal outlives the shell that spawned it (`--outlive-parent`), starts with `--no-notify`, and carries a `WT_PANE_KEY` and the kill-shim `PATH` that the launcher re-applies after the user's shell rc. If `herdr-app` is installed the agent shows as a tab in its pool's space (labels `herdr.space`/`herdr.tab`); if the app is unreachable the spawn prints a warning and the agent runs hidden. `spawn` and `respawn` refuse with "hc core is down" rather than starting the core. `list --json` also carries `session` (claude's full session id) and `pid` (the live claude pid from `claude agents --json`, WP-324; `null` = hc lists an agent claude does not know, or claude is absent). The dashboard's `AgentInfo` for a pane carries the same as `pane.pid` (cached 3 s, local machine only, `null` when unknown). `spawn` waits for claude to start (8 tries with backoff, WP-319); if it never does, it fails with hc's last error text (shown in the dashboard) and removes the orphan terminal and its labels.
 - **Own context usage (WP-312):** an agent reads its own context window with the wt MCP tool `context_usage` or `wt-agents context`:
   `{used, window, pct, model}` for a terminal agent (`$HC_TERMINAL_ID`) or a headless run (`$WT_HEADLESS_ID`, set by the dashboard).
   It reads the dashboard's `AgentInfo` (WP-313, the WP-201 rule), so there is no transcript parsing in the CLI and no API call;
@@ -938,7 +938,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   (a worktree may switch branches), `git switch` and `git checkout <branch>`/`-b`. The pkill/pgrep option-order guard
   stays in wt-memory. Loose shell parsing: it stops accidents only.
 - **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
-  pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
+  labels `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
   hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a
   fresh one — so the pool no longer grows by one per hand-off. `WT_WORKERS_MAX` (project setting or env, worker
   role only) caps the pool: at the cap, `wt-handoff` exits 3 (`pool full: <n>/<cap> workers in <repo>`, nothing
@@ -968,7 +968,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - **hc after a reboot**: nothing in wt-pack starts the hc core (`hc server status`, `hc ls` and `hc get` all start a
   stopped core, so the dashboard, its watchdog probe and `./setup doctor` probe the core's socket instead). Start it
   with `hc server start`. While it is down the dashboard shows a banner, the probe logs one line to `server.log` per
-  change, and spawns refuse. Terminals persist across a core restart; agents you did not respawn keep their rows.
+  change, and spawns, `handoff.sh`, every dashboard route that would touch a terminal (activity, conversation read, typing, Terminals) refuse (503 / "hc core is down", retry when it is up) without running any hc call. Terminals persist across a core restart; agents you did not respawn keep their rows.
 - **PWA**: in a browser on a secure origin, **Install app** (iOS: Share → Add to Home Screen); an update banner
   shows when a new build lands. The service worker never caches `/api`.
 - **Phone push (Web Push)** (WP-268): VAPID keys are generated on first use into `<data dir>/vapid.json` (mode 600);
@@ -1091,7 +1091,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   reviewer / auditor): `plan` and `build` through `handoff.sh --team`, the pair buddy as the team's `review` persona.
   `qa` has no automatic dispatch yet. A team whose roster has no such member, or all teams full, leaves the card in Ready
   with the reason in Dispatch's status. `handoff.sh` candidates, routine role picks, buddy picks and the drawer's buddy route
-  match on the `team` pane token (an agent's team must equal the ticket's, none = none), and a team spawn never exceeds
+  match on the `team` label (an agent's team must equal the ticket's, none = none), and a team spawn never exceeds
   the file's count (exit 3, `team full`). A card already taken through Planning goes to a worker next, not a second planner.
 - **Stage gates** (WP-239): an exit check per stage; a card cannot leave a stage until its check passes. Gates are
   on per team (`gates: [plan, build, review, qa]` in the team file; the standard template turns on plan/build/review,
