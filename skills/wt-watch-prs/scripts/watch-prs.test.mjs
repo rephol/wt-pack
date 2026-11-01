@@ -577,14 +577,14 @@ test('WP-337: serve posts each event to the dashboard route (no token, no file);
   assert.match(readFileSync(join(fx, 'handoff-calls'), 'utf8'), /--pane t9 --kind system --no-goal --from wt-watch-prs/) // fallback
 })
 
-// ---- WP-378 U4: identity is HC_TERMINAL_ID; no herdr anywhere; hc never starts a stopped core ----
+// ---- WP-378 U4: identity is HC_TERMINAL_ID; no old multiplexer anywhere; hc never starts a stopped core ----
 const hcCalls = () => { try { return readFileSync(join(fx, 'hc-calls'), 'utf8').trim().split('\n').filter(Boolean) } catch { return [] } }
-test('WP-378 mode: WT_ROLE (the launcher) answers without calling hc; HERDR_PANE_ID alone is no identity; a down core is not started', () => {
+test('WP-378 mode: WT_ROLE (the launcher) answers without calling hc; the old pane id alone is no identity; a down core is not started', () => {
   fixture('pane.json', { address: 't1', state: 'live', labels: { role: 'orchestrator' } })
   rmSync(join(fx, 'hc-calls'), { force: true })
   assert.equal(run(['mode'], { WT_ROLE: 'orchestrator', HC_TERMINAL_ID: 't1' }).stdout.trim(), 'dispatch')
   assert.deepEqual(hcCalls(), [])
-  assert.equal(run(['mode'], { HERDR_PANE_ID: 'w1:p1' }).stdout.trim(), 'standalone')
+  assert.equal(run(['mode'], { HERDR_PANE_ID: 'w1:p1' }).stdout.trim(), 'standalone') // legacy-herdr
   assert.deepEqual(hcCalls(), [])
   assert.equal(run(['mode'], { HC_TERMINAL_ID: 't1', XDG_STATE_HOME: down }).stdout.trim(), 'standalone') // core down: no lookup
   assert.deepEqual(hcCalls(), [])
@@ -608,6 +608,6 @@ test('WP-378 serve: a finished terminal counts as gone', () => {
   const r = run(['serve', '--once'], { WATCH_PRS_HANDOFF: handoff }); assert.equal(r.status, 0, r.stderr)
   assert.equal(JSON.parse(readFileSync(join(wh, 'watchers.json'), 'utf8')).length, 0)
 })
-test('WP-378: no herdr call is left in watch-prs.sh or poller-service.mjs', () => {
-  for (const f of ['watch-prs.sh', 'poller-service.mjs']) assert.doesNotMatch(readFileSync(new URL(`./${f}`, import.meta.url), 'utf8').replace(/^\s*#.*$/gm, ''), /\bherdr\b(?!-)|HERDR_PANE_ID/, f)
+test('WP-378: no old-multiplexer call is left in watch-prs.sh or poller-service.mjs', () => {
+  for (const f of ['watch-prs.sh', 'poller-service.mjs']) assert.doesNotMatch(readFileSync(new URL(`./${f}`, import.meta.url), 'utf8').replace(/^\s*#.*$/gm, ''), /\bherdr\b(?!-)|HERDR_PANE_ID/, f) // legacy-herdr
 })
