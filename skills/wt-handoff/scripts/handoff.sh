@@ -323,6 +323,11 @@ if [ -n "$reply" ]; then
     echo "replied ${hl%% *} (headless ${hl#* })"
     exit 0
   fi
+  # WP-378 D25: a blocked target (a dialog is open) takes nothing; refuse BEFORE any record or post, as hand_to does (D16), or a `delivered`
+  # reply row is left that hc send then refused (exit 9) and never typed.
+  if [ "$(row_of "$reply" | jq -r '.status // empty' 2>/dev/null)" = blocked ]; then
+    echo "$reply is blocked (a dialog is open): nothing sent; retry when it is answered" >&2; exit 1
+  fi
   # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
   # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
   # WP-328: the dashboard builds the envelope and records it; an old or unreachable one falls back to the local wrap above.

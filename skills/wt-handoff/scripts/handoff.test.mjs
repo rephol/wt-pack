@@ -416,6 +416,23 @@ test('WP-378 D16: a script-side send to a blocked target records and posts nothi
   setTerms()
 })
 
+test('WP-378 D25: --reply to a blocked target records and posts nothing, types nothing, exits 1 (no `delivered` row that was never typed)', () => {
+  const spy = join(tmp, 'curlspy2'), curlLog = join(tmp, 'curl2.log'); mkdirSync(spy, { recursive: true })
+  writeFileSync(join(spy, 'curl'), `#!/bin/sh\necho "curl $*" >> ${curlLog}\ncase " $* " in *" -w "*) printf 200 ;; *) echo "{}" ;; esac\n`); chmodSync(join(spy, 'curl'), 0o755)
+  const env = { ...ptrEnv, PATH: `${spy}:${ptrEnv.PATH}` }
+  setTerms(T('t9', 'demo-worker-09', { status: 'blocked' }))
+  writeFileSync(curlLog, ''); writeFileSync(log, '')
+  const r = spawnSync(join(here, 'handoff.sh'), ['--reply', 't9', 'thanks'], { encoding: 'utf8', env })
+  assert.equal(r.status, 1); assert.match(r.stderr, /t9 is blocked \(a dialog is open\): nothing sent; retry when it is answered/)
+  assert.doesNotMatch(readFileSync(curlLog, 'utf8'), /\/api\/(messages|deliveries)/)
+  assert.doesNotMatch(callsLog(), /^hc send/m)
+  setTerms(T('t9', 'demo-worker-09', { status: 'done' })) // the same reply to a resting agent still goes out
+  const ok = spawnSync(join(here, 'handoff.sh'), ['--reply', 't9', 'thanks'], { encoding: 'utf8', env })
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.match(callsLog(), /^hc send/m)
+  setTerms()
+})
+
 test('WP-378: no send into a shell (--pane at a kept shell), and a free worker resting at done is typed to with the one approved retry', () => {
   setTerms(T('t9', 'demo-worker-09', { status: null, prog: 'zsh' }))
   writeFileSync(log, '')
