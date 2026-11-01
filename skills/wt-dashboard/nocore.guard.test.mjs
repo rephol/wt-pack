@@ -38,6 +38,6 @@ test('the noCore shim refuses and records every call (exit 98), and flags a star
     const r = spawnSync('hc', ['server', 'start'], { env: nc.env(), encoding: 'utf8' })
     assert.equal(r.status, 98); assert.match(r.stderr, /refused by the test no-core shim/)
     assert.deepEqual(nc.calls(), ['server start']); assert.equal(nc.started(), true)
-    assert.ok(!('HC_TERMINAL_ID' in nc.env({ PATH: '/bin', HC_TERMINAL_ID: 't1', HERDR_PANE_ID: 'x', WT_PANE_KEY: 'k' })))
+    assert.ok(!('HC_TERMINAL_ID' in nc.env({ PATH: '/bin', HC_TERMINAL_ID: 't1', HERDR_PANE_ID: 'x', WT_PANE_KEY: 'k' }))) // legacy-herdr
   } finally { nc.close() }
 })
