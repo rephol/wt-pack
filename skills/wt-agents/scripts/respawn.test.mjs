@@ -144,3 +144,12 @@ test('WP-378 F5: rm and respawn act on a pack agent only: a plain shell, a stran
   // a pack agent still goes
   assert.equal(run(['rm', 'demo-worker-01'], [agent(1, 'idle')]).status, 0)
 })
+
+test('WP-378 F6: a role-less agent that carries a (non -shells) wt.pool label IS a pack agent: rm and respawn accept it (require_pack_agent pool branch)', () => {
+  const poolOnly = agent(1, 'idle', { role: undefined }) // labels: wt.pool=demo-workers, no role, no agents-table row
+  let r = run(['rm', 'demo-worker-01'], [poolOnly])
+  assert.equal(r.status, 0, r.stderr); assert.doesNotMatch(r.stderr, /not a pack agent/)
+  assert.ok(r.calls.some((c) => ['kill', 'rm'].includes(c.args[0])), 'it was ended')
+  r = run(['respawn', 'demo-worker-01'], [poolOnly])
+  assert.doesNotMatch(r.stderr, /not a pack agent/)
+})
