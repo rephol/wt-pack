@@ -1,7 +1,7 @@
 // Run: node --test skills/wt-handoff/scripts/handoff.test.mjs — handoff.sh against a stub `hc` (WP-378).
 // The stub keeps its terminals in terms.json (the rows `terminal.list` returns), logs every call to calls.log, and answers
 // `hc send` like the real one (blocked → exit 9; --if idle refused with "is done, not idle" / "is working, not idle" / "is silent, not idle").
-import test from 'node:test'
+import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync, statSync, rmSync } from 'node:fs'
@@ -59,6 +59,10 @@ const coreDir = mkdtempSync(join('/tmp', 'hw-')), coreSock = join(coreDir, 's')
 mkdirSync(join(tmp, '.local', 'state', 'herdr-core', 'default'), { recursive: true })
 writeFileSync(join(tmp, '.local', 'state', 'herdr-core', 'default', 'core.lock'), coreSock)
 const coreSrv = createServer(() => {}); await new Promise((r) => coreSrv.listen(coreSock, r))
+// F6: the fake core only accepts when this process's event loop turns, and every handoff.sh run asks core-up (a connect that sits in the kernel's
+// listen backlog, 128 on macOS, until accepted). The tests are synchronous, so without a turn between them the backlog fills up (the 35th test on) and
+// core-up reads "down". Yield after each test so the queued connections are accepted.
+afterEach(() => new Promise((r) => setTimeout(r, 20)))
 test.after(() => { coreSrv.close(); rmSync(coreDir, { recursive: true, force: true }) })
 setTerms()
 execFileSync('git', ['-C', repo, 'init', '-q'])
@@ -652,6 +656,29 @@ case " $* " in *" POST "*) case " $* " in *hl-new3/message*) printf '%s' '{"erro
   setTerms()
 })
 
+test('WP-378 F6: core down: a headless --pane and a headless --reply still go out, with no hc call at all (the headless exemption from core_up)', () => {
+  const curlBin = join(tmp, 'curlbin378h'), clog = join(tmp, 'curl378h.log')
+  mkdirSync(curlBin, { recursive: true })
+  const rows = [{ id: 'hl-h1', name: 'umk-planner-02', state: 'idle' }]
+  writeFileSync(join(curlBin, 'curl'), `#!/bin/sh
+body=$(cat); echo "curl $* :: $body" >> ${clog}
+case " $* " in *" POST "*) printf '%s' '{"ok":true}' ;; *) printf '%s' '${JSON.stringify(rows)}' ;; esac\n`)
+  chmodSync(join(curlBin, 'curl'), 0o755)
+  setTerms(T('t5', 'me'))
+  const env = { PATH: `${curlBin}:${bin}:${process.env.PATH}`, HOME: tmp, HC_SESSION: 'wtt-none', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HC_TERMINAL_ID: 't5', HERDR_DASH_URL: 'http://x' }
+  writeFileSync(log, '')
+  const go = (args, input = 'do it') => spawnSync(join(here, 'handoff.sh'), args, { input, encoding: 'utf8', env })
+  let r = go(['--pane', 'umk-planner-02', '--no-goal', repo])
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /reused headless umk-planner-02 \(hl-h1\)/)
+  r = go(['--reply', 'hl-h1', 'thanks'])
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /replied hl-h1 \(headless umk-planner-02\)/)
+  const c = readFileSync(clog, 'utf8'); assert.match(c, /hl-h1\/message/g)
+  assert.equal(callsLog(), '', `a headless target ran hc with the core down: ${callsLog()}`)
+  // a terminal target in the same env is still refused (so the test above proves the exemption, not a missing check)
+  r = go(['--pane', 't5', '--no-goal', repo]); assert.equal(r.status, 1); assert.match(r.stderr, /hc core is down/)
+  setTerms()
+})
+
 test('WP-328: a pane sender posts fields and types the pointer of the dashboard-built envelope; --from is honoured only with the server token', () => {
   setTerms(T('t7', 'demo-worker-07'))
   const curlBin = join(tmp, 'curlbin328'); mkdirSync(curlBin, { recursive: true })
@@ -841,7 +868,7 @@ test('WP-378 F5: core down: reply, cancel, list and a hand-off all stop with "hc
     writeFileSync(log, '')
     const r = spawnSync(join(here, 'handoff.sh'), args, { input: 'x', encoding: 'utf8', env })
     assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}${r.stderr}`)
-    assert.match(r.stderr, /hc core is down/, args.join(' '))
+    assert.match(r.stderr, /hc core is down — ask the user to start it \(hc server start\)/, args.join(' '))
     assert.equal(callsLog(), '', `${args.join(' ')} ran hc: ${callsLog()}`)
   }
 })

@@ -29,7 +29,7 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   is wt-pack traffic, not its user. `--kind` (default `handoff`) and `--from` (default: your agent name) are for
   server callers (Dispatch passes `--kind dispatch --from wt-dashboard`). The wrap counts toward the 4000 cap.
 - **`--reply <pane> "text"`** answers whoever sent you a wt-message: a plain `kind=reply` prompt, no `/goal`,
-  no labels, no worker selection. A raw `hc send` from an agent terminal arrives wrapped in `<hc from=…>` tags, which the receiving hook reads as a peer, not as pack traffic: `handoff.sh` types from a call with `HC_TERMINAL_ID` unset (`hc send` without `--force`; a blocked target — a dialog is open — is not typed into: exit 1, retry when it is answered). Use it, never a raw `hc send`, for anything an agent must act on. **Put a body with backticks, `$(…)` or quotes in a file (`--file <path>`) or pipe it
+  no labels, no worker selection. A raw `hc send` from an agent terminal arrives wrapped in `<hc from=…>` tags, which the receiving hook reads as a peer, not as pack traffic: `handoff.sh` types from a call with `HC_TERMINAL_ID` unset (`hc send` without `--force`; a blocked target — a dialog is open — is not typed into: exit 1 before anything is recorded, retry when it is answered; every other exit follows the **Output** list below). Use it, never a raw `hc send`, for anything an agent must act on. **Put a body with backticks, `$(…)` or quotes in a file (`--file <path>`) or pipe it
   (`… | handoff.sh --reply <pane>`, or `--file -`)** — in a shell argument the shell runs a backtick or `$(…)` first and silently
   drops its text (WP-359); an argument body that still contains one prints a warning. For a handoff, `--file <path|->` is the same as the
   `<cwd> <prompt-file>` form (no file and no `--file` still reads stdin).
@@ -55,10 +55,16 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   `--no-goal` is accepted and is the default. Without a goal the dashboard keeps the agent going: it nudges an acknowledged
   handoff whose card is still open (4 min, once) and the delivery mod reminds at the end of a turn that did not report.
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
-  `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
-  sent and nothing was recorded. Exit 1 because the target is **blocked** (a dialog is open) or the hc core is down means **retry later**
-  (the same `--request-id` is safe), as the `--reply` bullet says; do not print the prompt for a human. Print it for a human only for
-  the failures a retry cannot fix (bad arguments: exit 2, a full pool: exit 3).
+  `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. A request id seen before replays its first output (exit 0). Exit codes:
+  - **0** delivered (or queued for the target's delivery mod, or replayed).
+  - **1, nothing recorded and nothing sent — retry later; the same `--request-id` is safe:** the hc core is down (`hc core is down — ask the user to start it (hc server start)`;
+    an agent never starts it), the target is **blocked** (a dialog is open: retry when it is answered), `hc` is not on PATH, the target is paused/exited/missing
+    (resume it first), or a prompt over the goal's 4000-character cap / an unreadable file or directory / a failed wrap (fix the input, then run again).
+  - **1, `the dashboard did not record this message`:** nothing was typed. Retry with the **same `--request-id`** so the retry reuses the id the dashboard may already hold (pass one on the first call to make this safe).
+  - **1, `<pane> is not an agent` or `hc send … failed` (after the row was recorded):** nothing was typed. Check the target (`wt-agents list`), then retry with the same `--request-id`.
+  - **1, `prompt not submitted: it is still in the input box of <pane>`:** the message **was recorded and typed**; only the submit is unconfirmed. Do **not** send it again: look at the target (`hc read <pane>`), press Enter there if it is stuck.
+  - **2** bad arguments, or the card and the target are on different teams: nothing was sent; fix the call. Print the prompt for a human only for a failure a retry cannot fix.
+  - **3** the worker pool (`WT_WORKERS_MAX`) or the team roster is full: nothing was sent; the caller (Dispatch) keeps the card and retries when a seat frees up.
 
 ## Task label and awareness
 

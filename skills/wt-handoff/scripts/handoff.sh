@@ -201,7 +201,7 @@ command -v hc >/dev/null || { echo "hc not on PATH" >&2; exit 1; }
 # WP-378 F5: every hc call (even `hc connect`/`get`) STARTS a stopped core, and nothing in the pack may. Each path that talks to hc asks first
 # (hc.mjs core-up connects to the core's socket, never to hc) and stops before anything is recorded or sent. A headless target needs no hc.
 core_is_up() { node "$SELFDIR/../../wt-shared/scripts/hc.mjs" core-up >/dev/null 2>&1; }
-core_up() { core_is_up || { echo "hc core is down (hc server start); not starting it from here: nothing was recorded or sent, retry when it is up" >&2; exit 1; }; }
+core_up() { core_is_up || { echo "hc core is down — ask the user to start it (hc server start); nothing was recorded or sent, retry when it is up" >&2; exit 1; }; }
 
 # Who is sending: $HC_TERMINAL_ID (t7). Outside an hc terminal there is no sender and no sender-side labels.
 # The live terminals as one JSON array [{id,name,cwd,status,kind,prog,labels}], from ONE terminal.list over `hc connect` (hc ls --json
@@ -679,7 +679,7 @@ else
   # ok/send-back/returned. The worker's tier is already fixed (nothing will be applied), so this logs it as
   # source=reuse with no Jev call, purely for the ref. Left empty when the target has no model token (e.g. a
   # worker started without an explicit tier) — there is nothing known to log.
-  pmodel=$(label_of "$pane_arg" model)
+  pmodel=$( core_is_up && label_of "$pane_arg" model || true) # F6: a headless target has no labels, and `hc connect` with the core down would START it
   case "$pmodel" in
     haiku|sonnet|opus)
       r=$(printf '%s' "$task_text" | node "$SELFDIR/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
