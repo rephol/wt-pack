@@ -10,6 +10,7 @@
 //   next-name <prefix> <taken,csv>  the lowest free <prefix>-NN
 //   retire <terminal>           kill+rm a terminal (already gone is fine)
 //   label <terminal> k=v...     set labels (k= clears) under the pack's limits (32 / 80 chars)
+//   tab-name <terminal> <name> name the herdr-app tab holding the terminal after the agent (best effort, never fails)
 //   retire-stray <terminal>     kill+rm the shell herdr-app opened with a new space, only while it is still a plain shell
 // Nothing here starts the core: the caller (agents.sh) has already asked `hc.mjs core-up`.
 import { execFile } from 'node:child_process'
@@ -86,6 +87,18 @@ async function space(pool, folder) {
   } finally { rmSync(lock, { recursive: true, force: true }) }
 }
 
+async function tabName(term, name) {
+  const app = (args) => new Promise((resolve, reject) => {
+    execFile('herdr-app', args, { encoding: 'utf8', timeout: 8000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)))
+  })
+  try {
+    const { spaces } = JSON.parse(await app(['ls']))
+    for (const sp of spaces) for (const tb of sp.tabs) {
+      if (tb.terminals.length === 1 && tb.terminals[0].terminal === term) { await app(['do', 'tab.rename', '--id', tb.id, '--name', name]); return }
+    }
+  } catch (e) { console.error(`wt-agents: tab not named (${String(e.message).split('\n')[0].slice(0, 100)})`) }
+}
+
 async function main([cmd, a, b, c]) {
   const h = cmd === 'space' ? null : await hcm()
   switch (cmd) {
@@ -108,7 +121,8 @@ async function main([cmd, a, b, c]) {
       if (t && h.isShell(t)) await h.killRm(a)
       return
     }
-    default: console.error('usage: agents-hc.mjs list|find|names|live-ids|pools|team-count|space|retire-stray …'); process.exit(2)
+    case 'tab-name': return tabName(a, b)
+    default: console.error('usage: agents-hc.mjs list|find|names|live-ids|pools|team-count|space|retire-stray|tab-name …'); process.exit(2)
   }
 }
 try { await main(process.argv.slice(2)) } catch (e) { console.error(`wt-agents: hc: ${e.message}`); process.exit(1) }

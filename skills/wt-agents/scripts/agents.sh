@@ -440,6 +440,8 @@ ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
   fi
   # The shell herdr-app opened with a brand-new space: close it once the agent's tab exists, only while it is still a plain shell.
   [ -z "$stray" ] || node "$ah" retire-stray "$stray" >/dev/null 2>&1 || true
+  # herdr-app names a new tab by its number: name it after the agent (a tab shared with other terminals keeps its name).
+  [ -z "$space_id" ] || node "$ah" tab-name "$pane" "$label" >/dev/null 2>&1 || true
   echo "$label $pane"
   ;;
 
