@@ -114,25 +114,30 @@ test('F6: a forced single-select text send needs the cursor on the Other row, an
 
 // The multi-select picker as hc 0.1.16 draws it (captured live, D26): a forced paste+Enter commits the Other text but leaves its row unticked.
 const LINE = '─'.repeat(100)
-const multi = (other) => ['❯ Pick sides, please.', LINE, '←  ☐ Sides  ✔ Submit  →', 'Pick sides?', '',
-  '❯ 1. [ ] Fries', '         Fries side', '  2. [ ] Salad', '         Salad side', `  3. [${other?.[0] ?? ' '}] ${other?.[1] ?? 'Type something'}`, '     Submit', LINE, '  4. Chat about this', '', 'Enter to select · ↑/↓ to navigate · Esc to cancel', ''].join('\n')
+const multi = (other, onOther = false) => ['❯ Pick sides, please.', LINE, '←  ☐ Sides  ✔ Submit  →', 'Pick sides?', '',
+  `${onOther ? ' ' : '❯'} 1. [ ] Fries`, '         Fries side', '  2. [ ] Salad', '         Salad side', `${onOther ? '❯' : ' '} 3. [${other?.[0] ?? ' '}] ${other?.[1] ?? 'Type something'}`, '     Submit', LINE, '  4. Chat about this', '', 'Enter to select · ↑/↓ to navigate · Esc to cancel', ''].join('\n')
 test('a multi-select free-text answer: toggles, move to Other, ONE forced send, a re-read, Enter only if Other is not ticked, then Submit (D26)', async () => {
   const ask = () => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: 'Pick sides?', selected: ['Salad'], other: 'no dressing' })
   const run = async (screens) => { hc.screens('t3', screens); const k0 = sent('keys', 't3').length; const f0 = forced().length; const r = await ask(); return { r, keys: sent('keys', 't3').slice(k0).map((c) => c.args.slice(3).join(' ')), forced: forced().slice(f0) } }
   // unticked after the paste: one more Enter ticks it, then down + enter
-  let o = await run([multi(), multi(), multi([' ', 'no dressing']), multi(['✔', 'no dressing'])])
+  let o = await run([multi(), multi(undefined, true), multi([' ', 'no dressing'], true), multi(['✔', 'no dressing'], true)])
   assert.equal(o.r.status, 200, JSON.stringify(await o.r.clone().json()))
   assert.deepEqual(o.keys, ['2', 'down down', 'enter', 'down enter'])
   assert.deepEqual(o.forced.map((c) => c.args), [['send', '--json', '--force', 't3', 'no dressing']])
   // already ticked: no extra Enter
-  o = await run([multi(), multi(), multi(['✔', 'no dressing'])])
+  o = await run([multi(), multi(undefined, true), multi(['✔', 'no dressing'], true)])
   assert.equal(o.r.status, 200, JSON.stringify(await o.r.clone().json()))
   assert.deepEqual(o.keys, ['2', 'down down', 'down enter'])
   // never ticks: the answer stops before Submit
-  o = await run([multi(), multi(), multi([' ', 'no dressing'])])
+  o = await run([multi(), multi(undefined, true), multi([' ', 'no dressing'], true)])
   assert.equal(o.r.status, 409)
   assert.match((await o.r.json()).error, /terminal/)
   assert.deepEqual(o.keys, ['2', 'down down', 'enter'])
+  // F7: the cursor is NOT on the Other row when the text would be pasted (the move did not land): nothing forced, 409
+  o = await run([multi(), multi()])
+  assert.equal(o.r.status, 409, JSON.stringify(await o.r.clone().json()))
+  assert.match((await o.r.json()).error, /cursor|free-text/)
+  assert.deepEqual(o.forced, [], 'multi-select: no forced send while the cursor is off the Other row')
   hc.screens('t3', [])
 })
 
@@ -152,10 +157,10 @@ test('a forced free-text send is refused (409, no --force, no Enter) when the pi
   assert.equal(o.status, 409); assert.deepEqual(o.forced, [], 'a different question: nothing forced')
   const ask = () => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: 'Pick sides?', selected: ['Salad'], other: 'no dressing' })
   // multi-select: the picker disappears after the forced send, before the ensure Enter
-  o = await attempt('Pick sides?', [multi(), multi(), NOPICKER], ask)
+  o = await attempt('Pick sides?', [multi(), multi(undefined, true), NOPICKER], ask)
   assert.equal(o.status, 409)
   assert.ok(!o.keys.slice(o.keys.indexOf('down down') + 1).includes('enter'), 'no Enter into a screen with no picker: ' + o.keys)
-  o = await attempt('Pick sides?', [multi(), multi(), multi().replace('Pick sides?', 'Run rm -rf?')], ask)
+  o = await attempt('Pick sides?', [multi(), multi(undefined, true), multi(undefined, true).replace('Pick sides?', 'Run rm -rf?')], ask)
   assert.equal(o.status, 409); assert.ok(!o.keys.slice(o.keys.indexOf('down down') + 1).includes('enter'), 'no Enter into another question: ' + o.keys)
   // multi-select: gone before the forced send itself
   o = await attempt('Pick sides?', [multi(), NOPICKER], ask)

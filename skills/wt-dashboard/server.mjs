@@ -2306,8 +2306,8 @@ async function answerQuestion(a, req) {
         const r0 = await readPane(m, a.id, '80')
         const at = parsePicker(stripAnsi(r0), r0, track)
         if (!same(at)) throw gone()
-        // single-select: the paste lands wherever the cursor is, so it must be on the free-text row (key [n+1] put it there) or it would answer option k
-        if (!at.multiSelect && at.cursor !== at.options.length + 1) throw Object.assign(new Error('the cursor is not on the free-text option — answer in the terminal'), { status: 409 })
+        // the paste lands wherever the cursor is, so it must be on the free-text row (key [n+1] / the move to Other put it there) or it would answer or tick option k
+        if (at.cursor !== at.options.length + 1) throw Object.assign(new Error('the cursor is not on the free-text option — answer in the terminal'), { status: 409 })
         await hcSendRaw(a.id, st.text, { force: true })
         if (steps[i + 1]?.keys?.[0] === 'enter') { const rest = steps[i + 1].keys.slice(1); if (rest.length) steps[i + 1] = { keys: rest }; else i++ }
       } else if (st.ensure) { // multi-select Other: ticked with the text, or stop before Submit
