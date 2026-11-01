@@ -1,4 +1,4 @@
-// WP-348: one durable row per local pane agent in wt.db, keyed by its stable name. herdr is something the dashboard
+// WP-348: one durable row per local pane agent in wt.db, keyed by its stable name. the hc core is something the dashboard
 // watches (reconcile, below), not the source of truth. The table is lazy like project_pauses/projects: store.mjs's staged
 // migrations only import when legacy *files* are present, which cannot carry this import.
 // Never stored: task, task_state, handoff_* (LIVE_KEYS) or a pane key. tags = roles.mjs MIRRORED_KEYS only.
@@ -77,8 +77,8 @@ export class AgentTable {
   }
 }
 
-// The pure watcher. rows: AgentTable.list(); live: local agents from listAgents() ({ name, id, stableId?, session, status, cwd, pool, project,
-// ticket, paneTokens }); panes: Set of pane ids herdr still lists. Returns [{ name, patch }] for rows that changed (plus new rows).
+// The pure watcher. rows: AgentTable.list(); live: local agents from listAgents() ({ name, id, session, status, cwd, pool, project,
+// ticket, paneTokens }); panes: Set of terminal addresses hc still lists (finished ones too). Returns [{ name, patch }] for rows that changed (plus new rows).
 export function reconcile(rows, live, panes, now = Date.now()) {
   const byName = new Map(rows.map((r) => [r.name, r]))
   const sessionCount = new Map()

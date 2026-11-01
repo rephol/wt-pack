@@ -1,7 +1,7 @@
 {
   "name": "wt-dashboard",
   "short_name": "wt-dash",
-  "description": "Control room for herdr-managed Claude Code agents",
+  "description": "Control room for hc-managed Claude Code agents",
   "start_url": "./#overview",
   "scope": "./",
   "display": "standalone",

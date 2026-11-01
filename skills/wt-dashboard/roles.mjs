@@ -1,7 +1,7 @@
-// Configurable agent roles (Settings › Roles) and the per-agent tags wt-dashboard mirrors into herdr pane tokens.
+// Configurable agent roles (Settings › Roles) and the per-agent tags wt-dashboard mirrors into hc terminal labels (pane tokens).
 // A role resolves as: the pane's `role` token > the role's workspace glob > its name glob > "other".
-// Tokens (source "wt-dashboard") are display-only, one merged map per pane, values cut at 80 chars, and they live
-// only in the running herdr server — so the agents table (agents-table.mjs, WP-348; it replaced data/agent-tags.json) is the source of truth and they are re-applied.
+// Tokens (labels of the same name) are display-only, one merged map per pane, values cut at 80 chars, and they live
+// only in the running hc core — so the agents table (agents-table.mjs, WP-348; it replaced data/agent-tags.json) is the source of truth and they are re-applied.
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -25,10 +25,10 @@ export const DEFAULT_ROLES = [
 export const ADDED_DEFAULTS = ['reviewer', 'lead'] // defaults added after roles.json shipped; append new ones here
 export const COLORS = ['blue', 'green', 'purple', 'orange', 'red', 'teal', 'pink', 'gray']
 // MIRRORED keys live in the agents table row's tags and are re-applied; LIVE keys (set by wt-handoff) belong to the pane
-// alone, so a stale mirror can never overwrite them — and they are gone after a herdr restart, which is fine.
+// alone, so a stale mirror can never overwrite them — and they are gone after a core restart, which is fine.
 // WP-143: agents.sh's `model`/`effort` tokens are neither MIRRORED nor LIVE here — this file's mirror only ever
 // gets a value from inferTags()'s one-time backfill or adoptHandoff()'s ticket/handoff_at copy, so adding them
-// here would not actually persist them. A herdr restart wipes them like any other pane token, and an existing
+// here would not actually persist them. A core restart can wipe them like any other pane token, and an existing
 // agent then falls back to old behaviour (never reused by tier, never retired) until it is next spawned fresh.
 export const MIRRORED_KEYS = ['role', 'persona', 'project', 'ticket', 'branch', 'spawned_by', 'created', 'handoff_at']
 export const LIVE_KEYS = ['task', 'task_state', 'handoff_from', 'handoff_from_pane', 'handoff_to', 'handoff_to_pane', 'dnd', 'pair', 'team']

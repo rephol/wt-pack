@@ -20,7 +20,7 @@ type Source = { ok: boolean | null; lastOkAt: string | null; lastError: { at: st
 interface Health {
   pid: number; startedAt: string; managedBy: 'app' | 'launchd' | 'external'; webBuiltAt: string | null
   runtime?: { kind: string; path: string }
-  sources: Record<'herdr' | 'git' | 'gh' | 'linear' | 'machines', Source>
+  sources: Record<'hc' | 'git' | 'gh' | 'linear' | 'machines', Source>
   jev?: { state: 'up' | 'down' | 'unreachable'; key: 'none' | 'ok' | 'invalid' | 'unknown'; models: string[]; at: string }
   planUsage?: PlanUsage
 }

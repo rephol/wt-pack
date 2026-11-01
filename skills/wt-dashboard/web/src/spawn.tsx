@@ -59,7 +59,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const [prompt, setPrompt] = useState('')
   const [plugs, setPlugs] = useState<string[] | null>(null) // WP-309: null = untouched, send nothing (the server default applies)
   const hlPlugins = useQuery({ queryKey: ['headless-plugins'], queryFn: () => api<{ plugins: string[]; keep: string[] }>('/api/headless/plugins'), enabled: false })
-  const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of a herdr pane
+  const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of an hc terminal
   const [pmode, setPmode] = useState('') // '' = the user's own Claude Code settings
   const [model, setModel] = useState(''), [effort, setEffort] = useState(''), [hname, setHname] = useState(''), [hcwd, setHcwd] = useState('') // WP-302: blank = the server's defaults
   const list = projects.data ?? []
