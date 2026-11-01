@@ -36,6 +36,19 @@ test('denylist: what the core inherited from another agent is scrubbed, what the
   assert.equal(r.env.HC_TERMINAL_ID, 't7')
 })
 
+// WP-378 F5: every name the launcher scrubs is checked, not a sample. Inherited from the core's env -> gone; named in WT_LAUNCH_KEYS -> kept.
+const DENY = ['GH_TOKEN', 'GITHUB_TOKEN', 'WT_PANE_KEY', 'WT_DELIVER_TOKEN', 'CLAUDE_ENV_FILE', 'WT_KILL_SHIM_DIR', 'WT_ROLE', 'WT_PERSONA', 'WT_PROJECT', 'WT_MEMORY_MCP',
+  'WT_HEADLESS_ID', 'WT_HEADLESS_X', 'HERDR_PANE_ID', 'HERDR_DASH_URL', 'HERDR_ENV', 'WT_RUN_KEY', 'WT_GATE', 'WT_TURN_DIR', 'WT_MEMORY_CACHE', 'WT_DASHBOARD_DATA',
+  'WT_DASHBOARD_ENV', 'WT_TRUSTED_PROJECTS', 'WT_MEMORY_HOME', 'WT_MESSAGES_DIR', 'WT_RECEIPTS_DIR']
+test('denylist, every name: scrubbed when only the core had it, kept (the spawner\'s value) when listed in WT_LAUNCH_KEYS', () => {
+  const inherited = Object.fromEntries(DENY.map((k) => [k, `core-${k}`]))
+  const gone = run({ HOME: join(tmp, 'norc'), ...inherited, WT_LAUNCH_KEYS: '' })
+  assert.equal(gone.status, 0, gone.stderr)
+  assert.deepEqual(DENY.filter((k) => gone.env[k] !== undefined), [], 'inherited and not listed: still present')
+  const kept = run({ HOME: join(tmp, 'norc'), ...inherited, WT_LAUNCH_KEYS: DENY.join(',') })
+  assert.deepEqual(DENY.filter((k) => kept.env[k] !== `core-${k}`), [], 'listed by the spawner: must survive')
+})
+
 test('the pack beats the rc: an rc that sets GH_TOKEN/WT_PANE_KEY and rewrites PATH does not win; rc-only variables still arrive; bookkeeping is gone', () => {
   const r = run({ GH_TOKEN: 'pack-gh', WT_PANE_KEY: 'pack-key', WT_KILL_SHIM_DIR: shim, WT_LAUNCH_KEYS: 'GH_TOKEN,WT_PANE_KEY,WT_KILL_SHIM_DIR' })
   assert.equal(r.status, 0, r.stderr)
@@ -48,7 +61,7 @@ test('the pack beats the rc: an rc that sets GH_TOKEN/WT_PANE_KEY and rewrites P
 })
 
 test('writes pane-keys/$HC_TERMINAL_ID (0600 in a 0700 dir) from WT_PANE_KEY before the program starts', () => {
-  const r = run({ WT_PANE_KEY: 'abc123', WT_LAUNCH_KEYS: 'WT_PANE_KEY' }, ['--', '/bin/sh', '-c', `cat ${data}/pane-keys/t7`])
+  const r = run({ WT_PANE_KEY: 'abc123', WT_LAUNCH_KEYS: 'WT_PANE_KEY,WT_DASHBOARD_DATA' }, ['--', '/bin/sh', '-c', `cat ${data}/pane-keys/t7`])
   assert.equal(r.stdout.trim().split('\n').pop(), 'abc123', r.stderr)
   assert.equal(statSync(join(data, 'pane-keys', 't7')).mode & 0o777, 0o600)
   assert.equal(statSync(join(data, 'pane-keys')).mode & 0o777, 0o700)

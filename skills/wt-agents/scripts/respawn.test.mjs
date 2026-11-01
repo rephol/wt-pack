@@ -127,3 +127,20 @@ test('D8: an exited agent (finished terminal) respawns from the dashboard\'s row
   } finally { rmSync(agentRow, { force: true }) }
   assert.equal(run(['rm', 'demo-worker-77'], []).status, 1)
 })
+
+test('WP-378 F5: rm and respawn act on a pack agent only: a plain shell, a stranger terminal and a dashboard shell are refused with no kill/rm', () => {
+  const shell = term('t1', 'my-shell', { cwd: repo, program: 'zsh', pid: 888 })
+  const dashShell = term('t2', 'sh-demo-01', { cwd: repo, program: 'zsh', pid: 889, labels: { 'wt.pool': 'demo-shells' } })
+  for (const [name, row] of [['my-shell', shell], ['sh-demo-01', dashShell]]) {
+    for (const verb of [['rm', name], ['rm', name, '--force'], ['respawn', name, '--force']]) {
+      const r = run(verb, [row])
+      assert.notEqual(r.status, 0, `${verb.join(' ')}: ${r.stdout}`)
+      assert.match(r.stderr, /not a pack agent/)
+      assert.deepEqual(r.calls.filter((c) => ['kill', 'rm', 'interrupt'].includes(c.args[0]) || c.stdin?.includes('terminal.run')), [], `${verb.join(' ')} made a destructive call`)
+    }
+  }
+  // by id too
+  const r = run(['rm', 't1'], [shell]); assert.notEqual(r.status, 0); assert.ok(!r.calls.some((c) => c.args[0] === 'kill' || c.args[0] === 'rm'))
+  // a pack agent still goes
+  assert.equal(run(['rm', 'demo-worker-01'], [agent(1, 'idle')]).status, 0)
+})

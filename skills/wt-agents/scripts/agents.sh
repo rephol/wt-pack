@@ -140,6 +140,19 @@ launcher="$here/hc-launch"
 
 # A stopped core is STARTED by `hc ls|get|connect|server status` (spike S5): never touch hc while it is down (D4).
 core_up() { node "$hcjs" core-up || { echo "hc core is down (hc server start); not starting it from here" >&2; exit 1; }; }
+# WP-378 F5: rm/respawn end a terminal, and `agents-hc.mjs find` resolves ANY hc terminal: a user's shell or a dashboard shell must never be
+# one. A pack agent has a role label or a (non -shells) wt.pool label, or the dashboard's agents table holds a row for its name (a kept
+# shell at an agent's address has no labels, D8). Prints the refusal and exits 1 otherwise. <find-row-json> <target-as-typed>
+require_pack_agent() {
+  _role=$(printf '%s' "$1" | jq -r '.tokens.role // empty' 2>/dev/null); _pool=$(printf '%s' "$1" | jq -r '.tokens["wt.pool"] // empty' 2>/dev/null)
+  [ -z "$_role" ] || return 0
+  case "$_pool" in ''|*-shells) ;; *) return 0 ;; esac
+  . "$here/../../wt-shared/scripts/agent-pane.sh"
+  _n=$(printf '%s' "$1" | jq -r '.name // empty' 2>/dev/null)
+  [ -z "$(agent_row "${_n:-$2}" | jq -r '.name // empty' 2>/dev/null)" ] || return 0
+  echo "$2 is not a pack agent (no role or pool label, no agents-table row): refusing to end it" >&2
+  return 1
+}
 
 # hc names allow only [a-z0-9_-.], up to 32 chars; "<repo>-<role>-NN" must fit, so the repo part is cut to 20.
 repo_slug() { basename "$1" | LC_ALL=C tr ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz | LC_ALL=C tr -c 'a-z0-9_\n-' '-' | cut -c1-20; }
@@ -475,6 +488,7 @@ rm)
   : "${target:?name or id required}"
   row=$(node "$ah" find "$target" 2>/dev/null || true)
   [ -n "$row" ] || { echo "no such agent: $target" >&2; exit 1; }
+  require_pack_agent "$row" "$target" || exit 1
   pane=$(printf '%s' "$row" | jq -r .pane_id); name=$(printf '%s' "$row" | jq -r '.name // empty'); status=$(printf '%s' "$row" | jq -r .agent_status)
   # Ending a working agent discards a turn in flight, and its work is only in that terminal until it commits.
   # Refuse unless the caller says otherwise.
@@ -507,6 +521,7 @@ respawn)
       row=$(agent_row "$1" | jq -c 'select(.state == "missing" or .state == "exited") | {name, pane_id: "", cwd, agent_status: "idle", agent_session: {value: .session}, tokens: ({role, persona, project, ticket} | with_entries(select(.value != null)))}' 2>/dev/null)
     fi
     [ -n "$row" ] || { echo "no such agent: $1" >&2; return 1; }
+    require_pack_agent "$row" "$1" || return 1
     name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
     r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
     sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')

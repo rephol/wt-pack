@@ -34,7 +34,7 @@ keys=${WT_LAUNCH_KEYS:-}
 
 # stage 1: scrub the denylist except the keys this spawn set
 keep=",$keys,"
-for k in $(env | awk -F= '$1 ~ /^(GH_TOKEN|WT_PANE_KEY|WT_DELIVER_TOKEN|CLAUDE_ENV_FILE|WT_KILL_SHIM_DIR|WT_ROLE|WT_PERSONA|WT_PROJECT|WT_MEMORY_MCP|WT_HEADLESS_[A-Za-z0-9_]*|HERDR_[A-Za-z0-9_]*|__WTL_[A-Za-z0-9_]*)$/ { print $1 }'); do
+for k in $(env | awk -F= '$1 ~ /^(GH_TOKEN|GITHUB_TOKEN|WT_PANE_KEY|WT_RUN_KEY|WT_GATE|WT_TURN_DIR|WT_MEMORY_CACHE|WT_DASHBOARD_DATA|WT_DASHBOARD_ENV|WT_TRUSTED_PROJECTS|WT_MEMORY_HOME|WT_MESSAGES_DIR|WT_RECEIPTS_DIR|WT_DELIVER_TOKEN|CLAUDE_ENV_FILE|WT_KILL_SHIM_DIR|WT_ROLE|WT_PERSONA|WT_PROJECT|WT_MEMORY_MCP|WT_HEADLESS_[A-Za-z0-9_]*|HERDR_[A-Za-z0-9_]*|__WTL_[A-Za-z0-9_]*)$/ { print $1 }'); do
   case "$keep" in *",$k,"*) continue ;; esac
   unset "$k"
 done

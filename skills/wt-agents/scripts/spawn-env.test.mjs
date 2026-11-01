@@ -346,7 +346,8 @@ test('WP-368: spawn lead --agent <name> passes --agent to claude, labels role=le
 })
 
 test('agents.sh rm: ends the terminal (kill + rm), forgets the row unless --keep-row, refuses a working agent without --force', () => {
-  const rows = [term('t3', 'demo-worker-01', { status: 'idle' }), term('t4', 'demo-worker-02', { status: 'working' }), term('t8', 'demo-worker-08', { state: 'finished' })]
+  const lab = { role: 'worker' } // WP-378 F5: rm acts on pack agents only (a role label)
+  const rows = [term('t3', 'demo-worker-01', { status: 'idle', labels: lab }), term('t4', 'demo-worker-02', { status: 'working', labels: lab }), term('t8', 'demo-worker-08', { state: 'finished', labels: lab })]
   const withCurl = (extra = {}) => ({ rows, env: { HERDR_DASH_URL: 'http://dash', ...extra } })
   stub('curl', `echo "curl $*" >> ${log}`)
   let s = ok(spawn(['rm', 'demo-worker-01', '--keep-row'], withCurl()))
