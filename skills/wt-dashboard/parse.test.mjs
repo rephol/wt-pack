@@ -1550,6 +1550,15 @@ test('WP-203: runBulk answers every tab then submits once, for 1-4 tabs, from ta
     assert.equal(t.sent.at(-1), '1')
   }
 })
+test('F4: runBulk tells io.send which question each plan was computed for (the forced send re-checks it)', async () => {
+  const { runBulk } = await import('./server.mjs')
+  const seen = []
+  const pk = { review: false, tabs: [{ header: 'A', done: false }], current: 0, question: 'Q1?', multiSelect: false, options: [{ label: 'x', checked: false }], other: null, cursor: 1 }
+  let sent = false
+  const io = { read: async () => (sent ? { review: true, tabs: pk.tabs, answers: [1] } : pk), send: async (steps, expect) => { seen.push(expect); sent = true } }
+  await runBulk(io, [{ header: 'A', selected: ['x'] }], async () => {}).catch(() => {})
+  assert.deepEqual(seen[0], { question: 'Q1?', multiSelect: false })
+})
 test('WP-203: runBulk refuses (409) before submitting when the picker does not match', async () => {
   const { runBulk } = await import('./server.mjs')
   const bad = async (answers, term) => { await assert.rejects(runBulk(term.io, answers, async () => {}), (e) => e.status === 409); assert.ok(!term.t.submitted) }

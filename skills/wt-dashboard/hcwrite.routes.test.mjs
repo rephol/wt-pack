@@ -99,20 +99,47 @@ test('a multi-select free-text answer: toggles, move to Other, ONE forced send, 
   const ask = () => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: 'Pick sides?', selected: ['Salad'], other: 'no dressing' })
   const run = async (screens) => { hc.screens('t3', screens); const k0 = sent('keys', 't3').length; const f0 = forced().length; const r = await ask(); return { r, keys: sent('keys', 't3').slice(k0).map((c) => c.args.slice(3).join(' ')), forced: forced().slice(f0) } }
   // unticked after the paste: one more Enter ticks it, then down + enter
-  let o = await run([multi(), multi([' ', 'no dressing']), multi(['✔', 'no dressing'])])
+  let o = await run([multi(), multi(), multi([' ', 'no dressing']), multi(['✔', 'no dressing'])])
   assert.equal(o.r.status, 200, JSON.stringify(await o.r.clone().json()))
   assert.deepEqual(o.keys, ['2', 'down down', 'enter', 'down enter'])
   assert.deepEqual(o.forced.map((c) => c.args), [['send', '--json', '--force', 't3', 'no dressing']])
   // already ticked: no extra Enter
-  o = await run([multi(), multi(['✔', 'no dressing'])])
+  o = await run([multi(), multi(), multi(['✔', 'no dressing'])])
   assert.equal(o.r.status, 200, JSON.stringify(await o.r.clone().json()))
   assert.deepEqual(o.keys, ['2', 'down down', 'down enter'])
   // never ticks: the answer stops before Submit
-  o = await run([multi(), multi([' ', 'no dressing'])])
+  o = await run([multi(), multi(), multi([' ', 'no dressing'])])
   assert.equal(o.r.status, 409)
   assert.match((await o.r.json()).error, /terminal/)
   assert.deepEqual(o.keys, ['2', 'down down', 'enter'])
   hc.screens('t3', [])
+})
+
+// F4 (security): a forced send / an Enter in `ensure` only goes to the SAME picker the plan was computed for; anything else is 409 and nothing is sent.
+test('a forced free-text send is refused (409, no --force, no Enter) when the picker is gone or changed between the plan and the send', async () => {
+  const single = readFileSync(new URL('./test-fixtures/picker-single-question.txt', import.meta.url), 'utf8')
+  const pk = parsePicker(single)
+  const ans = (q, other) => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: q, selected: [], other })
+  const attempt = async (q, screens, body) => {
+    hc.screens('t3', screens); const f0 = forced().length, k0 = sent('keys', 't3').length
+    const r = await body(); return { status: r.status, forced: forced().slice(f0), keys: sent('keys', 't3').slice(k0).map((c) => c.args.slice(3).join(' ')) }
+  }
+  const NOPICKER = '$ ls\nfoo\n$ '
+  let o = await attempt(pk.question, [single, NOPICKER], () => ans(pk.question, 'sneaky'))
+  assert.equal(o.status, 409); assert.deepEqual(o.forced, [], 'no picker on screen: nothing forced'); assert.ok(!o.keys.includes('enter'))
+  o = await attempt(pk.question, [single, single.slice(0, single.lastIndexOf('Which color?')) + 'Delete everything?' + single.slice(single.lastIndexOf('Which color?') + 12)], () => ans(pk.question, 'sneaky'))
+  assert.equal(o.status, 409); assert.deepEqual(o.forced, [], 'a different question: nothing forced')
+  const ask = () => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: 'Pick sides?', selected: ['Salad'], other: 'no dressing' })
+  // multi-select: the picker disappears after the forced send, before the ensure Enter
+  o = await attempt('Pick sides?', [multi(), multi(), NOPICKER], ask)
+  assert.equal(o.status, 409)
+  assert.ok(!o.keys.slice(o.keys.indexOf('down down') + 1).includes('enter'), 'no Enter into a screen with no picker: ' + o.keys)
+  o = await attempt('Pick sides?', [multi(), multi(), multi().replace('Pick sides?', 'Run rm -rf?')], ask)
+  assert.equal(o.status, 409); assert.ok(!o.keys.slice(o.keys.indexOf('down down') + 1).includes('enter'), 'no Enter into another question: ' + o.keys)
+  // multi-select: gone before the forced send itself
+  o = await attempt('Pick sides?', [multi(), NOPICKER], ask)
+  assert.equal(o.status, 409); assert.deepEqual(o.forced, [])
+  hc.screens('t3', []); hc.screen('t3', '')
 })
 
 test('a server send to a blocked agent is queued: no send, the row stays queued with 0 attempts; once unblocked it is typed and counted', async () => {
@@ -121,7 +148,7 @@ test('a server send to a blocked agent is queued: no send, the row stays queued 
   assert.equal(r.status, 200, JSON.stringify(ev))
   assert.equal(ev.delivery, 'queued')
   assert.equal(plain('t3').length, 0)
-  assert.deepEqual(forced().map((c) => c.args.at(-1)), ['my own words', 'no dressing', 'no dressing', 'no dressing'], 'a delivery to a blocked target never carries --force: only the picker answers did')
+  assert.deepEqual(forced().map((c) => c.args.at(-1)), ['my own words', 'no dressing', 'no dressing', 'no dressing', 'no dressing', 'no dressing'], 'a delivery to a blocked target never carries --force: only the picker answers did')
   const rows = await (await fetch(`${base}/api/messages`, { headers: { cookie } })).json()
   const row = rows.find((m) => m.target === 't3')
   assert.ok(row, JSON.stringify(rows))

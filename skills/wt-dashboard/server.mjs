@@ -2242,7 +2242,7 @@ export async function runBulk(io, answers, nap = sleep) {
   for (let i = 0; i < n; i++) {
     if (!pk || pk.review || pk.tabs[i]?.header !== answers[i].header) throw fail('the picker changed — answer in the terminal')
     const prev = pk.question
-    await io.send(answerPlan(pk, answers[i]))
+    await io.send(answerPlan(pk, answers[i]), { question: pk.question, multiSelect: pk.multiSelect })
     pk = await settle((p) => p && (p.review || p.question !== prev))
   }
   if (!pk.review || (pk.answers ?? []).length !== n) throw fail('the terminal does not show all answers — answer in the terminal')
@@ -2279,19 +2279,26 @@ async function answerQuestion(a, req) {
   const raw = await readPane(m, a.id, '80')
   const pk = parsePicker(stripAnsi(raw), raw, track)
   if (!pk) return [409, { error: 'no question is waiting on screen' }]
-  const sendSteps = async (steps) => {
+  // F4: a forced text send and the Enter in `ensure` act on whatever is on screen, so each re-reads it first and goes ahead only when it is still the
+  // picker the plan was computed for (`expect` = {question, multiSelect}); otherwise 409 and nothing is sent.
+  const sendSteps = async (steps, expect = { question: pk.question, multiSelect: pk.multiSelect }) => {
+    const same = (now) => Boolean(now && !now.review && now.question === expect.question && Boolean(now.multiSelect) === Boolean(expect.multiSelect))
+    const gone = () => Object.assign(new Error('the question changed on screen — answer in the terminal'), { status: 409 })
     // WP-378 D26: a free-text answer is `hc send --force` (paste + Enter) into the waiting question's Other field. Force is allowed HERE ONLY: this
     // route needs the session cookie, so it is the user's own act; every delivery, sweep and queue flush refuses to force. A {text} step is
     // followed by the Enter that submits it, which the forced send already presses.
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i]
       if (st.text) {
+        const r0 = await readPane(m, a.id, '80')
+        if (!same(parsePicker(stripAnsi(r0), r0, track))) throw gone()
         await hcSendRaw(a.id, st.text, { force: true })
         if (steps[i + 1]?.keys?.[0] === 'enter') { const rest = steps[i + 1].keys.slice(1); if (rest.length) steps[i + 1] = { keys: rest }; else i++ }
       } else if (st.ensure) { // multi-select Other: ticked with the text, or stop before Submit
         for (let k = 0; k < 2; k++) {
           const r = await readPane(m, a.id, '80'), now = parsePicker(stripAnsi(r), r, track)
-          if (now?.other && now.otherChecked) break
+          if (!same(now)) throw gone()
+          if (now.other && now.otherChecked) break
           if (k) throw Object.assign(new Error('could not tick the custom text — finish this question in the terminal'), { status: 409 })
           await pressKeys(a.id, 'enter'); await sleep(250)
         }
