@@ -65,7 +65,9 @@ const blankSingle = (seg) => {
 // WP-378: the hc terminal runner. Pack scripts call `env -u HC_TERMINAL_ID hc send` INSIDE their own process (D5: the tag-free route), which this
 // never sees; a Bash command that does it itself is an agent forging an untagged message. `hcCall` finds the `hc` command of a segment (after
 // VAR=val / env / sudo wrappers and their flags) → { verb, sub, args, wrap } or null.
-const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|--unset(?:=|\s+)HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]{0,512}\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
+// `unset … HC_TERMINAL_ID` is tested per segment (UNSET and ID_NAME in the same one, any distance apart: linear, no bound to outrun).
+const UNSET = /\bunset\b/, ID_NAME = /\bHC_TERMINAL_ID\b/
+const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|--unset(?:=|\s+)HC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
 // Wrappers that run their next word as a command, and the flags of each that take a VALUE as the next word (`-uNAME` attached needs none).
 const WRAP_VAL = { env: ['-u', '-C', '-S', '--unset', '--chdir', '--split-string'], sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], command: [], nohup: [], time: ['-f', '-o'], exec: ['-a'],
   timeout: ['-s', '-k', '--signal', '--kill-after'], nice: ['-n', '--adjustment'], xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '-J'], eval: [] }
@@ -97,7 +99,7 @@ function hcCall(w) {
   const pre = []
   let k = 0
   while (k < w.length) {
-    const t = lead(w[k]).replace(/^\\(?=\w)/, '') // `\hc` is hc
+    const t = lead(w[k]).replace(/\\(?=\w)/g, '') // `\hc`, `h\c`: a backslash before a word character only escapes it
     if (t === '') { k++; continue }
     if (KEYWORDS.has(t)) { k++; continue }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) { pre.push(t); k++; continue }
@@ -123,30 +125,48 @@ function hcCall(w) {
   return null
 }
 
-// Command separators: && || |& ; newline | ALWAYS split (pre-F7 behaviour: a stray apostrophe in a comment, heredoc body or `echo it's` must never hide the next command).
-// Quote state decides ONLY whether a lone & (not >& &> <& 2>&1) separates: `curl "…?a=1&b=2"` is one command. It is reset at every newline, so an unbalanced quote
-// on one line cannot reach the next. A backslash-newline continuation is joined first (`git \\\npush` is `git push`).
-const splitSegs = (src) => {
-  const s = src.replace(/\\\n/g, '')
+// Command separators. classify reads EVERY command twice and takes the first non-null class (WP-378 F10): no single splitter is right about quotes (a stray apostrophe in a comment,
+// heredoc body or `echo it's` swallows the rest of the line for a quote-aware one; a quoted or escaped separator cuts a word in two for a quote-blind one), so the two are a union.
+//  A, splitQuoted: respects '…', "…" (with \" escapes) and $'…' (with escapes), escaped separators (`\;`, `\&`, `\|`), joins a backslash-newline only for an ODD run of backslashes
+//     (`\\<NL>` is a literal backslash, then a separator), splits a lone & only outside quotes, and carries the quote state across lines.
+//  B, splitBlind: splits on every ; newline | |& || && and lone & whatever the quotes or escapes (the pre-F7 behaviour); no continuation join.
+// The cost is a false positive when a quoted message holds a separator and a tool word (`git commit -m "a; git push"`): an ask, accepted.
+const SEP_BLIND = /&&|\|\||\|&|[;\n|]|(?<![>&<])&(?![>&])/
+export const splitBlind = (s) => s.split(SEP_BLIND)
+export const splitQuoted = (s) => {
   const out = []
-  let q = '', from = 0
+  let cur = '', q = '' // q: '' | "'" | '"' | 'c' ($'…')
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]
-    if (ch === '\n') q = ''
-    else if (q === "'") { if (ch === "'") q = '' }
-    else if (ch === '\\' && /["'\\]/.test(s[i + 1] ?? '')) { i++; continue } // an escaped quote or backslash changes no state; an escaped ; | & still splits (pre-F7)
-    else if (ch === '"') q = q ? '' : '"'
-    else if (!q && ch === "'") q = "'"
+    if (q === "'") { cur += ch; if (ch === "'") q = ''; continue }
+    if (ch === '\\') { // an escape pair: changes no state and is never a separator; backslash-newline is a continuation (both dropped)
+      if (i + 1 >= s.length) { cur += ch; continue }
+      i++
+      if (s[i] !== '\n') cur += ch + s[i]
+      continue
+    }
+    if (q) { cur += ch; if (ch === (q === '"' ? '"' : "'")) q = ''; continue }
+    if (ch === '"') { q = '"'; cur += ch; continue }
+    if (ch === "'") { q = "'"; cur += ch; continue }
+    if (ch === '$' && s[i + 1] === "'") { q = 'c'; cur += "$'"; i++; continue }
     let n = 0
     if (ch === '&' && s[i + 1] === '&') n = 2
     else if (ch === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) n = 2
     else if (ch === ';' || ch === '\n' || ch === '|') n = 1
-    else if (ch === '&' && !q && s[i - 1] !== '\\' && !'>&<'.includes(s[i - 1] ?? ' ') && !'>&'.includes(s[i + 1] ?? ' ')) n = 1
-    if (!n) continue
-    out.push(s.slice(from, i)); from = i + n; i += n - 1
+    else if (ch === '&' && !'>&<'.includes(s[i - 1] ?? ' ') && !'>&'.includes(s[i + 1] ?? ' ')) n = 1
+    if (!n) { cur += ch; continue }
+    out.push(cur); cur = ''; i += n - 1
   }
-  out.push(s.slice(from))
+  out.push(cur)
   return out
+}
+// The segments of both readings (B's only when it differs from A's).
+// `read` ('A' | 'B') restricts it to one reading: for tests that pin what each side catches alone; classify never passes it.
+const segmentsOf = (s, read) => {
+  if (read === 'A') return splitQuoted(s)
+  if (read === 'B') return splitBlind(s)
+  const a = splitQuoted(s), b = splitBlind(s)
+  return a.length === b.length && a.every((x, k) => x === b[k]) ? a : a.concat(b)
 }
 
 // → null | { action, rule, segment }. `ctx`: { cwd, root } — the session's cwd and its worktree/checkout root (for the rm-outside test).
@@ -162,20 +182,23 @@ export function classify(cmd, ctx = {}, carry = {}) {
   const depth = carry.depth ?? 0
   if (depth > 6) return { action: 'run a command nested too deep to read (sh -c / eval / hc run)', rule: 'long-command', segment: clip(full) } // never let nesting crash the gate open
   const cwd = ctx.cwd ?? process.cwd(), root = ctx.root ?? cwd
-  const cleared0 = !!carry.cleared || ID_UNSET.test(full), spoof0 = !!carry.spoof || ID_SPOOF.test(full)
+  const segs = segmentsOf(full, carry.read)
+  const cleared0 = !!carry.cleared || ID_UNSET.test(full) || segs.some((g) => UNSET.test(g) && ID_NAME.test(g)), spoof0 = !!carry.spoof || ID_SPOOF.test(full)
   for (const re of [SHELL_C, EVAL_Q]) for (const m of full.matchAll(re)) {
     const inner = m[1] ?? m[2].replace(/\\(["$`\\])/g, '$1')
-    const r = inner.length < full.length ? classify(inner, ctx, { cleared: cleared0 || ENV_I.test(m[0]), spoof: spoof0, depth: depth + 1 }) : null
+    const r = inner.length < full.length ? classify(inner, ctx, { cleared: cleared0 || ENV_I.test(m[0]), spoof: spoof0, depth: depth + 1, read: carry.read }) : null
     if (r) return r
   }
-  for (const seg of splitSegs(full)) {
+  for (const seg of segs) {
     const hit = (action, rule) => ({ action, rule, segment: clip(seg) })
     const bare = seg.replace(/"[^"]*"|'[^']*'/g, (m) => (/^(["'])[\w./~=-]+\1$/.test(m) ? m.slice(1, -1) : '""')) // words inside a message are not subcommands
     const w = words(bare)
+    const bsl = (x) => x.replace(/\\(?=\w)/g, '') // `\git push`, `g\it push`: a backslash before a word character only escapes it
     // strip leading VAR=val and env/sudo/command wrappers
     let i = 0
-    while (i < w.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i]) || ['env', 'sudo', 'command', 'nohup', 'time'].includes(w[i]) || KEYWORDS.has(w[i]))) i++
-    const [c, ...rest] = w.slice(i)
+    while (i < w.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i]) || ['env', 'sudo', 'command', 'nohup', 'time'].includes(bsl(w[i])) || KEYWORDS.has(w[i]))) i++
+    const [c0, ...rest] = w.slice(i)
+    const c = c0 && bsl(c0)
     if (!c) continue
     const hc = hcCall(w)
     if (hc) {
@@ -196,7 +219,7 @@ export function classify(cmd, ctx = {}, carry = {}) {
         const rest = toks.slice(p)
         // `hc run "<one string>"`: hc runs a single argument as a shell command line, so unquote it; several words are argv (and `hc exec` always is)
         const carried = verb === 'run' && rest.length === 1 && /^(["']).*\1$/s.test(rest[0]) ? (rest[0][0] === "'" ? rest[0].slice(1, -1) : rest[0].slice(1, -1).replace(/\\(["$`\\])/g, '$1')) : rest.join(' ')
-        const r = carried && carried.length < full.length ? classify(carried, ctx, { cleared, spoof: spoof0, depth: depth + 1 }) : null
+        const r = carried && carried.length < full.length ? classify(carried, ctx, { cleared, spoof: spoof0, depth: depth + 1, read: carry.read }) : null
         if (r) return r
       }
       continue
