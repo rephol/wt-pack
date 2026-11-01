@@ -500,6 +500,11 @@ hand_to() {
   # A reused agent that reports no status yet (claude still starting) gets the fresh-spawn treatment: waited on until ready.
   # An explicit --pane target may be busy (a follow-up to a working worker): it is typed to as `any`, not only while idle.
   [ "$mode" != pane ] || sendmode=any
+  # WP-378 D16: a blocked target (a dialog is open) takes nothing; refuse BEFORE any record or post, or a `delivered` row is left that was never typed.
+  # No script-side queue (a script has no lifetime to hold one). The exit-9 branch of hc_send stays as the race backstop.
+  if [ "$(row_of "$1" | jq -r '.status // empty' 2>/dev/null)" = blocked ]; then
+    echo "$1 is blocked (a dialog is open): nothing sent; retry when it is answered" >&2; exit 1
+  fi
   if [ "$fresh" -eq 0 ]; then
     _row=$(row_of "$1")
     printf '%s' "$_row" | jq -e '.status == "" and .prog == "claude"' >/dev/null 2>&1 && fresh=1
