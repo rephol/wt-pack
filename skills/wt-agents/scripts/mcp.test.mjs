@@ -8,7 +8,7 @@ import { join } from 'node:path'
 
 const here = new URL('.', import.meta.url).pathname
 const tmp = mkdtempSync(join(tmpdir(), 'wt-mcp-'))
-writeFileSync(join(tmp, 'herdr'), '#!/bin/sh\nexit 0\n'); chmodSync(join(tmp, 'herdr'), 0o755) // agents.sh only checks it is on PATH
+writeFileSync(join(tmp, 'hc'), '#!/bin/sh\nexit 0\n'); chmodSync(join(tmp, 'hc'), 0o755) // agents.sh only checks it is on PATH
 const envFile = join(tmp, 'env')
 const run = (cmd, args, env) => execFileSync(cmd, args, { cwd: join(here, '../..'), encoding: 'utf8',
   env: { PATH: `${tmp}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_ENV: envFile, ...env } }).trim()

@@ -1,10 +1,10 @@
 ---
 name: wt-agents
 description: >
-  Spawn, list and remove the named herdr agents this pack hands work to — planners, which start in
+  Spawn, list and remove the named hc (herdr-core) agents this pack hands work to — planners, which start in
   the main checkout because their first job is to create a worktree, and workers, which start inside
-  one. Keeps every agent named, which herdr does not do reliably on its own, so a pool stays
-  addressable by name instead of only by pane id. Use when asked to spawn or add a planner or a
+  one. Keeps every agent named at its start (hc cannot rename), so a pool stays
+  addressable by name instead of only by terminal id. Use when asked to spawn or add a planner or a
   worker, to remove or clean up one, or to see what the pools currently hold. Called by wt-plan's
   handoff; also useful invoked alone.
 allowed-tools: Bash
@@ -15,12 +15,13 @@ allowed-tools: Bash
 Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
 work both from the `./setup` links and from a plugin install (WP-122).
 
-Manages the two agent pools — `<repo>-workers` and `<repo>-planners` — each a herdr workspace created
-on demand.
+Manages the two agent pools — `<repo>-workers` and `<repo>-planners` — each the hc label
+`wt.pool=<repo>-<role>s` (plus one herdr-app space of that name, so the window shows them). Needs the hc core running:
+every subcommand except `mcp-args`/`mcp-file` refuses with "hc core is down" instead of starting it.
 
 ```bash
-scripts/agents.sh list [role] [--json]    # name, pane, status, cwd, dnd (+until), pair
-                                           # (--json: + raw pane tokens, plus dnd:{on,until} and pair)
+scripts/agents.sh list [role] [--json]    # name, terminal id, status, cwd, dnd (+until), pair
+                                           # (--json: + raw labels as tokens, plus dnd:{on,until}, pair, claude session + pid)
 scripts/agents.sh spawn worker [cwd] [--mcp figma,railway]  # starts in the worktree
 scripts/agents.sh spawn planner [cwd]     # starts in the MAIN checkout
 scripts/agents.sh spawn lead [cwd] --agent wt-pack:wt-lead  # WP-368: per-ticket coordinator, role=lead, <repo>-leads; --agent starts claude as that agent definition
@@ -44,46 +45,30 @@ scripts/agents.sh rm|stop --headless <id>   # stop one: allowed for the pane tha
 
 ## DND and pairing
 
-Both are herdr pane tokens, both shown by `list`: **dnd** (do-not-disturb) and **pair** (a ticket id, set by
+Both are hc labels, both shown by `list`: **dnd** (do-not-disturb) and **pair** (a ticket id, set by
 `wt-handoff`'s `--buddy`). `dnd on --for <Nh|Nm|Nd|Ns>` writes an expiry in the same format the dashboard's own
 DND toggle uses, so either side's auto-off (a project's `dndAutoOffHours`) clears it; `dnd on` with no `--for`
-never auto-clears. `dnd <name|pane>` with no on/off just reports the current state.
+never auto-clears. `dnd <name|id>` with no on/off just reports the current state.
 
 **A DND or paired agent is invisible to every free-agent pick** — `wt-handoff`'s `candidates()`, the
 dashboard's idle-retirement sweep, and routine agent-picks all skip it, so it neither gets handed new work nor
 gets reaped while idle. To target one anyway, address it explicitly with `--pane <id>` (`wt-handoff`'s
 `--pane` flag): an explicit target bypasses the skip, with a warning if it is DND.
 
-`respawn` exists because the pkill/pgrep/killall shims are pane env, set only when the tab is created, and
-plugin hooks load only at session start (WP-120). A same-pane restart gets the guard but not the shims.
-`--stale` skips `working` agents (unless `--force`) and the caller's own pane.
+`respawn` exists because the pkill/pgrep/killall shims and the launcher are the terminal's env/program, fixed when it
+starts, and plugin hooks load only at session start (WP-120). hc cannot start a program into an existing terminal, so
+respawn ends the old terminal and starts a new one under the same name. `--stale` skips `working` agents (unless
+`--force`) and the caller's own terminal. A terminal hc recovered after a crash (keep) is a login shell with no labels:
+the dashboard's agents-table row (role, cwd, session) is the identity, and nothing is ever typed into that shell.
 
 Run it from anywhere inside the repo; it resolves the main checkout itself, so a worktree works.
 
-## Why the naming is a step of its own
+## Names
 
-`herdr agent start <NAME>` names only what it actually **starts**. When it instead DETECTS a claude
-already running in the pane — the path a timeout-and-retry takes — it reports success and the name
-never lands. Four of six workers in this pool were unnamed for exactly that reason, addressable only
-through their tab label.
-
-So the script always follows a start with an explicit `agent rename`, and backfills any unnamed agent
-in the pool from its tab label on every call. `rm <name>` therefore works on agents that predate it.
-
-**Do not read a `start` success as "it started."** It may mean "something was already there."
-
-### There are two names, on two layers
-
-`herdr agent rename` names the agent **to herdr**. The claude session's own display name is a separate
-value, set once by `claude --name` at start and never updated afterwards — so a renamed agent keeps
-whatever session name it was born with, and this pool held two (`taw-03`, `tw-05`) from a scheme that
-had been abandoned. The herdr layer read correct while the session underneath did not.
-
-`spawn` therefore passes the label through both: `herdr agent start <label> ... -- --name <label>`.
-Verified in the worker's own transcript as `"agentName"`.
-
-**A stale session name cannot be fixed in place.** It is fixed by replacing the agent — `rm` then
-`spawn` — which costs the conversation, so it is worth doing only when the agent is free anyway.
+`hc run --name` fixes the name at the start (1-32 of `a-z0-9_-`, unique among **live** terminals) and hc has no rename,
+so the old rename/backfill repair is gone. `spawn` passes the same name to `claude --name <label>`, so the session itself
+carries it too (verified in the transcript as `"agentName"`). **A stale session name cannot be fixed in place**: replace
+the agent (`rm` then `spawn`), which costs the conversation.
 
 ## Spawning
 
@@ -91,9 +76,25 @@ A planner starts in the **main checkout**: its first job is to create a worktree
 that from inside one. A worker starts in the **worktree** it is being handed. Passing the wrong cwd
 is not an error anything reports — the agent just comes up in the wrong place.
 
-Names are global to herdr, not per workspace, so numbering is taken from existing agent names across
-every pool and carries the repo: two repos both numbering from 1 collide with `agent_name_taken` and
-the second agent never starts.
+Names are global to the core, not per pool, so numbering takes the lowest free `<repo>-<role>-NN` over every name hc still
+knows (live and finished) plus the dashboard's agents table, and carries the repo. A lost race (`name_taken`) takes the
+next number, three tries. The repo part is cut so the whole name fits 32 characters.
+
+## How the agent starts (hc-launch)
+
+One `terminal.run` call (via `../wt-shared/scripts/hc.mjs spawn`) with `outlive_parent` and `no_notify`, all labels set
+before claude exists (wt-memory's SessionStart reads `role`), and the program `scripts/hc-launch -- claude …`. A terminal
+started this way gets the **core's** environment, not the spawner's and not a login shell, so the pack's values (`GH_TOKEN`,
+`WT_PANE_KEY`, `WT_KILL_SHIM_DIR`, `CLAUDE_ENV_FILE`, `WT_MEMORY_MCP`, `WT_ROLE`/`WT_PERSONA`/`WT_PROJECT`, and any isolation
+variable the caller set) travel in the request body — never argv, never a file — and `WT_LAUNCH_KEYS` names them. The launcher
+scrubs what the core may have inherited from another agent (`GH_TOKEN`, `WT_PANE_KEY`, `WT_HEADLESS_*`, `HERDR_*` …), writes
+`pane-keys/$HC_TERMINAL_ID`, runs `$SHELL -l -i -c` so claude sees the user's rc (NVM, JAVA_HOME …), then puts the pack values
+back over whatever the rc set and re-prepends the kill-shim dir to `PATH`. It never scrubs `HC_SESSION`.
+
+herdr-app shows a terminal only with `herdr.space=<id>`: spawn looks the pool's space up by name in `herdr-app ls` (lowest id if
+two) or makes it under a per-pool lock, then closes the plain shell the new space opened. If herdr-app is missing or fails, the
+agent runs hidden (no `herdr.*` label), a warning is printed and the spawn still succeeds. Adopting a terminal enables hc's
+*keep*, so a dead agent can become a login shell.
 
 ## Lean MCP
 
@@ -106,7 +107,7 @@ A project's own Agent MCP (dashboard Settings › Projects) sits between the env
 ## GitHub account per project
 
 When the project has a GitHub account (dashboard Settings › Projects), `spawn` puts `GH_TOKEN` for it
-(`gh auth token --user <acct>`) into the new pane's env via `herdr tab create --env`, and sets the checkout's
+(`gh auth token --user <acct>`) into the new terminal's env (the `terminal.run` body), and sets the checkout's
 `credential.https://github.com.username`. It never runs `gh auth switch`. No token for the account: a warning,
 and the agent spawns with gh's active account. The token is a snapshot: respawn after changing the account.
 
@@ -115,7 +116,7 @@ When on, `spawn` starts claude with `--strict-mcp-config` and one merged `--mcp-
 1. **Role** `mcp/<role>.json`: worker = wt-memory; planner and auditor = wt-memory + context7 (remote HTTP).
 2. **Repo**: the committed `.mcp.json` at the root of the agent's cwd, else the main checkout's.
 3. **Task**: `--mcp a,b` picks from `mcp/catalog.json` (figma, context7, railway); an unknown name fails
-   before any tab is made. claude.ai connectors (Linear, Supabase, Drive…) can't be passed this way, so
+   before any terminal is made. claude.ai connectors (Linear, Supabase, Drive…) can't be passed this way, so
    they aren't in the catalog; a task that needs one needs `WT_AGENTS_MCP=full`.
 
 Strict mode drops every other MCP server, including plugin-provided ones (context-mode, claude-mem) and
@@ -125,8 +126,8 @@ still load. A role without a file, or `WT_AGENTS_MCP=full`, starts with the full
 
 ## Removing
 
-`rm` closes the tab. It **refuses a `working` agent** unless given `--force` — a turn in flight dies
-with it, and until the worker commits, its work exists only in that pane.
+`rm` ends the terminal (`hc kill`, then `hc rm`) and forgets its record. It **refuses a `working` agent** unless given `--force` — a turn in flight dies
+with it, and until the worker commits, its work exists only in that terminal.
 
 Check `list` first when the pool is unfamiliar. A `done` agent is finished and free; `idle` is
 waiting; only `working` is in flight.
@@ -139,10 +140,9 @@ there is none free, not by default: panes accumulate and nothing reaps them.
 
 ## Roles and tags
 
-Any lowercase role name works (`reviewer`, `release`…): its pool is the `<repo>-<role>s` workspace
-(`$WT_AGENTS_WORKSPACE` overrides the label) and its agents are `<repo>-<role>-NN`. Every spawned
-agent gets herdr **pane tokens** under source `wt-dashboard`: `role`, `project`, `spawned_by`
-(`$WT_AGENTS_SPAWNED_BY`, default `wt-agents`) and `created` (YYYY-MM-DD). Tokens are display-only
-metadata: one merged map per pane (any source can overwrite a key), values cut at 80 characters,
-and they live in the running herdr server — wt-dashboard keeps its own copy and re-applies them.
-
+Any lowercase role name works (`reviewer`, `release`…): its pool is the `<repo>-<role>s` pool
+(`$WT_AGENTS_WORKSPACE` overrides it) and its agents are `<repo>-<role>-NN`. Every spawned
+agent gets hc **labels**: `wt.pool`, `role`, `project`, `spawned_by`
+(`$WT_AGENTS_SPAWNED_BY`, default `wt-agents`), `created` (YYYY-MM-DD), `model`/`effort` and, when set, `persona`/`team`/`herdr.space`. Labels are display-only
+metadata: at most 32 per terminal, values cut at 80 characters (hc itself enforces neither; the adapter does), and they live in the core. A
+terminal that hc recovers via *keep* loses them.
