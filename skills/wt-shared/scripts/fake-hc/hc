@@ -5,7 +5,7 @@
 //   FAKE_HC_LOG    file; one JSON line per call {args, stdin, env:{HC_TERMINAL_ID,HC_SCOPE}}
 //   FAKE_HC_STATE  dir for the per-verb call counters (default: dirname of FAKE_HC_LOG, else os tmp)
 // verb = args[0]; `server status` is "server-status"; `connect` answers the JSON-RPC method on stdin from connect.json
-// (case "<method>" unless FAKE_HC_CASES names one for "connect"). An unrecorded verb or case exits 99.
+// (case "<method>" unless FAKE_HC_CASES names one for "connect" or, per method, for "connect:<method>"). An unrecorded verb or case exits 99.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -19,15 +19,16 @@ if (process.env.FAKE_HC_LOG) appendFileSync(process.env.FAKE_HC_LOG, JSON.string
 const verb = args[0] === 'server' ? `server-${args[1]}` : args[0]
 const cases = JSON.parse(process.env.FAKE_HC_CASES || '{}')
 let want = cases[verb]
-let rpcId = 1, method = null
+let rpcId = 1, method = null, counter = verb
 if (verb === 'connect') {
   try { const q = JSON.parse(stdin.split('\n')[0]); rpcId = q.id; method = q.method } catch { fail('connect: no JSON-RPC request on stdin') }
+  if (cases[`connect:${method}`] !== undefined) { want = cases[`connect:${method}`]; counter = `${verb}-${method}` } // a case for one method only: {"connect:terminal.run": "terminal.run_name_taken"}
 }
 const pick = (v) => {
   if (!Array.isArray(v)) return v
   const dir = process.env.FAKE_HC_STATE || (process.env.FAKE_HC_LOG ? dirname(process.env.FAKE_HC_LOG) : tmpdir())
   mkdirSync(dir, { recursive: true })
-  const f = join(dir, `.fake-hc-n-${verb}`)
+  const f = join(dir, `.fake-hc-n-${counter}`)
   const n = existsSync(f) ? Number(readFileSync(f, 'utf8')) : 0
   writeFileSync(f, String(n + 1))
   return v[Math.min(n, v.length - 1)]

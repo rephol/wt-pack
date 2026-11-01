@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // WP-378: the one place node code talks to hc (herdr-core). No deps. Shell callers call `hc` directly, except spawn:
-//   node hc.mjs spawn --name N | --prefix P  --cwd D  [--label k=v]...  [--launch <script> --env-file <file>]  [--taken a,b]  [--roles r,r] -- <argv...>
+//   node hc.mjs spawn --name N | --prefix P  --cwd D  [--label k=v]...  [--launch <script> --env-names A,B]  [--taken a,b]  [--roles r,r] -- <argv...>
+//   node hc.mjs core-up        exit 0 when the core answers, 1 when it is down (never starts it)
 // Import it DYNAMICALLY inside the subcommand that needs it (CLAUDE.md: a top-level import makes every subcommand depend on it).
 //
 // What the recordings (fixtures/hc, hc 0.1.16) taught, and the code below relies on:
@@ -11,7 +12,7 @@
 //  - hc stores any label (no limits): the pack's 32 labels / 80-char values / key shape / known roles are enforced here.
 //  - a kept (recovered) terminal is a login shell at the same address and has lost its labels.
 import { execFile } from 'node:child_process'
-import { readFileSync, unlinkSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { connect as netConnect } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -202,23 +203,20 @@ export function nextName(prefix, taken = []) {
   throw new HcError('invalid_params', `no free name under ${prefix}`)
 }
 
-// hc run --bg --outlive-parent --no-notify ... : the one spawn shape. Always detached from the spawner (`--outlive-parent`) and
-// silent towards its parent (`--no-notify`). With `launch`, the program is `<script> <envFile> -- <argv>` (U2's hc-launch,
-// which reads and deletes the env file); the env file is removed here when hc run fails, so a failed launch leaves no secret.
-export async function spawn({ name, cwd, labels = {}, argv, launch, roles, env } = {}) {
+// terminal.run over `hc connect` (WP-378 D3): the one spawn shape. Always detached from the spawner (`outlive_parent`) and silent
+// towards its parent (`no_notify`). `runEnv` is the terminal's environment on top of the core's: it travels in the request body
+// (stdin of the hc process), so a secret is in neither a command line nor a file. With `launch` (hc-launch) the program is
+// `<launch> -- <argv>` and `WT_LAUNCH_KEYS` names the keys the spawner set, so the launcher keeps those and scrubs the rest.
+export async function spawn({ name, cwd, labels = {}, argv, launch, runEnv = {}, roles, env } = {}) {
   if (!NAME_RE.test(name ?? '')) throw new HcError('invalid_params', `bad name ${JSON.stringify(name)}`)
   if (!argv?.length) throw new HcError('invalid_params', 'spawn needs a program')
   const { set } = planLabels(labels, {}, { roles })
-  const prog = launch ? [launch.script, launch.envFile, '--', ...argv] : argv
-  const args = ['run', '--bg', '--json', '--outlive-parent', '--no-notify', '--name', name, ...(cwd ? ['--cwd', cwd] : []),
-    ...Object.entries(set).flatMap(([k, v]) => ['--label', `${k}=${v}`]), '--', ...prog]
-  try {
-    const row = await hc(args, { timeoutMs: TIMEOUT.run, env })
-    return { id: row.address, name: row.name ?? name }
-  } catch (e) {
-    if (launch?.envFile) try { unlinkSync(launch.envFile) } catch {}
-    throw e
-  }
+  const termEnv = { ...runEnv }
+  if (launch) termEnv.WT_LAUNCH_KEYS = Object.keys(runEnv).join(',')
+  const params = { argv: launch ? [launch, '--', ...argv] : argv, env: termEnv, labels: set, name, no_notify: true, outlive_parent: true }
+  if (cwd) params.cwd = cwd
+  const row = await rpc('terminal.run', params, { timeoutMs: TIMEOUT.run, env })
+  return { id: row.address, name: row.name ?? name }
 }
 // Pick the next free <prefix>-NN and spawn it; on `name_taken` (a race with another spawner) take the next number, max 3 tries.
 export async function spawnNumbered({ prefix, taken = [], ...o } = {}) {
@@ -250,29 +248,31 @@ export function coreUp({ env = process.env, timeoutMs = 400 } = {}) {
   })
 }
 
-// ---- CLI (agents.sh spawn only) -----------------------------------------------------------------------------------------
+// ---- CLI (agents.sh spawn, core-up) -------------------------------------------------------------------------------------
+const EXIT_OF_KIND = { invalid_params: 6, not_found: 3 }
 async function cli(argv) {
   const [cmd, ...rest] = argv
-  if (cmd !== 'spawn') { console.error('usage: hc.mjs spawn --name N | --prefix P --cwd D [--label k=v]... [--launch S --env-file F] [--taken a,b] [--roles r,r] -- <argv...>'); process.exit(2) }
+  if (cmd === 'core-up') process.exit((await coreUp()) ? 0 : 1)
+  if (cmd !== 'spawn') { console.error('usage: hc.mjs spawn --name N | --prefix P --cwd D [--label k=v]... [--launch S --env-names A,B] [--taken a,b] [--roles r,r] -- <argv...> | core-up'); process.exit(2) }
   const dd = rest.indexOf('--')
   const flags = rest.slice(0, dd < 0 ? rest.length : dd), prog = dd < 0 ? [] : rest.slice(dd + 1)
-  const o = { labels: {} }, taken = []
+  const o = { labels: {}, runEnv: {} }, taken = []
   for (let i = 0; i < flags.length; i++) {
     const f = flags[i], v = flags[i + 1]
     if (f === '--name') { o.name = v; i++ } else if (f === '--prefix') { o.prefix = v; i++ } else if (f === '--cwd') { o.cwd = v; i++ }
     else if (f === '--label') { const k = v.indexOf('='); o.labels[v.slice(0, k)] = v.slice(k + 1); i++ }
-    else if (f === '--launch') { o.launch = { script: v }; i++ } else if (f === '--env-file') { o.envFile = v; i++ }
+    else if (f === '--launch') { o.launch = v; i++ }
+    // the VALUES come from this process's own environment (set by the caller for this one call), never from argv
+    else if (f === '--env-names') { for (const n of v.split(',').filter(Boolean)) { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n) || process.env[n] == null) { console.error(`hc.mjs: --env-names: ${n} is not set`); process.exit(2) } o.runEnv[n] = process.env[n] } i++ }
     else if (f === '--taken') { taken.push(...v.split(',').filter(Boolean)); i++ } else if (f === '--roles') { o.roles = v.split(',').filter(Boolean); i++ }
     else { console.error(`hc.mjs: unknown flag ${f}`); process.exit(2) }
   }
-  if (o.launch) o.launch.envFile = o.envFile
-  delete o.envFile
   try {
     const r = o.prefix ? await spawnNumbered({ ...o, taken, argv: prog }) : await spawn({ ...o, argv: prog })
     console.log(JSON.stringify(r))
   } catch (e) {
     console.error(JSON.stringify({ error: { kind: e.kind ?? 'failed', message: e.message, hint: e.hint } }))
-    process.exit(e.exit && e.exit > 0 ? e.exit : 1)
+    process.exit(e.exit > 0 ? e.exit : EXIT_OF_KIND[e.kind] ?? 1)
   }
 }
 if (import.meta.url === `file://${process.argv[1]}`) await cli(process.argv.slice(2))

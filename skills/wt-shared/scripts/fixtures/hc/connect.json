@@ -69,6 +69,57 @@
           "all": false
         }
       }
+    },
+    "terminal.run": {
+      "args": [
+        "connect"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{\"address\":\"t1\",\"argv\":[\"sleep\",\"300\"],\"cols\":200,\"created_ms\":1793526347313,\"cwd\":\"/tmp\",\"die_with_parent\":false,\"exit_code\":null,\"finished_ms\":null,\"identity\":\"ghostty\",\"keep\":false,\"labels\":{\"role\":\"worker\",\"wt.pool\":\"rec-workers\"},\"name\":\"rec-r\",\"notify\":false,\"parent\":null,\"pid\":12932,\"reason\":null,\"reported\":false,\"rm\":false,\"rows\":120,\"screen\":\"exact\",\"signal\":null,\"state\":\"live\",\"status\":null,\"status_ms\":null,\"template\":null,\"title\":\"\",\"turn\":0}}\n",
+      "stderr": "",
+      "rpc": {
+        "method": "terminal.run",
+        "params": {
+          "argv": [
+            "sleep",
+            "300"
+          ],
+          "cwd": "/tmp",
+          "env": {
+            "WT_PANE_KEY": "dummy-key"
+          },
+          "labels": {
+            "wt.pool": "rec-workers",
+            "role": "worker"
+          },
+          "name": "rec-r",
+          "no_notify": true,
+          "outlive_parent": true
+        }
+      }
+    },
+    "terminal.run_name_taken": {
+      "args": [
+        "connect"
+      ],
+      "exit": 0,
+      "stdout": "{\"error\":{\"code\":-32000,\"data\":{\"hint\":\"pick another name, or kill the one holding it\",\"kind\":\"name_taken\"},\"message\":\"a live terminal is already named \\\"rec-r\\\"\"},\"id\":1,\"jsonrpc\":\"2.0\"}\n",
+      "stderr": "",
+      "rpc": {
+        "method": "terminal.run",
+        "params": {
+          "argv": [
+            "sleep",
+            "300"
+          ],
+          "cwd": "/tmp",
+          "env": {},
+          "labels": {},
+          "name": "rec-r",
+          "no_notify": true,
+          "outlive_parent": true
+        }
+      }
     }
   }
 }
