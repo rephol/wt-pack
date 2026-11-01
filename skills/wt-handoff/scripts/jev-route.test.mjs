@@ -9,8 +9,10 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { route } from './jev-route.mjs'
 import { installFakeHc } from '../../wt-shared/scripts/fake-hc.mjs'
+import { fakeCore } from '../../wt-agents/scripts/hc-test-kit.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const core = await fakeCore() // WP-378 F5: handoff.sh asks core-up before any hc call
 test('route: planner at or above 0.75, worker below or with no answer', () => {
   assert.equal(route.decide({ plan: { noul: 0.82 } }), 'planner')
   assert.equal(route.decide({ plan: { noul: 0.74 } }), 'worker')
@@ -29,7 +31,7 @@ const wt = join(repo, 'sub'); execFileSync('mkdir', ['-p', wt])
 // WP-215: a temp HOME too — handoff.sh's model-route pick logs its decision under HOME (~/.claude/wt-judge-log.jsonl).
 const home = mkdtempSync(join(tmpdir(), 'jev-route-home-'))
 const run = (args, prompt, env = {}) => execFileSync('sh', [join(here, 'handoff.sh'), '--dry-run', ...args, wt], {
-  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: fake.env.PATH, HOME: home, HC_TERMINAL_ID: '', FAKE_HC_CASES: fake.env.FAKE_HC_CASES, FAKE_HC_LOG: fake.env.FAKE_HC_LOG, FAKE_HC_STATE: fake.env.FAKE_HC_STATE, WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
+  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: fake.env.PATH, HOME: home, HC_TERMINAL_ID: '', ...core.env, FAKE_HC_CASES: fake.env.FAKE_HC_CASES, FAKE_HC_LOG: fake.env.FAKE_HC_LOG, FAKE_HC_STATE: fake.env.FAKE_HC_STATE, WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
 
 test('handoff --dry-run: switch off → a worker in cwd, no route line (unchanged behaviour)', () => {
   const out = run([], 'build the thing', { WT_JEV_ROUTE: 'off' })
@@ -47,4 +49,4 @@ test("handoff --dry-run: wt-plan's own prompt is never re-routed", () => {
 test('handoff --dry-run: --role planner targets a planner in the main checkout', () => {
   assert.match(run(['--role', 'planner'], 'anything'), new RegExp(`^dry-run: would spawn a planner in ${repo}$`, 'm'))
 })
-test.after(() => fake.cleanup())
+test.after(() => { fake.cleanup(); core.stop() })
