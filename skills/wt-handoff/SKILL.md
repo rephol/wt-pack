@@ -58,12 +58,14 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. A request id seen before replays its first output (exit 0). Exit codes:
   - **0** delivered (or queued for the target's delivery mod, or replayed).
   - **1, nothing recorded and nothing sent — retry later; the same `--request-id` is safe:** the hc core is down (`hc core is down — ask the user to start it (hc server start)`;
-    an agent never starts it), the target is **blocked** (a dialog is open: retry when it is answered), `hc` is not on PATH, the target is paused/exited/missing
-    (resume it first), or a prompt over the goal's 4000-character cap / an unreadable file or directory / a failed wrap (fix the input, then run again).
+    an agent never starts it; this also applies to `--reply` to a terminal and to `--cancel`, but not to a headless target), the target is **blocked** (a dialog is open: retry when it is answered), `hc` is not on PATH, the target is paused/exited/missing
+    (resume it first), or a prompt over the goal's 4000-character cap / an unreadable prompt file or directory / a failed wrap (fix the input, then run again).
+  - **1, a headless target** (`--pane`/`--reply` naming a live headless run) **that the dashboard cannot take:** `wt-dashboard not reachable` (start or wait for the dashboard, then retry with the same `--request-id`) or `headless <id>: <error>` (the server's reason, e.g. the run is not live; resume or re-target it).
+  - **1, `<pane> is blocked (a dialog is open)` from the send itself (exit 9 from `hc send`, a race: the dialog opened after the pre-check):** a row may already be recorded, but nothing was typed. The retry is still safe with the **same `--request-id`**; wait until the dialog is answered.
   - **1, `the dashboard did not record this message`:** nothing was typed. Retry with the **same `--request-id`** so the retry reuses the id the dashboard may already hold (pass one on the first call to make this safe).
   - **1, `<pane> is not an agent` or `hc send … failed` (after the row was recorded):** nothing was typed. Check the target (`wt-agents list`), then retry with the same `--request-id`.
-  - **1, `prompt not submitted: it is still in the input box of <pane>`:** the message **was recorded and typed**; only the submit is unconfirmed. Do **not** send it again: look at the target (`hc read <pane>`), press Enter there if it is stuck.
-  - **2** bad arguments, or the card and the target are on different teams: nothing was sent; fix the call. Print the prompt for a human only for a failure a retry cannot fix.
+  - **1, `prompt not submitted: it is still in the input box of <pane>`:** the message **was recorded and typed**; only the submit is unconfirmed. Do **not** send it again: look at the target (`hc read <pane>`) and, if it is stuck, ask the user to look at it (pressing Enter in another terminal is `hc keys`, a gated action that needs the user's OK).
+  - **2** bad arguments (including `--reply --file <path>` that cannot be read, a `--reply` with no text, and a bad pane id), or the card and the target are on different teams: nothing was sent; fix the call. Print the prompt for a human only for a failure a retry cannot fix.
   - **3** the worker pool (`WT_WORKERS_MAX`) or the team roster is full: nothing was sent; the caller (Dispatch) keeps the card and retries when a seat frees up.
 
 ## Task label and awareness
