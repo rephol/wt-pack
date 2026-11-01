@@ -76,10 +76,14 @@ const hit = (text: string) => text.split(/[|;&\n]/).some((seg) => TOOLS.test(seg
 // What the gate refuses outright instead of reading (it caps what it scans, and the command is an argv word, ~1 MB is the OS limit): a longer command that mentions any tool.
 export const GATE_MAX = 131072
 const ANY_TOOL = /\b(?:hc|git|gh|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+// WP-378 F9: a superset of classify BY CONSTRUCTION. classify reads quoted words (`"git" push`, `gh "pr" merge`), escapes and continuations, so the tool-word test runs on the text with
+// backslash-newline joined and every ' " \ removed (a quote can then hide nothing); a message that merely mentions a tool word spawns the gate too (classify allows it). Separators are
+// the ones classify splits on unconditionally (; | & newline), so the segment split below mirrors it.
+const unquote = (s: string) => s.replace(/\\\n/g, '').replace(/['"\\]/g, '')
 export const maybeGated = (cmd: string) => {
   if (cmd.length > GATE_MAX) return ANY_TOOL.test(cmd)
   const b = blank(cmd)
-  return hit(b) || /\bhc\b/.test(cmd.replace(/"[^"]*"|'[^']*'/g, (m) => (SIMPLE.test(m) ? m : '""'))) || (WRAPPER.test(b) && hit(cmd))
+  return hit(unquote(cmd)) || /\bhc\b/.test(cmd.replace(/"[^"]*"|'[^']*'/g, (m) => (SIMPLE.test(m) ? m : '""'))) || (WRAPPER.test(b) && hit(cmd))
 }
 // WP-361: a gate deny names the rule id and the matched segment (wt-gate sends both) and says how to get the rest of a compound command through.
 const SPLIT = ' Only that segment is gated: run the other parts of the command as their own command.'
