@@ -65,25 +65,27 @@ const WHERE = 'test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude-plu
 // WP-332: a command that might push, merge, delete outside the worktree or send files/secrets out is checked against the turn's
 // origin by `wt-gate` (the policy is wt-shared/scripts/gate.mjs; the mod has no Node and no env, so it asks the CLI). Cheap prefilter
 // first: only a command that could be gated pays for the process.
-// WP-378 F8: the prefilter must pass EVERY command gate.mjs classifies (guards.test.ts holds it to wt-shared/scripts/fixtures/gate-cases.mjs): hc (any verb), and commands inside
-// a quoted `sh -c '…'` / `eval '…'` / `hc run "…"` string, which blanking the quotes would hide. Linear: one pass per segment, no regex that rescans a long line per `git`.
-const GIT_SUB = /\b(push|merge|branch|worktree)\b/
-const TOOLS = /\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat|hc)\b/
-const WRAPPER = /\b(?:ba|z|da|k|c)?sh\b|\beval\b/
-const blank = (s: string) => s.replace(/"[^"]*"|'[^']*'/g, '""') // words inside a message are not subcommands
-const SIMPLE = /^(["'])[\w./~=-]+\1$/
-const hit = (text: string) => text.split(/[|;&\n]/).some((seg) => TOOLS.test(seg) || (/\bgit\b/.test(seg) && GIT_SUB.test(seg)))
+// WP-378 F10: the prefilter is a plain WORD test that cannot drift from classify: no splitting, no quote blanking. On the text with every ' " \ removed, with and without backslash-newline joined (so a quote or
+// an escape can hide nothing, `g"i"t`, `\git`, `"git" push`), it passes a command that has
+//  - any of hc rm rmdir curl wget scp rsync nc ncat as a word (hc: every verb; rm/rmdir: rm-outside; the network tools: upload, secret-var, raw-socket); or
+//  - git AND any of push merge branch worktree anywhere; or gh AND pr anywhere (gh pr approve|merge|close); or
+//  - 7 or more shell/eval words (classify asks about a sh -c / eval nested deeper than 6, a command with no tool word in it); or
+//  - a command over 32 KB (classify fails closed past SCAN_MAX) that mentions any tool word, git and gh included.
+// Accepted cost: a command that merely MENTIONS a tool word spawns wt-gate (~60 ms); classify allows it. guards.test.ts holds this to wt-shared's fixtures (+ variants) rule by rule.
 // What the gate refuses outright instead of reading (it caps what it scans, and the command is an argv word, ~1 MB is the OS limit): a longer command that mentions any tool.
 export const GATE_MAX = 131072
+const SCAN_MAX = 32768 // wt-shared/scripts/gate.mjs SCAN_MAX
+const ALWAYS = /\b(?:hc|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
 const ANY_TOOL = /\b(?:hc|git|gh|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
-// WP-378 F9: a superset of classify BY CONSTRUCTION. classify reads quoted words (`"git" push`, `gh "pr" merge`), escapes and continuations, so the tool-word test runs on the text with
-// backslash-newline joined and every ' " \ removed (a quote can then hide nothing); a message that merely mentions a tool word spawns the gate too (classify allows it). Separators are
-// the ones classify splits on unconditionally (; | & newline), so the segment split below mirrors it.
-const unquote = (s: string) => s.replace(/\\\n/g, '').replace(/['"\\]/g, '')
+const GIT_SUB = /\b(?:push|merge|branch|worktree)\b/
+const SHELLISH = /\b(?:(?:ba|z|da|k|c)?sh|eval)\b/g
+const unquote = (s: string) => s.replace(/['"\\]/g, '')
+const toolWords = (t: string, long: boolean) => ALWAYS.test(t) || (/\bgit\b/.test(t) && GIT_SUB.test(t)) || (/\bgh\b/.test(t) && /\bpr\b/.test(t)) || (t.match(SHELLISH)?.length ?? 0) >= 7 || (long && ANY_TOOL.test(t))
+// Both readings of a backslash-newline: joined (`g\<NL>it` is `git`) and not (`"git"\<NL>nc` is two words after the join, classify's B reading still splits there).
 export const maybeGated = (cmd: string) => {
   if (cmd.length > GATE_MAX) return ANY_TOOL.test(cmd)
-  const b = blank(cmd)
-  return hit(unquote(cmd)) || /\bhc\b/.test(cmd.replace(/"[^"]*"|'[^']*'/g, (m) => (SIMPLE.test(m) ? m : '""'))) || (WRAPPER.test(b) && hit(cmd))
+  const long = cmd.length > SCAN_MAX
+  return toolWords(unquote(cmd), long) || (cmd.includes('\\\n') && toolWords(unquote(cmd.replace(/\\\n/g, '')), long))
 }
 // WP-361: a gate deny names the rule id and the matched segment (wt-gate sends both) and says how to get the rest of a compound command through.
 const SPLIT = ' Only that segment is gated: run the other parts of the command as their own command.'

@@ -180,9 +180,10 @@ test('WP-378 F8: a command over the gate limit that reaches the gate is denied b
   expect(runs.length).toBe(0)
 })
 
-test('WP-378 F8: the prefilter is linear on a long line (git git git … of 120 KB)', () => {
+test('WP-378 F8: the prefilter is linear on a long line (git git git … of 120 KB; over 32 KB a git mention passes)', () => {
   const t = Date.now()
-  expect(maybeGated('git '.repeat(30000))).toBe(false)
+  expect(maybeGated('git '.repeat(30000))).toBe(true)
+  expect(maybeGated('x '.repeat(60000))).toBe(false)
   expect(maybeGated('(' .repeat(120000) + 'sh -c')).toBe(false)
   expect(Date.now() - t).toBeLessThan(500)
 })
@@ -192,17 +193,31 @@ test('WP-378 F8: the prefilter is linear on a long line (git git git … of 120 
 test('WP-378 F9: the prefilter passes every fixture case under a quoted tool word, a comment apostrophe, a heredoc apostrophe', () => {
   const missed: string[] = []
   let n = 0
-  for (const c of cases as { cmd: string; rule: string }[]) for (const v of variants(c.cmd)) { n++; if (!maybeGated(v.cmd)) missed.push(`${c.rule} ${v.kind}: ${v.cmd.slice(0, 80)}`) }
+  for (const c of cases as { cmd: string; rule: string; a?: number }[]) for (const v of variants(c.cmd, !!c.a)) { n++; if (!maybeGated(v.cmd)) missed.push(`${c.rule} ${v.kind}: ${v.cmd.slice(0, 80)}`) }
   expect(n).toBeGreaterThan(400)
   expect(missed).toEqual([])
 })
 
-test('WP-378 F9: a message that only mentions a tool word spawns the gate (and the gate allows it); separators still split', () => {
-  for (const c of ['git commit skills/a -m "push"', 'git commit -m "docs: A & git merge notes"', 'echo "git push"'])
+test('WP-378 F10: the prefilter is a plain word test: a message that only mentions a tool word spawns the gate (and the gate allows it), wherever the words sit', () => {
+  for (const c of ['git commit skills/a -m "push"', 'git commit -m "docs: A & git merge notes"', 'echo "git push"', 'git status; echo push', 'git status\necho merge', 'git log && echo branch', 'ls | grep worktree; git status', 'gh issue list; echo pr'])
     expect(maybeGated(c)).toBe(true)
-  // hit()'s segment split: a tool word and a subcommand word in DIFFERENT segments are not a match
-  for (const c of ['git status; echo push', 'git status\necho merge', 'git log && echo branch', 'ls | grep worktree; git status', "git status; echo 'it's"])
+  // no tool word, or git / gh with none of their subcommand words: no spawn
+  for (const c of ["git status; echo 'it's", 'git log --oneline', 'gh issue list', 'echo push merge branch worktree pr', 'ls -la | grep foo', 'npm test && node x.mjs', 'echo "sh -c" eval'])
     expect(maybeGated(c)).toBe(false)
+})
+
+test('WP-378 F10: each trigger word is load-bearing (rmdir, ncat and every network tool alone pass; a nested shell chain with no tool word passes at 7)', () => {
+  for (const c of ['rmdir /etc/x', 'ncat -l 80', 'nc h 1', 'wget x', 'scp a b:c', 'rsync a b:c', 'curl x', 'hc ls', 'rm x', '\\rmdir x', '"ncat" h 1', 'git branch -D x', 'git worktree remove x', 'git merge x', 'git push', 'gh pr merge 1'])
+    expect(maybeGated(c)).toBe(true)
+  const nest = (n: number) => { let c = 'echo hi'; for (let k = 0; k < n; k++) c = 'sh -c "' + c.replace(/(["$`\\])/g, '\\$1') + '"'; return c }
+  expect(maybeGated(nest(7))).toBe(true)
+  expect(maybeGated(nest(3))).toBe(false)
+})
+
+test('WP-378 F10: a command over 32 KB that mentions any tool word passes (classify fails closed there), one without does not', () => {
+  const pad = ' '.repeat(40000)
+  for (const t of ['git', 'gh', 'hc', 'rm']) expect(maybeGated(`echo ${pad} ${t}`)).toBe(true)
+  expect(maybeGated(`echo ${pad} ok`)).toBe(false)
 })
 
 test('WP-378 F9: the over-limit deny is the mod\'s own, also for a quoted or lone tool word (it fails if the early deny is removed)', async ($, on) => {
