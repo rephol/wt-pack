@@ -367,3 +367,46 @@ turn records `$WT_TURN_DIR/turn-<id>.json` (inject.mjs:52, wt-gate:31) — **not
   touches no real `~/.cache/wt-memory` file. Isolation set for tests/QA: `WT_DASHBOARD_DATA`, `WT_TURN_DIR`, `WT_MESSAGES_DIR`, `WT_MEMORY_CACHE`,
   `XDG_CACHE_HOME`, `HERDR_DASH_URL`, scratch `XDG_STATE_HOME` under a short path (socket ≤103 bytes).
 - **D10 U8 dropped** (S1 tier 1). The tier-2/3 fallback text in §4 is history.
+
+## Tech-lead decisions after U2-U5 integration (merged into `wp-378-hc-backend`: U2 a9572c6, U3 79e51d7, U4 bdedc17, U5 df971cc)
+No textual conflicts. U5's `hc.mjs` change (CLI guard without top-level await, for the sidecar's CJS bundle) and U2's `hc.mjs` changes
+(`terminal.run` spawn, `core-up`) touch different lines; `fake-hc/hc` (U2) and `wt-dashboard/test-hc.mjs` (U5) are separate stubs.
+- **D11 protocol names stay** (R2 answered keep): `x-herdr-pane`, `x-wt-pane-key`, `HERDR_DASH_URL` and the `HERDR_DASH_*` aliases keep
+  their names; only the value changes (`HC_TERMINAL_ID`). The DoD grep exclusions stay.
+- **D12 `hc-kill` gates every raw `hc kill|rm`, no allowlist.** The sanctioned path is `agents.sh rm` (refuses a working agent), which runs
+  `hc` inside its own process where the Bash gate never looks; a raw `hc kill tN` typed by an agent is an ask, not a deny. An "I started it"
+  allowlist would need an `hc get` inside the gate hook (§4: no hc call in a hook but the wt-memory fallback), and parentage is no identity
+  once `--outlive-parent`/keep apply (S5-8).
+- **D13 pool label agreed.** `agents.sh` sets `wt.pool=${WT_AGENTS_WORKSPACE:-<basename of the target's main checkout>-<base role>s}`;
+  `handoff.sh` `ws_label` (`HANDOFF_WORKSPACE` or `<basename main>-workers` / `-<role>s`) and `watch-prs.sh` (`<basename MAIN>-reviewers`)
+  compute the same string. A persona spawns into its base role's pool on both sides. No change.
+- **D14 bare `tN` ids across cores, kept.** Pane keys, turn records and agents-table rows key on the bare address. The dashboard and the pack
+  talk to the default core only; tests and QA isolate with the D9 set; the dashboard drops rows and keys when `core.id` changes (U5); agents.sh
+  sweeps keys of non-live ids at spawn. A core prefix in the key would change the pane-key scheme (non-goal).
+- **D15 `agents.sh spawn` prints `<name> <id>`** (unchanged from herdr's `<label> <pane>`): `handoff.sh --session`, dispatch and the tests
+  parse it; warnings go to stderr. Keep.
+- **D16 script-side blocked = exit 1, no script queue.** A shell script has no lifetime to hold a queue; the dashboard queue (`queue_pulled`,
+  WP-272) already covers a live mod, and the caller (dispatch keeps the card in Ready) retries. Fix (F1, U3 follow-up): `handoff.sh` checks the
+  target row's status BEFORE recording and exits 1 with nothing recorded when it is `blocked`; a row recorded as `delivered` and then refused
+  would otherwise be acked by `seen()` (it still counts `blocked`, U6 removes that) or resent by the sweep beside the caller's retry.
+- **D17 `waitReady` keeps accepting `agent_status`** until U6 moves the server callers to hc rows; U6 deletes the fallback.
+- **D18 session id from `claude agents --json` only: approved.** It was already the WP-324 cross-check (3 s cache, 5 s timeout, best effort);
+  the launcher execs claude through the shell, so the terminal's foreground pid is claude's pid and the pid match holds. No session = Resume
+  starts fresh, as before.
+- **D19 a down core is 503, not 500** (U6). `agents()` keeps throwing `core_down` (the `soft('hc')` banner relies on it); the request error
+  handler maps `code === 'core_down'` to 503 `{error:'hc core not running — run hc server start'}` in one place. Red test: a route that calls
+  `agents()` uncaught (e.g. `GET /api/agents/by-name/x` as a pane) with the stub core down returns 503.
+- **D20 hc timeouts under test load (F2).** `hc connect timed out after 2000 ms` failed `agents.routes` (2 tests) and `dnd.test` (1) when the
+  dashboard and root suites ran at once: the fake `hc` is a node script and a cold start under load passes 2 s. `hc.mjs` multiplies `TIMEOUT`
+  by `WT_HC_TIMEOUT_SCALE` (integer 1-10, default 1, anything else ignored); `test-hc.mjs` `hcStub` and `hc-test-kit.mjs` set 5 in the
+  child env. Production is unchanged.
+- **D21 `agent-pane.sh` identity** — resolved by U3: it sends `x-herdr-pane: $HC_TERMINAL_ID`. Remaining `HERDR_PANE_ID` reads are U6
+  (`dispatch.mjs` `runHandoff` blanks it: becomes `HC_TERMINAL_ID: ''`) and U7 (`wt-finish/SKILL.md:92`).
+- **D22 herdr-app stray shell (U2) approved, QA-checked.** `space.new` opens a shell (`terminal` in its answer); agents.sh kills+rms it after the
+  agent's terminal exists and only while it is still a plain shell (also on a failed spawn). QA step 4 confirms: the pool space shows only the
+  agent's tab, no stray shell, and on a failed spawn no stray is left; an empty space left behind is acceptable.
+- **D23 isolation vars forwarded (U2) approved.** `WT_DASHBOARD_DATA WT_TURN_DIR WT_MESSAGES_DIR WT_MEMORY_CACHE WT_RECEIPTS_DIR
+  XDG_CACHE_HOME HERDR_DASH_URL` ride `terminal.run env` when set in the spawner and survive the launcher's scrub through `WT_LAUNCH_KEYS`.
+- **D24 `~/.local/bin/claude` after U5's isolated run.** `claude-link-guard.mjs check` against target `~/.local/share/claude/versions/2.1.316`
+  passes (link resolves, newest installed version). The link's own mtime is 16:59, inside U5's work window, so something rewrote it to the same
+  target: no damage, but the isolation rule was broken. Every later run uses `quietEnv()` and a guard snapshot taken BEFORE the run.
