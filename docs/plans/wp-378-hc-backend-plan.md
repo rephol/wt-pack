@@ -261,3 +261,68 @@ Everything else from revision 1 (Q1-Q5, WT_BACKEND, dual-backend routing, union 
   launcher scrubs core env, login shell, no eval, API `env` tried (S5); name race retry; gate classes for hc verbs; U6 after U5, spawn only via agents.sh;
   no ANSI read -> plain-text picker (R5); tier-2 Notification matcher; DoD grep exclusions; flip runbook (R6). Unverifiable: whether `hc ls/get/server status`
   start a stopped core on macOS -> S5.
+
+## Spike results (U1, hc 0.1.16, 2026-11-01)
+Run on isolated cores only (`HC_SESSION=wtt1`, scratch `XDG_*` under a short `/tmp` dir because a socket path is limited to 103 bytes,
+`WT_DASHBOARD_DATA`/`WT_TURN_DIR`/`WT_MEMORY_CACHE`/`WT_MESSAGES_DIR` in scratch, `HERDR_DASH_URL` on a closed port, every hc and claude started
+through `env -i` with a clean env so none of the engineer's own `HERDR_*`/`WT_PANE_KEY`/`GH_TOKEN` entered the core). Throwaway `claude --model haiku`
+terminals in a temp repo. Every core and terminal was stopped by recorded pid/address; the default core (`hc ls`, `pane-keys/` = 10 files,
+`~/.cache/wt-memory/turn-*` = 353) was identical before and after. Recordings: `skills/wt-shared/scripts/fixtures/hc/`.
+
+**Chosen: agent-state tier 1 (claude reports natively; no U8). Pack sends: untagged, S4 route below.**
+
+- **S1 tier 1.** claude reports OSC 7501 on its own under `hc run --bg` (no hook needed). `hc get`: `status:{app:"claude-code",state,msg,kind?}`,
+  `turn`, `title`. States seen: `idle` (fresh, trust dialog accepted) -> `working` (during a turn) -> `done` (turn finished; **stays `done`**, over
+  several reads and 5+ minutes; it is the resting state, `idle` is only the fresh state) and `blocked` (`kind:"permission"`, `msg:"approve Write: <path>"`;
+  `kind:"question"`, `msg:"answer: <question> (<options>)"` for AskUserQuestion). `hc wait <t>` returns `{ended:true,reason:"status",status:"done"|"blocked",turn}`
+  on a turn end or a block, `{ended:false,reason:"timeout"}` at its check-in, `reason:"exit"` + `exit_code` for a program that ended.
+  **Corrections to the plan**: (1) `hc ls --json` is a slim summary (address, agent, cwd, name, state, status word, turn) with **no labels and no
+  foreground**; the full rows (labels, status object, foreground, argv) come from `terminal.list` over `hc connect` in ONE call, which `hc.mjs list()` uses
+  (still one hc invocation per tick, ~12 ms). (2) `hc send --if idle` is refused with `status_mismatch` ("is done, not idle") for the normal resting
+  `done`: `send({ifIdle})` retries one plain send when the message says `is done`, and does not retry for `working`, `blocked` or a shell. (3) `foreground.name` of a
+  claude is its version string ("2.1.316"); `ls` `agent` is `claude-code`; use `argv[0]` basename (`program`) or the status object. (4) The Notification-idle
+  concern is moot at tier 1 (claude itself decides `blocked`).
+- **S2 picker.** A live 3-question `AskUserQuestion` read with plain `hc read` has exactly the layout of the `picker-*.txt` fixtures (tab bar `←  ☐ Color  ☐ Size  ☐ Shape  ✔ Submit  →`,
+  question, options, `Enter to select · Tab/Arrow keys…` footer), so `parsePickerText` works on it. The **focused tab is not recoverable from plain text**
+  (the tab row is identical on every tab; only the question text under it changes) and `read` has no ANSI mode. Options for U6: the blocked `msg` carries the current
+  question text, so focus can be matched against questions seen on earlier frames/keys the pack pressed, or one ANSI frame from `terminal.attach`'s first paint.
+- **S3 holder.** A claude's parent is the holder, command `<dir>/hc hold --socket <state>/…holder.<id>.sock` (the default core shows `herdr-core hold --socket …`);
+  its parent is the core `hc serve` / `herdr-core serve`. No shell sits between when the program is run directly. The wt-deliver walk matches basename in
+  {`hc`,`herdr-core`} with a following `hold` argument and stands down when more than one `claude` lies below it.
+- **S4 send.** Typed text is the argument byte for byte (a `<wt-message …>` pointer line arrived as the exact single line). A long multi-line text collapses to a pasted block
+  (as before), so only the pointer is typed. **Tagging depends on the SENDER being an agent terminal**: sent from a plain process (a launchd dashboard, no
+  `HC_TERMINAL_ID`), or from a plain `sh` terminal (also as its child), the line is untagged; sent from a **claude** terminal (`hc send` run by its Bash tool) it
+  arrives as `<hc from="t5 s2">…</hc>`. The tag is **not** stopped by `--no-notify` or `--no-parent`. Routes: (a) dashboard/no-terminal sender: **untagged**;
+  (b) inside an agent terminal: **tagged**; (c) (b) with only `HC_TERMINAL_ID` unset for the call (`env -u HC_TERMINAL_ID hc send …`; unsetting
+  `HC_SCOPE` or `HC_TERMINAL_SOCKET` alone does not help): **untagged**. `notes = false` in the (isolated) `config.toml` also made (b) untagged, taking effect on the next
+  CLI call with no core restart (R4 yes: valid, but not needed). **Route chosen: dashboard `deliver()` for server sends; script-side sends (`handoff.sh` and the like) run
+  `env -u HC_TERMINAL_ID hc send`**, no config edit needed; R4's consent stays unused unless U3 finds a reason. `inject.mjs` still classifies `<hc ` as peer (belt).
+  With the pointer sent to a claude whose hooks resolve no pane identity, the hook marked it "unverified": the hooks do fire under hc. `first_message`: not present for a
+  plain `hc run … claude "<prompt>"` (the prompt is argv); it is a template-run field.
+- **S5 env and core.** (1) A terminal started with an explicit command gets the **core's** environment plus `HC_SESSION`, `HC_SCOPE`, `HC_TERMINAL_ID`,
+  `HC_TERMINAL_SOCKET` (and `TERM`/`COLORTERM`/`TERM_PROGRAM`); the **client's** environment is ignored (an `env VAR=… hc run claude` on the client side did not reach it).
+  A core started from an agent's shell would therefore carry that agent's `GH_TOKEN`/`WT_PANE_KEY`/`HERDR_*` into every terminal (it did, on the first attempt, before the core was
+  restarted clean): the denylist scrub in the launcher is necessary. (2) No login shell: `zsh -l -c` adds only `.zprofile` variables (Homebrew, PATH rewritten to
+  start with `/opt/homebrew/bin`); `.zshrc`-only variables (ANDROID_HOME, JAVA_HOME, NVM_*, BUN_INSTALL, …) appear only with `zsh -l -i -c`. **The launcher's `$SHELL -l -c` misses them; U2 must decide `-l -i`.**
+  (3) `env VAR=… claude` as the terminal's command reaches claude and its Bash tool (`PATH` with the shim dir first and a custom var arrived unchanged) when no shell rc runs in between;
+  a login shell rewrites PATH, hence the planned `CLAUDE_ENV_FILE` re-prepend. (4) The API path works: `hc connect` `terminal.run` with `env:{…}` put the values in the program's
+  environment (and `PATH` replaced) while `hc get --json` and `ps` argv show none of them; params are `argv, cwd, env, labels, name, no_notify, no_parent, outlive_parent, parent,
+  keep, rm, timeout, wait`. U2 may use it (secrets then need no file at all) — the launcher is still needed for the denylist/pane-key/login-shell steps. (5) **`hc server status`, `hc ls` and `hc get`
+  each START a stopped core** on macOS (checked for all three on the isolated session). A non-starting probe exists: `core.lock` holds the socket path; connecting to it answers up/down —
+  `hc.mjs coreUp()` does exactly that (doctor and the dashboard must use it, never `hc server status`). (6) `hc server status --json` carries `core.id` (a permanent random id, different
+  per session) and `core.name` (hostname), `pid`, `uptime_ms`, `holder`/`holders` with `instance` ids, `live`, `finished`: the identity to compare for "core changed". Terminals persist across a
+  core stop/start (`hidden_finished` kept). (7) hc enforces **no label limits** (a 200-char value and the key `bad key` were stored); the 32/80/key rules live in `hc.mjs`. (8) A **keep** terminal whose program
+  was killed by a signal becomes a login shell at the same address (`argv:["/bin/zsh","-l"]`, `agent:"zsh"`, `keep:true`) and **its labels are gone** (`labels:{}`): identity must not
+  depend on labels once a terminal may have been recovered; the agents table row (name/pane id) is the identity. `hc send --if idle` to that shell is refused ("silent, not idle"): never typed into.
+  (9) `hc ls --json` also reports `machines` (connected hosts) at top level and `machine/tN` rows; `list()` drops the rows.
+- **S6.** `herdr-app --skill`, `--help` and `AGENTS.md` mention only `HERDR_APP_HOME` and a configurable core binary; nothing selects a core session, and showing an isolated core would
+  need a second app instance (opens a window) — not attempted. Treat as **no**: QA step 4 uses a `wtqa-` agent and space on the default core. `herdr-app ls` with no spaces prints
+  `{"spaces":[],"recent":[{"name":"","folder":"…"}]}`; the **non-empty `spaces` shape is unrecorded** (it needs a space in the user's window; U2/QA records it with step 4's throwaway space).
+  Adoption by `herdr.space` labels enables core keep on that terminal (AGENTS.md:141), so an adopted agent that dies becomes a login shell with no labels (see S5-8).
+
+**Per-pane paths under `$HOME` (audit; the isolation vars the pack really honours).** Pane-key files `$WT_DASHBOARD_DATA/pane-keys/<id>` (agents.sh:414, handoff.sh:115, server.mjs:3312);
+turn records `$WT_TURN_DIR/turn-<id>.json` (inject.mjs:52, wt-gate:31) — **not** `XDG_CACHE_HOME`; agents.sh `mcp-<name>.json`/`env-<name>.sh` under `$XDG_CACHE_HOME/wt-agents`; message bodies
+`$WT_MESSAGES_DIR` (handoff.sh:514; ignores `WT_DASHBOARD_DATA`); receipts `$WT_RECEIPTS_DIR`; recall state `$WT_MEMORY_CACHE` (wt-memory:246). Not isolated and keyed by session id, not address
+(no aliasing, but an isolated run still writes the real `~/.cache/wt-memory/<session>.{recalled,hash,ctx}`): inject.mjs:120,139 (U4 may honour `WT_TURN_DIR`/`WT_MEMORY_CACHE` there).
+`XDG_DATA_HOME` is honoured by none of them. The isolation set for spikes/QA is therefore `WT_DASHBOARD_DATA`, `WT_TURN_DIR`, `WT_MESSAGES_DIR`, `WT_MEMORY_CACHE`, `XDG_CACHE_HOME`
+(+ `HERDR_DASH_URL`), and U2's new launch dir (`~/.local/share/wt-agents/launch/`) needs an env override honoured the same way.
