@@ -186,7 +186,7 @@ test('server: unknown pane → 403 before body parsing, board unchanged', async 
       srv.on('exit', (c) => rej(new Error(`server exited (${c}) before listening: ${err.slice(-400)}`)))
       setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
     })
-    const call = (method, path, body) => fetch(`http://127.0.0.1:${port}${path}`, { method, body, headers: { 'x-herdr-pane': 'w999:p999', 'content-type': 'application/json' } })
+    const call = (method, path, body) => fetch(`http://127.0.0.1:${port}${path}`, { method, body, headers: { 'x-herdr-pane': 't999', 'content-type': 'application/json' } })
     assert.equal((await call('PATCH', '/api/tickets/WP-1', '{"column":"done"}')).status, 403)
     assert.equal((await call('PATCH', '/api/tickets/WP-1', '{not json')).status, 403)
     assert.equal((await call('POST', '/api/tickets', '{"title":"t","project":"wt-pack"}')).status, 403)

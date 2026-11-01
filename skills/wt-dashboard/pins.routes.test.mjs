@@ -6,27 +6,29 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { hcStub } from './test-hc.mjs'
 
-let child, base, cookie
+let hc, child, base, cookie
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 const call = (path, { method = 'GET', body, auth = true, headers = {} } = {}) =>
   fetch(`${base}${path}`, { method, headers: { ...(auth ? { cookie } : {}), ...(body ? { 'content-type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined })
 before(async () => {
   const root = mkdtempSync(join(tmpdir(), 'wt-pinroutes-'))
   mkdirSync(join(root, 'data'), { recursive: true })
-  child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root } })
+  hc = await hcStub({ terminals: [] }) // never the user's real hc core
+  child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root, ...hc.env } })
   base = `http://127.0.0.1:${PORT}`
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
   cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
   await call('/api/rooms') // rooms settings load on first use
 })
-after(() => child?.kill())
+after(async () => { child?.kill(); await hc?.close() })
 
 test('mutations are the dashboard user\'s: no cookie, or an agent pane header alone, is refused; reads are open', async () => {
   const b = { chat: 'room:x', msg: 'm1', text: 'hi' }
   assert.equal((await call('/api/pins', { method: 'POST', body: b, auth: false })).status, 403)
-  assert.equal((await call('/api/pins', { method: 'POST', body: b, auth: false, headers: { 'x-herdr-pane': 'w1:p1' } })).status, 403)
-  assert.equal((await call('/api/bookmarks', { method: 'POST', body: b, auth: false, headers: { 'x-herdr-pane': 'w1:p1' } })).status, 403)
+  assert.equal((await call('/api/pins', { method: 'POST', body: b, auth: false, headers: { 'x-herdr-pane': 't1' } })).status, 403)
+  assert.equal((await call('/api/bookmarks', { method: 'POST', body: b, auth: false, headers: { 'x-herdr-pane': 't1' } })).status, 403)
   assert.equal((await call('/api/pins?chat=room:x', { auth: false })).status, 200)
   assert.equal((await call('/api/pins', { method: 'POST', body: { chat: 'bad', msg: 'm' } })).status, 400)
 })

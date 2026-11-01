@@ -275,4 +275,4 @@ async function cli(argv) {
     process.exit(e.exit > 0 ? e.exit : EXIT_OF_KIND[e.kind] ?? 1)
   }
 }
-if (import.meta.url === `file://${process.argv[1]}`) await cli(process.argv.slice(2))
+if (import.meta.url === `file://${process.argv[1]}`) cli(process.argv.slice(2))

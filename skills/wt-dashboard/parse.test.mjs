@@ -259,18 +259,21 @@ test('rooms: @user from an agent needs you until the user replies; the handle is
   assert.equal(R.mentionStatus({ author: { kind: 'user' }, mentions: ['user'] }, { deliver: [] }, [], 'user').notified, false)
 })
 
-test('canonicalPane: a stable $HERDR_PANE_ID resolves to the current display id; bad ids and failures are null', async () => {
+test('canonicalPane (WP-378): an hc terminal address is confirmed against hc; the herdr pane-id form, flags and unknown terminals are null; a miss is not cached', async () => {
   const { canonicalPane } = await import('./server.mjs')
   let calls = 0
-  const get = async (id) => { calls++; if (id === 'w4:pM') return JSON.stringify({ result: { pane: { pane_id: 'wM:p6' } } }); throw new Error('no such pane') }
+  const get = async (id) => { calls++; if (id === 't7') return 't7'; throw new Error('no such terminal') }
   const cache = new Map()
-  assert.equal(await canonicalPane('w4:pM', get, cache, 0), 'wM:p6')
-  assert.equal(await canonicalPane('w4:pM', get, cache, 1000), 'wM:p6')
+  assert.equal(await canonicalPane('t7', get, cache, 0), 't7')
+  assert.equal(await canonicalPane('t7', get, cache, 1000), 't7')
   assert.equal(calls, 1) // cached
-  assert.equal(await canonicalPane('w4:pM', get, cache, 40_000), 'wM:p6')
-  assert.equal(calls, 2) // TTL expired, re-resolved
-  assert.equal(await canonicalPane('zz:p9', get, cache, 0), null)
-  assert.equal(await canonicalPane('--help', get, cache, 0), null)
+  assert.equal(await canonicalPane('t7', get, cache, 40_000), 't7')
+  assert.equal(calls, 2) // TTL expired, re-checked
+  assert.equal(await canonicalPane('t99', get, cache, 0), null)
+  assert.equal(await canonicalPane('t99', get, cache, 1), null)
+  assert.equal(calls, 4) // a miss is looked up again
+  for (const bad of ['w4:pM', '--help', 'machine/t7', 't7 ', 'T7', '']) assert.equal(await canonicalPane(bad, get, cache, 0), null, bad)
+  assert.equal(calls, 4) // never reaches hc
 })
 
 test('rooms routing: mention > responder > broadcast > nobody', async () => {
@@ -1261,7 +1264,8 @@ test('watchdog probe: notifies once on down, once on back up (WP-70)', () => {
 })
 
 test('sourceIssue: a failed overview source becomes a hint, not a 500 (WP-79)', () => {
-  assert.match(sourceIssue('herdr', 'Command failed: herdr agent list\n{"error":"server_not_running"}'), /herdr server not running — run herdr/)
+  assert.match(sourceIssue('hc', 'hc core not running'), /hc core not running — run `hc server start`/)
+  assert.match(sourceIssue('hc', 'hc is not installed (not on PATH)'), /hc core not running/)
   assert.match(sourceIssue('git', 'fatal: not a git repository (or any of the parent directories): .git'), /not a git checkout/)
   assert.match(sourceIssue('git', 'spawn git ENOENT'), /^git: spawn git ENOENT/)
 })

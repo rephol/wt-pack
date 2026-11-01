@@ -1,6 +1,7 @@
-// Agent control room: herdr panes + git worktrees + PRs + Linear, joined into tasks.
+// Agent control room: hc terminals (herdr-core) + git worktrees + PRs + Linear, joined into tasks.
 // ponytail: no deps, polling instead of websockets; switch to SSE if refresh feels laggy.
-import { ensureHerdr } from './herdrd.mjs'
+import { list as hcList, get as hcGet, setLabels as hcSetLabels, clearLabel as hcClearLabel, read as hcRead, hc as hcRun, coreUp, HcError } from '../wt-shared/scripts/hc.mjs'
+import { snapshot as hcSnapshot, sessionsByPid, coreChanged, dropPaneKeys } from './hcagents.mjs'
 import http from 'node:http'
 import { execFile } from 'node:child_process'
 import { readFile, readdir, open as fopen, stat, statfs, mkdir, writeFile, appendFile } from 'node:fs/promises'
@@ -55,7 +56,7 @@ import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { isClosed } from './contracts.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
-import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
@@ -103,7 +104,11 @@ const run = (cmd, args, cwd, timeout = 20_000, extraEnv) =>
     execFile(cmd, args, { cwd, maxBuffer: 32 << 20, timeout, ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}) }, (err, out, stderr) =>
       err ? reject(new Error(stderr || err.message)) : resolve(out)),
   )
+// WP-378: reads, labels and the core probe go through hc.mjs. `herdr`/`herdrOn` below are only the write side (sends, keys, terminals,
+// goal-clear, resume) that U6 converts; nothing U5 touches calls them.
 const herdr = (...args) => run('herdr', args)
+// A tool the server starts for an agent-less purpose (claude agents, memory, handoff.sh) must not act as an agent terminal.
+const NO_TERMINAL = { HC_TERMINAL_ID: '', HC_SCOPE: '', HC_TERMINAL_SOCKET: '' }
 const git = (dir, ...args) => run('git', ['-C', dir, ...args])
 
 export const stripAnsi = (s) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r/g, '')
@@ -151,7 +156,7 @@ export function parsePane(text, raw = '') {
   const footer = lines.slice(cut).join('\n')
 
   const ctx = footer.match(/Context:.*?(\d+(?:\.\d+)?[kM]?)\/(\d+[kM]?)\s*\((\d+)%\)/)
-  // A cwd the status line cut short ('…/my-app...') is dropped, so herdr's own cwd is used instead.
+  // A cwd the status line cut short ('…/my-app...') is dropped, so hc's own cwd is used instead.
   const cwd = footer.match(/^\s*cwd:\s*(\S.*?)\s*$/m)?.[1]?.replace(/^.*(\.\.\.|…)$/, '') || undefined
 
   // WP-179/follow-up: ccstatusline's own line, e.g. "Session: 0.0%  Reset: 4h57m  Weekly: 47.0%  Weekly Reset:
@@ -273,20 +278,15 @@ export const stallJudge = {
 const tails = new TailCache()
 
 // ---- machines ----
+// WP-378: one machine, this one. hc has no remote machines in the pack (`machine/tN` rows are dropped by hc.mjs); the list stays an array
+// because the agent keys (`<machine>/<terminal>`) and /api/machines callers expect it.
 const LOCAL_LABEL = hostname()
-const REMOTE_TIMEOUT_MS = Number(process.env.REMOTE_TIMEOUT_MS ?? 8000)
-async function machines() {
-  return cached('machines', 60_000, async () => {
-    const out = await herdr('machine', 'list').catch(() => '')
-    const remotes = out.split('\n').map((l) => l.split('\t')).filter((f) => f.length >= 5 && f[1])
-      .map(([id, label, host, session, state]) => ({ id, label, host, session, enabled: state.trim() === 'enabled', local: false }))
-    return [{ id: 'local', label: LOCAL_LABEL, host: 'localhost', session: 'default', enabled: true, local: true }, ...remotes]
-  })
-}
+const LOCAL_MACHINE = { id: 'local', label: LOCAL_LABEL, host: 'localhost', session: 'default', enabled: true, local: true }
+async function machines() { return [LOCAL_MACHINE] }
 // Label → machine, only from the list: user input never becomes an argv flag.
 const machineBy = async (label) => (await machines()).find((m) => m.label === label && m.enabled) ?? null
-// herdr on a machine. Remote = `herdr --machine <label>` over SSH, hard timeout.
-const herdrOn = (m, ...args) => (m.local ? herdr(...args) : run('herdr', ['--machine', m.label, ...args], undefined, REMOTE_TIMEOUT_MS))
+// U6 converts the sends that still go through this.
+const herdrOn = (m, ...args) => herdr(...args)
 
 // ---- projects ----
 // Project = the repo a cwd belongs to; worktrees resolve to their main repo via --git-common-dir.
@@ -440,9 +440,9 @@ function parsePickerText(text) {
   return question && options.length ? { review: false, tabs, current: tabs.findIndex((t) => !t.done), question, multiSelect, options, other, cursor } : null
 }
 
-// A blocked agent's scrollback can't be read by --lines (alternate screen); fall back to the visible screen.
-const readPane = (m, pane, lines) =>
-  herdrOn(m, 'agent', 'read', pane, '--lines', String(lines), '--ansi').catch(() => herdrOn(m, 'agent', 'read', pane, '--source', 'visible', '--ansi'))
+// WP-378: `hc read` is plain text only (no ANSI). A blocked agent's scrollback can't be read by --lines (alternate screen):
+// fall back to the visible screen. The picker's focused tab is not recoverable from plain text (S2): U6 tracks it (D6).
+const readPane = (m, pane, lines) => hcRead(pane, { lines: Number(lines) || 0 }).catch(() => hcRead(pane, { lines: 0 }))
 
 // ---- agents ----
 const since = new Map() // machine|pane → { status, at }
@@ -473,7 +473,7 @@ export async function planUsageFromFile(file = USAGE_FILE, now = Date.now()) {
 
 // WP-179: the freshest ccstatusline plan-usage reading seen on ANY pane (session/weekly % are account-wide,
 // not per-pane) — no Claude API call, just whatever a pane's own statusline already shows. Pure and
-// separately testable from the herdr-dependent read loop that feeds it. Fallback only — see planUsageFromFile.
+// separately testable from the hc-dependent read loop that feeds it. Fallback only — see planUsageFromFile.
 // WP-336: one reading per pane, not "last pane parsed wins". Panes disagree: an idle pane's footer is whatever
 // ccstatusline drew at its last redraw (seen live: idle panes at 3%/9% with "Reset: 0m" while active ones read 9%/21%).
 // A footer whose countdown has run out ("0m") was drawn in an earlier window → dropped. Usage only rises within a
@@ -503,19 +503,36 @@ export function planUsageFromLimits(l, now = Date.now()) {
 }
 // Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
 const roleStore = new RoleStore(DATA).attach(agentTable) // WP-348: tags live in the agents table (agent-tags.json is imported once)
-// Workspace labels and pane tokens: one `workspace list` + one `pane list` per refresh (local machine only).
+// WP-378: ONE `hc connect terminal.list` per refresh (hc.mjs list({all:true}), full rows with labels and status), shared by the agents
+// listing, the label sync and the watcher. A pane token is a label of the same name; the pool (herdr's workspace) is the `wt.pool` label.
+// The core is probed first with coreUp(): `hc connect`/`ls`/`get`/`server status` START a stopped core on macOS (S5-5, U5 re-checked
+// `connect` on an isolated core: it starts it too), and the dashboard must never start one (D4).
+const hcDown = () => Object.assign(new Error('hc core not running'), { code: 'core_down' })
+let upAt = 0, upVal = false // coreUp() is a socket connect; one answer per second serves every caller of a request
+const coreIsUp = async () => { if (Date.now() - upAt < 1000) return upVal; upVal = await coreUp(); upAt = Date.now(); return upVal }
+const hcRows = () => cached('hc:rows', 3000, async () => {
+  if (!(await coreIsUp())) throw hcDown()
+  return hcList({ all: true })
+})
+// Which names the pack knows as agents (the agents table), so a finished or kept terminal of one shows as exited, not as nothing.
+const knownNames = () => { try { return new Set(agentTable.list().map((r) => r.name)) } catch { return new Set() } }
 async function paneMeta(m) {
   if (!m.local) return { ws: new Map(), tokens: new Map() }
-  return cached('paneMeta', 3000, async () => {
-    const [w, p] = await Promise.all([herdr('workspace', 'list'), herdr('pane', 'list')])
-    return {
-      ws: new Map(JSON.parse(w).result.workspaces.map((x) => [x.workspace_id, x.label])),
-      tokens: new Map(JSON.parse(p).result.panes.map((x) => [x.pane_id, x.tokens ?? {}])),
-    }
-  })
+  const snap = hcSnapshot(await hcRows(), { known: knownNames(), tagKeys: TAG_KEYS })
+  return { ws: snap.ws, tokens: snap.tokens, ids: snap.ids }
 }
+// Set/clear labels on one terminal: the pack's limits (32 labels, 80 chars, key shape, known roles) are enforced by hc.mjs. The
+// terminal's current labels come from the shared listing, so a tick costs no `hc get`.
+async function setPaneLabels(id, want, { current } = {}) {
+  const cur = current ?? (await hcRows().catch(() => [])).find((t) => t.id === id)?.labels
+  const r = await hcSetLabels(id, want, { current: cur ?? undefined, roles: roleStore.roles.map((x) => x.id) })
+  store.delete('hc:rows'); store.delete('agents:local')
+  return r
+}
+const tokensOf = async (id) => (await hcGet(id)).labels // fresh (compare-and-clear needs the current value, not the 3 s cache)
+const labelsOf = (set, clear) => Object.fromEntries([...set.map(([k, v]) => [k, v]), ...clear.map((k) => [k, ''])])
 // Keep each local agent's pane tokens equal to the agents table row's tags (backfilling an agent seen for the first
-// time from inference). Only when they differ, so a herdr restart re-applies them and a steady state costs nothing.
+// time from inference). Only when they differ, so a core restart that lost the labels re-applies them and a steady state costs nothing.
 const omitSpawn = (t = {}) => Object.fromEntries(Object.entries(t).filter(([k]) => !['model', 'effort', 'team'].includes(k))) // WP-348
 const syncing = new Set()
 async function syncTokens(agents) {
@@ -528,11 +545,12 @@ async function syncTokens(agents) {
     }
     const adopted = adoptHandoff(roleStore.tags[a.name], a.paneTokens)
     if (adopted) { roleStore.tags[a.name] = adopted; backfilled = true }
+    if (a.status === 'exited') continue // a kept shell / finished terminal: its labels are gone (S5-8) and nothing is written to a shell
     const { set, clear } = tokenDiff(a.paneTokens, omitSpawn(roleStore.tags[a.name])) // model/effort/team follow the pane; the row only remembers them
     if (!set.length && !clear.length) continue
     syncing.add(a.id)
-    herdr('pane', 'report-metadata', a.id, '--source', 'wt-dashboard', ...set.flatMap(([k, v]) => ['--token', `${k}=${v}`]), ...clear.flatMap((k) => ['--clear-token', k]))
-      .then(() => store.delete('paneMeta'), (e) => console.error('tokens:', a.name, e.message)).finally(() => syncing.delete(a.id))
+    setPaneLabels(a.id, labelsOf(set, clear), { current: a.paneTokens })
+      .catch((e) => console.error('tokens:', a.name, e.message)).finally(() => syncing.delete(a.id))
   }
   if (backfilled) await roleStore.saveTags().catch((e) => console.error('agent-tags:', e.message))
 }
@@ -546,15 +564,15 @@ export function remoteName(label, cwd, paneId) {
   return room > 0 ? `${head}-${mid.slice(0, room).replace(/-$/, '')}-${tail}` : `${head.slice(0, 32 - tail.length - 1)}-${tail}`
 }
 export function agentName(m, a, cwd) {
-  // Local agents without a herdr name are often named by their title (my-app-orchestrator); a title that is not
-  // name-shaped is a session topic → <cwd>-<pane>. Remote titles are always topics → <machine>-<cwd>-<pane>.
+  // An hc terminal always has a name (fixed at `hc run --name`); the fallbacks are for a row without one: a name-shaped title,
+  // else <cwd>-<terminal>.
   if (a.name) return a.name
   const t = a.terminal_title_stripped?.trim()
   return m.local && t && /^[a-z0-9_-]{1,32}$/.test(t) ? t : remoteName(m.local ? '' : m.label, cwd, a.pane_id)
 }
 
 // WP-172: a picker (AskUserQuestion) can appear on an idle/blocked agent with no state_change_seq bump — the
-// planner just sat there waiting on background agents, and herdr never flagged a state change when it popped
+// planner just sat there waiting on background agents, and the status never flagged a change when it popped
 // up. Re-reading only a 'working' pane on the readEvery cadence left that cached pre-picker parse stuck
 // forever. idle/blocked now get the same cheap (120-line) periodic re-read as working does.
 export function paneStale(status, seen, seq, now, readEvery) {
@@ -563,40 +581,31 @@ export function paneStale(status, seen, seq, now, readEvery) {
   if ((status === 'working' || status === 'idle' || status === 'blocked') && now - seen.at > readEvery) return true
   return Boolean(seen.p?.picker) // a picker itself can also advance without a status change
 }
-// WP-221: has claude exited from this idle/done pane? Cached per pane until its state_change_seq moves or 15s pass.
-const fg = new Map() // pane → { seq, at, exited }
-async function claudeExited(m, a) {
-  const c = fg.get(a.pane_id)
-  if (c && c.seq === a.state_change_seq && Date.now() - c.at < 15_000) return c.exited
-  const exited = await run('herdr', ['pane', 'process-info', '--pane', a.pane_id], undefined, 2_000) // a hung herdr must not stall the tick
-    .then((t) => shellForeground(JSON.parse(t).result?.process_info), () => false) // unknown → trust herdr
-  fg.set(a.pane_id, { seq: a.state_change_seq, at: Date.now(), exited })
-  return exited
-}
 // WP-324: `claude agents --json` cross-check, sessionId -> live claude pid; best effort ({} when claude is absent), cached 3s so
-// the per-pane loop shares one spawn. A pane whose session is missing here is a herdr ghost (pid null).
+// the per-pane loop shares one spawn. WP-378: it is also where a terminal's session id comes from (hc rows carry none): the terminal's
+// foreground pid is claude's pid. A terminal whose pid is missing here is a ghost (pid null).
 let pidCache = { at: 0, v: {} }
 const claudePids = async () => {
   if (Date.now() - pidCache.at < 3000) return pidCache.v
-  const v = await run('claude', ['agents', '--json'], undefined, 5000, { HERDR_PANE_ID: '', HERDR_ENV: '' }).then((o) => Object.fromEntries(JSON.parse(o).map((x) => [x.sessionId, x.pid])), () => ({}))
+  const v = await run('claude', ['agents', '--json'], undefined, 5000, NO_TERMINAL).then((o) => ({ pids: Object.fromEntries(JSON.parse(o).map((x) => [x.sessionId, x.pid])), sessions: sessionsByPid(JSON.parse(o)) }), () => ({ pids: {}, sessions: new Map() }))
   pidCache = { at: Date.now(), v }
   return v
 }
-// ponytail: sequential + change-driven reads. Parallel reads every 3s flooded herdr's socket.
+// ponytail: sequential + change-driven reads. Parallel reads every 3s flooded the core's socket.
 async function listAgents(m) {
-  const { result } = JSON.parse(await herdrOn(m, 'agent', 'list'))
-  const meta = await paneMeta(m).catch(() => ({ ws: new Map(), tokens: new Map() }))
-  const pids = m.local ? await claudePids() : {}
-  const readEvery = m.local ? 15_000 : 30_000
+  // Throws when the core is down or hc fails: the caller's `soft('hc', …)` turns that into the banner and an empty list.
+  const meta = await paneMeta(m)
+  const { agents: listed } = hcSnapshot(await hcRows(), { known: knownNames(), tagKeys: TAG_KEYS })
+  const { pids, sessions } = await claudePids()
+  const readEvery = 15_000
   const out = []
-  if (m.local) for (const p of fg.keys()) if (!result.agents.some((a) => a.pane_id === p)) fg.delete(p)
-  for (const a of result.agents) {
-    if (m.local && (a.agent_status === 'idle' || a.agent_status === 'done') && await claudeExited(m, a)) a.agent_status = 'exited'
+  for (const a of listed) {
+    // An exited agent (finished, or a kept login shell at its address) has no screen worth parsing: the pane is a shell.
     const k = `${m.label}|${a.pane_id}`
     const prev = since.get(k)
     if (!prev || prev.status !== a.agent_status) since.set(k, { status: a.agent_status, at: Date.now() })
     const seen = parsed.get(k)
-    const stale = paneStale(a.agent_status, seen, a.state_change_seq, Date.now(), readEvery)
+    const stale = a.agent_status !== 'exited' && paneStale(a.agent_status, seen, a.state_change_seq, Date.now(), readEvery)
     if (stale) {
       try {
         const raw = await readPane(m, a.pane_id, '120')
@@ -608,7 +617,7 @@ async function listAgents(m) {
     const p = parsed.get(k)?.p ?? {}
     const cwd = p.cwd ?? a.foreground_cwd ?? a.cwd
     const name = agentName(m, a, cwd)
-    const session = m.local && a.agent_session?.kind === 'id' ? a.agent_session.value : null
+    const session = a.pid != null ? sessions.get(Number(a.pid)) ?? null : null // WP-378: the claude whose pid is the terminal's foreground
     // An AskUserQuestion picker on screen beats the reply-ends-with-? heuristic (kept for permission prompts).
     const pk = p.picker ?? null
     const jevAsks = (a.agent_status === 'idle' || a.agent_status === 'blocked') && p.tail && !pk && jevOn('NEEDS_YOU')
@@ -659,30 +668,13 @@ async function listAgents(m) {
   return out
 }
 
-// Remote machines refresh in the background and never block the local refresh.
-const remote = new Map() // label → { agents, lastSeen, lastTry, ok, error, inflight }
-function refreshRemote(m) {
-  const r = remote.get(m.label) ?? { agents: [], lastSeen: null, lastTry: 0, ok: false }
-  remote.set(m.label, r)
-  if (r.inflight || Date.now() - r.lastTry < 10_000) return
-  r.lastTry = Date.now()
-  r.inflight = listAgents(m)
-    .then((a) => Object.assign(r, { agents: a, lastSeen: Date.now(), ok: true, error: null }))
-    .catch((e) => Object.assign(r, { ok: false, error: String(e.message).slice(0, 200) }))
-    .finally(() => (r.inflight = null))
-}
-const machineStatus = (r) =>
-  !r?.lastSeen ? (r?.inflight && !r.error ? 'connecting' : 'offline')
-    : r.ok && Date.now() - r.lastSeen < 60_000 ? 'online'
-    : Date.now() - r.lastSeen < 5 * 60_000 ? 'stale' : 'offline'
-
-// WP-348 watcher: runs on each fresh local listing (3 s cache, so the 4 s tick drives it), adds no herdr call (pane list is paneMeta's cached one).
+// WP-348 watcher: runs on each fresh local listing (3 s cache, so the 4 s tick drives it), adds no hc call (the listing is hcRows' cached one).
 async function watchAgents(local) {
   const rows = agentTable.list()
-  const meta = await paneMeta((await machines())[0]).catch(() => null)
-  if (!meta) return // a failed pane list is not 'no panes': leave the rows as they are
-  const panes = new Set(meta.tokens.keys())
-  if (!local.length && !panes.size && rows.some((r) => r.state === 'running' || r.state === 'idle')) return // herdr restarting, not every agent dying
+  const meta = await paneMeta(LOCAL_MACHINE).catch(() => null)
+  if (!meta) return // a failed listing is not 'no terminals': leave the rows as they are
+  const panes = meta.ids
+  if (!local.length && !panes.size && rows.some((r) => r.state === 'running' || r.state === 'idle')) return // core restarting, not every agent dying
   const live = local.filter((a) => a.local)
   for (const u of reconcile(rows, live, new Set([...panes, ...live.map((a) => a.id)]))) {
     const cur = agentTable.get(u.name) // re-read: a pause or forget may have landed while this tick awaited
@@ -692,22 +684,30 @@ async function watchAgents(local) {
   }
 }
 
+// D4: a new core (new id in `hc server status --json`) means addresses t1.. alias nothing we know. Probed only while the core is up
+// (coreUp(), which never starts it), at most once a minute; the stored id lives in DATA/hc-core.json.
+let coreProbe = 0
+async function checkCore() {
+  if (Date.now() - coreProbe < (Number(process.env.WT_HC_CORE_PROBE_MS) || 60_000) || !(await coreIsUp())) return
+  coreProbe = Date.now()
+  const st = await hcRun(['server', 'status', '--json'], { timeoutMs: 3000 }).catch(() => null)
+  const r = coreChanged(join(DATA, 'hc-core.json'), st?.core?.id, { dropRows: () => { for (const x of agentTable.list()) agentTable.remove(x.name) }, dropKeys: () => dropPaneKeys(PANE_KEYS) })
+  if (r === 'changed') { console.error('hc core changed: agents table and pane keys dropped'); store.delete('hc:rows'); store.delete('agents:local') }
+}
+
 async function agents() {
-  const ms = await machines()
-  ms.filter((m) => !m.local && m.enabled).forEach(refreshRemote)
-  const local = await cached('agents:local', 3000, async () => { const l = await listAgents(ms[0]); await watchAgents(l).catch((e) => console.error('agents table:', e.message)); return l })
-  return [...local, ...ms.filter((m) => !m.local && m.enabled).flatMap((m) => remote.get(m.label)?.agents ?? [])]
+  // `cached` serves the last good value when a refresh fails: right for a slow hc, wrong for a stopped core (the agents are not there).
+  if (!(await coreIsUp())) { store.delete('hc:rows'); store.delete('agents:local'); throw hcDown() }
+  await checkCore().catch((e) => console.error('hc core:', e.message))
+  return cached('agents:local', 3000, async () => { const l = await listAgents(LOCAL_MACHINE); await watchAgents(l).catch((e) => console.error('agents table:', e.message)); return l })
 }
 
 async function machineSummaries(ag) {
   return (await machines()).map((m) => {
-    const r = remote.get(m.label)
     const mine = ag.filter((a) => a.machine === m.label)
     return {
       label: m.label, host: m.host, local: m.local, enabled: m.enabled,
-      status: !m.enabled ? 'disabled' : m.local ? 'online' : machineStatus(r),
-      lastSeen: m.local ? Date.now() : r?.lastSeen ?? null,
-      error: m.local ? null : r?.error ?? null,
+      status: 'online', lastSeen: Date.now(), error: null,
       working: mine.filter((a) => a.status === 'working').length,
       idle: mine.filter((a) => a.status === 'idle').length,
       total: mine.length,
@@ -1143,8 +1143,8 @@ async function teamsWrite(req, res, parts) {
     if (isBase && (a.tags?.role || a.pool) !== seat.persona) return send(res, 400, { error: `${a.name} is a ${a.tags?.role || a.pool}, not a ${seat.persona}` })
     const taken = teamView(t, parts[2], ag, () => undefined).members.find((m) => m.persona === seat.persona)?.agents.length ?? 0
     if (taken >= seat.count) return send(res, 400, { error: `team full: ${taken}/${seat.count} ${seat.persona} in ${name}` })
-    await herdr('pane', 'report-metadata', a.id, '--source', 'wt-dashboard', '--token', `team=${name}`, ...(isBase ? [] : ['--token', `persona=${seat.persona}`]))
-    store.delete('paneMeta'); store.delete('agents:local')
+    await setPaneLabels(a.id, { team: name, ...(isBase ? {} : { persona: seat.persona }) })
+    store.delete('agents:local')
     return send(res, 200, { ok: true, agent: a.name, team: name, persona: seat.persona })
   }
   if (parts.length === 5 && parts[4] === 'spawn' && req.method === 'POST') {
@@ -1256,7 +1256,7 @@ async function memoryApi(req, res, url, parts) {
     for (const k of ['role', 'project', 'persona']) { const v = url.searchParams.get(k); if (v && MEMORY_NAME.test(v)) args.push(`--${k}`, v) }
     if (!MEMORY_BIN) return send(res, 200, { text: '', error: 'wt-memory not found' })
     // --cwd / so an unset project is not guessed from the SERVER's directory.
-    return send(res, 200, { text: (await run(process.execPath, [MEMORY_BIN, ...args, '--cwd', '/'], undefined, 5000, { HERDR_PANE_ID: '' }).catch(() => '')).trim() })
+    return send(res, 200, { text: (await run(process.execPath, [MEMORY_BIN, ...args, '--cwd', '/'], undefined, 5000, NO_TERMINAL).catch(() => '')).trim() })
   }
   if (req.method === 'GET' && !parts[2]) {
     const list = async (d) => (await readdir(join(MEMORY, d)).catch(() => [])).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3))
@@ -1369,7 +1369,7 @@ export const ticketOf = (s, keys = [...TEAM_KEYS, ...boardKeys]) => {
 const AGENTS_SH = fileURLToPath(new URL('../wt-agents/scripts/agents.sh', import.meta.url)) // sibling skill (WP-122)
 
 // WP-143: which idle/done routed workers to retire on Done, so the pool stops growing by one per hand-off.
-// Pure (no herdr) so it is unit-tested directly: group the free, task-less, model-tagged agents by tier, keep the
+// Pure (no hc) so it is unit-tested directly: group the free, task-less, model-tagged agents by tier, keep the
 // `n` most recently handed off in each, and return the rest's panes. An agent with no `model` token (pre-WP-143,
 // or hand-made) is never touched; a busy or task-carrying one is never a candidate. When a tier has <= n agents
 // (including the pane that just went idle), nothing in it is removed.
@@ -1385,16 +1385,13 @@ export function retireIdle(agents, n) {
 async function retireIdleWorkers(project) {
   const n = Number(process.env.WT_WORKERS_IDLE_PER_TIER ?? psettings.get(project, 'WT_WORKERS_IDLE_PER_TIER'))
   if (!Number.isFinite(n) || n < 0) return
-  const label = `${project}-workers`
-  const [w, a, p] = await Promise.all([herdr('workspace', 'list'), herdr('agent', 'list'), herdr('pane', 'list')])
-  const ws = JSON.parse(w).result.workspaces.find((x) => x.label === label)?.workspace_id
-  if (!ws) return
-  const tokensOf = new Map(JSON.parse(p).result.panes.map((x) => [x.pane_id, x.tokens ?? {}]))
+  const pool = `${project}-workers`
   const agentsInPool = []
-  for (const x of JSON.parse(a).result.agents.filter((x) => x.workspace_id === ws)) {
-    // WP-221: an exited pane takes no keep slot (and stays for the watchdog's Resume).
-    if ((x.agent_status === 'idle' || x.agent_status === 'done') && await claudeExited({ local: true }, x)) continue
-    agentsInPool.push({ pane_id: x.pane_id, agent_status: x.agent_status, tokens: tokensOf.get(x.pane_id) ?? {} })
+  for (const x of (await hcRows()).filter((t) => t.labels?.['wt.pool'] === pool)) {
+    // WP-221: an exited agent (finished, or a kept shell) takes no keep slot (and stays for the watchdog's Resume).
+    const status = hcSnapshot([x], { known: knownNames(), tagKeys: TAG_KEYS }).agents[0]?.agent_status
+    if (!status || status === 'exited') continue
+    agentsInPool.push({ pane_id: x.id, agent_status: status, tokens: x.labels ?? {} })
   }
   for (const pane of retireIdle(agentsInPool, n)) {
     await run(AGENTS_SH, ['rm', pane], homedir(), 30_000).then(() => forgetPane(pane), (e) => console.error(`retire ${pane}:`, e.message))
@@ -1734,7 +1731,7 @@ async function handoffTask(id, mode) {
   if (!t) throw Object.assign(new Error('unknown task'), { status: 404 })
   const { args, prompt } = handoffArgs(t, mode)
   const out = await new Promise((resolve, reject) => {
-    const child = execFile(HANDOFF_SH, args, { cwd: t.worktree, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '', WT_DELIVER_TOKEN: SERVER_TOKEN } }, (err, o, stderr) =>
+    const child = execFile(HANDOFF_SH, args, { cwd: t.worktree, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, ...NO_TERMINAL, WT_DELIVER_TOKEN: SERVER_TOKEN } }, (err, o, stderr) =>
       err ? reject(new Error(stderr || err.message)) : resolve(o))
     child.stdin.end(prompt)
   })
@@ -1754,7 +1751,7 @@ export function restartBurst(starts, now = Date.now()) {
   const recent = starts.filter((t) => now - t < RESTART_WINDOW_MS)
   return { recent, warn: recent.length >= 3 ? recent.length : 0 }
 }
-const SOURCES = Object.fromEntries(['herdr', 'git', 'gh', 'linear', 'machines'].map((k) => [k, { ok: null, lastOkAt: null, lastError: null }]))
+const SOURCES = Object.fromEntries(['hc', 'git', 'gh', 'linear', 'machines'].map((k) => [k, { ok: null, lastOkAt: null, lastError: null }]))
 const track = (name, p) => p.then(
   (v) => (Object.assign(SOURCES[name], { ok: true, lastOkAt: new Date().toISOString() }), v),
   (e) => { Object.assign(SOURCES[name], { ok: false, lastError: { at: new Date().toISOString(), message: String(e.message ?? e).slice(0, 300) } }); throw e })
@@ -1852,18 +1849,18 @@ async function localIssues() {
 // A failed overview source (still tracked in SOURCES): one line for the page's banner (WP-79).
 export function sourceIssue(src, message) {
   const m = String(message ?? '')
-  if (src === 'herdr' && /server_not_running|ENOENT|ECONNREFUSED/.test(m)) return 'herdr server not running — run herdr'
+  if (src === 'hc' && /core_down|core not running|ENOENT|not installed|ECONNREFUSED/.test(m)) return 'hc core not running — run `hc server start`'
   if (src === 'git' && /not a git repository/.test(m)) return 'WT_DASHBOARD_REPO is not a git checkout — set it in ~/.config/wt-dashboard/env'
   return `${src}: ${m.split('\n').find((l) => l.trim()) ?? 'failed'}`.slice(0, 200)
 }
 async function overview() {
   return cached('overview', 3000, async () => {
     const local = await localIssues().catch((e) => (console.error('tickets:', e.message), []))
-    // herdr or git down degrades its own cards (empty lists + a banner line) instead of a 500 for the whole page.
+    // hc or git down degrades its own cards (empty lists + a banner line) instead of a 500 for the whole page.
     const down = []
     const soft = (src, p) => track(src, p).catch((e) => (down.push(sourceIssue(src, e.message)), []))
     const [ag, wt, pr, linearIssues] = await Promise.all([
-      soft('herdr', agents()),
+      soft('hc', agents()),
       soft('git', worktrees()),
       track('gh', prs()).catch((e) => (console.error(e.message), [])),
       (cfg.get('LINEAR_API_KEY') ? track('linear', linear()) : linear()).catch((e) => (console.error(e.message), [])),
@@ -2045,8 +2042,8 @@ async function autoOffDnd() {
     if (!Number.isFinite(at) || at > now) continue
     const m = await machineBy(a.machine)
     if (!m) continue
-    await herdrOn(m, 'pane', 'report-metadata', a.id, '--source', 'wt-dashboard', '--clear-token', 'dnd').catch((e) => console.error('dnd auto-off:', e.message))
-    store.delete('paneMeta'); store.delete('agents:local')
+    await hcClearLabel(a.id, 'dnd').catch((e) => console.error('dnd auto-off:', e.message))
+    store.delete('hc:rows'); store.delete('agents:local')
   }
 }
 async function tick() {
@@ -2483,6 +2480,7 @@ const LOCAL = {
     LOOPBACK_HOST.test(h) || (BIND_OK.remote && h.toLowerCase() === bindHostHeader(BIND, PORT)) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
 }
 const PANE = /^[\w.:-]+$/
+const HC_ADDR = /^t\d+$/ // an hc terminal address
 const KEY = /^[\w+-]{1,20}$/
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png' }
 
@@ -2578,10 +2576,10 @@ const tickets = new Tickets({
         // Compare-and-clear: the pane may have moved on to a different ticket by the time this fires
         // (a later merge-reconcile, after the worker was freed and reused) — only ours to clear if it's still ours.
         // Independent of the retirement sweep below: a stale match here must not skip that too.
-        const tok = JSON.parse(await herdr('pane', 'get', pane)).result?.pane?.tokens ?? {}
+        const tok = await tokensOf(pane)
         if (tok.ticket === t.id) {
-          await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--clear-token', 'task', '--clear-token', 'ticket')
-          store.delete('paneMeta')
+          await hcClearLabel(pane, 'task', 'ticket')
+          store.delete('hc:rows')
         }
       } catch (e) { console.error('tokens:', t.assignee.name, e.message) }
     }
@@ -2591,8 +2589,8 @@ const tickets = new Tickets({
       for (const p of [t.pair.worker, t.pair.buddy]) {
         if (!p?.pane) continue
         try {
-          const tok = JSON.parse(await herdr('pane', 'get', p.pane)).result?.pane?.tokens ?? {}
-          if (tok.pair === t.id) { await herdr('pane', 'report-metadata', p.pane, '--source', 'wt-dashboard', '--clear-token', 'pair'); store.delete('paneMeta') }
+          const tok = await tokensOf(p.pane)
+          if (tok.pair === t.id) { await hcClearLabel(p.pane, 'pair'); store.delete('hc:rows') }
         } catch (e) { console.error('tokens:', p.name, e.message) }
       }
       await tickets.patch(t.id, { pair: null }, { name: 'dispatch' }).catch((e) => console.error('tickets:', e.message))
@@ -2828,10 +2826,10 @@ async function ticketsApi(req, res, url, parts) {
     }
     const oldBuddy = t.pair?.buddy
     const out = await tickets.patch(id, { pair: worker.pane || buddy ? { worker, buddy } : null }, author)
-    if (worker.pane) await herdr('pane', 'report-metadata', worker.pane, '--source', 'wt-dashboard', '--token', `pair=${id}`).catch((e) => console.error('tokens:', worker.name, e.message))
-    if (buddy) await herdr('pane', 'report-metadata', buddy.pane, '--source', 'wt-dashboard', '--token', `pair=${id}`).catch((e) => console.error('tokens:', buddy.name, e.message))
-    if (oldBuddy?.pane && oldBuddy.pane !== buddy?.pane) await herdr('pane', 'report-metadata', oldBuddy.pane, '--source', 'wt-dashboard', '--clear-token', 'pair').catch((e) => console.error('tokens:', oldBuddy.name, e.message))
-    store.delete('paneMeta'); store.delete('agents:local')
+    if (worker.pane) await setPaneLabels(worker.pane, { pair: id }).catch((e) => console.error('tokens:', worker.name, e.message))
+    if (buddy) await setPaneLabels(buddy.pane, { pair: id }).catch((e) => console.error('tokens:', buddy.name, e.message))
+    if (oldBuddy?.pane && oldBuddy.pane !== buddy?.pane) await hcClearLabel(oldBuddy.pane, 'pair').catch((e) => console.error('tokens:', oldBuddy.name, e.message))
+    store.delete('hc:rows'); store.delete('agents:local')
     return send(res, 200, out)
   }
   if (req.method === 'POST' && parts[3] === 'comments') return send(res, 200, await tickets.comment(id, b.text, author))
@@ -2881,7 +2879,7 @@ async function asksApi(req, res, url, parts) {
   if (req.method === 'GET' && parts.length === 3) {
     // A pane (wt-ask --wait, WP-206) may read only its own ask; the user's session reads any.
     const author = await roomAuthor(req)
-    if (id === 'ping') { // wt-ask --ping (WP-206): dashboard up and this is a wt-pack agent pane (has a role token), not a bare herdr pane
+    if (id === 'ping') { // wt-ask --ping (WP-206): dashboard up and this is a wt-pack agent pane (has a role token), not a bare hc terminal
       return send(res, 200, ping(author, author.kind === 'agent' ? (await agents()).find((a) => a.key === author.key)?.tags?.role : undefined))
     }
     return send(res, 200, await asks.get(id, author.kind === 'agent' ? author.pane : undefined))
@@ -3106,18 +3104,18 @@ const roomsLoop = async () => {
     if (rooms.settings.ticketRooms !== 'off' && ++ticketTick % 3 === 0) await rooms.syncTickets((await overview()).tasks)
   } catch (e) { console.error('rooms:', e.message) }
 }
-// Who is posting: an agent names its pane (x-herdr-pane, set by the wt-room CLI from $HERDR_PANE_ID) and must be a
+// Who is posting: an agent names its pane (x-herdr-pane, set by the wt-room CLI from $HC_TERMINAL_ID) and must be a
 // live local agent reached on 127.0.0.1 itself; anything else must be the dashboard page (Origin present).
-// $HERDR_PANE_ID is herdr's STABLE pane id (e.g. "w4:pM"), while `agent list` reports the current display
-// id ("wM:p6"), which moves when workspaces are renumbered. `herdr pane get` resolves either form.
-const paneIds = new Map() // any id form -> { id: display pane id, at }
-// ponytail: 30s TTL, so a renumbered workspace is picked up quickly; `get` is injectable for the test.
-export async function canonicalPane(id, get = (x) => herdr('pane', 'get', x), cache = paneIds, now = Date.now()) {
-  if (!/^[\w-]+:[\w-]+$/.test(id)) return null
+// WP-378: $HC_TERMINAL_ID is the terminal's address (`t7`), the same form `hc` lists, so there is no stable-vs-display id to
+// reconcile; the lookup only confirms hc knows the terminal. `get` is injectable for the test (returns the address, or throws).
+const paneIds = new Map() // address -> { id, at }
+// ponytail: 30s TTL for a hit; a miss is never cached, so a terminal started a moment ago is found on the next call.
+export async function canonicalPane(id, get = async (x) => (await hcGet(x)).id, cache = paneIds, now = Date.now()) {
+  if (!/^t\d+$/.test(id)) return null
   const hit = cache.get(id)
   if (hit && now - hit.at < 30_000) return hit.id
   try {
-    const got = JSON.parse(await get(id)).result?.pane?.pane_id ?? null
+    const got = await get(id) ?? null
     if (got) cache.set(id, { id: got, at: now })
     return got
   } catch { return null }
@@ -3151,8 +3149,8 @@ async function headlessInbox(id) {
 }
 const headlessSubs = new Map() // run id → flush fns of open SSE streams
 const HL_STATUS = { starting: 'working', working: 'working', idle: 'idle', queued: 'idle', ended: 'exited', failed: 'exited' }
-// A headless run as a row of the Agents list (same shape as a herdr agent, plus headless:true). Not part of agents(): Dispatch,
-// token sync and the pane routes only ever see herdr agents.
+// A headless run as a row of the Agents list (same shape as a terminal agent, plus headless:true). Not part of agents(): Dispatch,
+// token sync and the pane routes only ever see terminal agents.
 // A run row (hl().get / list) with its AgentInfo attached (WP-313), for the /api/headless routes.
 async function withInfo(v) {
   return { ...v, info: headlessInfo(v, { state: v.asks?.length ? 'blocked' : HL_STATUS[v.state] ?? 'idle', project: projectName(v.cwd), usage: await transcriptUsage(v.session) }) }
@@ -3171,9 +3169,9 @@ async function headlessRows(machine) {
   return rows
 }
 // The Conversation view's per-agent routes for a headless row: the run's own transcript (the same JSONL a TUI session writes)
-// feeds the existing stream; send/stop/remove go to the supervisor instead of herdr.
+// feeds the existing stream; send/stop/remove go to the supervisor instead of hc.
 // WP-300: the picker for a headless run = what its init event listed (slash_commands + skills), described from the same sources
-// as a herdr agent's; before init (or an old run) all of them. A name init knows but we cannot describe still shows, as Built-in.
+// as a terminal agent's; before init (or an old run) all of them. A name init knows but we cannot describe still shows, as Built-in.
 async function headlessCommands(r) {
   const all = await commandsFor({ local: true, cwd: r.cwd })
   let init = null
@@ -3332,7 +3330,7 @@ async function roomAuthor(req) {
     if (!/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/.test(addr) || !/^127\.0\.0\.1:\d+$/.test(req.headers.host ?? ''))
       throw Object.assign(new Error('agents post via 127.0.0.1 only'), { status: 403 })
     const id = await canonicalPane(pane)
-    const a = (await agents()).find((x) => x.local && x.id === id)
+    const a = (await agents().catch(() => [])).find((x) => x.local && x.id === id) // core down: no pane can be verified -> 403, not 500
     if (!a) throw Object.assign(new Error(`unknown pane ${pane}`), { status: 403 })
     paneKeyCheck(a.id, req.headers['x-wt-pane-key'])
     return { kind: 'agent', name: a.name, machine: a.machine, pane: a.id, key: a.key }
@@ -3635,7 +3633,7 @@ async function projectPauseApi(req, res, project, sub) {
 // POST pause|resume (dashboard user only), POST forget (the cookie, or a pane for an exited/missing row or its own; never a paused row).
 const BYNAME_FIELDS = ['name', 'pane', 'stable_pane', 'state', 'session', 'cwd', 'role', 'persona', 'project', 'ticket']
 async function agentByNameApi(req, res, name, sub) {
-  const row = agentTable.get(name) ?? (name.includes(':') ? agentTable.byPane(name) : undefined) // a pane id works too
+  const row = agentTable.get(name) ?? (HC_ADDR.test(name) ? agentTable.byPane(name) : undefined) // a pane id works too
   if (!sub && req.method === 'GET') return row ? send(res, 200, Object.fromEntries(BYNAME_FIELDS.map((k) => [k, row[k] ?? null]))) : send(res, 404, { error: `no agent ${name}` })
   if (sub === 'pause' || sub === 'resume') return agentPauseApi(req, res, name, sub)
   if (sub === 'stream' && req.method === 'GET') { // WP-353: the saved transcript of a paused/missing/exited row, read-only, one snapshot
@@ -3649,7 +3647,7 @@ async function agentByNameApi(req, res, name, sub) {
   await rooms.load()
   const who = await roomAuthor(req)
   if (!row) return send(res, 404, { error: `no agent ${name}` })
-  // a pane may forget itself, an exited/missing row, or a row whose agent herdr no longer lists (agents.sh rm closes the tab, then asks, before the watcher has run); never a paused row
+  // a pane may forget itself, an exited/missing row, or a row whose agent hc no longer lists (agents.sh rm closes the tab, then asks, before the watcher has run); never a paused row
   const stillLive = (await agents()).some((a) => a.local && a.name === name)
   if (who.kind !== 'user' && (row.state === 'paused' || !(['exited', 'missing'].includes(row.state) || who.name === name || !stillLive))) return send(res, 403, { error: 'a pane may forget an exited or missing agent, or itself; a paused one only the dashboard' })
   agentTable.remove(name)
@@ -3701,7 +3699,8 @@ async function resumeSpawn(a, project) {
   const t = a.tokens ?? {}, sess = !fallback && a.session && (await findTranscript(a.session)) ? a.session : null // a session that never took a prompt has no transcript to resume
   const out = await run(AGENTS_SH, ['spawn', a.persona || a.role, cwd, '--label', a.name, ...(sess ? ['--resume', sess] : []), ...(t.model ? ['--model', t.model] : []), ...(t.effort ? ['--effort', t.effort] : [])], cwd, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
   const pane = out.trim().split(/\s+/).pop()
-  for (const [k, v] of Object.entries(t)) if (!['role', 'persona', 'project', 'spawned_by', 'created', 'model', 'effort'].includes(k)) await herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', '--token', `${k}=${v}`).catch(() => {})
+  const rest = Object.fromEntries(Object.entries(t).filter(([k]) => !['role', 'persona', 'project', 'spawned_by', 'created', 'model', 'effort'].includes(k)))
+  if (Object.keys(rest).length) await setPaneLabels(pane, rest).catch(() => {})
   return { pane, fallback }
 }
 
@@ -3857,7 +3856,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(403, { 'content-type': 'application/json', 'x-herdr-session': 'missing' })
         // A CLI (no cookie, no pane) gets told what it needs; the page keys on the header, not the text.
         const cli = !req.headers.cookie && !req.headers['x-herdr-pane']
-        return res.end(JSON.stringify({ error: cli ? 'writes need the dashboard page or a herdr agent pane (HERDR_PANE_ID); run this from an agent' : 'session expired — reload the dashboard' }))
+        return res.end(JSON.stringify({ error: cli ? 'writes need the dashboard page or an agent terminal (HC_TERMINAL_ID); run this from an agent' : 'session expired — reload the dashboard' }))
       }
       if (url.pathname === '/api/health') return send(res, 200, await health())
       if (url.pathname === '/api/events') return streamEvents(req, res)
@@ -3932,7 +3931,7 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'agents' && parts[2] === 'by-name' && parts[3]) return await agentByNameApi(req, res, decodeURIComponent(parts[3]), parts[4]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'agents') {
         if (!parts[2]) { // WP-348: paused and missing agents stay listed (no pane), so they never disappear
-          const ag = await agents(), have = new Set(ag.filter((a) => a.local).map((a) => a.name))
+          const ag = await agents().catch(() => []), have = new Set(ag.filter((a) => a.local).map((a) => a.name)) // core down: the stored rows still list
           const stored = agentTable.list().filter((r) => ['paused', 'missing', 'exited'].includes(r.state) && !have.has(r.name)).map((r) => { const a = rowAsAgent(r); return { ...a, info: paneInfo(a, null, null, null, r) } })
           return send(res, 200, [...ag, ...stored, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))])
         }
@@ -3941,22 +3940,14 @@ const server = http.createServer(async (req, res) => {
         const m = await machineBy(decodeURIComponent(parts[2]))
         if (!m) return send(res, 404, { error: 'unknown machine' })
         const pane = decodeURIComponent(parts[3] ?? '')
-        if (!PANE.test(pane) || pane.startsWith('-')) return send(res, 400, { error: 'bad pane' })
+        if (!HC_ADDR.test(pane)) return send(res, 400, { error: 'bad pane' })
         if (parts[4] === 'stream' && req.method === 'GET') {
-          if (!m.local) {
-            const a = (await agents()).find((x) => x.machine === m.label && x.id === pane)
-            if (!a) return send(res, 404, { error: 'unknown agent' })
-            // No visible prompt (a narrow pane, a long reply): its last reply is the match hint instead.
-            const p = parsed.get(`${m.label}|${pane}`)?.p
-            const hints = [a.lastPrompt, p?.turns?.findLast((t) => t.role === 'assistant')?.text, ...paneHints(p?.tail)]
-            return streamRemote(req, res, url, { host: m.host, pane, cwd: a.cwd, prompt: hints })
-          }
           const a = (await agents()).find((x) => x.local && x.id === pane)
           return streamTranscript(req, res, a?.session, url)
         }
         // The live spinner line, for an open conversation: one visible-screen read per pane per second, shared.
         if (parts[4] === 'activity' && req.method === 'GET') {
-          const text = await cached(`activity:${m.label}|${pane}`, 1000, () => herdrOn(m, 'pane', 'read', pane, '--source', 'visible')).catch(() => '')
+          const text = await cached(`activity:${m.label}|${pane}`, 1000, () => hcRead(pane, { lines: 0 })).catch(() => '')
           return send(res, 200, parseActivity(text))
         }
         if (parts[4] === 'answer' && req.method === 'POST') {
@@ -3973,7 +3964,6 @@ const server = http.createServer(async (req, res) => {
         if (parts[4] === 'stop' && req.method === 'POST') {
           if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
           store.delete('agents:local')
-          if (!m.local) remote.get(m.label) && (remote.get(m.label).lastTry = 0)
           const a = (await agents()).find((x) => x.machine === m.label && x.id === pane)
           if (!a) return send(res, 404, { error: 'unknown agent' })
           if (a.asks) return send(res, 409, { error: 'a question is pending; use the question card' })
@@ -4005,8 +3995,8 @@ const server = http.createServer(async (req, res) => {
           const { on } = JSON.parse(await body(req))
           const hours = Number(psettings.get(a.project, 'dndAutoOffHours')) || 0
           const value = on && hours > 0 ? new Date(Date.now() + hours * 3_600_000).toISOString() : on ? '1' : ''
-          await herdrOn(m, 'pane', 'report-metadata', pane, '--source', 'wt-dashboard', ...(value ? ['--token', `dnd=${value}`] : ['--clear-token', 'dnd']))
-          store.delete('paneMeta'); store.delete('agents:local'); store.delete('overview')
+          await setPaneLabels(pane, { dnd: value })
+          store.delete('agents:local'); store.delete('overview')
           return send(res, 200, { dnd: value || null })
         }
         if (parts[4] === 'commands' && req.method === 'GET') {
@@ -4017,18 +4007,13 @@ const server = http.createServer(async (req, res) => {
         // Remove = the wt-agents script's rm (closes the tab). Refuses a working agent unless forced;
         // an orchestrator needs its name typed back.
         if (req.method === 'DELETE') {
-          if (!m.local) return send(res, 400, { error: 'removing remote agents is not supported yet' })
           const b = JSON.parse((await body(req)) || '{}')
           const [code, out] = await removeAgent(pane, { force: b.force === true, confirmName: b.confirmName }).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message, needs: e.needs }])
           return send(res, code, out)
         }
         if (req.method === 'GET') {
-          // Remote: a long read takes longer than REMOTE_TIMEOUT_MS (~15s for 500 lines), so reuse the agents
-          // poll's own parse of the pane (120 lines, refreshed as the pane changes) — WP-97's pane fallback.
-          const seen = !m.local && !url.searchParams.get('visible') && parsed.get(`${m.label}|${pane}`)
-          if (seen) return send(res, 200, { text: '', ...seen.p })
           const lines = String(Math.min(2000, Number(url.searchParams.get('lines')) || 300))
-          const raw = url.searchParams.get('visible') ? await herdrOn(m, 'agent', 'read', pane, '--source', 'visible', '--ansi') : await readPane(m, pane, lines)
+          const raw = url.searchParams.get('visible') ? await hcRead(pane, { lines: 0 }) : await readPane(m, pane, lines)
           const text = stripAnsi(raw)
           return send(res, 200, { text, ...parsePane(text, raw) })
         }
@@ -4042,7 +4027,6 @@ const server = http.createServer(async (req, res) => {
           } else if (typeof text === 'string' && text.trim()) { recordSent(text); await herdrOn(m, 'agent', 'prompt', pane, text) }
           else return send(res, 400, { error: 'text or keys required' })
           store.delete('agents:local')
-          if (!m.local) remote.get(m.label) && (remote.get(m.label).lastTry = 0)
           store.delete('overview')
           return send(res, 200, { ok: true })
         }
@@ -4217,8 +4201,8 @@ const dispatcher = new Dispatch({
     routeOutcome,
     notify: (item) => inbox.add(item),
     // WP-147: tag a pair-replacement pane with the ticket it now pairs on (or clear it with a null ticket).
-    tagPair: (pane, ticket) => herdr('pane', 'report-metadata', pane, '--source', 'wt-dashboard', ...(ticket ? ['--token', `pair=${ticket}`] : ['--clear-token', 'pair']))
-      .then(() => store.delete('paneMeta'), (e) => console.error('tokens:', pane, e.message)),
+    tagPair: (pane, ticket) => setPaneLabels(pane, { pair: ticket ?? '' })
+      .then(() => store.delete('hc:rows'), (e) => console.error('tokens:', pane, e.message)),
     handoff: async (args, prompt, cwd) => {
       try { return await runHandoff(execFile, HANDOFF_SH, { WT_DELIVER_TOKEN: SERVER_TOKEN })(args, prompt, cwd) } finally { store.delete('agents:local'); store.delete('overview') }
     },
@@ -4348,13 +4332,13 @@ async function watchdogSnapshot() {
   for (const project of Object.keys(keys)) boards.push({ project, ...(await tickets.list(project)) })
   const fs = await statfs(DATA).catch(() => null)
   // WP-348: exited agents are the agents table's exited rows (the watcher keeps them true); panes is the snapshot's pane list.
-  const panes = await herdr('pane', 'list').then((t) => JSON.parse(t).result.panes.map((x) => x.pane_id), () => null)
+  const panes = await hcRows().then((rows) => rows.map((x) => x.id), () => null)
   return {
     exited: exitedAgents(agentTable.list()),
     stale: await staleHooks(ag).catch(() => null),
     starts: await readFile(join(DATA, 'server-starts.json'), 'utf8').then(JSON.parse, () => null),
     queue: [...rooms.queue].flatMap(([key, items]) => items.map((it) => ({ agent: nameOf.get(key) ?? key, slug: it.slug, ts: it.msg.ts }))),
-    boards, agents: ag, panes, herdr: SOURCES.herdr,
+    boards, agents: ag, panes, herdr: SOURCES.hc, // U6 renames the watchdog's 'herdr' check
     diskFree: fs ? fs.bavail * fs.bsize : null,
     dbBytes: await stat(join(DATA, 'wt.db')).then((x) => x.size, () => null),
     errors: serverErrors,
@@ -4475,7 +4459,7 @@ if (envOf('SERVE') === '1' || process.argv[1] === fileURLToPath(import.meta.url)
     process.on('uncaughtException', crashed('uncaughtException'))
     process.on('unhandledRejection', crashed('unhandledRejection'))
     projectRoots().then((roots) => { grandfather({ dataRoot: DATA_ROOT, psettings, roots }); syncTrusted({ dataRoot: DATA_ROOT, db: psettings.db, roots }) }).catch((e) => console.error('trust:', e.message)) // WP-334
-    ensureHerdr().catch((e) => console.error('herdr:', e.message)) // WP-218: after a reboot nobody has opened herdr yet
+    // WP-378 D4: the dashboard never starts the hc core (a connect/ls/get would): it only watches coreUp().
     setInterval(roomsLoop, 4000)
     setInterval(() => agents().then((ag) => { const live = new Set(ag.filter((a) => a.local).map((a) => a.id)); return live.size && asks.expire(live) }).catch((e) => console.error('asks expire:', e.message)), 60_000).unref() // WP-209
     setInterval(tick, 4000)
