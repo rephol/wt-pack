@@ -135,7 +135,7 @@ test('WP-378 F5: rm and respawn act on a pack agent only: a plain shell, a stran
     for (const verb of [['rm', name], ['rm', name, '--force'], ['respawn', name, '--force']]) {
       const r = run(verb, [row])
       assert.notEqual(r.status, 0, `${verb.join(' ')}: ${r.stdout}`)
-      assert.match(r.stderr, /not a pack agent/)
+      assert.match(r.stderr, /not a pack agent.*only pack agents can be removed or respawned here \(the user closes other terminals in herdr-app\)/s)
       assert.deepEqual(r.calls.filter((c) => ['kill', 'rm', 'interrupt'].includes(c.args[0]) || c.stdin?.includes('terminal.run')), [], `${verb.join(' ')} made a destructive call`)
     }
   }

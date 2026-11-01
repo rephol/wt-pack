@@ -139,7 +139,7 @@ ah="$here/agents-hc.mjs"                        # reads, herdr-app space, labels
 launcher="$here/hc-launch"
 
 # A stopped core is STARTED by `hc ls|get|connect|server status` (spike S5): never touch hc while it is down (D4).
-core_up() { node "$hcjs" core-up || { echo "hc core is down (hc server start); not starting it from here" >&2; exit 1; }; }
+core_up() { node "$hcjs" core-up || { echo "hc core is down — ask the user to start it (hc server start)" >&2; exit 1; }; }
 # WP-378 F5: rm/respawn end a terminal, and `agents-hc.mjs find` resolves ANY hc terminal: a user's shell or a dashboard shell must never be
 # one. A pack agent has a role label or a (non -shells) wt.pool label, or the dashboard's agents table holds a row for its name (a kept
 # shell at an agent's address has no labels, D8). Prints the refusal and exits 1 otherwise. <find-row-json> <target-as-typed>
@@ -150,7 +150,7 @@ require_pack_agent() {
   . "$here/../../wt-shared/scripts/agent-pane.sh"
   _n=$(printf '%s' "$1" | jq -r '.name // empty' 2>/dev/null)
   [ -z "$(agent_row "${_n:-$2}" | jq -r '.name // empty' 2>/dev/null)" ] || return 0
-  echo "$2 is not a pack agent (no role or pool label, no agents-table row): refusing to end it" >&2
+  echo "$2 is not a pack agent (no role or pool label, no agents-table row): refusing to end it; only pack agents can be removed or respawned here (the user closes other terminals in herdr-app)" >&2
   return 1
 }
 

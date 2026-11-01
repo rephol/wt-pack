@@ -147,7 +147,7 @@ test('core down: spawn, list, dnd, rm and respawn refuse and make NO hc call (a 
     for (const args of [['spawn', 'worker'], ['list', 'worker'], ['dnd', 'demo-worker-01', 'on'], ['rm', 'demo-worker-01'], ['respawn', 'demo-worker-01']]) {
       const s = spawn(args, { env: { XDG_STATE_HOME: dead } })
       assert.equal(s.status, 1, args.join(' '))
-      assert.match(s.stderr, /hc core is down/)
+      assert.match(s.stderr, /hc core is down — ask the user to start it \(hc server start\)/); assert.doesNotMatch(s.stderr, /^.*(run|start) (it|hc server start) yourself/im)
       assert.equal(s.calls.length, 0, `${args.join(' ')} touched hc`)
       assert.equal(s.app.calls().length, 0)
     }
