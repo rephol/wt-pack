@@ -410,3 +410,8 @@ No textual conflicts. U5's `hc.mjs` change (CLI guard without top-level await, f
 - **D24 `~/.local/bin/claude` after U5's isolated run.** `claude-link-guard.mjs check` against target `~/.local/share/claude/versions/2.1.316`
   passes (link resolves, newest installed version). The link's own mtime is 16:59, inside U5's work window, so something rewrote it to the same
   target: no damage, but the isolation rule was broken. Every later run uses `quietEnv()` and a guard snapshot taken BEFORE the run.
+- **D25 F1/F2 landed** (7896556 wt-handoff, f2bcf57 wt-shared incl. `fake-hc.mjs` default scale 5, 7a65d5f wt-dashboard, b97e119 wt-agents);
+  root `npm test` 488/488, dashboard `npm test` 796/796 + web 109/109 + typecheck. Pending, not blocking: `handoff.sh --reply` to a blocked
+  target still records a `delivered` reply row before `hc_send … any` refuses it. Replies are not in `ACK_KINDS`, so the sweep neither acks nor
+  resends it (a wrong state, no duplicate); U6 gives the reply path the same pre-check when it touches delivery states. `uploads.test.mjs`
+  assumes `TMPDIR` is set (fails under a bare `env -i`): run suites with `TMPDIR` kept.
