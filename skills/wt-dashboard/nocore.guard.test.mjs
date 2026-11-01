@@ -3,7 +3,8 @@
 // and `hc server status|ls|get` start a real core (seen from tickets.test.mjs). This scans every *.test.mjs under skills/.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { noCore } from './test-nocore.mjs'
 import { spawnSync } from 'node:child_process'
@@ -17,19 +18,68 @@ const walk = (d, out = []) => {
   }
   return out
 }
-// spawn/fork/exec(File)(… 'server.mjs' …) within one call's first 250 chars, but not wt-memory's own mcp/server.mjs
-export const spawnsServer = (src) => /\b(spawn|fork|exec|execFile)(Sync)?\s*\([\s\S]{0,250}?(?<!mcp\/)(?<=['"\/])server\.mjs/.test(src)
-export const pinned = (src) => /\b(hcStub|noCore)\b/.test(src)
+// Per spawn site (not per file): every spawn/fork/exec(File)(Sync) call whose argument list names server.mjs (a literal, or a variable assigned from
+// an expression naming it; wt-memory's own mcp/server.mjs excluded) must take its env from a hcStub()/noCore() value (`<ident>.env`).
+const SPAWN = /\b(?:spawn|fork|exec|execFile)(?:Sync)?\s*\(/g
+const callText = (src, open) => { // text of the call starting at its "(" , string-aware enough for test files
+  let depth = 0, q = null
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]
+    if (q) { if (c === '\\') i++; else if (c === q) q = null; continue }
+    if (c === "'" || c === '"' || c === '`') q = c
+    else if (c === '(') depth++
+    else if (c === ')' && --depth === 0) return src.slice(open, i + 1)
+  }
+  return src.slice(open)
+}
+const NAMES_SERVER = /(?<!mcp\/)(?<=['"\/])server\.mjs/
+export function spawnSites(src) {
+  const pins = [...src.matchAll(/\b(\w+)\s*=\s*(?:await\s+)?(?:hcStub|noCore)\s*\(/g)].map((m) => m[1])
+  const pathVars = [...src.matchAll(/^(?!.*\bimport\s*\().*?\b(\w+)\s*=\s*[^\n]*(?<!mcp\/)(?<=['"\/])server\.mjs/gm)].map((m) => m[1])
+  const sites = []
+  for (const m of src.matchAll(SPAWN)) {
+    const text = callText(src, m.index + m[0].length - 1)
+    const targets = NAMES_SERVER.test(text) || pathVars.some((v) => new RegExp(`\\b${v}\\b`).test(text))
+    if (!targets) continue
+    sites.push({ line: src.slice(0, m.index).split('\n').length, pinned: pins.some((p) => new RegExp(`\\b${p}\\.env\\b`).test(text)) })
+  }
+  return sites
+}
+export const violations = (files) => {
+  const bad = []; let scanned = 0, spawns = 0
+  for (const f of files) {
+    const sites = spawnSites(readFileSync(f, 'utf8')); scanned++; spawns += sites.length
+    for (const s of sites) if (!s.pinned) bad.push(`${f.startsWith(SKILLS) ? f.slice(SKILLS.length) : f}:${s.line}`)
+  }
+  return { bad, scanned, spawns }
+}
+const mine = (f) => !f.endsWith('nocore.guard.test.mjs')
 
 test('no test spawns server.mjs without a stub hc (hcStub or noCore): the real hc would start a core', () => {
-  const bad = walk(SKILLS).filter((f) => !f.endsWith('nocore.guard.test.mjs')).filter((f) => { const s = readFileSync(f, 'utf8'); return spawnsServer(s) && !pinned(s) })
-  assert.deepEqual(bad.map((f) => f.slice(SKILLS.length)), [])
+  const { bad, scanned, spawns } = violations(walk(SKILLS).filter(mine))
+  assert.ok(scanned > 0, 'the walk found no test files'); assert.ok(spawns > 0, 'the walk found no server spawns: the scan is broken')
+  assert.deepEqual(bad, [])
 })
-test('the scan sees a spawn of server.mjs (so an empty result is not a broken regex)', () => {
-  assert.ok(spawnsServer("spawn(process.execPath, ['server.mjs'], {})"))
-  assert.ok(spawnsServer("const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {"))
-  assert.ok(!spawnsServer("execFileSync(new URL('../mcp/server.mjs', import.meta.url).pathname, {"))
-  assert.ok(pinned("import { hcStub } from './test-hc.mjs'") && pinned("noCore()") && !pinned("spawn(x)"))
+test('the scan works per spawn site: one pinned and one unpinned spawn in a file is a violation; a path variable is followed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guard-'))
+  try {
+    const f = join(dir, 'two.test.mjs')
+    writeFileSync(f, `const nc = noCore()
+const a = spawn(process.execPath, ['server.mjs'], { env: { ...nc.env(), PORT: '1' } })
+const b = spawn(process.execPath, ['server.mjs'], { env: { ...process.env, PORT: '2' } })
+`)
+    const r = violations([f])
+    assert.equal(r.spawns, 2); assert.equal(r.bad.length, 1); assert.match(r.bad[0], /two\.test\.mjs:3$/)
+    const g = join(dir, 'var.test.mjs')
+    writeFileSync(g, `const hc = await hcStub({})
+const SERVER = join(here, 'server.mjs')
+spawn(process.execPath, [SERVER], { env: { ...process.env } })
+spawn(process.execPath, [SERVER], { env: { ...hc.env } })
+`)
+    const v = violations([g]); assert.equal(v.spawns, 2); assert.equal(v.bad.length, 1)
+    writeFileSync(join(dir, 'imp.test.mjs'), `const S = await import('./server.mjs')\nexecFileSync('x', [S])\nexecFileSync(new URL('../mcp/server.mjs', import.meta.url).pathname)\n`)
+    assert.equal(violations([join(dir, 'imp.test.mjs')]).spawns, 0)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 test('the noCore shim refuses and records every call (exit 98), and flags a start', () => {
   const nc = noCore()

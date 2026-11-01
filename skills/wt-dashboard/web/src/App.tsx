@@ -856,7 +856,7 @@ const needsYou = (a: Agent) => isLive(a) && a.asks && a.status !== 'working'
 const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
   all: () => true,
   busy: (a) => isBusy(a.status),
-  free: (a) => (a.status === 'idle' || a.status === 'done') && !needsYou(a),
+  free: (a) => isResting(a.status) && !needsYou(a),
   needs: needsYou,
 }
 const shortPath = (p: string | null) => (p ? p.split('/').filter(Boolean).at(-1) ?? p : null)
@@ -1036,7 +1036,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 <TableBody>
                   {rows.map((a) => {
                     const t = taskOf(a)
-                    const quiet = !needsYou(a) && (a.status === 'idle' || a.status === 'done') && !t
+                    const quiet = !needsYou(a) && isResting(a.status) && !t
                     const color = quiet ? 'secondary' : 'primary'
                     const summary = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap ?? '—'
                     // A handoff's --task label wins; its ticket stays a link when it is the linked task's.

@@ -19,6 +19,7 @@ import { Banner } from '@astryxdesign/core/Banner'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { useRoles } from './roles'
+import { isResting } from './overviewData'
 
 interface Project { name: string; root: string; worktrees: { path: string; branch: string | null; ticket: string | null; agents: string[] }[] }
 export interface SpawnAgentLite { key: string; id: string; machine: string; local: boolean; name: string; pool: string; status: string; cwd: string; project: string | null; asks: boolean }
@@ -73,7 +74,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   })
   // Reuse before spawning: a free agent of this kind (idle/done, no question; a planner sitting in the main checkout).
   const free = proj && agents.find((a) => a.local && a.project === proj.name && !a.asks
-    && (a.status === 'idle' || a.status === 'done') && a.pool === kind && (start !== 'main' || a.cwd === proj.root))
+    && isResting(a.status) && a.pool === kind && (start !== 'main' || a.cwd === proj.root))
   const reuse = () => { if (!free) return; setPrefill(free.key, prompt); onClose(); onOpenAgent(free.key) }
   const worktrees = proj?.worktrees ?? []
   const allowed = !role?.spawn?.projects.length || role.spawn.projects.includes(proj?.name ?? '')

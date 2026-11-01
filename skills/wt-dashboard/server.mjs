@@ -97,6 +97,10 @@ const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', i
 export const STALL_MS = 20 * 60_000
 // WP-378 F5: under hc a finished turn rests at `done` (S1, kept distinct by hcagents.mjs); every rule that means "the agent is waiting for input" tests this, never `idle` alone.
 export const resting = (status) => status === 'idle' || status === 'done'
+// The two status gates of listAgents' Jev calls (pure so a test can pin them): NEEDS_YOU judges the tail of a resting or blocked agent that shows no
+// picker; STALL judges an agent that has sat resting or working for STALL_MS.
+export const judgeNeedsYou = (status, tail, picker) => Boolean((resting(status) || status === 'blocked') && tail && !picker)
+export const stallLong = (status, since, now) => now - since > STALL_MS && (resting(status) || status === 'working')
 // Linear team key → project name (project = basename of the repo root), from WT_LINEAR_TEAMS (WP-82).
 const PROJECT_BY_TEAM = parseTeams(cfg.list('WT_LINEAR_TEAMS'))
 const TEAM_KEYS = Object.keys(PROJECT_BY_TEAM)
@@ -642,12 +646,12 @@ async function listAgents(m) {
     const session = a.pid != null ? sessions.get(Number(a.pid)) ?? null : null // WP-378: the claude whose pid is the terminal's foreground
     // An AskUserQuestion picker on screen beats the reply-ends-with-? heuristic (kept for permission prompts).
     const pk = p.picker ?? null
-    const jevAsks = (resting(a.agent_status) || a.agent_status === 'blocked') && p.tail && !pk && jevOn('NEEDS_YOU')
+    const jevAsks = judgeNeedsYou(a.agent_status, p.tail, pk) && jevOn('NEEDS_YOU')
       ? tails.get(`needs_you:${k}`, p.tail, (t) => jevAsk('NEEDS_YOU', { pane: t }, needsYouJudge.questions(), (x) => needsYouJudge.decide(x, minFor('needs_you')))
         .then((x) => (x ? needsYouJudge.decide(x, minFor('needs_you')) : undefined)))
       : undefined
     const ny = mergeNeedsYou(p, jevAsks)
-    const long = Date.now() - since.get(k).at > STALL_MS && (resting(a.agent_status) || a.agent_status === 'working')
+    const long = stallLong(a.agent_status, since.get(k).at, Date.now())
     const stall = long && p.tail && jevOn('STALL')
       ? tails.get(`stall:${k}`, p.tail, (t) => jevAsk('STALL', { pane: t }, stallJudge.questions(), (x) => ['stuck', 'looping'].includes(stallJudge.decide(x)))
         .then((x) => stallJudge.decide(x) ?? undefined))
@@ -2300,7 +2304,10 @@ async function answerQuestion(a, req) {
       const st = steps[i]
       if (st.text) {
         const r0 = await readPane(m, a.id, '80')
-        if (!same(parsePicker(stripAnsi(r0), r0, track))) throw gone()
+        const at = parsePicker(stripAnsi(r0), r0, track)
+        if (!same(at)) throw gone()
+        // single-select: the paste lands wherever the cursor is, so it must be on the free-text row (key [n+1] put it there) or it would answer option k
+        if (!at.multiSelect && at.cursor !== at.options.length + 1) throw Object.assign(new Error('the cursor is not on the free-text option — answer in the terminal'), { status: 409 })
         await hcSendRaw(a.id, st.text, { force: true })
         if (steps[i + 1]?.keys?.[0] === 'enter') { const rest = steps[i + 1].keys.slice(1); if (rest.length) steps[i + 1] = { keys: rest }; else i++ }
       } else if (st.ensure) { // multi-select Other: ticked with the text, or stop before Submit

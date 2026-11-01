@@ -74,10 +74,13 @@ test('keys and Stop go through `hc keys` (hc names), Stop only to a working agen
   assert.equal((await post(`/api/agents/${LABEL}/t2/stop`, {})).status, 409) // idle: Esc would clear its input
 })
 
+// F6: single-select, the cursor moved to the "Type something" row (the screen after key [n+1])
+const onOther = (screen) => screen.replace('❯ 1. Red', '  1. Red').replace('  4. Type something.', '❯ 4. Type something.')
 test('a free-text single-select picker answer: key [n+1] then ONE forced `hc send` (paste + Enter); a plain option is just keys (D26)', async () => {
   const screen = readFileSync(new URL('./test-fixtures/picker-single-question.txt', import.meta.url), 'utf8')
   const pk = parsePicker(screen)
   hc.screen('t3', screen)
+  hc.screens('t3', [screen, onOther(screen)]) // the plan's read, then the re-read after key [n+1] (F6: the cursor must sit on the Other row)
   const r = await post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: pk.question, selected: [], other: 'my own words' })
   const out = await r.json()
   assert.equal(r.status, 200, JSON.stringify(out))
@@ -89,6 +92,24 @@ test('a free-text single-select picker answer: key [n+1] then ONE forced `hc sen
   const ok = await post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: pk.question, selected: [pk.options[0].label] })
   assert.equal(ok.status, 200)
   assert.deepEqual(sent('keys', 't3').at(-1).args, ['keys', '--json', 't3', '1'])
+  hc.screens('t3', [])
+})
+
+test('F6: a forced single-select text send needs the cursor on the Other row, and the SAME kind of question (a multiSelect-only change is a 409)', async () => {
+  const single = readFileSync(new URL('./test-fixtures/picker-single-question.txt', import.meta.url), 'utf8')
+  const sides = single.replace(/Which color\?(?![\s\S]*Which color\?)/, 'Pick sides?') // a single-select asking the multi screen's question text
+  const ans = () => post(`/api/agents/${LABEL}/t3/answer`, { action: 'answer', question: 'Pick sides?', selected: [], other: 'sneaky' })
+  const attempt = async (screens) => { hc.screens('t3', screens); const f0 = forced().length; const r = await ans(); return { status: r.status, body: await r.json(), forced: forced().slice(f0) } }
+  // the cursor is still on option 1 when the text would be pasted: it would land on Red, not in the Other field
+  let o = await attempt([sides, sides])
+  assert.equal(o.status, 409, JSON.stringify(o.body)); assert.match(o.body.error, /cursor|free-text/); assert.deepEqual(o.forced, [])
+  // same question text, but now a multi-select picker: nothing forced
+  o = await attempt([sides, multi()])
+  assert.equal(o.status, 409, JSON.stringify(o.body)); assert.deepEqual(o.forced, [], 'a multiSelect-only change: nothing forced')
+  // control: cursor on Other, same kind → forced
+  o = await attempt([sides, onOther(sides)])
+  assert.equal(o.status, 200, JSON.stringify(o.body)); assert.equal(o.forced.length, 1)
+  hc.screens('t3', []); hc.screen('t3', '')
 })
 
 // The multi-select picker as hc 0.1.16 draws it (captured live, D26): a forced paste+Enter commits the Other text but leaves its row unticked.
@@ -148,7 +169,7 @@ test('a server send to a blocked agent is queued: no send, the row stays queued 
   assert.equal(r.status, 200, JSON.stringify(ev))
   assert.equal(ev.delivery, 'queued')
   assert.equal(plain('t3').length, 0)
-  assert.deepEqual(forced().map((c) => c.args.at(-1)), ['my own words', 'no dressing', 'no dressing', 'no dressing', 'no dressing', 'no dressing'], 'a delivery to a blocked target never carries --force: only the picker answers did')
+  assert.deepEqual(forced().map((c) => c.args.at(-1)), ['my own words', 'sneaky', 'no dressing', 'no dressing', 'no dressing', 'no dressing', 'no dressing'], 'a delivery to a blocked target never carries --force: only the picker answers did')
   const rows = await (await fetch(`${base}/api/messages`, { headers: { cookie } })).json()
   const row = rows.find((m) => m.target === 't3')
   assert.ok(row, JSON.stringify(rows))
@@ -158,7 +179,7 @@ test('a server send to a blocked agent is queued: no send, the row stays queued 
   hc.screen('t3', '❯ earlier prompt\n\n──────────────────────────────\n❯ \n──────────────────────────────\n')
   for (let i = 0; i < 40 && !plain('t3').length; i++) await sleep(500)
   assert.equal(plain('t3').length, 1)
-  assert.deepEqual([...new Set(forced().map((c) => c.args.at(-1)))], ['my own words', 'no dressing'])
+  assert.deepEqual([...new Set(forced().map((c) => c.args.at(-1)))], ['my own words', 'sneaky', 'no dressing'])
   for (let i = 0; i < 20; i++) { const m = (await (await fetch(`${base}/api/messages`, { headers: { cookie } })).json()).find((x) => x.target === 't3'); if (m.state === 'delivered') { assert.equal(m.attempts, 1); return } await sleep(250) }
   assert.fail('the queued row was never marked delivered')
 })
