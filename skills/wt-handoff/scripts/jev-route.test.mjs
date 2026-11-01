@@ -1,4 +1,4 @@
-// node --test: the route decision, and handoff.sh --dry-run routing with a fake herdr (no Jev call is made:
+// node --test: the route decision, and handoff.sh --dry-run routing with the fake hc (no Jev call is made:
 // the switch is off, the prompt is wt-plan's own, or --role forces it).
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { route } from './jev-route.mjs'
+import { installFakeHc } from '../../wt-shared/scripts/fake-hc.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 test('route: planner at or above 0.75, worker below or with no answer', () => {
@@ -20,22 +21,15 @@ test('route: planner at or above 0.75, worker below or with no answer', () => {
 // which still hits model-route.mjs's real network Jev call (shadow mode logs but doesn't apply); with no
 // WT_JEV_LOG override that 401 landed in the real ~/.local/share/wt-dashboard/jev-calls.jsonl production log.
 const jevLog = join(mkdtempSync(join(tmpdir(), 'jev-route-test-')), 'jev.jsonl')
-const bin = mkdtempSync(join(tmpdir(), 'fake-herdr-'))
-writeFileSync(join(bin, 'herdr'), `#!/bin/sh
-case "$1 $2" in
-  "workspace list") echo '{"result":{"workspaces":[]}}' ;;
-  "agent list") echo '{"result":{"agents":[]}}' ;;
-  *) echo '{}' ;;
-esac
-`)
-chmodSync(join(bin, 'herdr'), 0o755)
+// WP-378: the shared fake hc (wt-shared/scripts/fake-hc) answers terminal.list with no terminals: no pool, so a spawn is always dry-run.
+const fake = installFakeHc({ cases: { connect: { stdout: '{"id":1,"jsonrpc":"2.0","result":{"terminals":[]}}\n' } } })
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'route-repo-')))
 execFileSync('git', ['init', '-q', repo])
 const wt = join(repo, 'sub'); execFileSync('mkdir', ['-p', wt])
 // WP-215: a temp HOME too — handoff.sh's model-route pick logs its decision under HOME (~/.claude/wt-judge-log.jsonl).
 const home = mkdtempSync(join(tmpdir(), 'jev-route-home-'))
 const run = (args, prompt, env = {}) => execFileSync('sh', [join(here, 'handoff.sh'), '--dry-run', ...args, wt], {
-  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, HERDR_PANE_ID: '', WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
+  input: prompt, encoding: 'utf8', env: { ...process.env, PATH: fake.env.PATH, HOME: home, HC_TERMINAL_ID: '', FAKE_HC_CASES: fake.env.FAKE_HC_CASES, FAKE_HC_LOG: fake.env.FAKE_HC_LOG, FAKE_HC_STATE: fake.env.FAKE_HC_STATE, WT_AGENTS_MCP: 'full', WT_JEV_LOG: jevLog, ...env } })
 
 test('handoff --dry-run: switch off → a worker in cwd, no route line (unchanged behaviour)', () => {
   const out = run([], 'build the thing', { WT_JEV_ROUTE: 'off' })
@@ -53,3 +47,4 @@ test("handoff --dry-run: wt-plan's own prompt is never re-routed", () => {
 test('handoff --dry-run: --role planner targets a planner in the main checkout', () => {
   assert.match(run(['--role', 'planner'], 'anything'), new RegExp(`^dry-run: would spawn a planner in ${repo}$`, 'm'))
 })
+test.after(() => fake.cleanup())
