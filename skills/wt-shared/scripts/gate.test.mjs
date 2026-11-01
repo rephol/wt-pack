@@ -304,12 +304,12 @@ test('WP-378 F8: a flag word of 32 KB (sh -ccc…) classifies fast', () => {
   }
 })
 
-// WP-378 F8: fixtures/gate-cases.json is the one list of commands the gate asks about. wt-mods' guards.test.ts reads the same file and requires its prefilter (MAYBE_GATED)
+// WP-378 F8: fixtures/gate-cases.mjs is the one list of commands the gate asks about. wt-mods' guards.test.ts reads the same file and requires its prefilter (MAYBE_GATED)
 // to let every one through to wt-gate; a new gate class with no prefilter path fails there. Add a case here with the class, never only inline above.
 import { readFileSync } from 'node:fs'
-const CASES = JSON.parse(readFileSync(new URL('./fixtures/gate-cases.json', import.meta.url), 'utf8'))
+import CASES from './fixtures/gate-cases.mjs'
 
-test('WP-378 F8: every command in fixtures/gate-cases.json classifies as its rule', () => {
+test('WP-378 F8: every command in fixtures/gate-cases.mjs classifies as its rule', () => {
   assert.ok(CASES.length > 150)
   for (const { cmd, rule } of CASES) assert.equal(classify(cmd, ctx)?.rule, rule, cmd)
 })

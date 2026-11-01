@@ -1,4 +1,6 @@
-[
+// WP-378 F8: every command the gate (gate.mjs classify) asks about, with its rule id. ONE list for two tests: gate.test.mjs holds the policy to it, and wt-mods' guards.test.ts requires
+// the MAYBE_GATED prefilter to pass each one to wt-gate. A .mjs on purpose: the mods runtime imports code files only. Add a case here when you add a gate class.
+export default [
   {"cmd":"git push","rule":"push"},
   {"cmd":"git push origin main","rule":"push"},
   {"cmd":"cd x && git -C /r push -u origin b","rule":"push"},
