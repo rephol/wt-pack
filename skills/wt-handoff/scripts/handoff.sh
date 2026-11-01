@@ -198,6 +198,10 @@ pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
 [ -z "$request_id" ] || [ "$dry" -eq 1 ] || ! node "$RECEIPTS" get "$request_id" 2>/dev/null || exit 0
 
 command -v hc >/dev/null || { echo "hc not on PATH" >&2; exit 1; }
+# WP-378 F5: every hc call (even `hc connect`/`get`) STARTS a stopped core, and nothing in the pack may. Each path that talks to hc asks first
+# (hc.mjs core-up connects to the core's socket, never to hc) and stops before anything is recorded or sent. A headless target needs no hc.
+core_is_up() { node "$SELFDIR/../../wt-shared/scripts/hc.mjs" core-up >/dev/null 2>&1; }
+core_up() { core_is_up || { echo "hc core is down (hc server start); not starting it from here: nothing was recorded or sent, retry when it is up" >&2; exit 1; }; }
 
 # Who is sending: $HC_TERMINAL_ID (t7). Outside an hc terminal there is no sender and no sender-side labels.
 # The live terminals as one JSON array [{id,name,cwd,status,kind,prog,labels}], from ONE terminal.list over `hc connect` (hc ls --json
@@ -312,7 +316,7 @@ if [ -n "$reply" ]; then
   fi
   [ -n "$text" ] || { echo "--reply: no text" >&2; exit 2; }
   me=${HC_TERMINAL_ID:-}
-  nm=$( [ -n "$me" ] && name_of "$me" || true)
+  nm=$( [ -n "$me" ] && core_is_up && name_of "$me" || true) # a headless reply target needs no hc: no core, no name lookup
   msg=$(printf '%s' "$text" | node "$WTMSG" --kind reply --from "${from_arg:-${nm:-${me:-wt-handoff}}}") || { echo "wt-message wrap failed" >&2; exit 1; }
   [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
   if hl=$(hl_resolve "$reply"); then # WP-317: the sender is a headless run
@@ -323,6 +327,7 @@ if [ -n "$reply" ]; then
     echo "replied ${hl%% *} (headless ${hl#* })"
     exit 0
   fi
+  core_up
   # WP-378 D25: a blocked target (a dialog is open) takes nothing; refuse BEFORE any record or post, as hand_to does (D16), or a `delivered`
   # reply row is left that hc send then refused (exit 9) and never typed.
   if [ "$(row_of "$reply" | jq -r '.status // empty' 2>/dev/null)" = blocked ]; then
@@ -352,6 +357,7 @@ fi
 # idle; a goal that doesn't let go (or an agent already blocked past escape) falls back to /clear.
 if [ -n "$cancel" ]; then
   why=${1:-}
+  core_up
   pane=$(pane_of "$cancel")
   [ -n "$pane" ] || pane=$(pane_of_name "$cancel")
   [ -n "$pane" ] || { echo "--cancel: no such terminal or agent: $cancel" >&2; exit 1; }
@@ -444,7 +450,7 @@ candidates() {
       done
 }
 
-[ "$mode" = list ] && { candidates; exit 0; }
+[ "$mode" = list ] && { core_up; candidates; exit 0; }
 
 # MCP picks from Jev (before the footer is added: it judges the task, not the routing).
 jev=
@@ -599,9 +605,11 @@ queue_pulled() { # <pane>
 }
 auth_header() { [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HC_TERMINAL_ID:-}"; }
 
+# every path below reads or writes hc, except a headless --pane target
+if [ "$mode" = pane ] && hl_resolve "$pane_arg" >/dev/null 2>&1; then :; else core_up; fi
 task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
 from_pane=${HC_TERMINAL_ID:-}
-from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
+from_name=$( [ -n "$from_pane" ] && core_is_up && name_of "$from_pane" || true)
 # WP-354: a worker's work happens in a worktree under <main>/.claude/worktrees, never a ../<repo>-* sibling or /tmp.
 # Only for the RESOLVED worker role (set above, after routing), and not when the prompt already names such a worktree.
 WTSH="$(cd "$SELFDIR/../../wt-plan/scripts" 2>/dev/null && pwd -P)/worktree.sh" # absolute: a handoff into another repo has no skills/ of its own
@@ -773,7 +781,7 @@ dry() {  # <what would happen>
 # pinned to that tier even against --model/--effort (WT_LEAD_AGENT overrides the agent name).
 [ "$role" != lead ] || { route_tier=opus; route_effort=low; }
 
-if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id>
+if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id> (no hc: the core may be down)
   [ "$dry" -eq 1 ] && dry "would hand to headless ${hl#* } (${hl%% *})"
   if [ -n "$deliver_token" ]; then hl_post "${hl%% *}" "$send" || exit 1; record_message "${hl%% *}" "$send" delivered # WP-330: as for --reply
   else hl_post "${hl%% *}" "$raw_prompt" || exit 1; fi

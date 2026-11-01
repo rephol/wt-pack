@@ -5,6 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, realpathSync, statSync, rmSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -52,6 +53,13 @@ const T = (id, name, o = {}) => ({ address: id, name, cwd: o.cwd ?? repo, state:
   argv: [o.prog ?? 'claude'], foreground: { argv: [o.prog ?? 'claude'] } })
 const setTerms = (...list) => writeFileSync(terms, JSON.stringify(list))
 const callsLog = () => readFileSync(log, 'utf8')
+// WP-378 F5: handoff.sh asks `hc.mjs core-up` before any hc call (nothing in the pack starts a stopped core). HOME is tmp in every env here, so the
+// default session's core.lock under tmp/.local/state points at a listening socket; the "core down" test names a session that has none.
+const coreDir = mkdtempSync(join('/tmp', 'hw-')), coreSock = join(coreDir, 's')
+mkdirSync(join(tmp, '.local', 'state', 'herdr-core', 'default'), { recursive: true })
+writeFileSync(join(tmp, '.local', 'state', 'herdr-core', 'default', 'core.lock'), coreSock)
+const coreSrv = createServer(() => {}); await new Promise((r) => coreSrv.listen(coreSock, r))
+test.after(() => { coreSrv.close(); rmSync(coreDir, { recursive: true, force: true }) })
 setTerms()
 execFileSync('git', ['-C', repo, 'init', '-q'])
 mkdirSync(join(tmp, '.local', 'share', 'wt-dashboard'), { recursive: true }) // WP-334: HOME = tmp, so the repo's role files need a trust entry here
@@ -824,4 +832,16 @@ test('WP-368: --role lead always spawns a fresh wt-pack:wt-lead on opus/low and 
   assert.match(run(['--role', 'lead', '--no-goal', '--dry-run', repo], '/wt-run WP-9'), /--model opus --effort low --agent/) // route is opus/low
   assert.doesNotMatch(run(['--role', 'worker', '--no-goal', '--dry-run', repo]), /--agent/)
   setTerms()
+})
+
+test('WP-378 F5: core down: reply, cancel, list and a hand-off all stop with "hc core is down" before any hc call or record', () => {
+  setTerms(T('t1', 'demo-worker-01'))
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, HC_SESSION: 'wtt-none', HERDR_DASH_URL: 'http://127.0.0.1:9', WT_READY_TIMEOUT: '0', WT_SUBMIT_SETTLE_MS: '0', WT_HANDOFF_JEV: 'off', HC_TERMINAL_ID: 't5', WT_DELIVER_TOKEN: 'tok' }
+  for (const args of [['--role', 'worker', '--no-goal', repo], ['--role', 'worker', '--no-goal', '--dry-run', repo], ['--pane', 't1', '--no-goal', repo], ['--list', repo], ['--cancel', 't1'], ['--reply', 't1']]) {
+    writeFileSync(log, '')
+    const r = spawnSync(join(here, 'handoff.sh'), args, { input: 'x', encoding: 'utf8', env })
+    assert.equal(r.status, 1, `${args.join(' ')}: ${r.stdout}${r.stderr}`)
+    assert.match(r.stderr, /hc core is down/, args.join(' '))
+    assert.equal(callsLog(), '', `${args.join(' ')} ran hc: ${callsLog()}`)
+  }
 })

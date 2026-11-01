@@ -56,7 +56,9 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   handoff whose card is still open (4 min, once) and the delivery mod reminds at the end of a turn that did not report.
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
   `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
-  sent; print the prompt for a human instead.
+  sent and nothing was recorded. Exit 1 because the target is **blocked** (a dialog is open) or the hc core is down means **retry later**
+  (the same `--request-id` is safe), as the `--reply` bullet says; do not print the prompt for a human. Print it for a human only for
+  the failures a retry cannot fix (bad arguments: exit 2, a full pool: exit 3).
 
 ## Task label and awareness
 
