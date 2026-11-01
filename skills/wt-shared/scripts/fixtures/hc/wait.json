@@ -1,0 +1,66 @@
+{
+  "verb": "wait",
+  "recorded": "hc 0.1.16 2026-11-01",
+  "cases": {
+    "timeout": {
+      "args": [
+        "wait",
+        "--json",
+        "rec-a",
+        "--timeout",
+        "1"
+      ],
+      "exit": 0,
+      "stdout": "{\"children\":[],\"ended\":false,\"exit_code\":null,\"reason\":\"timeout\",\"signal\":null,\"status\":null,\"terminal\":\"t14\",\"turn\":0}\n",
+      "stderr": ""
+    },
+    "exit": {
+      "args": [
+        "wait",
+        "--json",
+        "rec-x",
+        "--timeout",
+        "5"
+      ],
+      "exit": 0,
+      "stdout": "{\"children\":[],\"ended\":true,\"exit_code\":3,\"reason\":\"exit\",\"signal\":null,\"status\":null,\"terminal\":\"t15\",\"turn\":0}\n",
+      "stderr": ""
+    },
+    "blocked": {
+      "args": [
+        "wait",
+        "--json",
+        "s3",
+        "--timeout",
+        "5"
+      ],
+      "exit": 0,
+      "stdout": "{\"children\":[],\"ended\":true,\"exit_code\":null,\"reason\":\"status\",\"signal\":null,\"status\":\"blocked\",\"terminal\":\"t6\",\"turn\":2}\n",
+      "stderr": ""
+    },
+    "status_done": {
+      "args": [
+        "wait",
+        "--json",
+        "s1",
+        "--timeout",
+        "5"
+      ],
+      "exit": 0,
+      "stdout": "{\"children\":[],\"ended\":true,\"exit_code\":null,\"reason\":\"status\",\"signal\":null,\"status\":\"done\",\"terminal\":\"t2\",\"turn\":13}\n",
+      "stderr": ""
+    },
+    "working_timeout": {
+      "args": [
+        "wait",
+        "--json",
+        "s1",
+        "--timeout",
+        "1"
+      ],
+      "exit": 0,
+      "stdout": "{\"children\":[],\"ended\":false,\"exit_code\":null,\"reason\":\"timeout\",\"signal\":null,\"status\":\"working\",\"terminal\":\"t2\",\"turn\":13}\n",
+      "stderr": ""
+    }
+  }
+}

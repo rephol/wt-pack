@@ -1,0 +1,89 @@
+{
+  "verb": "send",
+  "recorded": "hc 0.1.16 2026-11-01",
+  "cases": {
+    "finished": {
+      "args": [
+        "send",
+        "--json",
+        "rec-x",
+        "hi"
+      ],
+      "exit": 11,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"hc read t15\",\"kind\":\"finished\",\"message\":\"t15 has finished\"}}\n"
+    },
+    "not_found": {
+      "args": [
+        "send",
+        "--json",
+        "rec-nope",
+        "hi"
+      ],
+      "exit": 3,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"see `hc ls --all`\",\"kind\":\"not_found\",\"message\":\"no terminal \\\"rec-nope\\\"\"}}\n"
+    },
+    "blocked": {
+      "args": [
+        "send",
+        "--json",
+        "s3",
+        "hello"
+      ],
+      "exit": 9,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"typing would answer its dialog; read its screen first (hc read t6), or --force\",\"kind\":\"blocked\",\"message\":\"t6 is blocked (permission)\"}}\n"
+    },
+    "if_idle_but_done": {
+      "args": [
+        "send",
+        "--json",
+        "--if",
+        "idle",
+        "s1",
+        "x"
+      ],
+      "exit": 10,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"nothing was typed\",\"kind\":\"status_mismatch\",\"message\":\"t2 is done, not idle\"}}\n"
+    },
+    "ok_done": {
+      "args": [
+        "send",
+        "--json",
+        "s1",
+        "Reply with the single word: ok"
+      ],
+      "exit": 0,
+      "stdout": "{\"started\":true,\"status\":\"done\",\"turn\":13}\n",
+      "stderr": ""
+    },
+    "if_idle_but_working": {
+      "args": [
+        "send",
+        "--json",
+        "--if",
+        "idle",
+        "s1",
+        "x"
+      ],
+      "exit": 10,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"nothing was typed\",\"kind\":\"status_mismatch\",\"message\":\"t2 is working, not idle\"}}\n"
+    },
+    "if_idle_shell": {
+      "args": [
+        "send",
+        "--json",
+        "--if",
+        "idle",
+        "k1",
+        "echo SHELLTEST"
+      ],
+      "exit": 10,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"nothing was typed\",\"kind\":\"status_mismatch\",\"message\":\"t13 is silent, not idle\"}}\n"
+    }
+  }
+}
