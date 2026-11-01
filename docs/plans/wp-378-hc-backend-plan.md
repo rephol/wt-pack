@@ -501,3 +501,41 @@ security/data/scope/adversarial/reliability/performance), an independent validat
   a wrong cursor read would 409 every free-text answer). Keep the capture as a fixture under `skills/wt-dashboard/test-fixtures/` in a follow-up commit.
 - **Open user question (docs):** `hc` has no public install URL or command known to the pack, so `docs/hc-cutover.md` step 2, the README and setup's hint say
   "install hc" without saying how. Answer = the install source (URL / brew tap / internal build) or "unpublished, say so"; it changes only those three texts.
+- **F8-F10 (gate rounds).** F8 found the mod prefilter (`guards.ts` `MAYBE_GATED`) never let an hc command reach `wt-gate`, so every hc class was dead in
+  production; fixed with a shared positive fixture (`wt-shared/scripts/fixtures/gate-cases.mjs`) that both `gate.test.mjs` and `guards.test.ts` must pass. F9/F10
+  ended a run of splitter regressions structurally: `classify` is the union of a quote-aware reading (A) and the quote-blind 3da7fc3 reading (B), and the
+  prefilter is a plain word test on the unquoted text (no splitting), so it cannot drift from `classify`; differential fuzz (~2.9M commands) finds 0 misses.
+  Commits: F8 1456266 9d861f3 661d1ef 9e51fdc a0658f0; F9 50e1176 355b2ff 3cde6ec; F10 d82553f 78a6980 cf566f6.
+
+## Accepted residuals (gate B)
+Orchestrator instruction: F10 is the last fix round; everything below is accepted for this ticket (follow-up tickets if one bites).
+Gate (`gate.mjs` is a pattern list, loose by design; a residual here is a command that is not gated, or a harmless one that asks):
+- Indirection is unread: `$(…)`, pipe-to-shell (`echo … | sh`, `bash <<< …`), a variable holding the command (`$X kill`, `sh -c "$VAR"`), `env -S '…'`,
+  split words (`gi''t`, `$'git'`, `${x:-push}`), `find -exec hc …`, `python/node` subprocesses calling hc.
+- Stray-quote blind spot: an unclosed quote on an earlier line (`# it's`) followed by a construct only reading A understands (a quoted/escaped separator or a
+  continuation, e.g. `rm "a&b" /etc/x`) is read by neither A (swallowed) nor B (word cut). A third per-line-reset reading would close it.
+- Union false positives ask (never deny): a quoted message containing a separator and a gated command (`git commit -m "x; git push later"`,
+  `"docs: A & git merge notes"`), and the `git -C "a;b" push` trade-off (B cuts inside the quotes, A reads it whole; the union asks whenever either reads a class).
+- A quoted URL containing `;`/`|` before a `$KEY` header can skip `secret-var` in reading B (A still reads it unless the stray-quote case applies).
+- Cost: the prefilter spawns `wt-gate` (~60 ms) for any command mentioning a tool word, including commit messages.
+- Size: over 32 KB a command mentioning a tool word asks (`long-command`); over 128 KB the mod denies it on every turn, the user's own included (split it).
+- The hook fails open on a `wt-gate` spawn error or its 8 s timeout (by design: a broken gate must not wedge every agent).
+- A terminal's own `role` label is writable outside the gate (scripts, the user); the gate only asks for an agent's direct `hc label … role=|persona=|wt.pool=`.
+  Pre-existing under herdr pane tokens; `/verify` senderRole still reads the live label.
+Dashboard / agents / handoff:
+- Picker: the forced free-text send has a read-then-send window (~100-500 ms); a multi-select 409 after toggles leaves the toggles on screen. The cursor-on-Other
+  check is proven only on a hand-edited screen (no recorded capture): QA step 2 capture item above; a wrong read fails safe (409) but would block free text.
+- `terminal.run` timeout can leave an orphan terminal; `hcList({all:true})` per 3 s tick grows with kept finished terminals; a kept persona agent respawns as its
+  base role; the spawn-time pane-key sweep can race a concurrent spawn; `createShell` terminals get the core's env unscrubbed; a core started from a shell holding
+  user secrets (`TYPESAFE_API_KEY`, `LINEAR_API_KEY`, …) passes them to agents (the pack never starts the core; same as herdr).
+- `runHandoff` empties `HC_SCOPE`/`HC_TERMINAL_SOCKET` rather than unsetting them, and `hc kill` on a keep terminal may leave a shell: QA steps 2 and 4 verify.
+- `confirmSubmitted` can report "not submitted" for a very fast turn; shell `tag()`/`meta()` cut label values at 80 bytes (hc.mjs at 80 chars).
+- `require_pack_agent` refuses a kept shell at an agent's address while the dashboard is down (fail-safe); `wt-deliver` does not recognise a holder at a path
+  with spaces; `dispatch.mjs` still counts a `blocked` assignee as delivered (the handoff pre-check makes it benign).
+- Records keyed by old herdr ids go stale silently (D32; `docs/hc-cutover.md`).
+Tests:
+- `nocore.guard` covers spawns of `server.mjs` only (agents.sh/handoff.sh tests rely on their fakes and `HERDR_DASH_URL` pinning); handoff.test's 20 ms
+  `afterEach` yield is timing-based; the listAgents Jev/STALL gates and the web `isResting` sites are covered through their helpers only; the `wt-deliver`
+  bash 5 path cannot run on this host; the verify route's exited `me` filter is unreachable defence in depth; `hcagents.test` has a self-comparing fixture check
+  and `hc.test` an existence-only recordings check; the recorded herdr-app `one_space` fixture is unused and `space_close` holds a placeholder; the `hc-launch`
+  test's DENY list and the server/web resting predicates are hand-kept twins.
