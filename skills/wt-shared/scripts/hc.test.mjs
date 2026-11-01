@@ -356,3 +356,17 @@ describe('real hc (WT_REAL_HC=1, isolated session)', { skip: real ? false : 'set
     }
   })
 })
+
+test('WP-378 D20: WT_HC_TIMEOUT_SCALE (integer 1-10) multiplies every budget; anything else is ignored; hc() applies it', async () => {
+  const at = (v) => hc.scaled(hc.TIMEOUT.list, v === undefined ? {} : { WT_HC_TIMEOUT_SCALE: v })
+  assert.equal(at(undefined), 2000)
+  assert.equal(at('5'), 10000)
+  assert.equal(hc.scaled(hc.TIMEOUT.send, { WT_HC_TIMEOUT_SCALE: '10' }), 80000)
+  for (const bad of ['0', 'abc', '11', '', '2.5', '-3']) assert.equal(at(bad), 2000, bad)
+  // hc() itself: a hung binary reports the scaled budget
+  const dir = mkdtempSync(join(tmpdir(), 'hc-scale-'))
+  try {
+    writeFileSync(join(dir, 'hc'), '#!/bin/sh\nexec sleep 5\n', { mode: 0o755 })
+    await assert.rejects(hc.hc(['connect'], { timeoutMs: 100, env: { PATH: process.env.PATH, HC_BIN: join(dir, 'hc'), WT_HC_TIMEOUT_SCALE: '2' } }), /timed out after 200 ms/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})

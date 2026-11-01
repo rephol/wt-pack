@@ -10,7 +10,7 @@ const SHIM_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fake-hc')
 export function installFakeHc({ cases = {}, env: extra = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'fake-hc-'))
   const log = join(dir, 'calls.jsonl')
-  const env = { ...process.env, PATH: `${SHIM_DIR}:${process.env.PATH}`, HC_BIN: join(SHIM_DIR, 'hc'), FAKE_HC_CASES: JSON.stringify(cases), FAKE_HC_LOG: log, FAKE_HC_STATE: dir, ...extra }
+  const env = { ...process.env, PATH: `${SHIM_DIR}:${process.env.PATH}`, HC_BIN: join(SHIM_DIR, 'hc'), FAKE_HC_CASES: JSON.stringify(cases), FAKE_HC_LOG: log, FAKE_HC_STATE: dir, WT_HC_TIMEOUT_SCALE: '5', ...extra }
   // children of a test must not act as an agent terminal (CLAUDE.md: strip HC_* from the child env)
   for (const k of Object.keys(env)) if (/^(HC_(TERMINAL_ID|SCOPE|TERMINAL_SOCKET|SESSION)|HERDR_)/.test(k) && !(k in extra)) delete env[k]
   env.HC_BIN = join(SHIM_DIR, 'hc')

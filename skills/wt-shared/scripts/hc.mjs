@@ -23,6 +23,13 @@ export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/
 export const KEY_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 // Per-verb budgets (ms). `wait` has none: the caller's deadline decides.
 export const TIMEOUT = { list: 2000, get: 2000, label: 2000, send: 8000, keys: 2000, read: 5000, kill: 5000, rm: 5000, interrupt: 12_000, run: 15_000, server: 3000 }
+// WP-378 D20: tests run the fake hc (a node script) under load, where a cold start passes 2 s. WT_HC_TIMEOUT_SCALE (integer 1-10; unset
+// or anything else = 1) multiplies every budget; read at call time, from the call's env when it has one. Production sets nothing.
+export function timeoutScale(env) {
+  const v = (env ?? process.env).WT_HC_TIMEOUT_SCALE
+  return typeof v === 'string' && /^([1-9]|10)$/.test(v.trim()) ? Number(v) : 1
+}
+export const scaled = (ms, env) => ms * timeoutScale(env)
 const EXIT_KIND = { 3: 'not_found', 6: 'invalid_params', 7: 'needs_target', 9: 'blocked', 10: 'status_mismatch', 11: 'finished', 124: 'timeout' }
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'nu', 'dash', 'ksh', 'tcsh', 'csh', 'login'])
 
@@ -50,6 +57,7 @@ function parseError(stderr, stdout, exit) {
 
 // hc(args, {timeoutMs, input, text, env}) -> parsed JSON (default) or raw text. Throws HcError.
 export function hc(args, { timeoutMs = TIMEOUT.get, input, text = false, env } = {}) {
+  timeoutMs = scaled(timeoutMs, env)
   return new Promise((resolve, reject) => {
     const child = execFile(bin(env), args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: env ?? process.env }, (err, stdout, stderr) => {
       if (!err) {
