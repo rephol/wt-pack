@@ -2,7 +2,7 @@
 // shell parsing on purpose (like wt-memory's pkill-guard.mjs, which stays): it stops accidents, not obfuscation.
 import type { Register } from 'claude-code'
 
-const SENDS = /handoff\.sh|wt-room|\broom\s+post|\bherdr\b|wt-ticket|wt-ask/ // commands whose strings reach another agent or a card
+const SENDS = /handoff\.sh|wt-room|\broom\s+post|\bhc\b|herdr-app\s+(?:-\S+\s+)*do\b|wt-ticket|wt-ask/ // commands whose strings reach another agent or a card
 const words = (seg: string) => [...seg.matchAll(/"[^"]*"|'[^']*'|\S+/g)].map((m) => m[0])
 const clip = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > 120 ? t.slice(0, 119) + '…' : t }
 const TAKES_VALUE = new Set('FGgPstUucJjMNd'.split('')) // pkill/pgrep options that consume the next word
