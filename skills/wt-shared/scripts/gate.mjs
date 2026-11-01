@@ -12,7 +12,7 @@ const inside = (p, root) => p === root || p.startsWith(root.endsWith(sep) ? root
 const SECRET_VAR = /\$\{?[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]*\}?/
 
 // WP-361: every hit names its rule id (`rule`) and the segment that matched (`segment`: whitespace-collapsed, ≤120 chars), so a deny says
-// what to split out of a compound command. Rule ids: push, merge, branch-delete, worktree-remove, gh-pr, rm-outside, upload, secret-var, raw-socket; WP-378 hc: hc-forged-send, hc-core, hc-kill, hc-keys (and upload for hc put / file write / --on).
+// what to split out of a compound command. Rule ids: push, merge, branch-delete, worktree-remove, gh-pr, rm-outside, upload, secret-var, raw-socket; WP-378 hc: hc-forged-send, hc-core, hc-kill, hc-keys, hc-label (and upload for hc put / file write / --on).
 export const SEGMENT_MAX = 120
 const clip = (seg) => { const t = seg.replace(/\s+/g, ' ').trim(); return t.length > SEGMENT_MAX ? t.slice(0, SEGMENT_MAX - 1) + '…' : t }
 
@@ -66,7 +66,16 @@ const blankSingle = (seg) => {
 const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
 // Wrappers that run their next word as a command, and the flags of each that take a VALUE as the next word (`-uNAME` attached needs none).
 const WRAP_VAL = { env: ['-u', '-C', '-S'], sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], command: [], nohup: [], time: ['-f', '-o'], exec: ['-a'],
-  timeout: ['-s', '-k', '--signal', '--kill-after'], nice: ['-n', '--adjustment'], xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '-J'] }
+  timeout: ['-s', '-k', '--signal', '--kill-after'], nice: ['-n', '--adjustment'], xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '-J'], eval: [] }
+// Shell keywords that precede a command word (`for …; do hc kill $t; done`, `if …; then hc …`, `! hc …`): skipped like a wrapper without flags.
+const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!'])
+// `sh|bash|zsh|dash|ksh|csh -c '<cmd>'` and `eval '<cmd>'` in command position: the quoted string is itself a command line (classified recursively).
+const SHELL_C = /(?:^|[;&|\n(`{]|\$\()[^;&|\n'"]*?\b(?:ba|z|da|k|c)?sh\b(?:\s+-[A-Za-z-]+)*?\s+-[A-Za-z]*c[A-Za-z]*\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+const EVAL_Q = /(?:^|[;&|\n(`{]|\$\()[^;&|\n'"]*?\beval\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+// A spoofed sender: HC_TERMINAL_ID set to any non-empty value (the empty/unset forms are the forged-untagged case above).
+const ID_SPOOF = /\bHC_TERMINAL_ID=(?!(?:""|'')?(?:[\s;&|)]|$))\S/
+// Labels the server reads an identity from (senderRole on /verify is the live `role` label; the pool/persona pick follows): setting or clearing them is a role change.
+const IDENT_LABEL = /^(?:role|persona|wt\.pool)=/
 const DURATION = /^\d+(\.\d+)?[smhd]?$/
 const lead = (t) => t.replace(/^(?:\$\(|[({`])+/, '') // `(hc`, `{`, `$(hc`: a group or substitution opening before the command
 // hc's own global flags that take a value before the verb: `--session x`, `-s x` (`--session=x` needs none).
@@ -75,8 +84,9 @@ function hcCall(w) {
   const pre = []
   let k = 0
   while (k < w.length) {
-    const t = lead(w[k])
+    const t = lead(w[k]).replace(/^\\(?=\w)/, '') // `\hc` is hc
     if (t === '') { k++; continue }
+    if (KEYWORDS.has(t)) { k++; continue }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) { pre.push(t); k++; continue }
     const base = t.split('/').pop()
     if (base === 'hc') {
@@ -87,7 +97,7 @@ function hcCall(w) {
       const nonFlag = rest.slice(a).filter((x) => !x.startsWith('-'))
       return { verb: nonFlag[0], sub: nonFlag[1], args: [...kept, ...rest.slice(a)], wrap: pre }
     }
-    if (!(base in WRAP_VAL)) return null
+    if (!Object.hasOwn(WRAP_VAL, base)) return null
     pre.push(base); k++
     const takes = WRAP_VAL[base]
     while (k < w.length && w[k].startsWith('-') && w[k] !== '-') {
@@ -103,23 +113,30 @@ function hcCall(w) {
 // → null | { action, rule, segment }. `ctx`: { cwd, root } — the session's cwd and its worktree/checkout root (for the rm-outside test).
 export function classify(cmd, ctx = {}) {
   const cwd = ctx.cwd ?? process.cwd(), root = ctx.root ?? cwd
+  for (const re of [SHELL_C, EVAL_Q]) for (const m of String(cmd).matchAll(re)) {
+    const inner = m[1] ?? m[2].replace(/\\(["$`\\])/g, '$1')
+    const r = inner.length < String(cmd).length ? classify(inner, ctx) : null
+    if (r) return r
+  }
   for (const seg of String(cmd).split(/&&|\|\||[;\n|]/)) {
     const hit = (action, rule) => ({ action, rule, segment: clip(seg) })
-    const bare = seg.replace(/"[^"]*"|'[^']*'/g, '""') // words inside a message are not subcommands
+    const bare = seg.replace(/"[^"]*"|'[^']*'/g, (m) => (/^(["'])[\w./~=-]+\1$/.test(m) ? m.slice(1, -1) : '""')) // words inside a message are not subcommands
     const w = words(bare)
     // strip leading VAR=val and env/sudo/command wrappers
     let i = 0
-    while (i < w.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i]) || ['env', 'sudo', 'command', 'nohup', 'time'].includes(w[i]))) i++
+    while (i < w.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i]) || ['env', 'sudo', 'command', 'nohup', 'time'].includes(w[i]) || KEYWORDS.has(w[i]))) i++
     const [c, ...rest] = w.slice(i)
     if (!c) continue
     const hc = hcCall(w)
     if (hc) {
       const { verb, sub, args } = hc
       const cleared = hc.wrap.includes('-i') || ID_UNSET.test(String(cmd))
-      if ((verb === 'send' || verb === 'keys') && cleared) return hit('send into another terminal as an untagged (forged) message', 'hc-forged-send')
+      const spoof = (verb === 'send' || verb === 'keys') && ID_SPOOF.test(String(cmd))
+      if ((verb === 'send' || verb === 'keys') && (cleared || spoof)) return hit('send into another terminal as an untagged (forged) message', 'hc-forged-send')
       if (verb === 'server' && ['stop', 'restart'].includes(sub) || verb === 'update') return hit('stop, restart or update the hc core', 'hc-core')
       if (verb === 'kill' || verb === 'rm') return hit('end or remove another terminal', 'hc-kill')
-      if (verb === 'keys' || (verb === 'send' && args.includes('--force'))) return hit('press keys in another terminal (answer its dialog)', 'hc-keys')
+      if (verb === 'label' && args.some((a) => IDENT_LABEL.test(a))) return hit("change another terminal's role, persona or pool label", 'hc-label')
+      if (verb === 'keys' || verb === 'interrupt' || (verb === 'send' && args.includes('--force'))) return hit('press keys in another terminal (answer its dialog)', 'hc-keys')
       if (verb === 'put' || (verb === 'file' && sub === 'write') || args.some((a) => a === '--on' || a.startsWith('--on='))) return hit('send files or secrets off the machine', 'upload')
       continue
     }

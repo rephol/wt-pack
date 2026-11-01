@@ -116,7 +116,6 @@ test('WP-378: a send/keys with HC_TERMINAL_ID unset or emptied is a forged-untag
   assert.equal(act('env -u HC_TERMINAL_ID hc send t7 hi'), 'send into another terminal as an untagged (forged) message')
   // not forged: the id is kept, set to a value, or the call is not a send; other unsets are fine
   assert.equal(classify('hc send t7 hi', ctx), null)
-  assert.equal(classify('HC_TERMINAL_ID=t3 hc send t7 hi', ctx), null)
   assert.equal(classify('env -u HC_SESSION hc ls', ctx), null)
   assert.equal(classify('env -u HC_TERMINAL_ID hc get t7', ctx), null)
   assert.equal(classify('env -u HC_TERMINAL_ID ls', ctx), null)
@@ -136,4 +135,45 @@ test('WP-378 F5: hc is found behind wrappers (timeout, nice, exec, command, nohu
   // ordinary calls through the same wrappers still pass
   for (const c of ['timeout 5 hc ls', 'nice hc get t7', '(hc read t7)', 'hc --session x ls', 'hc -s x send t7 hi', 'xargs -n 1 hc get', 'exec hc server status', 'timeout 5 ls kill', 'nohup echo hc kill'])
     assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378 F6: prototype-key wrapper names do not throw or match (Object.hasOwn)', () => {
+  for (const c of ['constructor -x hc kill t7', 'toString hc kill t7', '__proto__ hc kill t7', 'hasOwnProperty -x hc kill t7']) assert.doesNotThrow(() => classify(c, ctx), c)
+  assert.equal(classify('constructor -x hc kill t7', ctx), null)
+})
+
+test('WP-378 F6: hc after shell keywords, in loops/ifs, in sh -c / eval strings, quoted, escaped and by absolute path', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  const kill = ['for t in t1 t2; do hc kill $t; done', 'while read t; do hc kill $t; done', 'if true; then hc kill t3; fi', 'if false; then echo; else hc kill t3; fi', 'if a; then b; elif c; then hc rm t3; fi',
+    '! hc kill t3', 'time hc kill t3', 'do hc kill t3', 'then hc kill t3', 'sh -c "hc kill t3"', "sh -c 'hc kill t3'", 'bash -c "echo; hc kill t3"', "zsh -c 'cd /x && hc kill t3'", "bash -lc 'hc kill t3'",
+    'eval hc kill t3', 'eval "hc kill t3"', "eval 'hc rm t3'", '\\hc kill t3', '"hc" kill t3', "'hc' kill t3", '/opt/homebrew/bin/hc kill t3', 'sudo sh -c "hc kill t3"', 'env FOO=1 bash -c "hc kill t3"']
+  for (const c of kill) assert.equal(rule(c), 'hc-kill', c)
+  assert.equal(rule("sh -c 'hc server stop'"), 'hc-core'); assert.equal(rule('then hc update'), 'hc-core'); assert.equal(rule('for t in a; do hc keys $t enter; done'), 'hc-keys')
+  assert.equal(rule('while :; do hc put t3 f; done'), 'upload')
+  assert.equal(rule('for t in a; do git push; done'), 'push', 'keywords are skipped before other commands too')
+  for (const c of ['echo hc', 'grep hc file', 'git commit -m "hc kill"', 'for t in a; do hc ls; done', "sh -c 'echo hc kill'", 'bash -c "hc ls"', 'eval echo hc kill t3', 'echo "hc" kill', 'ls /opt/homebrew/bin/hc', 'do echo hc kill', 'sh script.sh hc kill'])
+    assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378 F6: HC_TERMINAL_ID set to a value for a send/keys spoofs another sender (classified like the forged-untagged send)', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  for (const c of ['HC_TERMINAL_ID=t3 hc send t7 hi', 'HC_TERMINAL_ID=t3 hc keys t7 enter', 'env HC_TERMINAL_ID=t3 hc send t7 hi', 'HC_TERMINAL_ID="t3" hc send t7 hi', 'export HC_TERMINAL_ID=t3; hc send t7 hi',
+    'HC_TERMINAL_ID=orch timeout 5 hc send t7 hi', 'HC_TERMINAL_ID=$X hc send t7 hi']) assert.equal(rule(c), 'hc-forged-send', c)
+  for (const c of ['HC_TERMINAL_ID=t3 hc get t7', 'HC_TERMINAL_ID=t3 hc ls', 'HC_TERMINAL_ID=t3 ls', 'echo HC_TERMINAL_ID=t3']) assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378 F6: hc label of role/persona/wt.pool asks (senderRole is read from the live role label); other keys do not', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  for (const c of ['hc label t3 role=orchestrator', 'hc label t3 role=', 'hc label self persona=qa', 'hc label t3 wt.pool=worker', 'hc label t3 task=x role=orchestrator', 'hc --json label t3 role=worker', 'hc label t3 "role=orchestrator"',
+    'timeout 5 hc label t3 persona=', 'for t in a; do hc label $t role=orchestrator; done', "sh -c 'hc label t3 role=orchestrator'"]) assert.equal(rule(c), 'hc-label', c)
+  assert.equal(classify('hc label t3 role=orchestrator', ctx).action, 'change another terminal\'s role, persona or pool label')
+  for (const c of ['hc label t3 task=', 'hc label t3 task=WP-1', 'hc label t3 a=b', 'hc label t3 wt.task=x', 'hc label t3 myrole=x', 'hc label t3 pane_role=x', 'hc get t3 role=x']) assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378 F6: hc interrupt is the same class as hc keys', () => {
+  assert.equal(classify('hc interrupt t7', ctx)?.rule, 'hc-keys'); assert.equal(classify('timeout 5 hc interrupt t7', ctx)?.rule, 'hc-keys')
+})
+
+test('WP-378 F6: sudo value flags are skipped (sudo -u x hc kill t3); emptying WRAP_VAL.sudo would lose it', () => {
+  for (const c of ['sudo -u x hc kill t3', 'sudo -g staff hc kill t3', 'sudo -u x -g y hc rm t3', 'sudo -ux hc kill t3', 'sudo -u root env FOO=1 hc kill t3']) assert.equal(classify(c, ctx)?.rule, 'hc-kill', c)
 })
