@@ -70,7 +70,7 @@ export async function hcStub({ root, terminals = [], sessions = {}, core = { id:
   const api = {
     dir,
     // env for the spawned server: the stub first on PATH; the real core's session/state never reached
-    env: { PATH: `${bin}:${process.env.PATH}`, HC_BIN: join(bin, 'hc'), FAKE_HC_DIR: dir, XDG_STATE_HOME: state, HC_SESSION: 'default', HC_TERMINAL_ID: '', HC_SCOPE: '', HC_TERMINAL_SOCKET: '' },
+    env: { PATH: `${bin}:${process.env.PATH}`, HC_BIN: join(bin, 'hc'), FAKE_HC_DIR: dir, XDG_STATE_HOME: state, HC_SESSION: 'default', WT_HC_TIMEOUT_SCALE: '5', HC_TERMINAL_ID: '', HC_SCOPE: '', HC_TERMINAL_SOCKET: '' },
     set: (t) => writeFileSync(join(dir, 'terminals.json'), JSON.stringify(t)),
     rows: () => JSON.parse(readFileSync(join(dir, 'terminals.json'), 'utf8')),
     screen: (t, text) => writeFileSync(join(dir, 'screens', `${t}.txt`), text),
