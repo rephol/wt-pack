@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import type { SkillsDir } from '../../wt-mods/hooks/commands'
 
-// WP-206: in a wt-pack herdr agent pane, answer AskUserQuestion through wt-dashboard (wt-ask posts the chip and
+// WP-206: in a wt-pack hc agent terminal, answer AskUserQuestion through wt-dashboard (wt-ask posts the chip and
 // Inbox card, --wait blocks for the answer) and return it as the tool's result. Anything off the happy path
 // (no pane, dashboard down, a text/number question, a wt-ask error) calls next(e): the native dialog.
 const SLICE_S = 300 // one --wait call; $.process.run caps a command at ten minutes

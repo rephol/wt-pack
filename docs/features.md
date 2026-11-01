@@ -11,10 +11,10 @@ Routines · Terminals**, then **Inbox**, **Settings** and the server health dot 
 
 - Tiles: **Needs you** (opens the Inbox), **Stalled**, **In review** — counting your own tasks.
 - Rows: agents per project (working / idle / blocked), **Today** across all projects (PRs opened, merged,
-  reached main, board cards done), **Machine** (RAM and memory pressure, worker slots), **Health** (herdr,
-  git, gh, Linear, machines, Jev errors in the last 24h), the 3 most recent rooms, and Usage.
+  reached main, board cards done), **Machine** (RAM and memory pressure, worker slots), **Health** (hc,
+  git, gh, Linear, Jev errors in the last 24h), the 3 most recent rooms, and Usage.
 - Header: **New agent** and **Refresh**.
-- A source that fails (herdr not running, the repo not a git checkout) shows a warning banner with the fix
+- A source that fails (the hc core not running, the repo not a git checkout) shows a warning banner with the fix
   and leaves its cards empty; the rest of the page still loads (also on Tasks and Agents).
 - **Live updates** (WP-253): the board, the inbox and the rooms list refresh from one change stream, `GET /api/changes` (SSE),
   instead of fast polling. An event says what changed (`tickets` with its project, `inbox`, `rooms` with a slug, or the list
@@ -35,16 +35,16 @@ A queue of work across PRs, agents and the local board, with a **Mine / Everyone
   behind-base badges), Nudge, Reassign (asks to confirm), Plan it, Finish.
 - A local board card becomes a task once it is Ready (shown as Up next) or has live work; it links to
   `#board/<ID>`.
-- An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)).
+- An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)). Under hc an agent rests at `done` after a turn, so a `done` agent counts as idle everywhere: the idle tiles and machine counts, the needs-you rule and this stall rule.
 - Skills: wt-plan, wt-work, wt-babysit, wt-finish, wt-handoff.
 
 ## Project store (WP-347)
 
-Projects live in `wt.db` (`projects`: name, root, added_at). Every project the dashboard derives (configured repo, `WT_DASHBOARD_PROJECTS`, running agents' checkouts, New project) is remembered, so a project stays listed with no running agent or herdr workspace. Hide project still removes it from the list; a stored project whose checkout is gone is dropped from the list.
+Projects live in `wt.db` (`projects`: name, root, added_at). Every project the dashboard derives (configured repo, `WT_DASHBOARD_PROJECTS`, running agents' checkouts, New project) is remembered, so a project stays listed with no running agent or pool. Hide project still removes it from the list; a stored project whose checkout is gone is dropped from the list.
 
 ## Agents table and pause (WP-346, WP-348)
 
-Every local pane agent has one durable row in `wt.db` (`agents`), keyed by its name: role or persona, project, folder, session id, current pane, ticket, mirrored tags and a state — `running`, `idle`, `paused`, `exited` or `missing`. herdr is something the dashboard watches, not the source of truth: a watcher reconciles the rows with herdr and `claude agents --json` on every fresh agent listing (the 3 s cache, driven by the 4 s tick; no extra herdr calls). A new pane gets a row; a pane-id change moves the row to the new pane (matched by session id); a crashed claude becomes `exited`; an agent gone from herdr becomes `missing`. A row is never deleted by the watcher — only a deliberate `agents.sh rm` (or **Forget**) removes it. Tags never include `task`, `task_state`, `handoff_*`, `dnd`, `pair` or a pane key. The old `agent-tags.json`, `watchdog.json` `lastSeen` and `project_pauses` were imported once and are no longer read (left on disk for rollback). Remote machines stay live herdr views.
+Every local agent terminal has one durable row in `wt.db` (`agents`), keyed by its name: role or persona, project, folder, session id, current pane, ticket, mirrored tags and a state — `running`, `idle`, `paused`, `exited` or `missing`. The hc core is something the dashboard watches, not the source of truth: a watcher reconciles the rows with hc's terminal list and `claude agents --json` on every fresh agent listing (the 3 s cache, driven by the 4 s tick; one hc call per tick). A new terminal gets a row; a terminal-address change moves the row to the new address (matched by session id); a crashed claude becomes `exited`; an agent gone from hc becomes `missing`. When the core's identity changes (a different core, not a restart) the pane keys of the old one are dropped, and so are its rows, except a paused row and a missing row that carries a session (Resume needs them): those keep their session and folder and lose only their old address. A row is never deleted by the watcher — only a deliberate `agents.sh rm` (or **Forget**) removes it. Tags never include `task`, `task_state`, `handoff_*`, `dnd`, `pair` or a pane key. The old `agent-tags.json`, `watchdog.json` `lastSeen` and `project_pauses` were imported once and are no longer read (left on disk for rollback). There are no remote machines under hc yet: the dashboard's machine UI says so, and no remote code remains.
 
 **Pause** (Agent actions › Pause agent, or Settings › Projects › Pause for every agent of the project) saves the row as `paused`, then closes the pane (`agents.sh rm --keep-row`) or stops the headless run. Agents caught mid-turn are marked and get one `continue` on resume. Cards stay In progress, marked `paused`. A paused agent stays listed (no pane); Dispatch, routines, recovery and handoff never pick it, and team refill counts it as filling its seat. A paused project is flagged on the project (Dispatch, routines and refill skip it) and stays in the project list, marked `(paused)`, even when hidden. **Resume** respawns the agent under its old name with `--resume <session>`, model, effort and tags (fresh pane key); one cold cache write per agent. A failed despawn or respawn is listed; a retry resumes only the rest. If a saved folder is gone (its worktree was removed after the merge), Resume restarts the agent in the project's main checkout on a fresh session and lists it in the result (`fallbacks`); only a missing role fails.
 
@@ -54,7 +54,7 @@ Every local pane agent has one durable row in `wt.db` (`agents`), keyed by its n
 
 **Stored agent panel (WP-353).** Opening a paused, missing or exited agent shows its saved conversation read-only (one snapshot of the session's transcript file; no live stream, no retry banner), or `No saved transcript for <name>.` with the session id when there is none. The composer is replaced by one line — `Paused <ago> — Resume to talk to it` or `Not running (<state> <ago>) — Respawn to talk to it` — with the Resume/Respawn button. The Summary shows State, Project, Role, a copyable Session id and `— no pane (stored)`, with Resume/Respawn and Forget at the bottom; Resume or Respawn switches the panel back to the live stream by itself. `GET /api/agents/by-name/<name>/stream` serves the snapshot (dashboard only; `404 no saved transcript` at once when there is no session or file; `409` for a live row).
 
-`GET /api/agents/by-name/<name|pane>` returns the row (name, pane, state, session, cwd, role, persona, project, ticket — no tags or keys); `POST …/pause`, `…/resume` are dashboard-only; `POST …/forget` takes the dashboard or a pane (an exited or missing row, or itself; never another agent's paused row). `handoff.sh --pane` refuses a target whose row is paused, exited or missing (`<name> is paused: resume it first`) and falls through to herdr when the dashboard is down. `agents.sh` numbering reads every row's name, so a paused, exited or missing agent's number is never reused; `agents.sh respawn <name>` also works on a missing or exited row.
+`GET /api/agents/by-name/<name|pane>` returns the row (name, pane, state, session, cwd, role, persona, project, ticket — no tags or keys); `POST …/pause`, `…/resume` are dashboard-only; `POST …/forget` takes the dashboard or a pane (an exited or missing row, or itself; never another agent's paused row). `handoff.sh --pane` refuses a target whose row is paused, exited or missing (`<name> is paused: resume it first`) and falls through to hc when the dashboard is down. `agents.sh` numbering reads every row's name, so a paused, exited or missing agent's number is never reused; `agents.sh respawn <name>` also works on a missing or exited row.
 
 ## Project settings location (WP-234)
 
@@ -135,7 +135,7 @@ header, remembered per viewer and defaulting to the global project; picking ther
   `/wt-run <ID>`; the card is moved to Planning by that prompt, teams and the pairing buddy are skipped. There is no pool cap on leads (each labelled card gets its own), so
   label deliberately. Cards without the label behave exactly as above. See *Ticket lead and named agents*.
 - An agent already **holding a ticket** is never picked (worker reuse, buddy, pair replacement): it is the
-  assignee of an open card, or its `task`/`ticket` pane token names one. A card moved to **Ready** (by the user
+  assignee of an open card, or its `task`/`ticket` label names one. A card moved to **Ready** (by the user
   or an agent) loses its assignee and dispatch state, so Dispatch can pick it up again; a gone assignee is only
   unassigned, the column is left alone.
 - **Report to** (Automation sheet, while Dispatch is on): where a dispatched agent posts its one-line result —
@@ -169,8 +169,8 @@ header, remembered per viewer and defaulting to the global project; picking ther
   above, so completion no longer depends on a reply. A worker that works past the 10 minutes and then idles briefly between
   its own turns can be flagged early; ticketless messages are not judged. A SendMessage `notify_when_idle` notice reaches the
   sender only after the sender's own turn ends (WP-259), so treat it as a hint, never as the completion signal.
-- **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means herdr accepted the prompt, not
-  that it reached the agent's pane (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
+- **Delivery confirmation** (WP-177): `handoff.sh` reporting success only means hc accepted the prompt, not
+  that it reached the agent's terminal (e.g. a Remote Control disconnect can drop it silently). Within ~60s of a
   card being dispatched, its assignee must show working, done or blocked (it asked something); if not,
   the same prompt is resent once, targeting the same pane. Still unconfirmed ~60s after that resend: the card
   gets the **Stalled** badge and an Inbox item, instead of sitting silently assigned to an idle worker.
@@ -197,7 +197,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 
 - A ticket can hold a **worker + buddy** pair (`pair: { worker, buddy }`), shown as a chip on the board card and
   read-only under `paired · <TICKET>` on the paired agents' Summary tab; editable as a **Buddy** dropdown in the
-  ticket drawer (needs an assignee first). Both members get a `pair` pane token, which — like DND — makes them
+  ticket drawer (needs an assignee first). Both members get a `pair` label, which — like DND — makes them
   invisible to every free-agent pick until the ticket is Done.
 - **Setting it**: `wt-handoff --buddy <pane|self>` (`self` = the sending pane) at the moment the worker is
   chosen — wt-plan's handoff pairs the worker with the planner itself. Dispatch pairs a worker-role ticket with
@@ -226,7 +226,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Plugin-only install** (WP-122): `/plugin marketplace add rephol/wt-pack`, then `/plugin install wt-pack@wt-pack`.
   This gives the same plugin from a marketplace copy: every `wt-*` skill (namespaced: `/wt-pack:wt-plan`), wt-memory's
   hooks and its MCP server, with no
-  `./setup`. Agents still need herdr. There is no board, rooms or dashboard: `wt-ticket` and `room` exit with
+  `./setup`. Agents still need hc. There is no board, rooms or dashboard: `wt-ticket` and `room` exit with
   "needs wt-dashboard … (see README › Install)".
   - **Instant slash command** (WP-207, WP-212): one namespaced `/wt <sub> …` — `/wt room list|read|post`,
     `/wt ticket show|move|list|comment`, `/wt dnd [on|off]` (this pane), `/wt herd [role]` (`wt-agents list`; `/agents`
@@ -261,8 +261,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 
 ## Agents, roles and spawn
 
-- Agents are herdr panes. The Agents page is a table grouped by role (agent, task, status, activity,
-  branch, context %, model; **Columns** also offers machine, project and role, and a saved layout is kept), one card per machine (local and remote herdr hosts), with filters All / Busy / Free /
+- Agents are hc terminals. The Agents page is a table grouped by role (agent, task, status, activity,
+  branch, context %, model; **Columns** also offers machine, project and role, and a saved layout is kept), one card for this machine, with filters All / Busy / Free /
   Needs you / Attention and sorting; open an agent to read and type into its conversation. **Stop** sends Esc (only while working and no question is pending).
 - **Chat dock** (WP-112, windows 900px and wider): opening an agent or room chat — task queue, ⌘K switcher, room
   members and @mentions, Inbox, notifications, Overview's room cards — puts it in a dock at the bottom right
@@ -278,12 +278,8 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   Terminals keep the side panel. The sidebar's old Agents/Rooms **Open** list is gone — use the Agents and Rooms
   pages or ⌘K. Narrower windows and phones have no dock (chats open as pages, as before) but remember what you opened: the
   chat button gets a red dot while one of those chats is unread.
-- **Remote agents** (WP-97): the conversation shows the real Claude transcript, read over SSH (read-only, from the
-  `herdr machine list` host). herdr gives remote panes no session id, so the file is matched: the jsonl in the
-  pane's project dir (changed in the last week) whose recent text matches the pane's last prompt or reply. The
-  first load reads the last 4 MB, then pulls every 3s while the page is open (one SSH call per pane, 4 per host).
-  A badge says `remote · transcript`, `loading transcript…`, `transcript not matched — pane view` or
-  `unreachable — pane view`; until messages arrive the pane view shows.
+- **No remote machines.** hc can reach other hosts, but the dashboard does not use that yet: its machine UI shows
+  "not supported on hc yet" and no transcript is read over SSH. Agents and conversations are this machine's only.
 - **Roles** (Settings › Roles): Orchestrator (purple, not spawnable), Planner (blue, starts in the main
   checkout, workspace `<repo>-planners`), Worker (green, starts in a worktree, `<repo>-workers`), Auditor
   (orange, main checkout, `<repo>-auditors`), Reviewer (teal, main checkout, `<repo>-reviewers`; runs
@@ -295,7 +291,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **New agent** (Overview or palette): pick role and project, optional **first prompt** (sent once the agent
   is idle, up to 60s). It can reuse a free agent instead of spawning. Working directory is always the main
   checkout or one of the project's worktrees.
-- Names: `<repo>-<role>-NN`, numbered across all pools (herdr names are global; repo slug cut to 20 chars) —
+- Names: `<repo>-<role>-NN`, numbered across all pools (hc names are global to the core; repo slug cut to 20 chars) —
   the lowest number not currently in use (WP-148), so removing an agent frees its number for reuse. Numbers
   held by exited agents the watchdog still remembers are skipped, so their Resume stays possible (WP-120); a
   deliberate `rm` (or idle retirement, WP-143) drops its own name from that memory instead, since it isn't a
@@ -309,12 +305,12 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   `skills/wt-plan/scripts/worktree.sh <branch>` — never a `../<repo>-*` sibling or `/tmp`. It is in the worker and planner
   role rules (wt-memory), in the `Worktree:` line `wt-handoff` appends to every worker prompt, and in wt-work and wt-finish.
   `./setup doctor` warns about any worktree of the repo outside that folder.
-- **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The tab
-  closes; a worktree it used stays on disk.
+- **Remove**: refused while working unless forced; an orchestrator needs its name typed back. The terminal
+  ends; a worktree it used stays on disk.
 - **Model and effort** (WP-198): the Summary tab's **Model** section shows what the session actually runs, e.g.
   `Sonnet 5.5 · medium` (tooltip: the exact id). The name comes from the transcript's last assistant `model` id
   (local sessions) or, without one, the pane footer's `Model:`; the effort from the footer's `Thinking:` (a narrow pane truncates the footer), then the spawn-time `effort`
-  pane token, then the `~/.claude/settings.json` default for that model (`modelSettings[id].effortLevel`, else the
+  label, then the `~/.claude/settings.json` default for that model (`modelSettings[id].effortLevel`, else the
   top-level `effortLevel`), shown as `low (default)`; the name falls back to the spawn-time `model` token. When the spawn token names a different tier than the
   one running it adds `routed opus, running sonnet`. The Agents list has an optional **Model** column (hidden by
   default, like Context) and the phone rows carry the model name.
@@ -329,24 +325,23 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   instead of a flat `1`, cleared by the 4s server tick once it's past.
 - `wt-agents list` (plain and `--json`) shows DND (with its expiry, when set) and `pair` per agent — `--json`
   adds structured `dnd:{on,until}` and `pair` fields alongside the existing raw pane `tokens` map.
-- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]`, `respawn <name|pane>|--stale [--force]` (WP-125: new tab with current kill shims + plugin guard; keeps name, role, cwd, tokens and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). `rm` of an agent whose claude exited (herdr no longer lists it) closes the bare-shell tab left under its name, and `spawn`/`respawn` close one before opening the new tab, so no shell-only tab named after an agent sits beside it (WP-222). `list --json` also carries `session` (herdr's full session id) and `pid` (the live claude pid from `claude agents --json`, WP-324; `null` = herdr lists an agent claude does not know, or claude is absent). The dashboard's `AgentInfo` for a pane carries the same as `pane.pid` (cached 3 s, local machine only, `null` when unknown). `spawn` waits for claude to start (8 tries with backoff, WP-319); if it never does, it fails with herdr's last error text (shown in the dashboard) and closes the orphan pane and clears its tokens.
+- CLI: `wt-agents spawn <role|persona>`, `list [role] [--json]`, `rm <name|pane> [--force]` (a pack agent only: a plain shell or any other terminal is refused), `respawn <name|pane>|--stale [--force]` (WP-125: a new terminal with current kill shims + plugin guard; hc cannot start a program into an existing terminal, so the old one ends first; keeps name, role, cwd, labels and `--resume`s the session; `--stale` = every pool agent lacking either, skipping `working` ones and the caller). The terminal outlives the shell that spawned it (`--outlive-parent`), starts with `--no-notify`, and carries a `WT_PANE_KEY` and the kill-shim `PATH` that the launcher re-applies after the user's shell rc. If `herdr-app` is installed the agent shows as a tab in its pool's space (labels `herdr.space`/`herdr.tab`); if the app is unreachable the spawn prints a warning and the agent runs hidden. `spawn` and `respawn` refuse with "hc core is down" rather than starting the core. `list --json` also carries `session` (claude's full session id) and `pid` (the live claude pid from `claude agents --json`, WP-324; `null` = hc lists an agent claude does not know, or claude is absent). The dashboard's `AgentInfo` for a pane carries the same as `pane.pid` (cached 3 s, local machine only, `null` when unknown). `spawn` waits for claude to start (8 tries with backoff, WP-319); if it never does, it fails with hc's last error text (shown in the dashboard) and removes the orphan terminal and its labels.
 - **Own context usage (WP-312):** an agent reads its own context window with the wt MCP tool `context_usage` or `wt-agents context`:
-  `{used, window, pct, model}` for a pane agent (`$HERDR_PANE_ID`) or a headless run (`$WT_HEADLESS_ID`, set by the dashboard).
+  `{used, window, pct, model}` for a terminal agent (`$HC_TERMINAL_ID`) or a headless run (`$WT_HEADLESS_ID`, set by the dashboard).
   It reads the dashboard's `AgentInfo` (WP-313, the WP-201 rule), so there is no transcript parsing in the CLI and no API call;
   exit 1 when the dashboard is unreachable or the agent has no assistant turn yet.
 - Skills: wt-agents, wt-handoff.
 
 ### Headless agents (WP-293, opt-in)
 - **One AgentInfo (WP-313):** every row of `GET /api/agents` and every `GET /api/headless[/:id]` carries an `info` object of the same
-  type for a herdr pane and a headless run (`AgentInfo` in `skills/wt-dashboard/contracts.d.mts`, built only by `agentinfo.mjs`):
+  type for an hc terminal and a headless run (`AgentInfo` in `skills/wt-dashboard/contracts.d.mts`, built only by `agentinfo.mjs`):
   a discriminated `kind` (`pane` | `headless`), a common core (name, role, persona, cwd, project, state, resolved `model`, `effort`,
   `permissionMode`, `plugins`, `sessionId`, `commands`/`skills`, `contextUsed`/`contextWindow`/`contextPct`, `costUsd`, `turns`,
   `startedAt`, `lastActivity`) and a `pane` part (id, machine, tags, dnd, pair, routed) or a `run` part (id, state, resumes, stuck,
   reason, pid, `driver` `cli`|`sdk` from `headless_runs.driver`, shown as the Model section's **Driver** row; a pane has none). A value the server does not know is `null`, never invented (a pane has no cost or plugin list). Context comes from
   the session transcript's last turn; the window is the one the agent REPORTS (a headless run's result event `modelUsage[<model>].contextWindow`, stored as `context_window`; a pane's status line `x / 1M`), and only when none was reported the WP-201 guess (200k, 1M for a `[1m]` model or once a turn passed 200k). The existing
   fields stay (additive); the Summary's Model section, the Agents list's model and context columns and the composer read `info`.
-- A headless agent is a `claude -p` stream-json process that the dashboard server runs itself: no herdr pane, no
-  terminal. It runs under your own Claude login with a minimal env (no API key, no `HERDR_*`). Nothing starts until
+- A headless agent is a `claude -p` stream-json process that the dashboard server runs itself: no hc terminal. It runs under your own Claude login with a minimal env (no API key, no `HC_*`). Nothing starts until
   something spawns one: `POST /api/headless {role, cwd, prompt?, model?, effort?, name?}` from the dashboard, or from an
   agent pane.
 - **Headless gate (WP-330):** an agent pane that spawns a run gets `default` permission mode only (any other mode is 403, and an
@@ -356,7 +351,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   ready-made envelope is 400), records it, and the run's own hook verifies it with its per-run key (`WT_RUN_KEY`, never in a
   GET). Text you type into a run stays raw. The run's first `--prompt` from a pane is wrapped the same way.
 - It shows in the Agents list, in its role's group, with a **headless** badge (`headless:true`, its state in `headlessState`), and is `blocked`
-  while it waits on an ask. Only live or queued runs are listed: an ended, failed or removed run leaves the list (it stays in `GET /api/headless`). Dispatch, routines, pane tokens and the pane routes only ever see herdr agents, so a
+  while it waits on an ask. Only live or queued runs are listed: an ended, failed or removed run leaves the list (it stays in `GET /api/headless`). Dispatch, routines, pane labels and the pane routes only ever see hc agents, so a
   headless run is never picked for work.
 - **Files:** a headless run shows a file in its Conversation view with the `send_file` tool (wt MCP; `SendUserFile` does not exist in `claude -p`).
   Read-only roles get only that one MCP tool (`mcp__wt-files__send_file`), never the ticket/room/handoff tools, and it needs no ask.
@@ -394,7 +389,7 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
 - **Resume:** an ended run keeps its session id. `POST /api/headless/:id/resume {text?}` (or a message to it) starts it
   again with `--resume`.
 - **Model and `/` picker (WP-300):** the stream-json `init` event's `model`, `slash_commands` and `skills` are stored on the run. The
-  Conversation view shows the resolved model (plus the run's effort, when set) like a herdr agent, and the composer's `/` picker
+  Conversation view shows the resolved model (plus the run's effort, when set) like an hc agent, and the composer's `/` picker
   lists exactly those commands and skills.
 - **Messaging a headless run (WP-317):** Agents reach a run by name or id: `agents.sh send --headless <name|id> '<text>'`, `handoff.sh --pane <name|id>` and `--reply <name|id>`
   (envelope, reply footer and `--request-id` as for a pane); `agents.sh list --headless` shows state (idle = reusable) and role, `spawn --headless --reuse`
@@ -405,10 +400,10 @@ Skills: wt-ticket, wt-plan, wt-work, wt-ship, wt-handoff, wt-audit (files cards)
   `default` and reject any other mode, so their tool policy still applies and only get the read tools (`--tools`, no MCP servers), so no allow-rule in the user's settings can open a write tool.
 - A run started without a first prompt is `idle` as soon as its process is up (claude only emits `init` on its first turn), not
   `starting`. A render error in the web app now shows an error panel with a Reload button instead of a blank page.
-- **Names (WP-306):** without `name`, a run is called `<repo>-<role>-NN` like a herdr agent (repo slug of the cwd's project, lowest
-  unused number across live herdr agents and non-ended headless runs; an ended run frees its number). An explicit `name` wins.
-- **Role and model (WP-307):** a run has no herdr pane token, so the supervisor puts `WT_ROLE` (and `WT_PERSONA`) in its env and
-  wt-memory's `context` reads them: a headless planner gets the same role rules, persona text and wt-message section as a herdr
+- **Names (WP-306):** without `name`, a run is called `<repo>-<role>-NN` like an hc agent (repo slug of the cwd's project, lowest
+  unused number across live hc agents and non-ended headless runs; an ended run frees its number). An explicit `name` wins.
+- **Role and model (WP-307):** a run has no hc terminal label, so the supervisor puts `WT_ROLE` (and `WT_PERSONA`) in its env and
+  wt-memory's `context` reads them: a headless planner gets the same role rules, persona text and wt-message section as an hc
   planner. A persona name as `role` (`POST /api/headless {role: "frontend"}`) becomes its base role + persona. The spawn also applies
   the role's `model-route.mjs floor` as an explicit `--model` id and `--effort` (an explicit model/effort wins, as in `agents.sh spawn`), so a run
   keeps one model for its life instead of Claude Code's default.
@@ -540,12 +535,13 @@ Chat rooms shared by you and agents.
   one counts as unverified). Otherwise the agent is told no, and an Inbox ask "<agent> wants to git push: …" appears with
   *Allow once* / *Deny*; *Allow once* lets the agent's next identical command through for 10 minutes, once. Settings →
   *Ask before push, merge, delete and send-out actions* (`WT_GATE`, default `ask`; `off` restores the old behaviour). It is a
-  pattern list, not a shell parser: obfuscated shell (`sh -c "$(…)"`, a script that pushes itself) and other tools (`gh api -X
-  PUT …/merge`) are not caught, and a gate that cannot run lets the command through. Merge order: server (restart) → plugin.
+  pattern list, not a shell parser: literal `sh -c '…'` / `bash -c "…"` / `eval '…'` strings and the command carried by `hc run` / `hc exec` are read (and a lone `&` separates commands), but
+  indirection (`sh -c "$(…)"`, a variable holding the command), a pipe into a shell, a script that pushes itself and other tools (`gh api -X
+  PUT …/merge`) are not caught, and a gate that cannot run lets the command through. A command over 32 KB fails closed: the first 32 KB is read, and if that is clean but the command mentions `hc`, `git`, `gh`, `rm`, `curl`, `wget`, `scp`, `rsync`, `nc` or `ncat` anywhere it asks (`long-command`, as does nesting deeper than six levels); over 128 KB the Bash hook itself denies such a command ("split it") instead of passing it to the gate — on every turn, the user's own included (split the command or put the long text in a file). Every command is read **twice** and asks if either reading finds a gated action (WP-378 F10): a quote-aware one (honours `'…'`, `"…"`, `$'…'`, escaped separators `\;` `\&` `\|`, a backslash-newline continuation, a quote that runs over several lines) and a quote-blind one that cuts at every `;`, newline, `|`, `||`, `&&` and `&` whatever the quotes. Each covers what the other gets wrong, so the price is a false positive: words inside a quoted message can make a command ask, e.g. `git commit -m "docs; git push"` or `-m "a & git merge notes"`. Quoted and escaped tool words (`"git" push`, `gh "pr" merge`, `\git push`), an apostrophe in a comment, a heredoc body or `echo it's`, and `echo hi \\` + newline are read. Known blind spot: a quoted or escaped separator that sits AFTER a stray quote left open on an earlier line (`# it's` then `rm "a&b" /etc/x`) is read by neither side, because the quote-aware reading is swallowed by the stray quote and the quote-blind one cuts the quoted word. The Bash hook's prefilter spawns the gate for any command that mentions a tool word (`hc`, `rm`, `rmdir`, `curl`, `wget`, `scp`, `rsync`, `nc`, `ncat`; or `git` with `push`/`merge`/`branch`/`worktree`; or `gh` with `pr`) with quotes and backslashes removed, so a command that only mentions one costs one gate process (about 60 ms) and is allowed. `hc run "<one string>"` is read as a shell command line; `unset … HC_TERMINAL_ID` in one segment clears the sender at any distance. Merge order: server (restart) → plugin.
   **Block messages (WP-361):** every wt-pack deny — the gate and the repo-rule guards (no draft PR, `commit -a`, force-push, short
   `pkill -f`, branch change in the main checkout, …) — names the rule id and the matched segment, quoted and cut at 120
   characters: `wt-pack gate [rule: secret-var, segment: \`curl …\`]: …`. Gate rule ids: `push`, `merge`, `branch-delete`,
-  `worktree-remove`, `gh-pr`, `rm-outside`, `upload`, `secret-var`, `raw-socket`. A compound command is judged whole, so the
+  `worktree-remove`, `gh-pr`, `rm-outside`, `upload`, `secret-var`, `raw-socket`, `long-command`; hc rules (WP-378): `hc-forged-send` (an `hc send`/`keys` with `HC_TERMINAL_ID` unset, emptied or set to another value, or `env -i`, also behind `sh -c`), `hc-core` (`hc server stop|restart`, `hc update`), `hc-kill` (`hc kill`, `hc rm`), `hc-keys` (`hc keys`, `hc interrupt`, `hc send --force`), `hc-label` (setting `role=`, `persona=` or `wt.pool=` on a terminal) and `upload` (`hc put`, `hc file write`, anything with `--on`). A compound command is judged whole, so the
   message says to run the other parts as their own command. **Loopback exemption:** `curl` (not `wget`, which follows redirects and re-sends headers by default) passes the send-out rule when
   every URL host is literally `127.0.0.1`, `localhost` or `[::1]` (http/https), so the pack's own CLIs can call the dashboard
   with a pane key. Still gated: a proxy or connection flag (`-x`, `--proxy`, `--connect-to`, `--resolve`, `--unix-socket`, a
@@ -603,20 +599,20 @@ Chat rooms shared by you and agents.
   `AskUserQuestion` picker from an agent's own chat session (its terminal stays the source of truth). A multi-question
   picker is read once (the server steps through its tabs and back), answered locally with free movement between tabs, and sent in one
   go at Submit (WP-203); if the terminal no longer matches, nothing is submitted, an error says to answer in the terminal and your
-  answers are kept. A single question keeps one-click send. Use your
+  answers are kept. A single question keeps one-click send. **Free-text "Other"** (also on a multi-select question): the dashboard focuses the Other row with `hc keys`, then pastes your text and presses Enter in one `hc send --force` (the only place the pack forces a send, because it is your own answer, from the page's session cookie; no delivery, sweep or queue flush ever forces). For a multi-select question it then re-reads the screen and checks Other is ticked with your text before it moves on to Submit; if it is not, the answer stops with a 409 and nothing is submitted. Use your
   session's native question tool in your own chat — it already shows there; `wt-ask` is for everywhere else.
   Clicking a chip or an Inbox **question**/**ask** item opens the same popup in place. `wt-ask --resolve <id>`
   closes a card without an answer.
-  **Native capture (WP-206):** the `skills/wt-ask` mod (part of the one wt-pack plugin) answers an agent's `AskUserQuestion` itself in a wt-pack herdr pane: the question becomes a chip (in the agent's ticket room, else in the room named after its project, created if missing — WP-232) and
+  **Native capture (WP-206):** the `skills/wt-ask` mod (part of the one wt-pack plugin) answers an agent's `AskUserQuestion` itself in a wt-pack hc terminal: the question becomes a chip (in the agent's ticket room, else in the room named after its project, created if missing — WP-232) and
   Inbox card, the terminal prints the question and its options ("answer there; Esc cancels" — Esc interrupts the turn, which Claude Code records as declined, and closes the dashboard ask at once), the dashboard card offers "Other" as a selectable choice (typed answer) and "Chat about this" (drops the question; the agent is told to discuss it with you; WP-233), pops the question up by itself on any page and whatever project is selected, phone included (once per ask per tab; it closes when the ask is answered or cancelled elsewhere; WP-231), and your answer returns as the tool
-  result (no reply message). It falls back to the native picker when the dashboard is unreachable, outside a herdr
-  pane, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).
+  result (no reply message). It falls back to the native picker when the dashboard is unreachable, outside an hc
+  terminal, or for non-option questions; an unanswered question is denied after 30 min (plugin option `timeoutMin`).
   A session picks the mod up on `/reload-plugins` or at its next start (mods reload without a respawn); until then it
   keeps the native picker, which the pane-scrape mirror above still serves. `wt-ask --wait <id>`, `--ping` and `--no-deliver` are the mod's building blocks.
   An ask the mod never got to close (the agent was killed mid-wait, or the dashboard blipped during `--resolve`) is
   closed by a server sweep every minute once its pane is gone or it is over 24 h old (WP-209).
 
-**Queued delivery (WP-210):** the `skills/wt-room/mod` mod (part of the one wt-pack plugin) makes a herdr agent pull its `wt-message` replies, room
+**Queued delivery (WP-210):** the `skills/wt-room/mod` mod (part of the one wt-pack plugin) makes an hc agent pull its `wt-message` replies, room
 mentions and routine prompts from a dashboard queue and submit each as a plugin-origin prompt, one at a time and
 only between turns — no pasted keystrokes. Each delivery is a `deliveries` row in `wt.db`: `queued` → `delivered`
 (the prompt entered the session) or `pasted` (the mod went quiet before it pulled; the dashboard pasted it). The mod
@@ -633,7 +629,8 @@ without reporting" Inbox item then follows ~4 min after the nudge instead of 10 
 `wt-deliver check-finish` at the end of every turn (once per turn; `handoff.sh` has no flag for it): the dashboard queues ONE system
 reminder when the pane's newest acknowledged, unanswered handoff still has an open card. Plugin hooks load at session start, so the
 mod part needs the plugin cache to have it and a session restart.
-Typed prompts are checked (WP-248): `handoff.sh` waits up to 60 s (`WT_READY_TIMEOUT`) for a freshly spawned session to register and go idle before typing (a missed registration is nudged once with `herdr agent rename`), and after typing, `wt-shared/scripts/pane-submit.mjs` reads the pane and presses Enter again (3 tries) if the text is still in the input box. An empty box alone is not proof (the paste renders about a second late, and a menu or a still-starting session has no box at all): it needs the agent to have left idle or the prompt echoed in the transcript, and never presses Enter on a screen without an input box. Otherwise the handoff exits 1 with "prompt not submitted" (`WT_SUBMIT_DEBUG=1` logs what each poll read); if the short `/goal` line cannot be typed it warns before pasting the whole message. The dashboard's typed sends (Dispatch, routines) run the same check and fail the send.
+**Blocked agents (hc):** a message sent to an agent that is waiting on a dialog (a permission prompt or a question, status `blocked`) is never forced past it. The send types nothing and the message waits in a dashboard queue, in memory: its row stays `queued`, the attempt is not counted, and it is typed when the agent leaves the dialog. After 30 minutes the dashboard gives up and marks the row `failed` with the reason; the question or Inbox card already asks you to answer the dialog. A dashboard restart empties the queue; handoff, dispatch and routine rows stay `queued` and the WP-257 sweep resends them, while `reply` and `system` messages (nobody waits on them) are not resent. A script-side `handoff.sh` to a blocked target exits 1 with nothing recorded, and the caller retries (Dispatch keeps the card in Ready).
+Typed prompts are checked (WP-248): `handoff.sh` waits up to 60 s (`WT_READY_TIMEOUT`) for a freshly spawned session to register and go idle before typing, and after typing, `wt-shared/scripts/pane-submit.mjs` reads the terminal (plain text) and presses Enter again (3 tries) if the text is still in the input box. An empty box alone is not proof (the paste renders about a second late, and a menu or a still-starting session has no box at all): it needs the agent to have left idle or the prompt echoed in the transcript, and never presses Enter on a screen without an input box. Otherwise the handoff exits 1 with "prompt not submitted" (`WT_SUBMIT_DEBUG=1` logs what each poll read); if the short `/goal` line cannot be typed it warns before pasting the whole message. The dashboard's typed sends (Dispatch, routines) run the same check and fail the send.
 
 ## Inbox
 
@@ -696,8 +693,10 @@ Recurring work the server runs itself (Routines page).
 
 ## Terminals
 
-- Shells owned by herdr (panes with no agent, in a `<project>-shells` workspace), mirrored and typed into
-  from the page. Allowed start dirs: a project, its worktrees, `$HOME`, `/private/tmp`.
+- Shells owned by hc (terminals with no agent, labelled `wt.pool=<project>-shells`), mirrored as plain text
+  (`hc read`; no colour) and typed into from the page.
+- **Typing limits.** A line with **Enter** (the input line, **Run**) goes through `hc send` and takes any character. Typing key by key without Enter goes through `hc keys`, which names keys: letters (capitals as `shift+<letter>`), digits, space and `/ = . - , ; ' \ [ ] backtick` arrive intact; shifted punctuation (`! @ # $ % ^ & * ( ) _ + { } | : " < > ? ~`) and non-ASCII cannot be pressed by name and are refused with a message that points to the input line. Programs that need such a key mid-line (an editor, a `y/N` that wants `?`) are used from herdr-app. Key names and `send --force` semantics are version-bound (checked on hc 0.1.16); `./setup doctor` prints the version.
+- There are no remote machines under hc yet: the Terminals view lists this machine's shells only. Allowed start dirs: a project, its worktrees, `$HOME`, `/private/tmp`.
 - **Off by default**: Settings › Terminals has **Enable terminals** and **Allow terminals over the tailnet**,
   both changeable only from `http://127.0.0.1` on this Mac. Every action is written to an audit log (last 100
   shown there).
@@ -779,22 +778,23 @@ Projects, Terminals, Usage, Observability, Server, About.
 - **Watchdog** (Settings › Observability): every 60s (first run 90s after start), deterministic checks, each
   with an on/off switch and a threshold — server restarts in the last hour (**3**), room message undelivered
   (**15** min), Ready card not dispatched with Dispatch on (**10** min, held cards excluded), Backlog card
-  untriaged with Auto on (**30** min), Planning/Building card held by a gone or stalled agent (**10** min), herdr
+  untriaged with Auto on (**30** min), Planning/Building card held by a gone or stalled agent (**10** min), the hc core
   unreachable (**2** min), free disk (**5** GB), wt.db size (**200** MB), server errors in 10 min (**20**), Jev
   failure rate over the last hour (**30**%, at least 5 calls), pool agent's Claude session exited while its pane
   stays open (**1** min), pool agent whose Claude session started before the installed wt-memory version (so it runs
   without the pkill guard — plugin hooks load at session start; restart it; **0** min, WP-120), and a `/goal` agent whose last **5** error tool results are the same auth/network error over ≥ 10 min (WP-220: the watchdog presses esc and sends `/goal clear`, posts in the project room and raises a severe Inbox card that stays until dismissed; the ticket is left as is). A finding opens once per condition as a
-  `watchdog` Inbox item (native notification only for restarts, herdr and disk) and resolves itself when the
+  `watchdog` Inbox item (native notification only for restarts, the hc core and disk) and resolves itself when the
   condition clears. **Investigate** hands a finding to a worker (or **Ask auditor**) through wt-handoff, framed as
   data, to diagnose and file a ticket — only when clicked. For an exited session, **Resume** (on the finding and
-  its Inbox item) restarts the same session id in the same pane with the agent's name and MCP set (the watchdog
-  remembers each live pool agent's session, since herdr forgets it on exit); it refuses when the pane runs an
+  its Inbox item) restarts the same session id (`agents.sh respawn`: a new terminal under the same name, with the agent's MCP set) (the watchdog
+  remembers each live pool agent's session, since hc forgets it on exit); it refuses when the terminal runs an
   agent again, the name is live elsewhere, or the agent's ticket was re-dispatched to another pane. Never
   automatic.
-- **Exited panes** (WP-221): herdr can keep reporting an agent idle/done after its claude process exits. A local
-  idle/done pane whose shell is back in the foreground (`herdr pane process-info`) shows as **exited** in the agent
+- **Exited panes** (WP-221): hc can keep reporting an agent idle/done after its claude process exits. A local
+  idle/done terminal whose shell is back in the foreground (hc's foreground process) shows as **exited** in the agent
   list, is never picked by Dispatch, a buddy pick or wt-handoff, counts as gone for reconcile (its ticket returns
   to Ready), and feeds the watchdog's exited-session finding (with **Resume**).
+  An exited terminal is not an identity: its address cannot post, send or verify through any pane route (a finished or kept-shell terminal is refused, and as the sender of an old message it carries no role).
 - **Server**: state, pid, uptime, build time, per-source status; **Restart server** (or **Install as
   service** when not managed).
 - **Web build stays current** (WP-81): a server running from a checkout rebuilds `web/dist` itself when
@@ -934,13 +934,13 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   call that runs `gh pr create --draft`, `git commit -a`/`--all`, or a commit with an overriding identity (`--author`,
   `-c user.*`, `GIT_AUTHOR_*`/`GIT_COMMITTER_*`) — these three only when the session is in a wt-pack checkout
   (`.claude-plugin/marketplace.json` at the repo root, checked once per session) — and, in any project, a
-  handoff/room/herdr/ticket/ask command carrying a `~/.claude/skills/…` path. WP-279 adds, in a wt-pack checkout,
+  handoff/room/hc/ticket/ask command carrying a `~/.claude/skills/…` path. WP-279 adds, in a wt-pack checkout,
   `git push --force`/`-f`/`+ref` (`--force-with-lease` passes), `pkill`/`pgrep -f` with a pattern under 6 characters or
   starting with `-`, and `wt-ticket new --help` (it creates a ticket titled "--help"); and, in the main checkout only
   (a worktree may switch branches), `git switch` and `git checkout <branch>`/`-b`. The pkill/pgrep option-order guard
   stays in wt-memory. Loose shell parsing: it stops accidents only.
 - **Worker pool** (live routing): every spawn (`wt-agents spawn`) records the tier/effort it actually runs as
-  pane tokens `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
+  labels `model`/`effort` (a respawn re-applies them, instead of falling back to the role floor). A routed
   hand-off reuses a free worker only when its tokens already match the picked tier/effort; otherwise it spawns a
   fresh one — so the pool no longer grows by one per hand-off. `WT_WORKERS_MAX` (project setting or env, worker
   role only) caps the pool: at the cap, `wt-handoff` exits 3 (`pool full: <n>/<cap> workers in <repo>`, nothing
@@ -967,10 +967,10 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   `service:install` also installs the **watchdog probe** `id.local.wtdashboard.watchdog`: every 2 min it curls
   `/api/health` and shows a macOS notification when the server stops answering (and once when it is back).
   `node scripts/service.mjs probe` installs only the probe; `./setup` adds it to an existing service.
-- **herdr after a reboot** (WP-218): when the dashboard server starts, and on every watchdog probe, it checks
-  `herdr status server` and starts herdr's headless server (`herdr server`, detached) if none is running — never a
-  second one, never blocking startup; logged to `server.log`. Agents and panes from before the reboot do not come
-  back on their own (respawn them).
+- **hc after a reboot**: nothing in wt-pack starts the hc core (`hc server status`, `hc ls` and `hc get` all start a
+  stopped core, so the dashboard, its watchdog probe and `./setup doctor` probe the core's socket instead). Start it
+  with `hc server start`. While it is down the dashboard shows a banner, the probe logs one line to `server.log` per
+  change, and spawns, `handoff.sh`, every dashboard route that would touch a terminal (activity, conversation read, typing, Terminals) refuse (503 / "hc core is down", retry when it is up) without running any hc call. Terminals persist across a core restart; agents you did not respawn keep their rows.
 - **PWA**: in a browser on a secure origin, **Install app** (iOS: Share → Add to Home Screen); an update banner
   shows when a new build lands. The service worker never caches `/api`.
 - **Phone push (Web Push)** (WP-268): VAPID keys are generated on first use into `<data dir>/vapid.json` (mode 600);
@@ -1001,10 +1001,10 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 - `./setup` (install, default): Homebrew deps (asks once; `--yes`), loads the checkout as the one wt-pack
   plugin (`CLAUDE_CODE_PLUGIN_DIRS`; removes the older plugins and skill links, see Install as a plugin), config dirs, web build, launchd service, secrets, then doctor.
   Never repoints an install owned by another checkout. Flags: `--yes`, `--no-secrets`, `--no-service`.
-- `./setup doctor [--fix]`: one line per check (node ≥ 22.13 with `node:sqlite`, git/curl/jq, gh auth, claude, herdr,
+- `./setup doctor [--fix]`: one line per check (node ≥ 22.13 with `node:sqlite`, git/curl/jq, gh auth, claude, hc (version line),
   one wt-pack plugin loaded and none of the old four, build, service, :7777, config; optional TypeSafe/Linear keys, tailscale, agent-browser,
   cargo); per project with a GitHub account: gh has its token, the token logs in as it, and it reaches the
-  repo; exit 1 while a required check fails. Report-only by default: if `~/.claude/.env` and the Keychain hold
+  repo; exit 1 while a required check fails. hc lines: the version (key names and `send --force` are version-bound), whether the core is running (probed on its socket; doctor never starts it, so a down core is a note with `hc server start`), `herdr-app` present (note), and whether `notes = false` is set in `~/.config/herdr-core/config.toml` (read only, never edited: without it hc tags a send typed from an agent terminal as `<hc …>`, which the pack treats as a peer message; the pack's own scripts send untagged either way). Leftovers of the previous multiplexer (a settings hook, launchd entries) are warned about, never removed; [hc-cutover.md](hc-cutover.md) is the one-step switch for an existing install. Report-only by default: if `~/.claude/.env` and the Keychain hold
   different TypeSafe keys, it names the mismatch but leaves both alone (the file copy could be the newer key).
   `--fix` backs the file up to `~/.claude/.env.bak-<timestamp>` (0600) and removes just the stale
   `TYPESAFE_API_KEY` line, keeping the Keychain entry.
@@ -1041,7 +1041,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
 
 - **Standing role rules from t3code's known failure modes** (WP-256), kept as role notes (`wt-memory remember --scope role`,
   in the store, not in git) so every agent of the role gets them at session start:
-  - *orchestrator, planner*: before retrying a failed agent launch or handoff, check whether it already took effect (`wt-agents list`, `herdr pane read`, the ticket's assignee); a launch has no idempotency key, so a blind retry starts a duplicate. Retry `handoff.sh` only with the same `--request-id`.
+  - *orchestrator, planner*: before retrying a failed agent launch or handoff, check whether it already took effect (`wt-agents list`, `hc read <terminal>`, the ticket's assignee); a launch has no idempotency key, so a blind retry starts a duplicate. Retry `handoff.sh` only with the same `--request-id`.
   - *worker, planner*: a `cd` or `git worktree add` rebinds only the Bash shell, not the session (hooks, MCP servers, memory and CLAUDE.md were chosen at start). After entering a worktree verify `pwd` and `git rev-parse --show-toplevel`, use absolute paths, and start an agent that must live in a worktree there (`wt-agents spawn worker <worktree>`).
   - *worker, planner, orchestrator*: a lazily loaded MCP tool (not in the tool list yet) gets one bounded direct attempt (load it with ToolSearch, call it once), then is reported absent with that error: never looped, never assumed present or missing untried.
   A fresh checkout does not carry these notes; re-add them with `wt-memory remember` (the entries are the three lines above).
@@ -1084,7 +1084,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   worker does everything), **standard** (planner, 2 workers, reviewer), **full** SDLC (adds a QA auditor).
 - `agents.sh spawn --team <name> [cwd]` brings the whole team up, one agent per member × count (each spawned as that
   persona into its base pool); `agents.sh spawn <role|persona> --team <name>` adds one. Every member pane carries a
-  display-only `team=<name>` token (shown in the agent's tags; like `pair` it lives on the pane, so a herdr restart clears it
+  display-only `team=<name>` token (shown in the agent's tags; like `pair` it lives on the terminal, so a recovered (kept) terminal loses it
   until the agent is respawned). A failed member makes `spawn --team` exit 1 after the others have started; the whole-team form takes an absolute or `./` path. This ticket (WP-237) covers definitions and spawn;
   ticket routing is WP-238 (below), stage gates WP-239.
 - Ticket ownership and stage routing (WP-238, Dispatch): when a repo has team files, a card's first assignment gives it a
@@ -1093,7 +1093,7 @@ Picks the Claude model (haiku, sonnet or opus) an agent runs on: `wt-shared/scri
   reviewer / auditor): `plan` and `build` through `handoff.sh --team`, the pair buddy as the team's `review` persona.
   `qa` has no automatic dispatch yet. A team whose roster has no such member, or all teams full, leaves the card in Ready
   with the reason in Dispatch's status. `handoff.sh` candidates, routine role picks, buddy picks and the drawer's buddy route
-  match on the `team` pane token (an agent's team must equal the ticket's, none = none), and a team spawn never exceeds
+  match on the `team` label (an agent's team must equal the ticket's, none = none), and a team spawn never exceeds
   the file's count (exit 3, `team full`). A card already taken through Planning goes to a worker next, not a second planner.
 - **Stage gates** (WP-239): an exit check per stage; a card cannot leave a stage until its check passes. Gates are
   on per team (`gates: [plan, build, review, qa]` in the team file; the standard template turns on plan/build/review,
@@ -1164,7 +1164,7 @@ agent typed tools over the CLIs it already has: `ticket_list`, `ticket_show`, `t
 - **Deadline.** Claude Code aborts an MCP call after about 60 s, so a CLI still running after 50 s (`WT_MCP_TIMEOUT_MS`) is
   killed with its children and the call fails `timeout`; repeat it with the same key. `ask_answer` waits at most 45 s per call
   (`{ answered: false }` = still open, call again).
-- Identity is the agent's own pane (`$HERDR_PANE_ID`, inherited). The server is loaded by agents that load the wt-pack plugin;
+- Identity is the agent's own terminal (`$HC_TERMINAL_ID`, inherited). The server is loaded by agents that load the wt-pack plugin;
   an agent spawned in `WT_AGENTS_MCP=lean` mode (a strict per-role MCP set) does not get it.
 
 ## wt-ticket CLI
@@ -1192,7 +1192,7 @@ current repo; `--json` on any command. Exit 0 ok, 1 API error / server down, 2 u
 | wt-review depth (WP-182, extended WP-183) | Every reviewer follows `reviewer-contract.md`: confidence 0/25/50/75/100 tied to what was actually verified (drop below 50), a finding at ≥75 must quote the offending line, every finding carries `evidence` and a `suggested_fix`, a known false-positive list, an intent-mismatch finding type (code vs. its own stated claim), a ~40-call tool budget with unread areas named, and `residual_risks`/`testing_gaps` arrays on the reply. "Do not re-derive the codebase" is scoped to the research table only — diff-mode reviewers trace callers and read whole functions. Adversarial fires in diff mode too (≥50 changed lines, or persistence/retries/concurrency/external calls, or the change is itself a guard/test/CI gate) checking for breakable code, not just a shaky premise; three more lenses join it — agent-native (SKILL.md/prompt/handoff/MCP prose an agent could misread), reliability (timeouts, retries, kill paths, Monitor arming) and performance (polling, render loops, unbounded reads). One fresh, independent agent re-checks every merged high/medium finding before it's returned — the default path when there's no TypeSafe key instead of the caller self-verifying its own dispatched findings — and rejecting a security or data-loss finding needs a cited `file:line`. `wt-ship`'s apply step starts each fix from the finding's `suggested_fix`, and files any surviving `residual_risks` as `wt-ticket new --label residual` (or lists them in the PR body off a local board); `wt-plan` does the same for plan-mode residuals. Reviewers themselves never file tickets. |
 | wt-ship | Simplify → review → record learnings → PR (this repo merges to main instead) |
 | wt-babysit | Watch a PR until merge-ready. A monitor that fails to arm is retried a couple times before giving up; on final failure it stops and reports the failure honestly (WP-154) rather than running with a silently unwatched PR |
-| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity. Modes (WP-121): standalone `/wt-watch-prs [repo]`; dispatch (orchestrator role: hands each new head to a `<repo>-reviewers` agent, never reads a diff, capped by Max reviewers); review `/wt-watch-prs review <pr> --sha <sha> --session <D>` (one head, records under the dispatcher, replies, stops). Two watch mechanisms (§1 tries the first, falls back to the second): a background poller (`watch-prs.sh serve`, launchd `id.local.wtpack.watchprs` on macOS or the systemd user unit `wt-watch-prs.service` on Linux — WP-190; installed by `./setup install` or, from a plugin-only install with no `./setup`, by the skill itself — `watch-prs.sh poller-install` (WP-191; §1 runs it once when `poller-status` fails in standalone mode) — and removed by `./setup uninstall` / `poller-uninstall`; the service runs a stable shim `~/.local/share/wt-watch-prs/bin/watch-prs` that each install rewrites, so a plugin update that moves the plugin directory never orphans it; with neither launchd nor systemd (a container) `poller-install` runs it detached under a pidfile (WP-192: idempotent, killed by that recorded pid on `poller-uninstall`, wrapped in a tiny restart loop so a crashed `serve` comes back after 5 seconds with no session involved) polls independently of any session and delivers each event as a `<wt-message kind=system>` prompt — `$W register --session S` hooks a pane up to it and the watch outlives the session that registered it; when the poller isn't running, the session arms two `Monitor`s itself (`timeout_ms` 30 min, the maximum — `Monitor` has no `persistent` option, so each re-arms on its own expiry notice). A monitor that fails to arm — on the initial start or a re-arm — is retried a couple times before giving up on it specifically; one still armed keeps the loop running degraded, both exhausted posts to the repo's room and stops rather than running with silent coverage loss (WP-152). Either mechanism's poll-shas/poll-replies persist their dedupe state to disk (`poll/` under the repo's state dir, WP-188), so a Monitor re-arm or the poller's own restart resumes cleanly instead of silently dropping a PR that closed in the gap. The poller unregisters a pane only when it is unreachable — gone, or 3 failed handoffs in a row (WP-202: an event unclaimed 30+ minutes on, with the pane still alive, is re-delivered once and raised as an Inbox notice but never unregisters it — a session waiting on CI is not a dead one; the skill claims on receipt, before waiting on the gate; `poller-status --expect-registered` also fails with "running but 0 watchers") — and surfaces each unregister as a dashboard Inbox notice via a read-only scan of `unwatched.json` (WP-187; a launchd process has no herdr pane to room-post from, so this reuses the same scan idiom as Held PR items rather than posting). A hung poller is not silent (WP-196): the detached restart loop and the systemd unit (`Type=notify`, `WatchdogSec=180`) kill and restart a `serve` whose heartbeat is 3+ minutes stale; the dashboard raises an Inbox item (`watch-prs-stale`) when the beat is that old while sessions are registered; a supervised poller also picks up its own updates (WP-197: each round it compares the script its shim points at, plus a checksum of it and the handoff helper, and on a change logs `code changed, restarting` and exits 75 — non-zero, because launchd's KeepAlive only restarts a failed exit — so its supervisor brings the new code up within a round; a hand-run poller with no shim never self-exits); and a poller that comes back after such a gap sends each registered pane one system message (`poller resumed after Nm; replayed missed heads`). `./setup doctor` reports the poller's own heartbeat age as an optional line (on Linux it also requires the unit to be `systemctl --user is-active`, and setup advises `loginctl enable-linger` so the unit outlives logout). Gates every approval on `wt-review`'s coverage line: partial coverage (a skimmed/skipped file, a missed effort floor, a lens that never ran) posts a comment instead of an approval or a hold, and is recorded (`record --coverage full\|partial`); a PR that merges on a recorded partial review gets a full re-review of the merged diff and a ticket per finding it turns up (WP-176) |
+| wt-watch-prs | Reviewer loop: watch the repo's open PRs, review each new head (delta after the first), hold or approve under a reviewer identity. Modes (WP-121): standalone `/wt-watch-prs [repo]`; dispatch (orchestrator role: hands each new head to a `<repo>-reviewers` agent, never reads a diff, capped by Max reviewers); review `/wt-watch-prs review <pr> --sha <sha> --session <D>` (one head, records under the dispatcher, replies, stops). Two watch mechanisms (§1 tries the first, falls back to the second): a background poller (`watch-prs.sh serve`, launchd `id.local.wtpack.watchprs` on macOS or the systemd user unit `wt-watch-prs.service` on Linux — WP-190; installed by `./setup install` or, from a plugin-only install with no `./setup`, by the skill itself — `watch-prs.sh poller-install` (WP-191; §1 runs it once when `poller-status` fails in standalone mode) — and removed by `./setup uninstall` / `poller-uninstall`; the service runs a stable shim `~/.local/share/wt-watch-prs/bin/watch-prs` that each install rewrites, so a plugin update that moves the plugin directory never orphans it; with neither launchd nor systemd (a container) `poller-install` runs it detached under a pidfile (WP-192: idempotent, killed by that recorded pid on `poller-uninstall`, wrapped in a tiny restart loop so a crashed `serve` comes back after 5 seconds with no session involved) polls independently of any session and delivers each event as a `<wt-message kind=system>` prompt — `$W register --session S` hooks a pane up to it and the watch outlives the session that registered it; when the poller isn't running, the session arms two `Monitor`s itself (`timeout_ms` 30 min, the maximum — `Monitor` has no `persistent` option, so each re-arms on its own expiry notice). A monitor that fails to arm — on the initial start or a re-arm — is retried a couple times before giving up on it specifically; one still armed keeps the loop running degraded, both exhausted posts to the repo's room and stops rather than running with silent coverage loss (WP-152). Either mechanism's poll-shas/poll-replies persist their dedupe state to disk (`poll/` under the repo's state dir, WP-188), so a Monitor re-arm or the poller's own restart resumes cleanly instead of silently dropping a PR that closed in the gap. The poller unregisters a pane only when it is unreachable — gone, or 3 failed handoffs in a row (WP-202: an event unclaimed 30+ minutes on, with the pane still alive, is re-delivered once and raised as an Inbox notice but never unregisters it — a session waiting on CI is not a dead one; the skill claims on receipt, before waiting on the gate; `poller-status --expect-registered` also fails with "running but 0 watchers") — and surfaces each unregister as a dashboard Inbox notice via a read-only scan of `unwatched.json` (WP-187; a launchd process has no hc terminal to room-post from, so this reuses the same scan idiom as Held PR items rather than posting). A hung poller is not silent (WP-196): the detached restart loop and the systemd unit (`Type=notify`, `WatchdogSec=180`) kill and restart a `serve` whose heartbeat is 3+ minutes stale; the dashboard raises an Inbox item (`watch-prs-stale`) when the beat is that old while sessions are registered; a supervised poller also picks up its own updates (WP-197: each round it compares the script its shim points at, plus a checksum of it and the handoff helper, and on a change logs `code changed, restarting` and exits 75 — non-zero, because launchd's KeepAlive only restarts a failed exit — so its supervisor brings the new code up within a round; a hand-run poller with no shim never self-exits); and a poller that comes back after such a gap sends each registered pane one system message (`poller resumed after Nm; replayed missed heads`). `./setup doctor` reports the poller's own heartbeat age as an optional line (on Linux it also requires the unit to be `systemctl --user is-active`, and setup advises `loginctl enable-linger` so the unit outlives logout). Gates every approval on `wt-review`'s coverage line: partial coverage (a skimmed/skipped file, a missed effort floor, a lens that never ran) posts a comment instead of an approval or a hold, and is recorded (`record --coverage full\|partial`); a PR that merges on a recorded partial review gets a full re-review of the merged diff and a ticket per finding it turns up (WP-176) |
 | wt-finish | Retire a merged worktree and its branch |
 | wt-handoff | Hand a prompt to an agent, or a freshly spawned one; `--cancel` actually stops an agent (ends its `/goal`, if any); `--goal` arms one |
 | wt-audit | PM+QA pass that files board cards; proposals only |

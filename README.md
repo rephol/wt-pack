@@ -11,7 +11,7 @@
 
 <p align="center">
   <img alt="Claude Code skills" src="https://img.shields.io/badge/Claude%20Code-skills-d97757">
-  <img alt="herdr" src="https://img.shields.io/badge/agents-herdr-408cff">
+  <img alt="hc" src="https://img.shields.io/badge/agents-hc-408cff">
   <img alt="Node 22.13+" src="https://img.shields.io/badge/node-%E2%89%A5%2022.13-339933?logo=node.js&logoColor=white">
   <img alt="macOS first" src="https://img.shields.io/badge/macOS-first-000000?logo=apple&logoColor=white">
   <img alt="Linux works" src="https://img.shields.io/badge/Linux-works-FCC624?logo=linux&logoColor=black">
@@ -32,7 +32,7 @@
 ## What it is
 
 wt-pack is a set of [Claude Code](https://claude.com/claude-code) skills plus a local web dashboard.
-Together they turn a handful of Claude Code sessions, run by [herdr](https://herdr.dev), into a small
+Together they turn a handful of Claude Code sessions, run by `hc` (herdr-core), into a small
 team with defined roles:
 
 - An **orchestrator** picks Ready tickets and hands them off.
@@ -90,7 +90,7 @@ Pick **one** of these. Don't combine 1 and 2: both load wt-memory's hooks, so ev
    ```
 
    You get every `wt-*` skill, plus wt-memory's hooks (standing preferences and the pkill guard) and its MCP
-   server. Agents still need [herdr](https://herdr.dev). There is no board, rooms or dashboard: `wt-ticket` and
+   server. Agents still need `hc` (herdr-core). There is no board, rooms or dashboard: `wt-ticket` and
    `room` say so when you call them. Plugin skills are namespaced, so type `/wt-pack:wt-plan` instead of
    `/wt-plan`. A prompt like "Use wt-plan …" works either way.
    Add the marketplace from GitHub or a clean clone, never from a working checkout. A local-path install copies
@@ -102,7 +102,7 @@ Pick **one** of these. Don't combine 1 and 2: both load wt-memory's hooks, so ev
 ## Quick start
 
 You need macOS or Linux, Node ≥ 22.13, Git, [`gh`](https://cli.github.com),
-[herdr](https://herdr.dev) and Claude Code.
+`hc` (herdr-core) and Claude Code.
 
 ```sh
 git clone https://github.com/rephol/wt-pack.git ~/wt-pack
@@ -131,9 +131,9 @@ Inside Claude Code, "set up wt-pack" runs the `wt-setup` skill, which drives the
 
 ```sh
 sudo apt-get install -y jq gh                                   # drop sudo when you are root
-curl -fsSL https://herdr.dev/install.sh | sh                    # then add ~/.local/bin to PATH
+# hc (herdr-core) is installed with herdr-app; put hc on PATH, `hc update` keeps it current
 gh auth login
-herdr                                                           # the herdr server must be running
+hc server start                                                 # the dashboard never starts the core itself
 npm --prefix ~/wt-pack/skills/wt-dashboard start  # the dashboard, instead of launchd
 ```
 
@@ -153,7 +153,7 @@ Each directory under `skills/` is one skill, shipped in the one wt-pack plugin (
 | `wt-simplify` · `wt-review` · `wt-compound` · `wt-pr` | The steps `wt-ship` runs, each also usable on its own |
 | `wt-babysit` | Watches a PR until it is merge-ready |
 | `wt-finish` | Retires a merged worktree and its branch |
-| `wt-agents` | Spawns, lists and removes named herdr agents (planners, workers, auditors) |
+| `wt-agents` | Spawns, lists and removes named hc agents (planners, workers, auditors) |
 | `wt-handoff` | Hands a prompt to an agent as a `/goal`, labelling both ends |
 | `wt-audit` | The auditor's loop: use the product, file findings, rank what to do next |
 | `wt-ticket` | The local kanban board CLI |
@@ -166,9 +166,9 @@ Each directory under `skills/` is one skill, shipped in the one wt-pack plugin (
 
 ## Architecture
 
-- **Agents** are Claude Code sessions in herdr panes. Pane tokens carry each agent's role, project and task.
+- **Agents** are Claude Code sessions in hc terminals. Terminal labels carry each agent's role, project and task.
 - **wt-dashboard** is a dependency-free Node server (`skills/wt-dashboard/server.mjs`) with a
-  `node:sqlite` store for tickets, rooms and the inbox. It reads herdr, git and `gh` to show state,
+  `node:sqlite` store for tickets, rooms and the inbox. It reads hc, git and `gh` to show state,
   and Claude Code's own JSONL transcripts for the chat view.
 - **The web UI** (React 19, Vite, TanStack Query) is served by that server on loopback, behind a session
   cookie and a Host/Origin allowlist. **The Mac app** is a Tauri 2 shell around the same UI.

@@ -4,3 +4,4 @@
 wt-judge-thresholds.json
 .env
 skills/wt-memory/claude-plugin/evals/results/
+.qa-evidence/

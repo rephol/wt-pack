@@ -1,5 +1,5 @@
 #!/bin/sh
-# A planner's task label and its lifecycle, as herdr pane tokens (source wt-dashboard, shown as
+# A planner's task label and its lifecycle, as hc labels (shown as
 # "task · task_state" in the dashboard):
 #
 #   task-state.sh own "<TICKET> <title>" [state]   # this pane: task (cut to 80) + task_state (default planning)
@@ -9,17 +9,28 @@
 #
 # `planner` finds the planner through this pane's handoff_from_pane token (role=planner only) and changes it only while
 # the planner's task is still this work: it starts with the same ticket (ENG-123 or WP-12), or, without one,
-# is the same label. Every failure is silent and exits 0 (not in herdr, pane gone, old herdr).
-[ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null && command -v jq >/dev/null || exit 0
+# is the same label. Every failure is silent and exits 0 (not in an hc terminal, terminal gone, no hc).
+[ -n "${HC_TERMINAL_ID:-}" ] && command -v hc >/dev/null && command -v jq >/dev/null || exit 0
 
-tokens() { herdr pane get "$1" 2>/dev/null | jq -c '.result.pane.tokens // {}' 2>/dev/null; }
+tokens() { hc get --json "$1" 2>/dev/null | jq -c '.labels // {}' 2>/dev/null; }
 tok() { printf '%s' "$1" | jq -r --arg k "$2" '.[$k] // empty' 2>/dev/null; }
-meta() { p=$1; shift; herdr pane report-metadata "$p" --source wt-dashboard "$@" >/dev/null 2>&1 || true; }
 cut80() { printf '%.80s' "$1"; }
+# meta <terminal> --token k=v ... | --clear-token k ...: one `hc label` call (`k=` removes a label); values cut to 80.
+meta() {
+  p=$1; shift; n=$#
+  while [ "$n" -gt 0 ]; do
+    case "$1" in
+      --token) kv=$2; set -- "$@" "${kv%%=*}=$(cut80 "${kv#*=}")"; shift 2 ;;
+      --clear-token) set -- "$@" "$2="; shift 2 ;;
+      *) shift ;;
+    esac
+    n=$((n - 2))
+  done
+  [ $# -eq 0 ] || hc label --json "$p" "$@" >/dev/null 2>&1 || true
+}
 
-# HERDR_PANE_ID may be herdr's stable id; the tokens live on the pane id.
-me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)
-[ -n "$me" ] || exit 0
+# The terminal address (t7) is the identity: its labels live on it.
+me=$HC_TERMINAL_ID
 
 case "${1:-}" in
   own)

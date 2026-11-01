@@ -1,0 +1,57 @@
+{
+  "verb": "run",
+  "recorded": "hc 0.1.16 2026-11-01",
+  "cases": {
+    "bg": {
+      "args": [
+        "run",
+        "--bg",
+        "--json",
+        "--name",
+        "rec-a",
+        "--label",
+        "wt.pool=rec-workers",
+        "--label",
+        "role=worker",
+        "--label",
+        "model=sonnet",
+        "--outlive-parent",
+        "--no-notify",
+        "--",
+        "sleep",
+        "300"
+      ],
+      "exit": 0,
+      "stdout": "{\"address\":\"t14\",\"agent\":\"sleep\",\"cwd\":\"/private/tmp/wtt1/repo\",\"name\":\"rec-a\",\"state\":\"live\",\"turn\":0}\n",
+      "stderr": ""
+    },
+    "name_taken": {
+      "args": [
+        "run",
+        "--bg",
+        "--json",
+        "--name",
+        "rec-a",
+        "sleep",
+        "5"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"pick another name, or kill the one holding it\",\"kind\":\"name_taken\",\"message\":\"a live terminal is already named \\\"rec-a\\\"\"}}\n"
+    },
+    "bad_name": {
+      "args": [
+        "run",
+        "--bg",
+        "--json",
+        "--name",
+        "Rec-Bad",
+        "sleep",
+        "5"
+      ],
+      "exit": 6,
+      "stdout": "",
+      "stderr": "{\"error\":{\"hint\":\"see `hc schema`\",\"kind\":\"invalid_params\",\"message\":\"bad name \\\"Rec-Bad\\\": use 1-32 of a-z 0-9 - _ . starting with a letter or digit, not shaped like an id (t7)\"}}\n"
+    }
+  }
+}

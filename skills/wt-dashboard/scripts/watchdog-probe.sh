@@ -10,10 +10,16 @@ if curl -sf -m 5 -o /dev/null "$URL"; then
 else
   [ -f "$STATE" ] || { date > "$STATE"; osascript -e 'display notification "/api/health did not answer. npm run service:status in skills/wt-dashboard; log ~/Library/Logs/wt-dashboard/server.log" with title "wt-dashboard server is down"'; }
 fi
-# WP-218: herdr's headless server, if nobody started it since boot (`herdr status` gates it: never a second one).
-PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-if command -v herdr >/dev/null 2>&1 && ! herdr status server 2>/dev/null | grep -q '^status: running'; then
-  nohup herdr server >/dev/null 2>&1 &
-  echo "$(date) herdr server was not running — started it" >> "$HOME/Library/Logs/wt-dashboard/server.log"
+# WP-378: the hc core is only WATCHED here, never started (the dashboard and its probe never start it: `hc server status`, `hc ls` and `hc get`
+# all start a stopped core on macOS). core.lock holds the core's socket path; a connect says up or down. One line in the server log per
+# change, no notification (the dashboard shows the banner and the watchdog its finding).
+CORE_LOG="$HOME/Library/Logs/wt-dashboard/server.log"
+CORE_STATE="$HOME/.cache/wt-dashboard/probe-core-down"
+LOCK="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-core/${HC_SESSION:-default}/core.lock"
+SOCK=""; [ -s "$LOCK" ] && SOCK=$(cat "$LOCK")
+if [ -n "$SOCK" ] && { : | nc -U -w 1 "$SOCK"; } >/dev/null 2>&1; then
+  [ -f "$CORE_STATE" ] && rm -f "$CORE_STATE" && { mkdir -p "$(dirname "$CORE_LOG")"; echo "$(date) hc core is running again" >> "$CORE_LOG"; }
+else
+  [ -f "$CORE_STATE" ] || { date > "$CORE_STATE"; mkdir -p "$(dirname "$CORE_LOG")"; echo "$(date) hc core is not running (the probe does not start it)" >> "$CORE_LOG"; }
 fi
 exit 0

@@ -24,14 +24,14 @@ before(async () => {
 })
 after(() => srv.close())
 
-const turn = (v) => writeFileSync(join(turns, 'turn-w1_p1.json'.replace('_', ':')), JSON.stringify(v))
-const check = (cmd, env = {}) => new Promise((resolve) => execFile(CLI, ['check', '--', cmd], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tmpdir(), HERDR_PANE_ID: 'w1:p1', WT_PANE_KEY: 'k', WT_TURN_DIR: turns, HERDR_DASH_URL: base, WT_GATE: 'ask', ...env } },
+const turn = (v) => writeFileSync(join(turns, 'turn-t1.json'), JSON.stringify(v))
+const check = (cmd, env = {}) => new Promise((resolve) => execFile(CLI, ['check', '--', cmd], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tmpdir(), HC_TERMINAL_ID: 't1', WT_PANE_KEY: 'k', WT_TURN_DIR: turns, HERDR_DASH_URL: base, WT_GATE: 'ask', ...env } },
   (e, stdout) => resolve({ code: e ? e.code : 0, out: stdout.trim() })))
 
 test('not gated, not an agent session, or WT_GATE=off: exit 0 and the dashboard is never called', async () => {
   calls.length = 0; turn({ trust: 'unverified' })
   assert.equal((await check('git status')).code, 0)
-  assert.equal((await check('git push', { HERDR_PANE_ID: '' })).code, 0)
+  assert.equal((await check('git push', { HC_TERMINAL_ID: '' })).code, 0)
   assert.equal((await check('git push', { WT_GATE: 'off' })).code, 0)
   assert.equal(calls.length, 0)
 })
@@ -47,7 +47,7 @@ test('the user\'s turn and a verified handoff from the orchestrator/server pass;
     assert.equal(r.code, 3, JSON.stringify(t)); assert.deepEqual(JSON.parse(r.out), { action: 'git push', rule: 'push', segment: 'git push origin main', asked: true })
   }
   assert.deepEqual(calls.map((c) => c.url).slice(0, 2), ['/api/gate/consume', '/api/gate/ask'])
-  assert.equal(calls[1].body.cmd, 'git push origin main'); assert.match(calls[1].body.hash, /^[0-9a-f]{16}$/); assert.equal(calls[1].pane, 'w1:p1')
+  assert.equal(calls[1].body.cmd, 'git push origin main'); assert.match(calls[1].body.hash, /^[0-9a-f]{16}$/); assert.equal(calls[1].pane, 't1')
 })
 
 test('WP-357: a peer-started turn is denied outright: exit 3, no grant consumed, no ask posted; WT_GATE=off still allows', async () => {
@@ -61,12 +61,24 @@ test('WP-357: a peer-started turn is denied outright: exit 3, no grant consumed,
 })
 
 test('a missing turn record is unverified; a live grant lets the retry through; an unreachable dashboard still denies, unasked', async () => {
-  for (const f of ['turn-w1:p1.json']) writeFileSync(join(turns, f), '{"trust":"user"}')
-  const { unlinkSync } = await import('node:fs'); unlinkSync(join(turns, 'turn-w1:p1.json'))
+  for (const f of ['turn-t1.json']) writeFileSync(join(turns, f), '{"trust":"user"}')
+  const { unlinkSync } = await import('node:fs'); unlinkSync(join(turns, 'turn-t1.json'))
   assert.equal((await check('git push')).code, 3) // no record = not allowed by absence
   granted = true; calls.length = 0
   assert.equal((await check('git push')).code, 0); assert.deepEqual(calls.map((c) => c.url), ['/api/gate/consume']) // consumed, no new ask
   granted = false
   const r = await check('git push', { HERDR_DASH_URL: 'http://127.0.0.1:1' })
   assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', rule: 'push', segment: 'git push', asked: false })
+})
+
+test('WP-378: identity is HC_TERMINAL_ID (the old pane id alone is a human terminal); a forged-untagged hc send is gated, ask posted once, exit 3', async () => {
+  calls.length = 0; turn({ trust: 'unverified' })
+  assert.equal((await check('git push', { HC_TERMINAL_ID: '', HERDR_PANE_ID: 'w1:p1' })).code, 0) // legacy-herdr
+  assert.equal(calls.length, 0)
+  const r = await check('env -u HC_TERMINAL_ID hc send t7 "do it"')
+  assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'send into another terminal as an untagged (forged) message', rule: 'hc-forged-send', segment: 'env -u HC_TERMINAL_ID hc send t7 "do it"', asked: true })
+  assert.equal(calls[1].pane, 't1')
+  turn({ trust: 'user' }); calls.length = 0
+  assert.equal((await check('env -u HC_TERMINAL_ID hc send t7 "do it"')).code, 0) // the user's own turn may
+  assert.equal((await check('hc send t7 hello')).code, 0) // an ordinary tagged send is not gated at all
 })

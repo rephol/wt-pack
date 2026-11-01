@@ -25,11 +25,10 @@ test('subOf splits the sub-command off; an unknown or missing one is empty', () 
 // The engine beneath: process.run answers from a script and records argv.
 function rig(on: any) {
   const ran: string[][] = []
-  mock.env(on, { HERDR_PANE_ID: 'w1:p2' })
+  mock.env(on, { HC_TERMINAL_ID: 't7' })
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     ran.push(e.argv)
-    const pane = e.argv[0] === 'herdr'
-    return { value: { exitCode: 0, stdout: pane ? JSON.stringify({ result: { pane: { pane_id: 'w1:p2' } } }) : 'out\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode: 0, stdout: 'out\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.register', () => ({}))
   return ran
@@ -44,11 +43,21 @@ test('/wt ticket show WP-1 runs the sibling script and returns its output', asyn
   expect(r.text).toBe('out')
 })
 
-test('/wt dnd acts on the resolved current pane', async ($, on) => {
+test('/wt dnd acts on the current terminal (HC_TERMINAL_ID, no lookup: the address is the id)', async ($, on) => {
   const ran = rig(on)
   await $.command.run({ command: 'wt', args: 'dnd on' } as never)
-  expect(ran[0]).toEqual(['herdr', 'pane', 'get', 'w1:p2'])
-  expect(ran[1].slice(-3)).toEqual(['dnd', 'w1:p2', 'on'])
+  expect(ran).toHaveLength(1)
+  expect(ran[0].slice(-3)).toEqual(['dnd', 't7', 'on'])
+})
+
+test('/wt dnd outside an hc terminal says so and runs nothing', async ($, on) => {
+  const ran: string[][] = []
+  mock.env(on, { HERDR_PANE_ID: 'w1:p2' }) // the old id is no identity (legacy-herdr)
+  on('process.run', (_$: unknown, e: { argv: string[] }) => { ran.push(e.argv); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
+  on('command.register', () => ({}))
+  const r: any = await $.command.run({ command: 'wt', args: 'dnd on' } as never)
+  expect(r.text).toMatch(/HC_TERMINAL_ID is unset/)
+  expect(ran).toEqual([])
 })
 
 test('/wt with no or an unknown sub prints the usage and runs nothing', async ($, on) => {

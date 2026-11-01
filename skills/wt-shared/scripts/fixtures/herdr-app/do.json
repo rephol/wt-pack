@@ -1,0 +1,32 @@
+{
+  "verb": "herdr-app do",
+  "recorded": "herdr-app 2026-11-01",
+  "cases": {
+    "space_new": {
+      "args": [
+        "do",
+        "space.new",
+        "--name",
+        "wtqa-u2",
+        "--folder",
+        "/tmp"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"space\": \"sp8abb9719a3675c8ca15cf8649e86c16f\",\n  \"tab\": \"tb5ee7453bc6a3b3b9c16368ba5d903849\",\n  \"terminal\": \"t6\"\n}\n",
+      "stderr": ""
+    },
+    "space_close": {
+      "args": [
+        "do",
+        "space.close",
+        "--id",
+        "sp...",
+        "--confirmed",
+        "true"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"ok\": true\n}\n",
+      "stderr": ""
+    }
+  }
+}

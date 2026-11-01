@@ -1,8 +1,8 @@
 ---
 name: wt-handoff
 description: >
-  Hand a prompt to a herdr agent — a free worker from the repo's pool, a named pane, or a freshly spawned
-  one — as a plain prompt (a /goal only with --goal), and leave both ends aware of each other: the target pane is labelled with the task
+  Hand a prompt to an hc agent — a free worker from the repo's pool, a named terminal, or a freshly spawned
+  one — as a plain prompt (a /goal only with --goal), and leave both ends aware of each other: the target terminal is labelled with the task
   (shown in wt-dashboard) and told who sent it and how to reply; the sender is told where it went. Use
   when handing off a plan or any work prompt to another agent instead of the clipboard. Called by
   wt-plan's handoff step; also useful invoked alone.
@@ -15,7 +15,7 @@ Paths to scripts and files are relative to this skill's base directory (announce
 work both from the `./setup` links and from a plugin install (WP-122).
 
 ```bash
-scripts/handoff.sh --list <cwd>     # free workers: pane-id, tab label, cwd
+scripts/handoff.sh --list <cwd>     # free workers: terminal (t7), name, cwd
 printf '%s\n' "$PROMPT" | scripts/handoff.sh \
   [--pane <id> [--clear] | --new] [--goal] [--task "ENG-1192 Tailwind v4 for @acme/ui"] [--mcp figma] [--kind k] [--from name] [--dry-run] [--file <path|->] <cwd>
 scripts/handoff.sh --reply <pane> "text"   # answer a wt-message (or text on stdin)
@@ -29,8 +29,7 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   is wt-pack traffic, not its user. `--kind` (default `handoff`) and `--from` (default: your agent name) are for
   server callers (Dispatch passes `--kind dispatch --from wt-dashboard`). The wrap counts toward the 4000 cap.
 - **`--reply <pane> "text"`** answers whoever sent you a wt-message: a plain `kind=reply` prompt, no `/goal`,
-  no tokens, no worker selection. Raw `herdr agent prompt` still works but arrives untagged — describe it only
-  as the fallback when `handoff.sh` is unavailable. **Put a body with backticks, `$(…)` or quotes in a file (`--file <path>`) or pipe it
+  no labels, no worker selection. A raw `hc send` from an agent terminal arrives wrapped in `<hc from=…>` tags, which the receiving hook reads as a peer, not as pack traffic: `handoff.sh` types from a call with `HC_TERMINAL_ID` unset (`hc send` without `--force`; a blocked target — a dialog is open — is not typed into: exit 1 before anything is recorded, retry when it is answered; every other exit follows the **Output** list below). Use it, never a raw `hc send`, for anything an agent must act on. **Put a body with backticks, `$(…)` or quotes in a file (`--file <path>`) or pipe it
   (`… | handoff.sh --reply <pane>`, or `--file -`)** — in a shell argument the shell runs a backtick or `$(…)` first and silently
   drops its text (WP-359); an argument body that still contains one prints a warning. For a handoff, `--file <path|->` is the same as the
   `<cwd> <prompt-file>` form (no file and no `--file` still reads stdin).
@@ -39,7 +38,7 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   incident: two agents told to stop kept going). It sends Escape to interrupt whatever the agent is
   mid-doing, then `/goal clear`, waiting for the agent to go idle/done as verification; if that doesn't
   happen (still working/blocked after Escape, or the goal won't let go) it falls back to a plain `/clear`.
-  Either way it then clears the pane's `task`/`ticket` tokens, and — if the local board ticket in `tokens.ticket`
+  Either way it then clears the terminal's `task`/`ticket` labels, and — if the local board ticket in the `ticket` label
   is still assigned to that pane — unassigns it and moves it back to `ready` with a note (`cancelled: <why>`).
   Prints one line: `cancelled <name> (<pane>): <goal cleared|goal clear unverified, sent /clear>[, cleared
   task="…"][, returned <ID> to ready]`. Dispatch and reconcile use it when they withdraw a hand-off.
@@ -47,7 +46,7 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
 - `--pane <name|id>` (and `--reply <name|id>`) also take a live **headless run** (WP-317): the message is delivered through
   `POST /api/headless/:id/message` with the same envelope, reply footer and `--request-id` idempotency. A live name wins over an
   ended run that shares it; an id prefix must be unique.
-- No `--pane`/`--new`: the first free worker in `<repo>-workers` that sits in the main checkout; else spawns
+- No `--pane`/`--new`: the first free worker of the pool (hc label `wt.pool=<repo>-workers`) that sits in the main checkout and runs claude (a kept login shell is never a candidate, never typed into); else spawns
   one through `wt-agents`. `--clear` sends `/clear` first. No `/goal` by default (WP-272): when the
   target's delivery mod is live the message is queued and the target pulls it between turns (if not pulled within
   `WT_PULL_WAIT_S`, 30 s, the queued row is cancelled and the pointer is typed once, same envelope id); otherwise the
@@ -56,8 +55,18 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   `--no-goal` is accepted and is the default. Without a goal the dashboard keeps the agent going: it nudges an acknowledged
   handoff whose card is still open (4 min, once) and the delivery mod reminds at the end of a turn that did not report.
 - **Output:** line 1 is `reused <pane>` or `created <name> <pane>` (callers parse it); then
-  `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. Non-zero exit = nothing was
-  sent; print the prompt for a human instead.
+  `target <name> <pane> — <task>` and `reach: scripts/handoff.sh --reply <pane> "..."`. A request id seen before replays its first output (exit 0). Exit codes:
+  - **0** delivered (or queued for the target's delivery mod, or replayed).
+  - **1, nothing recorded and nothing sent — retry later; the same `--request-id` is safe:** the hc core is down (`hc core is down — ask the user to start it (hc server start)`;
+    an agent never starts it; this also applies to `--reply` to a terminal and to `--cancel`, but not to a headless target), the target is **blocked** (a dialog is open: retry when it is answered), `hc` is not on PATH, the target is paused/exited/missing
+    (resume it first; `--cancel` on a terminal or agent that does not exist prints `--cancel: no such terminal or agent: <name>`), or a prompt over the goal's 4000-character cap / an unreadable prompt file or directory / a failed wrap (fix the input, then run again).
+  - **1, a headless target** (`--pane`/`--reply` naming a live headless run) **that the dashboard cannot take:** `wt-dashboard not reachable` (start or wait for the dashboard, then retry with the same `--request-id`) or `headless <id>: <error>` (the server's reason, e.g. the run is not live; resume or re-target it).
+  - **1, `<pane> is blocked (a dialog is open)` from the send itself (exit 9 from `hc send`, a race: the dialog opened after the pre-check):** a row may already be recorded, but nothing was typed. The retry is still safe with the **same `--request-id`**; wait until the dialog is answered.
+  - **1, `the dashboard did not record this message`:** nothing was typed. Retry with the **same `--request-id`** so the retry reuses the id the dashboard may already hold (pass one on the first call to make this safe).
+  - **1, `<pane> is not an agent` or `hc send … failed` (after the row was recorded):** nothing was typed. Check the target (`wt-agents list`), then retry with the same `--request-id`.
+  - **1, `prompt not submitted: it is still in the input box of <pane>`:** the message **was recorded and typed**; only the submit is unconfirmed. Do **not** send it again: look at the target (`hc read <pane>`) and, if it is stuck, ask the user to look at it (pressing Enter in another terminal is `hc keys`, a gated action that needs the user's OK).
+  - **2** bad arguments (including `--reply --file <path>` that cannot be read, a `--reply` with no text, and a bad pane id), or the card and the target are on different teams: nothing was sent; fix the call. Print the prompt for a human only for a failure a retry cannot fix.
+  - **3** the worker pool (`WT_WORKERS_MAX`) or the team roster is full: nothing was sent; the caller (Dispatch) keeps the card and retries when a seat frees up.
 
 ## Task label and awareness
 
@@ -82,18 +91,18 @@ scripts/handoff.sh --cancel <pane|name> ["why"]   # stop an agent for real
   without it, persona agents are never picked.
 - `--dry-run` prints what would happen (reuse which worker, or spawn with which `--mcp`) and Jev's
   probabilities, and sends, tags and spawns nothing.
-- `--task` labels the target: herdr pane token `task` (source `wt-dashboard`), shown in the dashboard's agent
+- `--task` labels the target: hc label `task`, shown in the dashboard's agent
   list, detail header and switcher. It always **starts with the ticket**; without `--task` the label is just
   the ticket from `<cwd>`'s branch (`ENG-NNN` for a Linear team key, or `<KEY>-N` for a local board key from `wt-ticket keys`), and with
   neither nothing is set. Cut to 80 characters.
 - A local board ticket (`WP-12`) handed to a worker moves to **building** and is assigned to the worker
   (`wt-ticket move` + `assign`, best effort; `--dry-run` prints `ticket=` and the move instead).
-- Target tokens: `task`, `ticket`, `handoff_from`, `handoff_from_pane`, `handoff_at`. Sender tokens (only
-  inside herdr, from `$HERDR_PANE_ID`): `handoff_to`, `handoff_to_pane`.
+- Target labels: `task`, `ticket`, `handoff_from`, `handoff_from_pane`, `handoff_at`. Sender labels (only
+  inside an hc terminal, from `$HC_TERMINAL_ID`): `handoff_to`, `handoff_to_pane`.
 - The prompt gets a footer: `Handed off by <sender> (pane <id>). To reply: <absolute path of this handoff.sh> --reply <id> "..."`
   (resolved at send time, so it works from the `./setup` links and from a plugin install).
 - `handoff_at` is what lets the dashboard adopt the new `ticket` over its own mirrored copy
-  (the dashboard's agents table, `wt.db`); `task` and `handoff_*` are never mirrored, so they vanish on a herdr restart.
+  (the dashboard's agents table, `wt.db`); `task` and `handoff_*` are never mirrored, so they vanish when the terminal does.
 - `wt-finish` clears `task` when the work is retired.
 
 ## Knowing when a handoff is done

@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { itemFromTransition } from './inbox.mjs'
-import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, remoteName, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, planUsageFromLimits, projectName } from './server.mjs'
+import { parsePane , sourceIssue, snapshot, transitions, jevState, deriveTasks, todayCounts, agentName, notePlanUsage, planUsageSnapshot, planUsageFromFile, planUsageFromLimits, projectName } from './server.mjs'
 
 const rule = '─'.repeat(40)
 const pane = `❯ fix the bug
@@ -36,7 +36,7 @@ test('answerPlan maps one picker question to keys', async () => {
   assert.deepEqual(answerPlan(single, { other: 'Purple' }), [{ keys: ['4'] }, { text: 'Purple' }, { keys: ['enter'] }])
   const multi = { multiSelect: true, cursor: 1, other: null, options: [{ label: 'Cat', checked: false }, { label: 'Dog', checked: true }, { label: 'Fish', checked: false }] }
   assert.deepEqual(answerPlan(multi, { selected: ['Cat', 'Dog'] }), [{ keys: ['1'] }, { keys: ['down', 'down', 'down', 'down', 'enter'] }])
-  assert.deepEqual(answerPlan(multi, { selected: [], other: 'Bird' }), [{ keys: ['2'] }, { keys: ['4'] }, { keys: ['down', 'down', 'down'] }, { text: 'Bird' }, { keys: ['down', 'enter'] }])
+  assert.deepEqual(answerPlan(multi, { selected: [], other: 'Bird' }), [{ keys: ['2'] }, { keys: ['down', 'down', 'down'] }, { text: 'Bird' }, { ensure: 'Bird' }, { keys: ['down', 'enter'] }])
   assert.throws(() => answerPlan(single, { selected: ['Nope'] }))
 })
 
@@ -259,20 +259,6 @@ test('rooms: @user from an agent needs you until the user replies; the handle is
   assert.equal(R.mentionStatus({ author: { kind: 'user' }, mentions: ['user'] }, { deliver: [] }, [], 'user').notified, false)
 })
 
-test('canonicalPane: a stable $HERDR_PANE_ID resolves to the current display id; bad ids and failures are null', async () => {
-  const { canonicalPane } = await import('./server.mjs')
-  let calls = 0
-  const get = async (id) => { calls++; if (id === 'w4:pM') return JSON.stringify({ result: { pane: { pane_id: 'wM:p6' } } }); throw new Error('no such pane') }
-  const cache = new Map()
-  assert.equal(await canonicalPane('w4:pM', get, cache, 0), 'wM:p6')
-  assert.equal(await canonicalPane('w4:pM', get, cache, 1000), 'wM:p6')
-  assert.equal(calls, 1) // cached
-  assert.equal(await canonicalPane('w4:pM', get, cache, 40_000), 'wM:p6')
-  assert.equal(calls, 2) // TTL expired, re-resolved
-  assert.equal(await canonicalPane('zz:p9', get, cache, 0), null)
-  assert.equal(await canonicalPane('--help', get, cache, 0), null)
-})
-
 test('rooms routing: mention > responder > broadcast > nobody', async () => {
   const R = await import('./rooms.mjs')
   const S = { ...R.DEFAULT_SETTINGS }
@@ -470,7 +456,7 @@ test('parsePane: WP-179 plan usage — ccstatusline\'s own Session/Weekly line, 
 
 // Follow-up: real ccstatusline output separates fields with U+00A0 (non-breaking space) around a single
 // powerline-style glyph (here U+E0B0), never a run of plain spaces — a real capture from wt-pack-worker-04
-// (w1Q:p1A, `herdr pane read`) came back null against the ASCII-space fixture above.
+// (w1Q:p1A, `hc read`) came back null against the ASCII-space fixture above.
 test('parsePane: WP-179 follow-up — a real ccstatusline capture (NBSP + glyph separators, not plain spaces)', () => {
   const box = '─'.repeat(40)
   const real = '   Session: 0.0%  Reset: 4h57m  Weekly: 47.0%  Weekly Reset: 3d 15hr 7m'
@@ -709,23 +695,34 @@ test('service plist: valid, crash-only KeepAlive, launchd marker, escaped paths'
   assert.equal(j.ThrottleInterval, 10)
 })
 
-import { herdrKeys, allowedCwd, isShellPane, TerminalSettings } from './terminals.mjs'
-test('terminals: key whitelist maps to herdr names and refuses anything else', () => {
-  assert.deepEqual(herdrKeys(['C-c', 'Enter', 'Up']), ['ctrl+c', 'enter', 'up'])
-  assert.throws(() => herdrKeys(['C-c', 'rm -rf']), /not allowed/)
-  assert.throws(() => herdrKeys(['__proto__']), /not allowed/)
-  assert.throws(() => herdrKeys([]), /1–32/)
+import { hcKeys, typeKeys, allowedCwd, isShellTerminal, shellsLabel, TerminalSettings } from './terminals.mjs'
+test('terminals: key whitelist maps to hc key names and refuses anything else', () => {
+  assert.deepEqual(hcKeys(['C-c', 'Enter', 'Up']), ['ctrl+c', 'enter', 'up'])
+  assert.throws(() => hcKeys(['C-c', 'rm -rf']), /not allowed/)
+  assert.throws(() => hcKeys(['__proto__']), /not allowed/)
+  assert.throws(() => hcKeys([]), /1–32/)
+})
+test('terminals (WP-378): typing without Enter goes key by key, only characters hc keys types faithfully (capitals via shift+<letter>; shifted punctuation and non-ASCII stay refused)', () => {
+  assert.deepEqual(typeKeys('ls -la /tmp'), ['l', 's', 'space', '-', 'l', 'a', 'space', '/', 't', 'm', 'p'])
+  assert.deepEqual(typeKeys('a=1,b.c'), ['a', '=', '1', ',', 'b', '.', 'c'])
+  assert.deepEqual(typeKeys('Ab;'), ['shift+a', 'b', ';'])
+  assert.deepEqual(typeKeys('Zz]`'), ['shift+z', 'z', ']', '`'])
+  for (const bad of ['a<b', 'echo "x"', 'a:b', 'a_b', 'a&b', 'é']) assert.throws(() => typeKeys(bad), (e) => e.status === 400 && /cannot be typed/.test(e.message), bad)
+  assert.throws(() => typeKeys(''), /1–/)
+  assert.throws(() => typeKeys('a'.repeat(65)), /1–/)
 })
 test('terminals: a shell starts only in a project, a worktree, $HOME or tmp', () => {
   const pl = { roots: ['/r/acmeapp'], worktrees: ['/r/acmeapp/.wt/acm-1'], home: '/Users/me', tmp: ['/private/tmp'] }
   for (const ok of ['/r/acmeapp', '/r/acmeapp/', '/r/acmeapp/.wt/acm-1', '/Users/me', '/private/tmp']) assert.ok(allowedCwd(ok, pl), ok)
   for (const bad of ['/', '/etc', '/r/acmeapp/src', '/r/acmeapp/../x', 'relative', null]) assert.ok(!allowedCwd(bad, pl), String(bad))
 })
-test('terminals: only agent-less panes in a -shells workspace are shells', () => {
-  const ws = new Set(['wS'])
-  assert.ok(isShellPane({ workspace_id: 'wS', agent: null }, ws))
-  assert.ok(!isShellPane({ workspace_id: 'wS', agent: 'claude' }, ws))
-  assert.ok(!isShellPane({ workspace_id: 'wM', agent: null }, ws))
+test('terminals (WP-378): only a LIVE terminal in a <project>-shells pool is a shell; an agent, a finished one or a stranger is not', () => {
+  assert.equal(shellsLabel('acme'), 'acme-shells')
+  assert.ok(isShellTerminal({ alive: true, labels: { 'wt.pool': 'acme-shells' } }))
+  assert.ok(!isShellTerminal({ alive: false, labels: { 'wt.pool': 'acme-shells' } }))
+  assert.ok(!isShellTerminal({ alive: true, labels: { 'wt.pool': 'acme-workers' } }))
+  assert.ok(!isShellTerminal({ alive: true, labels: {} }))
+  assert.ok(!isShellTerminal(null))
 })
 test('terminals: off by default; tailnet needs its own switch; audit is appended', async () => {
   const dir = mkdtempSync(pj(tmpdir(), 'wtd-term-'))
@@ -1132,7 +1129,7 @@ test('syncTickets ignores local board tasks', async () => {
   assert.deepEqual([...r.taskPrev.keys()], ['ACM-1'])
 })
 
-test('parsePane: a truncated cwd is dropped (herdr cwd wins)', () => {
+test('parsePane: a truncated cwd is dropped (the core cwd wins)', () => {
   assert.equal(parsePane(pane.replace('/tmp/wt/acm-12', '/Users/x/Work/projects/acmeapp...')).cwd, undefined)
   assert.equal(parsePane(pane).cwd, '/tmp/wt/acm-12')
 })
@@ -1145,20 +1142,16 @@ test('stripSelfMention: an agent opening with @itself loses the prefix (WP-13)',
   assert.equal(stripSelfMention('@wp-worker please rebase', 'wp'), '@wp-worker please rebase') // a longer name is someone else
 })
 
-test('remote agents get <machine>-<cwd>-<pane> names; herdr name wins; unnamed local → <cwd>-<pane>', () => {
-  assert.equal(remoteName('code-reviewer', '/work/projects/acmeapp', 'w5:p8'), 'code-reviewer-acmeapp-p8')
-  assert.equal(remoteName('Herdr Box', '/x/My Repo', 'w1:p2'), 'herdr-box-my-repo-p2')
-  assert.equal(remoteName('box', undefined, 'w1:p3'), 'box-agent-p3')
-  const a = remoteName('code-reviewer', '/w/a-very-long-repository-name-here', 'w5:p8')
-  const b = remoteName('code-reviewer', '/w/a-very-long-repository-name-here', 'w5:p9')
+test('agentName (WP-378): the hc name wins; else a name-shaped title; else <cwd slug>-<terminal address>, at most 32 characters', () => {
+  const m = { local: true }
+  assert.equal(agentName(m, { name: 'wt-pack-worker-03', pane_id: 't1' }, '/w'), 'wt-pack-worker-03')
+  assert.equal(agentName(m, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 't1' }, '/x/acmeapp-product-ops'), 'acmeapp-product-ops-t1')
+  assert.equal(agentName(m, { pane_id: 't1' }, undefined), 'agent-t1')
+  assert.equal(agentName(m, { terminal_title_stripped: 'acmeapp-orchestrator', pane_id: 't9' }, '/x/acmeapp'), 'acmeapp-orchestrator')
+  assert.equal(agentName(m, { terminal_title_stripped: 'Some Topic', pane_id: 't12' }, '/x/My Repo'), 'my-repo-t12')
+  const a = agentName(m, { pane_id: 't8' }, '/w/a-very-long-repository-name-here-and-more')
+  const b = agentName(m, { pane_id: 't9' }, '/w/a-very-long-repository-name-here-and-more')
   assert.ok(a.length <= 32 && b.length <= 32 && a !== b && /^[a-z0-9_-]+$/.test(a), a)
-  const rem = { local: false, label: 'code-reviewer' }
-  assert.equal(agentName(rem, { name: 'pinned', pane_id: 'w5:p8' }, '/w/u'), 'pinned')
-  assert.equal(agentName(rem, { terminal_title_stripped: 'Some Topic', pane_id: 'w5:p8' }, '/w/u'), 'code-reviewer-u-p8')
-  assert.equal(agentName({ local: true }, { name: 'wt-pack-worker-03', pane_id: 'w1:p1' }, '/w'), 'wt-pack-worker-03')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'Code-reviewer agent startup', pane_id: 'w1:p1' }, '/x/acmeapp-product-ops'), 'acmeapp-product-ops-p1')
-  assert.equal(agentName({ local: true }, { pane_id: 'w1:p1' }, undefined), 'agent-p1')
-  assert.equal(agentName({ local: true }, { terminal_title_stripped: 'acmeapp-orchestrator', pane_id: 'wP:p1' }, '/x/acmeapp'), 'acmeapp-orchestrator')
 })
 
 // WP-38: the delivery queue is in memory; a restart must not silently lose mentions waiting for a busy agent.
@@ -1260,8 +1253,33 @@ test('watchdog probe: notifies once on down, once on back up (WP-70)', () => {
   assert.match(said()[1], /server is back/)
 })
 
+test('watchdog probe (WP-378): reports a stopped hc core once, never starts one (hc server status / ls / get all start a stopped core)', async () => {
+  const home = mkdtempSync(pj(tmpdir(), 'wtd-pc-'))
+  const bin = pj(home, 'bin'); mkdirSync(bin)
+  for (const n of ['hc', 'herdr', 'herdr-core', 'nohup']) { wfs(pj(bin, n), `#!/bin/sh\necho "${n} $*" >> "$HOME/started"\n`); chmodSync(pj(bin, n), 0o755) }
+  wfs(pj(bin, 'osascript'), '#!/bin/sh\n:\n'); chmodSync(pj(bin, 'osascript'), 0o755)
+  const state = pj(home, 'st'), lockDir = pj(state, 'herdr-core', 'default'); mkdirSync(lockDir, { recursive: true })
+  const run = () => xfs('/bin/sh', [new URL('./scripts/watchdog-probe.sh', import.meta.url).pathname, 'file:///etc/hosts'], { env: { HOME: home, XDG_STATE_HOME: state, PATH: `${bin}:/usr/bin:/bin` } })
+  const log = () => (existsSync(pj(home, 'Library/Logs/wt-dashboard/server.log')) ? rfs(pj(home, 'Library/Logs/wt-dashboard/server.log'), 'utf8').trim().split('\n') : [])
+  run(); run() // no core.lock: down
+  assert.equal(log().length, 1, 'said once')
+  assert.match(log()[0], /hc core is not running/)
+  const net = await import('node:net')
+  const sock = pj(home, 'c.sock'), srv = net.createServer((c) => c.end())
+  await new Promise((r) => srv.listen(sock, r))
+  wfs(pj(lockDir, 'core.lock'), sock)
+  try {
+    // async: a sync child would block this process's event loop, and the stub core could never accept the probe's connect
+    const { promisify } = await import('node:util'), { execFile } = await import('node:child_process')
+    await promisify(execFile)('/bin/sh', [new URL('./scripts/watchdog-probe.sh', import.meta.url).pathname, 'file:///etc/hosts'], { env: { HOME: home, XDG_STATE_HOME: state, PATH: `${bin}:/usr/bin:/bin` } })
+  } finally { srv.close() }
+  assert.match(log().at(-1), /hc core is running again/)
+  assert.equal(existsSync(pj(home, 'started')), false, 'no hc / nohup was ever run')
+})
+
 test('sourceIssue: a failed overview source becomes a hint, not a 500 (WP-79)', () => {
-  assert.match(sourceIssue('herdr', 'Command failed: herdr agent list\n{"error":"server_not_running"}'), /herdr server not running — run herdr/)
+  assert.match(sourceIssue('hc', 'hc core not running'), /hc core not running — run `hc server start`/)
+  assert.match(sourceIssue('hc', 'hc is not installed (not on PATH)'), /hc core not running/)
   assert.match(sourceIssue('git', 'fatal: not a git repository (or any of the parent directories): .git'), /not a git checkout/)
   assert.match(sourceIssue('git', 'spawn git ENOENT'), /^git: spawn git ENOENT/)
 })
@@ -1313,78 +1331,6 @@ test('rooms: a new room takes its project at create (WP-96); none by default; th
   const { checkProject } = await import('./rooms.mjs')
   assert.throws(() => checkProject('../x'), (e) => e.status === 400) // POST /api/rooms checks it
   assert.doesNotThrow(() => checkProject(null))
-})
-
-test('streamRemote (WP-97): tail window, ids <file>:<byte offset>, ?since= resumes, unmatched/unreachable states', async () => {
-  const { streamRemote } = await import('./server.mjs')
-  const { Limiter } = await import('./remoteTranscript.mjs')
-  const { EventEmitter } = await import('node:events')
-  const ID = '655088a9-831f-4fb0-bbf2-28b96c355918'
-  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
-  let file = Buffer.from(line('a', 'hello there') + line('b', 'café 🎉'))
-  // A fake remote: `find` lists the file, `tail -c N` / `tail -c +K | head -c L` slice it.
-  const fake = (mode) => async (host, script) => {
-    if (mode === 'down') throw Object.assign(new Error('ssh: connect timed out'), { code: 255 })
-    if (script.includes('find')) return Buffer.from(mode === 'none' ? '' : `2 ${file.length} ${ID}.jsonl\n`)
-    let m = script.match(/^tail -c (\d+) /)
-    if (m) return file.subarray(Math.max(0, file.length - Number(m[1])))
-    m = script.match(/^tail -c \+(\d+) .*head -c (\d+)$/)
-    return file.subarray(Number(m[1]) - 1, Number(m[1]) - 1 + Number(m[2]))
-  }
-  const run = async (mode, qs = '', grow = null) => {
-    const req = Object.assign(new EventEmitter(), { headers: {} })
-    let out = ''
-    const res = { writeHead() {}, write(s) { out += s }, end() {} }
-    const p = streamRemote(req, res, new URL(`http://x/${qs}`), { host: 'herdr-box', pane: 'w5:p8', cwd: '/work/projects/acmeapp', prompt: 'hello there' },
-      { run: fake(mode), limiter: new Limiter(4), pullMs: 5, retry: { unreachable: 5, unmatched: 5 } })
-    await new Promise((r) => setTimeout(r, 20))
-    if (grow) { file = Buffer.concat([file, Buffer.from(grow)]); await new Promise((r) => setTimeout(r, 30)) }
-    req.emit('close'); await p
-    return {
-      out,
-      ids: [...out.matchAll(/^id: (.+)$/gm)].map((m) => m[1]),
-      texts: [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text)),
-      states: [...out.matchAll(/^event: remote\ndata: (.*)$/gm)].map((m) => JSON.parse(m[1]).state),
-    }
-  }
-  const full = await run('ok', '', line('c', 'more'))
-  assert.deepEqual(full.texts, ['hello there', 'café 🎉', 'more'])
-  const firstLen = Buffer.byteLength(line('a', 'hello there'))
-  assert.equal(full.ids[0], `${ID}:${firstLen + Buffer.byteLength(line('b', 'café 🎉'))}`)
-  assert.equal(full.ids.at(-1), `${ID}:${file.length}`)
-  assert.deepEqual(full.states, ['loading', 'ok'])
-  assert.match(full.out, new RegExp(`event: session\\ndata: "${ID}"`))
-  assert.deepEqual((await run('ok', `?since=${ID}:${firstLen}`)).texts, ['café 🎉', 'more'])
-  assert.deepEqual((await run('ok', `?since=other:${firstLen}`)).texts, ['hello there', 'café 🎉', 'more']) // another file's cursor: ignored
-  assert.ok((await run('none')).states.includes('unmatched'))
-  const down = await run('down')
-  assert.ok(down.states.includes('unreachable'))
-  assert.deepEqual(down.texts, [])
-})
-
-test('streamRemote (WP-97): a transcript over 4 MB loads only its tail, from the first whole line, with absolute offsets', async () => {
-  const { streamRemote } = await import('./server.mjs')
-  const { Limiter, WINDOW } = await import('./remoteTranscript.mjs')
-  const { EventEmitter } = await import('node:events')
-  const ID = '37b2a164-fbe5-4a47-8ebb-d8b353718924'
-  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
-  const pad = line('pad', 'x'.repeat(1000))
-  const file = Buffer.from(pad.repeat(Math.ceil(WINDOW / pad.length) + 50) + line('z', 'the end'))
-  const run = async (host, script) => {
-    if (script.includes('find')) return Buffer.from(`2 ${file.length} ${ID}.jsonl\n`)
-    let m = script.match(/^tail -c (\d+) /)
-    if (m) return file.subarray(file.length - Number(m[1]))
-    m = script.match(/^tail -c \+(\d+) .*head -c (\d+)$/)
-    return file.subarray(Number(m[1]) - 1, Number(m[1]) - 1 + Number(m[2]))
-  }
-  const req = Object.assign(new EventEmitter(), { headers: {} })
-  let out = ''
-  const p = streamRemote(req, { writeHead() {}, write(s) { out += s }, end() {} }, new URL('http://x/'), { host: 'h', pane: 'p', cwd: '/w', prompt: 'the end' }, { run, limiter: new Limiter(), pullMs: 5 })
-  await new Promise((r) => setTimeout(r, 30)); req.emit('close'); await p
-  const texts = [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text))
-  assert.equal(texts.at(-1), 'the end')
-  assert.ok(texts.length < 200 + 1 && texts.every((t) => t === 'the end' || t.startsWith('xxx'))) // no torn first line
-  assert.match(out, new RegExp(`^id: ${ID}:${file.length}$`, 'm'))
 })
 
 test('wt-message send sites (WP-104): routine prompt and spawn tagged, spawn dialog untagged, Ready nudge kind=system', async () => {
@@ -1527,8 +1473,9 @@ test('WP-172: paneStale re-reads idle/blocked on the readEvery cadence, not just
   assert.equal(paneStale('idle', { seq: 5, at: old }, 5, now, readEvery), true)
   assert.equal(paneStale('blocked', { seq: 5, at: old }, 5, now, readEvery), true)
   assert.equal(paneStale('working', { seq: 5, at: old }, 5, now, readEvery), true)
-  // A status this predicate doesn't recognise (e.g. 'done') stays on seq-change-only, unaffected.
-  assert.equal(paneStale('done', { seq: 5, at: old }, 5, now, readEvery), false)
+  // WP-378 F5: `done` (the resting state under hc) is re-read like idle; a status this predicate doesn't recognise stays on seq-change-only.
+  assert.equal(paneStale('done', { seq: 5, at: old }, 5, now, readEvery), true)
+  assert.equal(paneStale('exited', { seq: 5, at: old }, 5, now, readEvery), false)
   // A held picker is always stale (it can advance to a different question with no seq bump), any status.
   assert.equal(paneStale('idle', { seq: 5, at: now, p: { picker: {} } }, 5, now, readEvery), true)
 })
@@ -1603,6 +1550,15 @@ test('WP-203: runBulk answers every tab then submits once, for 1-4 tabs, from ta
     assert.deepEqual(t.chosen, answers.map((a) => a.selected))
     assert.equal(t.sent.at(-1), '1')
   }
+})
+test('F4: runBulk tells io.send which question each plan was computed for (the forced send re-checks it)', async () => {
+  const { runBulk } = await import('./server.mjs')
+  const seen = []
+  const pk = { review: false, tabs: [{ header: 'A', done: false }], current: 0, question: 'Q1?', multiSelect: false, options: [{ label: 'x', checked: false }], other: null, cursor: 1 }
+  let sent = false
+  const io = { read: async () => (sent ? { review: true, tabs: pk.tabs, answers: [1] } : pk), send: async (steps, expect) => { seen.push(expect); sent = true } }
+  await runBulk(io, [{ header: 'A', selected: ['x'] }], async () => {}).catch(() => {})
+  assert.deepEqual(seen[0], { question: 'Q1?', multiSelect: false })
 })
 test('WP-203: runBulk refuses (409) before submitting when the picker does not match', async () => {
   const { runBulk } = await import('./server.mjs')
@@ -1713,4 +1669,54 @@ test('WP-339: sidebar planUsage follows the picked limits (a fresh pane reading 
   assert.deepEqual(planUsageFromLimits(l, now), { session: { pct: 10, reset: '2h0m' }, weekly: { pct: 21, reset: '5d 0hr 0m' }, at: now })
   assert.equal(planUsageFromLimits({ ...l, stale: true }, now), null)
   assert.equal(planUsageFromLimits(null, now), null)
+})
+
+test('WP-378 F5: under hc a finished turn rests at `done`; it is idle for every rule (needs-you, stall, re-read, counts)', async () => {
+  const { waitsOnUser, paneStale, resting, idleLongAgent, STALL_MS } = await import('./server.mjs')
+  assert.deepEqual(['idle', 'done', 'working', 'blocked', 'exited'].map(resting), [true, true, false, false, false])
+  assert.equal(Boolean(waitsOnUser({ status: 'done', asks: ['Proceed?'] })), true, 'a done agent that asks a question is needs_you')
+  assert.equal(Boolean(waitsOnUser({ status: 'working', asks: ['Proceed?'] })), false)
+  const now = 10_000_000
+  assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - STALL_MS - 1 }, now)), true, 'a done agent past STALL_MS is stalled')
+  assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - 1000 }, now)), false)
+  assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - STALL_MS - 1, stall: 'finished' }, now)), false)
+  assert.equal(paneStale('done', { seq: 5, at: now - 60_000 }, 5, now, 5000), true, 'a done pane is re-read on the cadence like idle')
+})
+
+// WP-378 F11: real hc captures. Digit keys typed while the cursor sits on the free-text row go INTO the field.
+const hcFix = async (name) => {
+  const { parsePicker } = await import('./server.mjs')
+  const { readFileSync } = await import('node:fs')
+  return parsePicker(readFileSync(new URL(`./test-fixtures/picker-hc-${name}.txt`, import.meta.url), 'utf8'))
+}
+const digitKeys = (plan) => plan.flatMap((s) => s.keys ?? []).filter((k) => /^\d$/.test(k))
+test('F11 parses the real captures: cursor on Other is row n+1', async () => {
+  const s = await hcFix('single-cursor-on-other'), so = await hcFix('single-cursor-on-option')
+  const m = await hcFix('multi-cursor-on-other'), mo = await hcFix('multi-cursor-on-option')
+  assert.deepEqual([s.options.length, s.cursor, s.other, s.multiSelect], [2, 3, null, false])
+  assert.deepEqual([so.options.length, so.cursor, so.other], [2, 1, null])
+  assert.deepEqual([m.options.length, m.cursor, m.other, m.multiSelect], [3, 4, null, true])
+  assert.deepEqual([mo.options.length, mo.cursor, mo.other], [3, 1, null])
+})
+test('F11 parses text left in the Other field as other, not as an option', async () => {
+  const pk = await hcFix('single-leftover-text')
+  assert.deepEqual([pk.options.map((o) => o.label), pk.cursor, pk.other], [['Apple', 'Banana'], 3, '3'])
+})
+test('F11 single-select + other: no digit while the cursor is on Other', async () => {
+  const { answerPlan } = await import('./server.mjs')
+  assert.deepEqual(answerPlan(await hcFix('single-cursor-on-other'), { other: 'hello world' }), [{ text: 'hello world' }, { keys: ['enter'] }])
+  assert.deepEqual(answerPlan(await hcFix('single-cursor-on-option'), { other: 'hello world' }), [{ keys: ['3'] }, { text: 'hello world' }, { keys: ['enter'] }])
+  const left = await hcFix('single-leftover-text')
+  assert.throws(() => answerPlan(left, { other: 'hello world' }), { status: 409 })
+})
+test('F11 leaves the field (up) before any digit', async () => {
+  const { answerPlan, chatPlan } = await import('./server.mjs')
+  const s = await hcFix('single-cursor-on-other'), m = await hcFix('multi-cursor-on-other')
+  assert.deepEqual(answerPlan(s, { selected: ['Banana'] }), [{ keys: ['up'] }, { keys: ['2'] }])
+  assert.deepEqual(chatPlan(s), [{ keys: ['up'] }, { keys: ['4'] }])
+  assert.deepEqual(answerPlan(m, { selected: ['Red'] }), [{ keys: ['up'] }, { keys: ['1'] }, { keys: ['down', 'down', 'enter'] }])
+  assert.deepEqual(answerPlan(m, { selected: ['Red'], other: 'teal-ish mix' }),
+    [{ keys: ['up'] }, { keys: ['1'] }, { keys: ['down'] }, { text: 'teal-ish mix' }, { ensure: 'teal-ish mix' }, { keys: ['down', 'enter'] }])
+  assert.equal(digitKeys(answerPlan(m, { selected: [], other: 'x' })).length, 0) // nothing to toggle: no digit, no up
+  assert.deepEqual(answerPlan(await hcFix('multi-cursor-on-option'), { selected: ['Red'] }), [{ keys: ['1'] }, { keys: ['down', 'down', 'down', 'down', 'enter'] }])
 })

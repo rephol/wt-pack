@@ -51,7 +51,7 @@ function cleanAnswer(a, questions) {
 }
 
 // GET /api/asks/ping (WP-206's wt-ask --ping): dashboard up, and the caller is the user or a wt-pack agent pane (one
-// with a role token), not a bare herdr pane. `role` is the pane's role token. Returns the 200 body or throws a 403.
+// with a role token), not a bare hc terminal. `role` is the pane's role token. Returns the 200 body or throws a 403.
 export function ping(author, role) {
   if (author.kind === 'agent' && !role) throw err(403, 'pane has no role token')
   return { ok: true, kind: author.kind }
@@ -148,7 +148,7 @@ export class Asks {
     return next
   }
   // Close open noDeliver asks nobody can answer to any more: the asking pane is gone (`live` = the panes that exist,
-  // never empty-because-herdr-failed: the caller skips the sweep then) or the ask is older than maxAgeMs.
+  // never empty-because-hc-failed: the caller skips the sweep then) or the ask is older than maxAgeMs.
   async expire(live, now = Date.now(), maxAgeMs = ASK_MAX_AGE_MS) {
     const stale = (await this.list(undefined, true)).filter((a) => a.noDeliver && (!live.has(a.pane) || now - Date.parse(a.created) > maxAgeMs))
     let n = 0

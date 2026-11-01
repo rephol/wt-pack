@@ -19,6 +19,7 @@ import { Banner } from '@astryxdesign/core/Banner'
 import { useToast } from '@astryxdesign/core/Toast'
 import { api } from './rooms'
 import { useRoles } from './roles'
+import { isResting } from './overviewData'
 
 interface Project { name: string; root: string; worktrees: { path: string; branch: string | null; ticket: string | null; agents: string[] }[] }
 export interface SpawnAgentLite { key: string; id: string; machine: string; local: boolean; name: string; pool: string; status: string; cwd: string; project: string | null; asks: boolean }
@@ -59,7 +60,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   const [prompt, setPrompt] = useState('')
   const [plugs, setPlugs] = useState<string[] | null>(null) // WP-309: null = untouched, send nothing (the server default applies)
   const hlPlugins = useQuery({ queryKey: ['headless-plugins'], queryFn: () => api<{ plugins: string[]; keep: string[] }>('/api/headless/plugins'), enabled: false })
-  const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of a herdr pane
+  const [headless, setHeadless] = useState(false) // WP-300: a server-owned `claude -p` run instead of an hc terminal
   const [pmode, setPmode] = useState('') // '' = the user's own Claude Code settings
   const [model, setModel] = useState(''), [effort, setEffort] = useState(''), [hname, setHname] = useState(''), [hcwd, setHcwd] = useState('') // WP-302: blank = the server's defaults
   const list = projects.data ?? []
@@ -73,7 +74,7 @@ function SpawnDialog({ agents, defaultProject, onClose, onOpenAgent }: { agents:
   })
   // Reuse before spawning: a free agent of this kind (idle/done, no question; a planner sitting in the main checkout).
   const free = proj && agents.find((a) => a.local && a.project === proj.name && !a.asks
-    && (a.status === 'idle' || a.status === 'done') && a.pool === kind && (start !== 'main' || a.cwd === proj.root))
+    && isResting(a.status) && a.pool === kind && (start !== 'main' || a.cwd === proj.root))
   const reuse = () => { if (!free) return; setPrefill(free.key, prompt); onClose(); onOpenAgent(free.key) }
   const worktrees = proj?.worktrees ?? []
   const allowed = !role?.spawn?.projects.length || role.spawn.projects.includes(proj?.name ?? '')

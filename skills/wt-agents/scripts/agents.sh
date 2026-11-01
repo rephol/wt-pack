@@ -1,67 +1,68 @@
 #!/bin/sh
-# Manage the named agent pools this pack hands work to.
+# Manage the named agent pools this pack hands work to (on hc, herdr-core; WP-378).
 #
-#   agents.sh list [role] [--json]         # name, pane, status, cwd, dnd (+until), pair (--json adds tokens,
-#                                            plus structured dnd:{on,until} and pair)
+#   agents.sh list [role] [--json]         # name, terminal id, status, cwd, dnd (+until), pair (--json adds tokens,
+#                                            plus structured dnd:{on,until} and pair, and claude's session + pid)
 #   agents.sh spawn <role|persona> [cwd] [--mcp a,b] [--model haiku|sonnet|opus] [--effort low|medium|high|xhigh|max]
-#                                            # -> prints "<name> <pane>"; --mcp adds servers from mcp/catalog.json;
+#                                            # -> prints "<name> <terminal id>"; --mcp adds servers from mcp/catalog.json;
 #                                            --model starts claude on that tier (WP-128), pinned to its explicit
 #                                            model id (WP-158) rather than the bare alias; --effort sets its
 #                                            effort (WP-137); either missing falls back to the role's routing
-#                                            floor; the final tier/effort actually spawned are written as pane
-#                                            tokens model/effort (WP-143, tier not id), for reuse-matching and
+#                                            floor; the final tier/effort actually spawned are written as labels
+#                                            model/effort (WP-143, tier not id), for reuse-matching and
 #                                            idle retirement
-#   agents.sh dnd <name|pane> [on [--for 2h]|off]  # set/clear/query the `dnd` pane token (WP-147, WP-173):
+#   agents.sh dnd <name|id> [on [--for 2h]|off]  # set/clear/query the `dnd` label (WP-147, WP-173):
 #                                            DND agents are skipped by every free-agent pick (wt-handoff
 #                                            candidates(), retireIdle, routines) — target one explicitly with
 #                                            --pane to bypass the skip. `on` with no --for never auto-clears
 #                                            (dnd=1); `on --for <Nh|Nm|Nd|Ns>` writes an expiry (dashboard's own
 #                                            format, ISO time), auto-cleared by the dashboard's tick. No on/off
 #                                            argument prints the current state instead of changing it.
-#   agents.sh rm <name|pane> [--force]     # closes the tab
-#   agents.sh respawn <name|pane>|--stale [--force] # new tab (current PATH shims + plugin guard), same name, role,
-#                                            cwd, tokens and claude session (model/effort tokens re-applied as
+#   agents.sh rm <name|id> [--force]       # ends the agent's terminal and removes its record
+#   agents.sh respawn <name|id>|--stale [--force] # new terminal (current PATH shims + plugin guard), same name, role,
+#                                            cwd, labels and claude session (model/effort labels re-applied as
 #                                            --model/--effort so the respawn keeps its tier, not the role floor);
 #                                            --stale: every pool agent lacking either
 #   agents.sh spawn --team <name> [cwd]    # WP-237: bring a whole team up (.wt-pack/teams/<name>.md, see wt-roles team):
 #                                            one `spawn <persona> [cwd] --team <name>` per member x count, prints each
 #                                            (WP-247: only the seats not already taken; a single spawn into a team refuses a
 #                                            non-member persona (exit 2) and a full seat (exit 3))
-#                                            "<name> <pane>"; `spawn <role|persona> --team <name>` adds ONE agent to a
-#                                            team. Every member pane gets the display-only `team` token.
+#                                            "<name> <id>"; `spawn <role|persona> --team <name>` adds ONE agent to a
+#                                            team. Every member terminal gets the display-only `team` label.
 #   agents.sh spawn --headless <role> [cwd] [--prompt "<text>"] [--model m] [--effort e] [--name n] [--permission-mode m]
 #                                            # WP-293: asks wt-dashboard ($HERDR_DASH_URL, default 127.0.0.1:7777) to
-#                                            run a headless agent (no herdr pane); prints "<name> <id> <state>" (state
+#                                            run a headless agent (no terminal); prints "<name> <id> <state>" (state
 #                                            may be queued). cwd defaults to $PWD. Exit 1 on a dashboard error.
 #   agents.sh list --headless              # the dashboard's headless runs: "<name> <id> <state> <cwd> <role>"
 #   agents.sh send --headless <name|id> '<text>'   # WP-317: the run's next user message (text or stdin); live run wins over an ended one of the same name
 #   agents.sh spawn --headless <role> [cwd] --reuse ...   # an idle run of the same role + cwd gets --prompt instead of a new run: prints "<name> <id> idle reused"
-#   agents.sh rm|stop --headless <id>      # stop a headless run (WP-317: an agent pane may stop the runs it spawned, an orchestrator any; else 403)
-#   agents.sh context                      # WP-312: the caller's own context window as JSON {used,window,pct,model}: a pane agent
-#                                            ($HERDR_PANE_ID) or a headless run ($WT_HEADLESS_ID) looked up in the dashboard's
+#   agents.sh rm|stop --headless <id>      # stop a headless run (WP-317: an agent terminal may stop the runs it spawned, an orchestrator any; else 403)
+#   agents.sh context                      # WP-312: the caller's own context window as JSON {used,window,pct,model}: a terminal agent
+#                                            ($HC_TERMINAL_ID) or a headless run ($WT_HEADLESS_ID) looked up in the dashboard's
 #                                            /api/agents `info` (the WP-201 rule); exit 1 when the dashboard or the row is missing
 #   agents.sh mcp-args <role> [cwd] [--mcp a,b] # the claude MCP args spawn would use (nothing = full set)
 #   agents.sh mcp-file <role> <cwd> <label>    # writes spawn's MCP config for <label>, prints its claude args (resume)
 #
-# A pool is a herdr workspace, "<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners),
-# created on demand; $WT_AGENTS_WORKSPACE overrides the label. A persona (WP-204: a name with a project-role
+# A pool is the label wt.pool="<repo>-<role>s" (e.g. <repo>-workers, <repo>-planners); $WT_AGENTS_WORKSPACE overrides it.
+# herdr-app shows a terminal only when it carries herdr.space=<id>, so every pool also gets one herdr-app space, looked up by
+# name or made under a per-pool lock (agents-hc.mjs space); when herdr-app is missing or fails the agent runs hidden and the
+# spawn still succeeds. A persona (WP-204: a name with a project-role
 # file <repo>/.wt-pack/roles/<name>.md or, at user level, ~/.config/wt-pack/projects/<repo>/roles/<name>.md; the repo
-# folder wins when both exist; `wt-roles where` prints both) spawns into its BASE role's pool, tagged role=<base> persona=<name>. Any role name works
+# folder wins when both exist; `wt-roles where` prints both) spawns into its BASE role's pool, labelled role=<base> persona=<name>. Any role name works
 # ([a-z][a-z0-9-]*); workers are spawned in <cwd> (a worktree, usually), every other
 # role in the main checkout unless a cwd is given (a planner's first job is to MAKE a
-# worktree). Each new agent gets herdr pane tokens (source "wt-dashboard", display-
-# only): role, project, spawned_by ($WT_AGENTS_SPAWNED_BY, default wt-agents), created.
+# worktree). Each new agent gets hc labels (display-only): role, project, spawned_by ($WT_AGENTS_SPAWNED_BY, default wt-agents), created.
 #
-# Every agent is NAMED. `herdr agent start <NAME>` only names what it actually
-# starts — when it instead DETECTS a claude already running in the pane (the
-# path a timeout-and-retry takes) it reports success and the name never lands,
-# which is how this pool ended up with four unnamed agents. So the name is
-# always set with an explicit `agent rename` afterwards; it is idempotent.
+# Every agent is NAMED, at the start: `hc run --name` takes 1-32 of [a-z0-9_-], unique among live terminals, and hc cannot rename.
+# The same name is passed to `claude --name`, so the session itself is named too. Numbering takes the lowest free
+# <repo>-<role>-NN over every name hc still knows plus the dashboard's agents table; a lost race (name_taken) takes the next number.
+# The program is scripts/hc-launch (login+interactive shell, pack values re-applied, denylist scrubbed): see that file. Secrets
+# (GH_TOKEN, WT_PANE_KEY) travel in the terminal.run request body, never in argv or a file.
 set -eu
 
-# WP-293: --headless goes to wt-dashboard's /api/headless, never to herdr. Prints the body; exit 1 on a non-2xx or no answer.
+# WP-293: --headless goes to wt-dashboard's /api/headless, never to the terminal core. Prints the body; exit 1 on a non-2xx or no answer.
 hl_call() { # method path [json]
-  hl_out=$(curl -sS --max-time 10 -X "$1" ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+  hl_out=$(curl -sS --max-time 10 -X "$1" ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} -w '\n%{http_code}' "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless$2" 2>/dev/null) \
     || { echo "wt-dashboard not reachable at ${HERDR_DASH_URL:-http://127.0.0.1:7777}" >&2; exit 1; }
   hl_code=$(printf '%s' "$hl_out" | tail -n1); hl_body=$(printf '%s' "$hl_out" | sed '$d')
@@ -121,11 +122,9 @@ esac
 # WP-312: the caller's own context usage, from the dashboard's AgentInfo (no transcript parsing here).
 if [ "${1:-}" = context ]; then
   me=${WT_HEADLESS_ID:-}
-  if [ -z "$me" ] && [ -n "${HERDR_PANE_ID:-}" ]; then
-    me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty'); me=${me:-$HERDR_PANE_ID}
-  fi
-  [ -n "$me" ] || { echo "context: not a herdr pane or headless run (no HERDR_PANE_ID / WT_HEADLESS_ID)" >&2; exit 1; }
-  rows=$(curl -sS --max-time 10 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null) \
+  [ -n "$me" ] || me=${HC_TERMINAL_ID:-}
+  [ -n "$me" ] || { echo "context: not an hc terminal or headless run (no HC_TERMINAL_ID / WT_HEADLESS_ID)" >&2; exit 1; }
+  rows=$(curl -sS --max-time 10 ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null) \
     || { echo "wt-dashboard not reachable at ${HERDR_DASH_URL:-http://127.0.0.1:7777}" >&2; exit 1; }
   printf '%s' "$rows" | jq -e --arg me "$me" '[.[]? | select(.info.pane.id == $me or .info.run.id == $me or .id == $me)][0] // empty
     | select(.info.contextUsed != null) | {used: .info.contextUsed, window: .info.contextWindow, pct: .info.contextPct, model: (.info.model.id // .info.model.name)}' \
@@ -133,50 +132,43 @@ if [ "${1:-}" = context ]; then
   exit 0
 fi
 
-command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
+command -v hc >/dev/null || { echo "hc (herdr-core) not on PATH" >&2; exit 1; }
+here=$(cd "$(dirname "$0")" && pwd)
+hcjs="$here/../../wt-shared/scripts/hc.mjs"   # spawn + core-up
+ah="$here/agents-hc.mjs"                        # reads, herdr-app space, labels
+launcher="$here/hc-launch"
 
-# herdr names allow only [a-z0-9_-], up to 32 chars; "<repo>-<role>-NN" must fit, so the repo part is cut to 20.
+# A stopped core is STARTED by `hc ls|get|connect|server status` (spike S5): never touch hc while it is down (D4).
+core_up() { node "$hcjs" core-up || { echo "hc core is down — ask the user to start it (hc server start)" >&2; exit 1; }; }
+# WP-378 F5: rm/respawn end a terminal, and `agents-hc.mjs find` resolves ANY hc terminal: a user's shell or a dashboard shell must never be
+# one. A pack agent has a role label or a (non -shells) wt.pool label, or the dashboard's agents table holds a row for its name (a kept
+# shell at an agent's address has no labels, D8). Prints the refusal and exits 1 otherwise. <find-row-json> <target-as-typed>
+require_pack_agent() {
+  _role=$(printf '%s' "$1" | jq -r '.tokens.role // empty' 2>/dev/null); _pool=$(printf '%s' "$1" | jq -r '.tokens["wt.pool"] // empty' 2>/dev/null)
+  [ -z "$_role" ] || return 0
+  case "$_pool" in ''|*-shells) ;; *) return 0 ;; esac
+  . "$here/../../wt-shared/scripts/agent-pane.sh"
+  _n=$(printf '%s' "$1" | jq -r '.name // empty' 2>/dev/null)
+  [ -z "$(agent_row "${_n:-$2}" | jq -r '.name // empty' 2>/dev/null)" ] || return 0
+  echo "$2 is not a pack agent (no role or pool label, no agents-table row): refusing to end it; only pack agents can be removed or respawned here (the user closes other terminals in herdr-app)" >&2
+  return 1
+}
+
+# hc names allow only [a-z0-9_-.], up to 32 chars; "<repo>-<role>-NN" must fit, so the repo part is cut to 20.
 repo_slug() { basename "$1" | LC_ALL=C tr ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz | LC_ALL=C tr -c 'a-z0-9_\n-' '-' | cut -c1-20; }
 
 repo_root() {
   dirname "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null
 }
 
-# WP-222: a tab named after an agent whose claude is gone (herdr drops it from `agent list`) is a bare shell
-# (one pane, agent_status unknown) — close it, so rm/respawn/spawn never leave one beside the live agent.
-close_bare_tabs() {  # <label> [workspace-id]
-  herdr tab list ${2:+--workspace "$2"} 2>/dev/null | jq -r --arg l "$1" \
-    '.result.tabs[] | select(.label == $l and .pane_count == 1 and .agent_status == "unknown") | .tab_id' \
-  | while IFS= read -r t; do herdr tab close "$t" >/dev/null 2>&1 || true; done
-}
-
-pool_ws() {  # <label> <cwd-for-new-workspace>
-  id=$(herdr workspace list | jq -r --arg l "$1" \
-    '.result.workspaces[] | select(.label == $l) | .workspace_id' | head -1)
-  [ -n "$id" ] || id=$(herdr workspace create --label "$1" --cwd "$2" --no-focus \
-    | jq -r '.result.workspace.workspace_id')
-  echo "$id"
-}
-
-# Backfill any agent in the pool whose name never landed, from its tab label.
-# Cheap, and it keeps `rm <name>` usable for agents started before this script.
-sync_names() {  # <workspace-id>
-  herdr agent list | jq -r --arg ws "$1" \
-    '.result.agents[] | select(.workspace_id == $ws and (.name // "") == "") | .pane_id + "\t" + .tab_id' \
-  | while IFS="$(printf '\t')" read -r pane tab; do
-      [ -n "$pane" ] && [ -n "$tab" ] || continue
-      label=$(herdr tab get "$tab" 2>/dev/null | jq -r '.result.tab.label // ""')
-      case "$label" in ''|'?') continue ;; esac
-      herdr agent rename "$pane" "$label" >/dev/null 2>&1 || true
-    done
-}
-
-role_label() {  # <role> <repo>
+role_label() {  # <role> <repo> -> the pool (label wt.pool)
   case "$1" in
     ''|*[!a-z0-9-]*|[!a-z]*) echo "bad role: $1 (lowercase letters, digits, dashes)" >&2; exit 2 ;;
   esac
   echo "${WT_AGENTS_WORKSPACE:-$2-$1s}"
 }
+
+dash_curl() { curl -sS --max-time 3 ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$@"; }
 
 cmd=${1:-list}; shift 2>/dev/null || true
 
@@ -184,31 +176,10 @@ case "$cmd" in
 list)
   json=; role=
   for a in "$@"; do case "$a" in --json) json=1 ;; *) role=$a ;; esac; done
+  core_up
   main=$(repo_root "$PWD"); repo=$(basename "$main")
   for r in ${role:-worker planner}; do
-    ws=$(pool_ws "$(role_label "$r" "$repo")" "$main")
-    sync_names "$ws"
-    # dnd token -> {on, until}: absent = off; "1" = on, no expiry; anything else = on until that ISO time
-    # (WP-147's dashboard format, matched by `dnd on --for`).
-    if [ -n "$json" ]; then
-      # Tokens live on panes, not on the agent list.
-      # WP-324: cross-check with claude's own session list (best effort, [] when claude is absent): herdr's
-      # agent_session id -> the live claude pid. pid null = herdr lists an agent claude does not know (ghost).
-      cs=$(claude agents --json 2>/dev/null | jq -c '[.[] | {key: .sessionId, value: .pid}] | from_entries' 2>/dev/null) || cs=
-      [ -n "$cs" ] || cs='{}'
-      herdr agent list | jq -c --arg ws "$ws" --argjson cs "$cs" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
-        '.result.agents[] | select(.workspace_id == $ws) | ($panes[.pane_id] // {}) as $t |
-         {name, pane: .pane_id, status: .agent_status, cwd, tokens: $t,
-          session: (.agent_session.value // null), pid: ($cs[.agent_session.value // ""] // null),
-          dnd: (if ($t.dnd // "") == "" then {on:false,until:null} elif $t.dnd == "1" then {on:true,until:null} else {on:true,until:$t.dnd} end),
-          pair: ($t.pair // null)}'
-    else
-      herdr agent list | jq -r --arg ws "$ws" --argjson panes "$(herdr pane list | jq '[.result.panes[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')" \
-        '.result.agents[] | select(.workspace_id == $ws) | ($panes[.pane_id] // {}) as $t |
-         [.name, .pane_id, .agent_status, .cwd,
-          (if ($t.dnd // "") == "" then "-" elif $t.dnd == "1" then "dnd" else "dnd until " + $t.dnd end),
-          ($t.pair // "-")] | @tsv'
-    fi
+    node "$ah" list "$(role_label "$r" "$repo")" ${json:+--json}
   done
   ;;
 
@@ -289,7 +260,7 @@ TEAM_MEMBERS
   # A planner makes its own worktree, so it starts in the main checkout; so does any other role without a cwd.
   case "$role" in worker) cwd=${2:-$PWD} ;; *) cwd=${2:-$main} ;; esac
   [ -d "$cwd" ] || { echo "no such directory: $cwd" >&2; exit 1; }
-  # Absolutise: herdr resolves a relative --cwd against the DAEMON's directory,
+  # Absolutise: hc resolves a relative --cwd against the CORE's directory (the API default),
   # not the caller's, so `spawn worker .` silently lands the agent outside the
   # repo — where it still works, but `git rev-parse` finds nothing and the
   # handoff candidate filter can never see it again.
@@ -298,43 +269,30 @@ TEAM_MEMBERS
   # Spawning `orchestrator ~/Work/projects/other` from this checkout made wt-pack-orchestrator-NN in wt-pack's pool.
   tmain=$(repo_root "$cwd"); case "$tmain" in ''|.) ;; *) main=$tmain; repo=$(basename "$main") ;; esac
 
+
+  [ "$cmd" != spawn ] || core_up
   # WP-247: a spawn that names a team joins it only as a persona/role the team file has, and only into a free seat
   # (the same checks and messages as handoff.sh --team). exit 2: not a member; exit 3: roster full.
   if [ -n "$team" ] && [ "$cmd" = spawn ]; then
     want=$lrole
-    seats=$(node "$(dirname "$0")/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "$cwd" 2>/dev/null) || seats=0
+    seats=$(node "$here/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "$cwd" 2>/dev/null) || seats=0
     [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
-    have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
-    . "$(dirname "$0")/../../wt-shared/scripts/agent-pane.sh"; have=$(( ${have:-0} + $(agent_paused_in_team "$team" "$want") )) # WP-348: a paused member still holds its seat
+    have=$(node "$ah" team-count "$team" "$want" 2>/dev/null) || have=0
+    . "$here/../../wt-shared/scripts/agent-pane.sh"; have=$(( ${have:-0} + $(agent_paused_in_team "$team" "$want") )) # WP-348: a paused member still holds its seat
     [ "${have:-0}" -lt "$seats" ] || { echo "team full: $have/$seats $want in $team" >&2; exit 3; }
   fi
 
-  [ "$cmd" != spawn ] || {
-  # WP-216: a workspace herdr creates here comes with a default tab "1" (a plain shell); remember it to close below.
-  fresh_tab= fresh_new=
-  herdr workspace list | jq -e --arg l "$(role_label "$role" "$repo")" '.result.workspaces[] | select(.label == $l)' >/dev/null || fresh_new=1
-  ws=$(pool_ws "$(role_label "$role" "$repo")" "$main")
-  [ -z "${fresh_new:-}" ] || fresh_tab=$(herdr tab list --workspace "$ws" | jq -r '.result.tabs[0].tab_id // ""')
-  sync_names "$ws"
-
-  # Number from existing AGENT NAMES across all pools: herdr names are GLOBAL,
-  # so two repos numbering from 1 collide on the second pool with
-  # agent_name_taken and the agent never starts.
-  slug=$(repo_slug "$main")
-  # herdr names are <= 32: a persona's longer role part shortens the repo part ("-" + role + "-NN").
-  [ -z "$persona" ] || slug=$(printf '%s' "$slug" | cut -c1-$((28 - ${#persona})))
-  # WP-120: plus the names of exited/paused/missing agents the dashboard remembers (its agents table, WP-348) — herdr drops them from its
-  # list, and reusing one blocks that agent's Resume. A deliberate `rm` forgets its row, so only those still occupy a number here.
-  # WP-148: pick the LOWEST unoccupied number rather than max+1, so numbers freed by removal get reused.
-  # WP-348: the names come from the dashboard's agents table (every row, paused/exited/missing included), not watchdog.json.
-  used=$({ herdr agent list | jq -r '.result.agents[].name // empty'
-    curl -sS --max-time 3 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null | jq -r '.[]? | select(.local) | .name // empty' 2>/dev/null; } \
-    | sed -n "s/^$slug-$lrole-0*\([0-9][0-9]*\)$/\1/p" | sort -nu)
-  num=$(printf '%s\n' "$used" | awk 'BEGIN{n=1} NF{if ($1==n) n++} END{print n}')
-  label=$(printf '%s-%s-%02d' "$slug" "$lrole" "$num")
-  [ -z "$fixed" ] || label=$fixed
+  pool=$(role_label "$role" "$repo")
+  # hc names are <= 32 ("<slug>-<role>-NN"): a long role or persona shortens the repo part.
+  slug=$(repo_slug "$main" | cut -c1-$((28 - ${#lrole})))
+  prefix=$slug-$lrole
+  label=${fixed:-}
+  # WP-120/148/348: number from every name hc still knows (live and finished: a finished one keeps its record until rm) plus the
+  # dashboard's agents table (paused/exited/missing rows hold a number, a deliberate `rm` frees it). The LOWEST free number wins.
+  names_taken() {
+    { node "$ah" names; dash_curl "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents" 2>/dev/null | jq -r '.[]? | select(.local) | .name // empty' 2>/dev/null || true; } | paste -sd, -
   }
-  [ "$cmd" = mcp-args ] && label=args-$$
+  [ "$cmd" != mcp-args ] || label=args-$$
   if [ "$cmd" = mcp-file ]; then
     label=${3:?label required}
     case "$label" in *[!a-z0-9_-]*) echo "bad label: $label" >&2; exit 1 ;; esac
@@ -343,152 +301,162 @@ TEAM_MEMBERS
   # Lean MCP: only the servers in mcp/<role>.json (--strict-mcp-config also drops plugin and claude.ai
   # servers — context-mode, claude-mem, railway, plan… — each a node process per session).
   # Only in lean mode (dashboard Settings switch, or WT_AGENTS_MCP=lean; default full). Full mode, or a role
-  # without a file, keeps the full set (still adding any --mcp picks).
-  mcp_file=; strict=; files=
-  if [ "$("$(dirname "$0")/../../wt-shared/scripts/mcp-mode.sh" --cwd "$cwd")" = lean ] && [ -f "$dir/$role.json" ]; then
-    strict=--strict-mcp-config; files=$dir/$role.json
-    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
-    for f in "$top/.mcp.json" "$main/.mcp.json"; do [ -f "$f" ] && { files="$files
+  # without a file, keeps the full set (still adding any --mcp picks). Sets mcp_file/strict for the current $label.
+  build_mcp() {
+    mcp_file=; strict=; files=
+    if [ "$("$here/../../wt-shared/scripts/mcp-mode.sh" --cwd "$cwd")" = lean ] && [ -f "$dir/$role.json" ]; then
+      strict=--strict-mcp-config; files=$dir/$role.json
+      top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+      for f in "$top/.mcp.json" "$main/.mcp.json"; do [ -f "$f" ] && { files="$files
 $f"; break; }; done
-  fi
-  if [ -n "$extra" ]; then
-    mkdir -p "${TMPDIR:-/tmp}/wt-agents"
-    jq --argjson p "$picks" '{mcpServers: (.mcpServers | with_entries(select(.key as $k | $p | index($k))))}' "$dir/catalog.json" \
-      > "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
-    files="$files
+    fi
+    if [ -n "$extra" ]; then
+      mkdir -p "${TMPDIR:-/tmp}/wt-agents"
+      jq --argjson p "$picks" '{mcpServers: (.mcpServers | with_entries(select(.key as $k | $p | index($k))))}' "$dir/catalog.json" \
+        > "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
+      files="$files
 ${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
-  fi
-  if [ -n "$files" ]; then
-    mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents"
-    mcp_file=${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$label.json
-    # Later files win on a name clash: role < repo < --mcp.
-    printf '%s\n' "$files" | sed '/^$/d' | tr '\n' '\0' | xargs -0 jq -s '{mcpServers: (map(.mcpServers // {}) | add)}' > "$mcp_file"
-    rm -f "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
-  fi
+    fi
+    if [ -n "$files" ]; then
+      mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents"
+      mcp_file=${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$label.json
+      # Later files win on a name clash: role < repo < --mcp.
+      printf '%s\n' "$files" | sed '/^$/d' | tr '\n' '\0' | xargs -0 jq -s '{mcpServers: (map(.mcpServers // {}) | add)}' > "$mcp_file"
+      rm -f "${TMPDIR:-/tmp}/wt-agents/picks-$$.json"
+    fi
+  }
   if [ "$cmd" = mcp-args ]; then
+    build_mcp
     [ -n "$mcp_file" ] && { echo ${strict:+$strict }--mcp-config; jq -c '.mcpServers | keys' "$mcp_file"; rm -f "$mcp_file"; }
     exit 0
   fi
   if [ "$cmd" = mcp-file ]; then
+    build_mcp
     [ -n "$mcp_file" ] && echo ${strict:+$strict }--mcp-config "$mcp_file"
     exit 0
   fi
 
-  # A path claude has never seen opens the first-run trust dialog and blocks,
-  # and `agent start` then fails with agent_not_ready. Seed the flag first.
+  # A path claude has never seen opens the first-run trust dialog and blocks. Seed the flag first.
   conf="$HOME/.claude.json"
   [ -f "$conf" ] || echo '{}' > "$conf"
   jq --arg d "$cwd" '.projects[$d].hasTrustDialogAccepted = true' "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
 
-  # WP-107: a project with a GitHub account (dashboard Settings › Projects) gets that account's token in the pane
+  # WP-107: a project with a GitHub account (dashboard Settings › Projects) gets that account's token in the agent's
   # env, so gh and git push inside it act as that account. From gh's keyring; never `gh auth switch` (global).
-  # The token is a snapshot: a changed account or rotated token needs a respawn.
-  # ponytail: the token rides herdr's argv for the one tab-create call; the pane env (ps eww) already exposes it
-  # for the agent's life, accepted on a single-user Mac (plan risk). herdr has no env-file option to avoid either.
-  set --
-  acct=$(node "$(dirname "$0")/../../wt-shared/scripts/project-setting.mjs" get githubAccount --cwd "$main" 2>/dev/null)
+  # The token is a snapshot: a changed account or rotated token needs a respawn. WP-378 D3: it rides the terminal.run request
+  # body (hc connect's stdin) — not argv, not a file; hc.mjs reads it from THIS call's environment (--env-names).
+  gh_tok=
+  acct=$(node "$here/../../wt-shared/scripts/project-setting.mjs" get githubAccount --cwd "$main" 2>/dev/null)
   if [ -n "$acct" ]; then
     if tok=$(gh auth token --user "$acct" 2>/dev/null) && [ -n "$tok" ]; then
-      set -- --env "GH_TOKEN=$tok"
+      gh_tok=$tok
       git -C "$main" config credential.https://github.com.username "$acct" 2>/dev/null || true
     else
       echo "warning: no gh token for $acct (gh auth login --hostname github.com, as $acct); spawning with gh's active account" >&2
     fi
   fi
-  # WP-120: pkill/pgrep/killall shims first on PATH (refuse options after the pattern and too-broad -f patterns).
-  # CLAUDE_ENV_FILE is sourced before every Bash command, so rc files that prepend to PATH cannot bury the shims.
-  # A per-agent copy of env.sh: hooks may append to CLAUDE_ENV_FILE, which must not write into the checkout.
-  shim=$(cd "$(dirname "$0")/../bin" && pwd)
-  envf="${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/env-$label.sh"
-  mkdir -p "$(dirname "$envf")" && cp "$shim/env.sh" "$envf"
-  set -- "$@" --env "PATH=$shim:$PATH" --env "WT_KILL_SHIM_DIR=$shim" --env "CLAUDE_ENV_FILE=$envf"
-  # WP-122: mcp/<role>.json run ${WT_MEMORY_MCP:-~/.claude/skills/…}; a plugin-only install has no such link.
-  set -- "$@" --env "WT_MEMORY_MCP=$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs"
-  # WP-327: a per-pane key (env + a 0600 file the dashboard reads) so x-herdr-pane alone is not identity. Never a pane token.
+  # WP-120: pkill/pgrep/killall shims first on PATH (refuse options after the pattern and too-broad -f patterns): hc-launch
+  # re-prepends WT_KILL_SHIM_DIR after the shell rc ran, and CLAUDE_ENV_FILE is sourced before every Bash command, so rc files
+  # that prepend to PATH cannot bury the shims. A per-agent copy of env.sh: hooks may append to CLAUDE_ENV_FILE, which must not write into the checkout.
+  shim=$(cd "$here/../bin" && pwd)
+  # WP-327: a per-pane key (env + a 0600 file the dashboard reads) so x-herdr-pane alone is not identity. Never a label.
   pane_key=$(openssl rand -hex 32)
-  set -- "$@" --env "WT_PANE_KEY=$pane_key"
-  close_bare_tabs "$label" "$ws"
-  created=$(herdr tab create --workspace "$ws" --label "$label" --cwd "$cwd" --no-focus "$@")
-  pane=$(printf '%s' "$created" | jq -r .result.root_pane.pane_id)
-  new_tab=$(printf '%s' "$created" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)
-  keydir="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys"
-  keyid=$(herdr pane get "$pane" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null || true)
-  (umask 077; mkdir -p "$keydir" && chmod 700 "$keydir" && printf '%s\n' "$pane_key" > "$keydir/.tmp.$$" && mv "$keydir/.tmp.$$" "$keydir/${keyid:-$pane}") \
-    || echo "warning: could not write the pane key for $pane (it will run in grace mode)" >&2
-  # A herdr pane id can be reused by a pane started outside spawn: drop keys of panes that are no longer live agents.
-  live=$(herdr agent list 2>/dev/null | jq -r '.result.agents[]?.pane_id // empty' 2>/dev/null || true)
-  if [ -n "$live" ]; then
-    for kf in "$keydir"/*; do
-      [ -f "$kf" ] || continue; kn=$(basename "$kf")
-      [ "$kn" = "${keyid:-$pane}" ] || printf '%s\n' "$live" | grep -qxF "$kn" || rm -f "$kf"
-    done
-  fi
-  # Close that default tab once the agent's tab exists — only while it is still an idle shell (no agent in it).
-  [ -z "$fresh_tab" ] || [ "$(herdr tab get "$fresh_tab" 2>/dev/null | jq -r '.result.tab | "\(.pane_count) \(.agent_status)"')" != "1 unknown" ] \
-    || herdr tab close "$fresh_tab" >/dev/null 2>&1 || true
+  # The names of the values this spawn sets in the terminal's env (hc-launch keeps exactly these and scrubs the rest of its
+  # denylist): the pack's own, the role identity for wt-memory's hook, and any isolation variable the caller has set.
+  env_names=WT_KILL_SHIM_DIR,CLAUDE_ENV_FILE,WT_MEMORY_MCP,WT_PANE_KEY,WT_ROLE,WT_PROJECT${persona:+,WT_PERSONA}${gh_tok:+,GH_TOKEN}
+  for v in WT_DASHBOARD_DATA WT_TURN_DIR WT_MESSAGES_DIR WT_MEMORY_CACHE WT_RECEIPTS_DIR XDG_CACHE_HOME HERDR_DASH_URL; do
+    eval "[ -z \"\${$v+x}\" ]" || env_names="$env_names,$v"
+  done
 
-  # Tags go on the pane BEFORE claude starts: wt-memory's SessionStart hook reads the
-  # role token from this pane, and a tag set after start arrives too late for it.
-  # (Best effort: an older herdr has no report-metadata.)
-  herdr pane report-metadata "$pane" --source wt-dashboard --token "role=$role" --token "project=$repo" \
-    --token "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --token "created=$(date +%F)" ${persona:+--token "persona=$persona"} ${team:+--token "team=$team"} >/dev/null 2>&1 || true
-
-  # A fresh pane is not at its shell prompt the instant `tab create` returns.
-  n=0
-  # Two names, two layers: `agent start <NAME>` names the agent to HERDR, while
-  # `claude --name` sets the session's own display name. Setting only the first
-  # leaves the session itself unnamed wherever claude lists its own sessions.
-  set -- --name "$label"
-  [ -z "$resume" ] || set -- "$@" --resume "$resume"
-  [ -z "$agent" ] || set -- "$@" --agent "$agent"
-  if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
   # WP-128/137: an explicit tier/effort wins; else the role floor and its effort (WP-160: in every routing
   # mode, not just live — spawn has no task to route in the first place). WP-158: floor also returns the
   # tier's explicit model id (its own loadConfig() already has the map in scope) — one call regardless of
   # what's missing, not a second `model-id` process on top.
   # --model here (when the caller already gave one) is passed through so floor computes effort/id for the
   # tier actually being spawned, not the role's own floor tier when the two diverge.
-  floor=$(node "$(dirname "$0")/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} ${pmodel:+--persona-model "$pmodel"} --cwd "$main" --json 2>/dev/null || true)
+  floor=$(node "$here/../../wt-shared/scripts/model-route.mjs" floor --role "$role" ${model:+--model "$model"} ${pmodel:+--persona-model "$pmodel"} --cwd "$main" --json 2>/dev/null || true)
   model_id=$(printf '%s' "$floor" | jq -r '.model // empty' 2>/dev/null || true)
   [ -n "$model" ] || model=$(printf '%s' "$floor" | jq -r '.tier // empty' 2>/dev/null || true)
   [ -n "$effort" ] || effort=$(printf '%s' "$floor" | jq -r '.effort // empty' 2>/dev/null || true)
   # claude --model <tier> lets Claude Code resolve the bare alias to whatever it currently treats as that
-  # tier; pin the explicit model id instead. $model itself stays the tier below (pane token, reuse match).
-  [ -z "$model" ] || set -- "$@" --model "${model_id:-$model}"
-  [ -z "$effort" ] || set -- "$@" --effort "$effort"
-  # WP-143: record what this pane actually runs (post-floor), so reuse and idle-retirement can match on it.
-  herdr pane report-metadata "$pane" --source wt-dashboard ${model:+--token "model=$model"} ${effort:+--token "effort=$effort"} >/dev/null 2>&1 || true
-  # WP-319: a slow shell/claude start under load is transient — back off up to ~8 tries (WT_AGENTS_START_SLEEP
-  # scales the wait), keep herdr's last error for the message, and on final failure close the orphan pane.
-  err=
-  while ! err=$(herdr agent start "$label" --kind claude --pane "$pane" -- "$@" 2>&1 >/dev/null); do
-    n=$((n + 1))
-    if [ "$n" -ge 8 ]; then
-      herdr pane report-metadata "$pane" --source wt-dashboard --clear-token role --clear-token project --clear-token model --clear-token effort >/dev/null 2>&1 || true
-      [ -n "$new_tab" ] || new_tab=$(herdr pane get "$pane" 2>/dev/null | jq -r '.result.pane.tab_id // empty' 2>/dev/null || true)
-      [ -z "$new_tab" ] || herdr tab close "$new_tab" >/dev/null 2>&1 || true
-      echo "claude did not come up in $label (pane $pane) after $n tries: ${err:-no error output from herdr}" >&2
-      exit 1
-    fi
-    sleep $((n * ${WT_AGENTS_START_SLEEP:-2}))
+  # tier; pin the explicit model id instead. $model itself stays the tier below (label, reuse match).
+  # WP-143: the labels record what this agent actually runs (post-floor), so reuse and idle-retirement can match on it.
+
+  # herdr-app: one space per pool (looked up by name, made under a lock). A failure runs the agent hidden, never fails the spawn.
+  space_json=$(node "$ah" space "$pool" "$main" 2>&2) || space_json='{}'
+  space_id=$(printf '%s' "$space_json" | jq -r '.space // empty' 2>/dev/null || true)
+  stray=$(printf '%s' "$space_json" | jq -r '.stray // empty' 2>/dev/null || true)
+
+  # One hc call starts the agent: all its labels exist before claude does (wt-memory's SessionStart hook reads the role),
+  # and the env values travel in the request body. $label is the terminal name AND claude's --name.
+  launch_once() {
+    envf="${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/env-$label.sh"
+    mkdir -p "$(dirname "$envf")" && cp "$shim/env.sh" "$envf"
+    build_mcp
+    set -- --name "$label"
+    [ -z "$resume" ] || set -- "$@" --resume "$resume"
+    [ -z "$agent" ] || set -- "$@" --agent "$agent"
+    if [ -n "$mcp_file" ]; then set -- "$@" $strict --mcp-config "$mcp_file"; fi
+    [ -z "$model" ] || set -- "$@" --model "${model_id:-$model}"
+    [ -z "$effort" ] || set -- "$@" --effort "$effort"
+    set -- spawn --name "$label" --cwd "$cwd" --label "wt.pool=$pool" --label "role=$role" --label "project=$repo" \
+      --label "spawned_by=${WT_AGENTS_SPAWNED_BY:-wt-agents}" --label "created=$(date +%F)" ${persona:+--label "persona=$persona"} ${team:+--label "team=$team"} \
+      ${model:+--label "model=$model"} ${effort:+--label "effort=$effort"} ${space_id:+--label "herdr.space=$space_id"} \
+      --launch "$launcher" --env-names "$env_names" -- claude "$@"
+    (
+      export WT_KILL_SHIM_DIR="$shim" CLAUDE_ENV_FILE="$envf" WT_MEMORY_MCP="$(cd "$shim/../../wt-memory/mcp" && pwd)/server.mjs" WT_PANE_KEY="$pane_key" WT_ROLE="$role" WT_PROJECT="$repo"
+      [ -z "$persona" ] || export WT_PERSONA="$persona"
+      [ -z "$gh_tok" ] || export GH_TOKEN="$gh_tok"
+      exec node "$hcjs" "$@"
+    )
+  }
+
+  tries=0; errf=$(mktemp "${TMPDIR:-/tmp}/wt-agents-err.XXXXXX"); tk=$(names_taken)
+  while :; do
+    [ -n "$fixed" ] || label=$(node "$ah" next-name "$prefix" "$tk") || { rm -f "$errf"; exit 1; }
+    if res=$(launch_once 2>"$errf"); then break; fi
+    kind=$(jq -r '.error.kind // empty' "$errf" 2>/dev/null || true); msg=$(jq -r '.error.message // empty' "$errf" 2>/dev/null || true)
+    rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$label.json" "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/env-$label.sh"
+    tries=$((tries + 1))
+    # a lost numbering race: the next number (not for a fixed name — respawn needs exactly that one)
+    if [ "$kind" = name_taken ] && [ -z "$fixed" ] && [ "$tries" -lt 3 ]; then tk="$tk,$label"; continue; fi
+    [ -z "$stray" ] || node "$ah" retire-stray "$stray" >/dev/null 2>&1 || true
+    echo "claude did not start in $label: ${msg:-$(cat "$errf")}" >&2
+    rm -f "$errf"; exit 1
   done
-  herdr agent rename "$pane" "$label" >/dev/null 2>&1 || true
+  rm -f "$errf"
+  pane=$(printf '%s' "$res" | jq -r .id)
+  # Belt to hc-launch's own write: the key file exists before this call returns.
+  keydir="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys"
+  (umask 077; mkdir -p "$keydir" && chmod 700 "$keydir" && printf '%s\n' "$pane_key" > "$keydir/.tmp.$$" && mv "$keydir/.tmp.$$" "$keydir/$pane") \
+    || echo "warning: could not write the pane key for $pane (it will run in grace mode)" >&2
+  # An id repeats across cores (t1.. on every one): drop keys of terminals that are no longer live (best effort; never on an empty list).
+  live=$(node "$ah" live-ids 2>/dev/null || true)
+  if [ -n "$live" ]; then
+    for kf in "$keydir"/*; do
+      [ -f "$kf" ] || continue; kn=$(basename "$kf")
+      [ "$kn" = "$pane" ] || printf '%s\n' "$live" | grep -qxF "$kn" || rm -f "$kf"
+    done
+  fi
+  # The shell herdr-app opened with a brand-new space: close it once the agent's tab exists, only while it is still a plain shell.
+  [ -z "$stray" ] || node "$ah" retire-stray "$stray" >/dev/null 2>&1 || true
   echo "$label $pane"
   ;;
 
 dnd)
-  target=${1:?name or pane required}; shift
+  core_up
+  target=${1:?name or id required}; shift
   state=${1:-}
   case "$state" in on|off) shift ;; '') ;; *) echo "dnd: on, off, or omit to query" >&2; exit 2 ;; esac
   for_dur=
   while [ $# -gt 0 ]; do case "$1" in --for) for_dur=${2:?--for needs a duration}; shift 2 ;;
     *) echo "dnd: unknown argument: $1" >&2; exit 2 ;; esac; done
   [ -z "$for_dur" ] || [ "$state" = on ] || { echo "dnd: --for only valid with on" >&2; exit 2; }
-  pane=$(herdr agent list | jq -r --arg t "$target" \
-    '.result.agents[] | select(.name == $t or .pane_id == $t) | .pane_id' | head -1)
+  row=$(node "$ah" find "$target" 2>/dev/null || true)
+  pane=$(printf '%s' "$row" | jq -r 'select(.alive) | .pane_id // empty' 2>/dev/null)
   [ -n "$pane" ] || { echo "no such agent: $target" >&2; exit 1; }
   if [ -z "$state" ]; then
-    v=$(herdr pane get "$pane" | jq -r '.result.pane.tokens.dnd // empty')
+    v=$(printf '%s' "$row" | jq -r '.tokens.dnd // empty')
     if [ -z "$v" ]; then echo "dnd off: $target ($pane)"
     elif [ "$v" = 1 ]; then echo "dnd on: $target ($pane), no expiry"
     else echo "dnd on: $target ($pane) until $v"; fi
@@ -505,66 +473,68 @@ dnd)
         console.log(new Date(Date.now() + Number(m[1]) * ms).toISOString())
       ' "$for_dur") || exit 1
     fi
-    herdr pane report-metadata "$pane" --source wt-dashboard --token "dnd=$value" >/dev/null
+    node "$ah" label "$pane" "dnd=$value" >/dev/null
   else
-    herdr pane report-metadata "$pane" --source wt-dashboard --clear-token dnd >/dev/null
+    node "$ah" label "$pane" "dnd=" >/dev/null
   fi
   echo "dnd $state: $target ($pane)"
   ;;
 
 rm)
+  core_up
   # WP-348: --keep-row leaves the agents-table row (pause and respawn keep it); any other rm forgets it.
   target=; force=; keep_row=
   for a in "$@"; do case "$a" in --force) force=--force ;; --keep-row) keep_row=1 ;; *) [ -n "$target" ] || target=$a ;; esac; done
-  : "${target:?name or pane required}"
-  pane=$(herdr agent list | jq -r --arg t "$target" \
-    '.result.agents[] | select(.name == $t or .pane_id == $t) | .pane_id' | head -1)
-  if [ -z "$pane" ]; then
-    # WP-222: its claude exited, so herdr no longer lists it — still close the bare tab left under its name.
-    [ -n "$(herdr tab list | jq -r --arg l "$target" '.result.tabs[] | select(.label == $l and .pane_count == 1 and .agent_status == "unknown") | .tab_id')" ] \
-      || { echo "no such agent: $target" >&2; exit 1; }
-    close_bare_tabs "$target"
-    [ -n "$keep_row" ] || curl -sS --max-time 3 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents/by-name/$target/forget" >/dev/null 2>&1 || true # WP-348: a crashed agent's row goes too
-    echo "removed $target (bare shell tab)"; exit 0
-  fi
-  status=$(herdr agent get "$pane" | jq -r '.result.agent.agent_status')
-  # Closing a working agent discards a turn in flight, and its work is only in
-  # that pane until it commits. Refuse unless the caller says otherwise.
+  : "${target:?name or id required}"
+  row=$(node "$ah" find "$target" 2>/dev/null || true)
+  [ -n "$row" ] || { echo "no such agent: $target" >&2; exit 1; }
+  require_pack_agent "$row" "$target" || exit 1
+  pane=$(printf '%s' "$row" | jq -r .pane_id); name=$(printf '%s' "$row" | jq -r '.name // empty'); status=$(printf '%s' "$row" | jq -r .agent_status)
+  # Ending a working agent discards a turn in flight, and its work is only in that terminal until it commits.
+  # Refuse unless the caller says otherwise.
   if [ "$status" = working ] && [ "$force" != "--force" ]; then
     echo "$target is working; re-run with --force to close it anyway" >&2
     exit 1
   fi
-  tab=$(herdr agent get "$pane" | jq -r '.result.agent.tab_id')
-  name=$(herdr agent get "$pane" | jq -r '.result.agent.name // empty')
-  herdr tab close "$tab" >/dev/null
-  [ -n "$name" ] && rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$name.json"
+  node "$ah" retire "$pane" >/dev/null || { echo "could not end $target ($pane)" >&2; exit 1; } # kill + rm; a finished terminal only needs the rm
+  if [ -n "$name" ]; then rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/mcp-$name.json" "${XDG_CACHE_HOME:-$HOME/.cache}/wt-agents/env-$name.sh"; fi
+  rm -f "${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys/$pane"
   # WP-148/348: a deliberate rm forgets the agent's row, so its number is free again (pause and respawn pass --keep-row).
   if [ -n "$name" ] && [ -z "$keep_row" ]; then
-    curl -sS --max-time 3 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
-      "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents/by-name/$name/forget" >/dev/null 2>&1 || true
+    dash_curl -X POST "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/agents/by-name/$name/forget" >/dev/null 2>&1 || true
   fi
   echo "removed $target ($pane, was $status)"
   ;;
 
 respawn)
-  # WP-125: the kill shims are pane ENV, set only at tab create, so a same-pane restart (the dashboard's Resume)
-  # would not pick them up — close the tab and spawn a new one under the same name (herdr names are global).
-  self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+  core_up
+  # WP-125: the kill shims and the launcher are the terminal's ENV/program, fixed at its start, so a respawn ends the terminal
+  # and starts a new one under the same name (hc cannot start a program into an existing terminal; names are unique among live ones).
+  self=$here/$(basename "$0")
   force=; stale=; target=
   for a in "$@"; do case "$a" in --force) force=--force ;; --stale) stale=1 ;; *) target=$a ;; esac; done
-  respawn_one() {  # <name|pane> -> prints "<name> <new-pane>"
-    row=$(herdr agent list | jq -c --arg t "$1" '[.result.agents[] | select(.name == $t or .pane_id == $t)][0] // empty')
+  respawn_one() {  # <name|id> -> prints "<name> <new-id>"
+    . "$here/../../wt-shared/scripts/agent-pane.sh"
+    row=$(node "$ah" find "$1" 2>/dev/null || true)
     if [ -z "$row" ]; then
-      # WP-348: a missing agent (gone from herdr) is respawnable from its agents-table row: name, role, cwd and session.
-      . "$(dirname "$0")/../../wt-shared/scripts/agent-pane.sh"
+      # WP-348: a missing agent (gone from hc) is respawnable from its agents-table row: name, role, cwd and session.
       row=$(agent_row "$1" | jq -c 'select(.state == "missing" or .state == "exited") | {name, pane_id: "", cwd, agent_status: "idle", agent_session: {value: .session}, tokens: ({role, persona, project, ticket} | with_entries(select(.value != null)))}' 2>/dev/null)
     fi
     [ -n "$row" ] || { echo "no such agent: $1" >&2; return 1; }
+    require_pack_agent "$row" "$1" || return 1
     name=$(printf '%s' "$row" | jq -r '.name // empty'); old=$(printf '%s' "$row" | jq -r .pane_id)
     r=$(printf '%s' "$row" | jq -r '.tokens.role // empty'); dir=$(printf '%s' "$row" | jq -r '.cwd // empty')
     sess=$(printf '%s' "$row" | jq -r '.agent_session.value // empty')
     m=$(printf '%s' "$row" | jq -r '.tokens.model // empty'); e=$(printf '%s' "$row" | jq -r '.tokens.effort // empty')
-    [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role token and a cwd to respawn" >&2; return 1; }
+    # D8: a terminal recovered by hc's keep is a shell with no labels, and claude's own list does not know a dead session:
+    # the dashboard's agents-table row is the identity (role, cwd, session).
+    if [ -z "$r" ] || [ -z "$sess" ]; then
+      ar=$(agent_row "${name:-$1}" 2>/dev/null || true)
+      [ -n "$r" ] || r=$(printf '%s' "$ar" | jq -r '.role // empty' 2>/dev/null || true)
+      [ -n "$sess" ] || sess=$(printf '%s' "$ar" | jq -r '.session // empty' 2>/dev/null || true)
+      [ -n "$dir" ] || dir=$(printf '%s' "$ar" | jq -r '.cwd // empty' 2>/dev/null || true)
+    fi
+    [ -n "$name" ] && [ -n "$r" ] && [ -n "$dir" ] || { echo "$1: needs a name, a role label and a cwd to respawn" >&2; return 1; }
     [ -n "$sess" ] || { echo "$1: no claude session id to resume" >&2; return 1; }
     [ -d "$dir" ] || { echo "$1: its cwd $dir is gone; not closing it" >&2; return 1; }
     if [ "$(printf '%s' "$row" | jq -r .agent_status)" = working ] && [ -z "$force" ]; then
@@ -577,22 +547,23 @@ respawn)
     # WP-204: a persona agent respawns as its persona while that role file still resolves; otherwise as its base role
     # (spawn would take the bare persona name for a brand-new role and pool).
     pn=$(printf '%s' "$row" | jq -r '.tokens.persona // empty')
-    if [ -n "$pn" ] && node "$(dirname "$0")/../../wt-shared/scripts/roles.mjs" resolve "$pn" --cwd "$dir" >/dev/null 2>&1; then r=$pn; fi
+    if [ -n "$pn" ] && node "$here/../../wt-shared/scripts/roles.mjs" resolve "$pn" --cwd "$dir" >/dev/null 2>&1; then r=$pn; fi
     [ -z "$old" ] || "$self" rm "$old" --force --keep-row >/dev/null || return 1
     out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
     new=${out#* }
-    # Spawn writes its own role/project/spawned_by/created/model/effort; carry the rest (task, ticket, task_state …) over.
-    printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .persona, .project, .spawned_by, .created, .model, .effort) | to_entries[] | "\(.key)=\(.value)"' \
-    | while IFS= read -r kv; do
-        herdr pane report-metadata "$new" --source wt-dashboard --token "$kv" >/dev/null 2>&1 || true
-      done
+    # Spawn writes its own pool/role/project/spawned_by/created/model/effort; carry the rest (task, ticket, task_state, team …) over.
+    carry=$(printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .persona, .project, .spawned_by, .created, .model, .effort, ."wt.pool", ."herdr.space", ."herdr.tab") | to_entries[] | "\(.key)=\(.value)"')
+    if [ -n "$carry" ]; then
+      # one label call per pair keeps a value with spaces intact and a dropped pair from failing the rest
+      printf '%s\n' "$carry" | while IFS= read -r kv; do node "$ah" label "$new" "$kv" >/dev/null 2>&1 || true; done
+    fi
     echo "$out"
   }
-  if [ -z "$stale" ]; then respawn_one "${target:?name, pane or --stale required}"; exit; fi
+  if [ -z "$stale" ]; then respawn_one "${target:?name, id or --stale required}"; exit; fi
 
   # --stale: every agent in this repo's pools whose claude lacks the PATH shim or predates the installed plugin guard.
   main=$(repo_root "$PWD"); repo=$(basename "$main")
-  me=; [ -z "${HERDR_PANE_ID:-}" ] || me=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty')
+  me=${HC_TERMINAL_ID:-}
   ip=$(node -e 'try{console.log(require(process.argv[1]).plugins["wt-memory@wt-pack"][0].installPath)}catch{}' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null || true)
   g=0; [ -n "$ip" ] && [ -d "$ip" ] && g=$(stat -c %W "$ip" 2>/dev/null || stat -f %B "$ip" 2>/dev/null || echo 0)
   # WP-213: no installed plugin but the checkout loaded as the plugin (CLAUDE_CODE_PLUGIN_DIRS): its hooks file's mtime.
@@ -600,10 +571,8 @@ respawn)
     pd=$(node -e 'try{const e=require(process.argv[1]).env?.CLAUDE_CODE_PLUGIN_DIRS||"";console.log(e.split(":").filter(Boolean)[0]||"")}catch{}' "$HOME/.claude/settings.json" 2>/dev/null || true)
     [ -n "$pd" ] && [ -f "$pd/hooks/hooks.json" ] && g=$(stat -c %Y "$pd/hooks/hooks.json" 2>/dev/null || stat -f %m "$pd/hooks/hooks.json" 2>/dev/null || echo 0)
   fi
-  wss=$(herdr workspace list | jq -c --arg p "$repo-" '[.result.workspaces[] | select(.label | startswith($p) and endswith("s")) | .workspace_id]')
   found=0
-  for name in $(herdr agent list | jq -r --argjson w "$wss" --arg me "$me" \
-      '.result.agents[] | select((.workspace_id as $x | $w | index($x)) and .pane_id != $me and (.name // "") != "") | .name'); do
+  for name in $(node "$ah" pools "$repo-" "$me"); do
     # Never pgrep/pkill here (WP-109): read the process table and match claude's own --name.
     pid=$(ps -axo pid=,command= | awk -v n="$name" '{ for (i = 2; i < NF; i++) if ($i == "--name" && $(i+1) == n && $2 ~ /(^|\/)claude$/) { print $1; exit } }')
     [ -n "$pid" ] || continue

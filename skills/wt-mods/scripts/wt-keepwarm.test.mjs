@@ -20,14 +20,14 @@ async function stub() {
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   return { url: `http://127.0.0.1:${server.address().port}`, seen, close: () => server.close() }
 }
-const run = (args, url) => execFileP(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: 'w1:p2', WT_PANE_KEY: 'k2', HERDR_DASH_URL: url } })
+const run = (args, url) => execFileP(BIN, args, { encoding: 'utf8', env: { ...process.env, HC_TERMINAL_ID: 't2', WT_PANE_KEY: 'k2', HERDR_DASH_URL: url } })
 
 test('on posts {event:"arm"} to the pane\'s own report route; off still posts the stop/off report', async () => {
   const s = await stub()
   try {
     const on = await run(['on'], s.url)
     assert.match(on.stdout, /keepwarm armed for this agent/)
-    assert.deepEqual(s.seen[0], { method: 'POST', url: '/api/keepwarm/me/report', pane: 'w1:p2', key: 'k2', body: { event: 'arm' } })
+    assert.deepEqual(s.seen[0], { method: 'POST', url: '/api/keepwarm/me/report', pane: 't2', key: 'k2', body: { event: 'arm' } })
     const off = await run(['off'], s.url)
     assert.match(off.stdout, /\/wt keepwarm on/)
     assert.deepEqual(s.seen[1].body, { event: 'stop', off: true, reason: 'turned off' })

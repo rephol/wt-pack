@@ -24,7 +24,7 @@ export const COMMANDS: Record<string, Cmd> = {
   room: { description: 'wt-room: list | read <slug> | post <slug> "text"', hint: '<list|read|post> …', script: 'wt-room/scripts/room', argv: a => (a.length ? a : ['list']) },
   ticket: { description: 'wt-ticket: show|move|list|comment … (e.g. show WP-12)', hint: '<show|move|list|…> …', script: 'wt-ticket/scripts/wt-ticket', argv: a => (a.length ? a : ['list', '--mine']) },
   dnd: { description: 'Do-not-disturb for this agent: on [--for 2h] | off | (status)', hint: '[on|off]', script: 'wt-agents/scripts/agents.sh', argv: (a, pane) => ['dnd', pane, ...a] },
-  herd: { description: 'List the herdr agents (wt-agents list; /agents is built in)', hint: '[role] [--json]', script: 'wt-agents/scripts/agents.sh', argv: a => ['list', ...a] },
+  herd: { description: 'List the hc agents (wt-agents list; /agents is built in)', hint: '[role] [--json]', script: 'wt-agents/scripts/agents.sh', argv: a => ['list', ...a] },
   keepwarm: { description: 'Prompt-cache keepwarm for this agent: status | on | off', hint: '[status|on|off]', script: 'wt-mods/scripts/wt-keepwarm', argv: a => (a.length === 0 || a[0] === 'status' ? ['status'] : a[0] === 'on' ? ['on'] : a[0] === 'off' ? ['off'] : 'usage: /wt keepwarm [status|on|off]') },
   watch: { description: 'PR poller status (wt-watch-prs poller-status)', hint: 'status', script: 'wt-watch-prs/scripts/watch-prs.sh', argv: a => (a.length === 0 || a[0] === 'status' ? ['poller-status', ...a.slice(1)] : 'usage: /wt watch status') },
 }
@@ -39,13 +39,9 @@ export const subOf = (args: string): [string, string] => {
 
 async function run($: Ctx, skills: SkillsDir, name: string, args: string) {
   const c = COMMANDS[name]
-  let pane = (await $.env.get('HERDR_PANE_ID')) ?? ''
-  if (name === 'dnd') {
-    if (!pane) return { text: 'dnd: not inside a herdr pane (HERDR_PANE_ID is unset)' }
-    // HERDR_PANE_ID may be the stable id; agents.sh matches the canonical pane_id (CLAUDE.md trap).
-    const got = await $.process.run(['herdr', 'pane', 'get', pane]).catch(() => undefined)
-    try { pane = JSON.parse(got?.stdout ?? '').result.pane.pane_id || pane } catch { return { text: 'dnd: cannot resolve this pane (herdr pane get failed)' } }
-  }
+  // WP-378: the hc terminal address (`t7`) is the id agents.sh matches; there is no second id to resolve.
+  const pane = (await $.env.get('HC_TERMINAL_ID')) ?? ''
+  if (name === 'dnd' && !pane) return { text: 'dnd: not inside an hc terminal (HC_TERMINAL_ID is unset)' }
   const argv = c.argv(split(args), pane)
   if (typeof argv === 'string') return { text: argv }
   const r = await $.process.run([`${skills($.plugin.root)}/${c.script}`, ...argv], { timeoutMs: 20000 }).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))

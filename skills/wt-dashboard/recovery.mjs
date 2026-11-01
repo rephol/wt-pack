@@ -1,13 +1,13 @@
 // WP-252: restart recovery sweep. A dashboard restart leaves cards in Planning/Building whose agent died with
-// the machine or the herdr session; reconcile() would return them eventually, but silently and only after its
+// the machine or the hc core; reconcile() would return them eventually, but silently and only after its
 // debounce. This runs once at startup: mark each such card interrupted (with the reason), then re-dispatch it
 // or flag it on the board and in the Inbox. Pack agents only: it looks at cards a wt-pack dispatch assigned
-// (assignee with a pane), never at herdr panes outside the pack.
+// (assignee with a pane), never at hc terminals outside the pack.
 // deps: { agents(), notify(draft), redispatch(ticket, {key}) → boolean (WP-251 seam: `key` is the idempotency
 // key a re-dispatch must carry so a double send is a no-op), event(project, kind, id, text) }
 export async function sweep({ tickets, deps, now = Date.now(), log = console.error }) {
   const local = (await deps.agents().catch(() => [])).filter((a) => a.local)
-  if (!local.length) return [] // herdr down is not "every agent is gone"
+  if (!local.length) return [] // hc down is not "every agent is gone"
   const out = []
   for (const { id, project } of tickets.db.prepare('SELECT id, project FROM tickets').all()) {
     const t = await tickets.get(id)

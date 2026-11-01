@@ -510,7 +510,7 @@ export class Rooms {
     for (const [key, items] of [...this.queue]) {
       const a = agents.find((x) => x.key === key)
       if (!a) {
-        // The pane is gone (agent closed, or its key changed after a herdr restart): say so on each message.
+        // The pane is gone (agent closed, or its key changed after a core restart): say so on each message.
         this.queue.delete(key)
         for (const it of items) for (const n of it.msg.queuedFor ?? []) if (!it.msg.deliveredTo.includes(n) && !agents.some((x) => x.name === n)) this.undeliverable(it.slug, it.msg, n, 'not delivered: agent is gone')
         continue

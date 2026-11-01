@@ -89,8 +89,8 @@ work that is not in it, and a PR whose diff includes someone else's.
 
 Override when the ticket belongs somewhere else: `WT_BASE=origin/preview scripts/worktree.sh <branch>`.
 
-**Label your own pane with the task** (herdr tokens the dashboard shows as "task · state"; a new plan
-overwrites both; silent outside herdr):
+**Label your own pane with the task** (hc labels the dashboard shows as "task · state"; a new plan
+overwrites both; silent outside an hc terminal):
 
 ```
 ../wt-shared/scripts/task-state.sh own "<TICKET> <title>"        # task_state = planning
@@ -280,10 +280,10 @@ Three things in that reference are easy to skip and all three have already gone 
 
 - **Copy the three-line prompt verbatim; do not compose one like it.** A composed draft named an acceptance
   criterion and dropped `wt-ship`, and had to be corrected in the next message.
-- **When `herdr` is on PATH, always offer** to send it to a worker rather than making the user paste it —
+- **When `hc` is on PATH, always offer** to send it to a worker rather than making the user paste it —
   and wait for a yes.
 - **The prompt goes out as a plain prompt** (WP-272; `--goal` makes it a one-line `/goal`, which re-prompts the worker after
-  every turn until the condition holds). Without a goal the dashboard nudges a worker whose card is still open. It is one line because herdr types it into the pane and a newline is Enter, so let the
+  every turn until the condition holds). Without a goal the dashboard nudges a worker whose card is still open. It is one line because hc types it into the terminal and a newline is Enter, so let the
   script flatten it. It can still end early — impossible verdict, or no tool use for several turns — so say
   it may need a nudge rather than promising an unattended run.
 

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Runs inside the image: start herdr headless, start the dashboard, and check what a new user would.
+# Runs inside the image: start the hc core (the one thing wt-pack never does for you), start the dashboard, and check what a new user would.
 set -u
-script -qfc herdr /dev/null >/dev/null 2>&1 &       # herdr wants a terminal; script gives it one
+command -v hc >/dev/null && hc server start >/tmp/hc.log 2>&1
 npm --prefix skills/wt-dashboard start >/tmp/server.log 2>&1 &
 sleep 8
 ./setup doctor; echo "doctor exit $? (gh auth is expected to fail)"

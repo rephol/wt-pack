@@ -36,7 +36,7 @@ import { OverviewPage } from './overview'
 import { HeadlessBar, HeadlessStopDialog } from './headless'
 import { agentKind, canStop, headlessBadge } from './headlessData'
 import { contextLabel, modelLabel, modelRows, type AgentInfo } from './agentInfo'
-import { tileCounts } from './overviewData'
+import { isResting, tileCounts } from './overviewData'
 import { useDraft } from './draft'
 import { useAgentOps } from './agentOps'
 import { SpawnHost, RemoveHost, openSpawn, takePrefill } from './spawn'
@@ -288,9 +288,9 @@ function scopeToProject(o: Overview, project: string): Overview & { allProjects:
     tasks,
     machines: o.machines.map((m) => {
       const mine = agents.filter((a) => a.machine === m.label)
-      return { ...m, total: mine.length, working: mine.filter((a) => a.status === 'working').length, idle: mine.filter((a) => a.status === 'idle').length }
+      return { ...m, total: mine.length, working: mine.filter((a) => a.status === 'working').length, idle: mine.filter((a) => isResting(a.status)).length }
     }),
-    counts: { needsYou: n('needs_you'), stalled: n('stalled'), building: n('building'), inReview: n('in_review'), idleAgents: agents.filter((a) => a.status === 'idle').length, today: o.counts.today },
+    counts: { needsYou: n('needs_you'), stalled: n('stalled'), building: n('building'), inReview: n('in_review'), idleAgents: agents.filter((a) => isResting(a.status)).length, today: o.counts.today },
   }
 }
 const activeTasks = (ts: Task[]) => ts.filter((t) => STATE[t.state].group !== 'done')
@@ -500,7 +500,7 @@ export default function App() {
   const nav = (
     <SideNav
       // Mobile top bar and drawer (below AppShell's lg breakpoint): the project picker alone, one row; the title is desktop-only.
-      header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="herdr agent control room" />{projectPicker}</VStack>}
+      header={mobileNav ? projectPicker : <VStack gap={1}><SideNavHeading heading="wt-dashboard" subheading="hc agent control room" />{projectPicker}</VStack>}
       collapsible={{ isCollapsed: navCollapsed, onCollapsedChange: setNavCollapsed, hasButton: true, buttonLabel: 'Toggle navigation ([)' }}
       footer={<VStack gap={0.5} className="hd-nav-footer"><InboxButton collapsed={navCollapsed} /><SavedButton /><SideNavItem label="Settings" icon={<GearIcon />} onClick={() => openSettings()} /><ServerStatus collapsed={navCollapsed} onOpen={() => openSettings('server')} /></VStack>}>
       {(['overview', 'tasks', 'board', 'agents', 'rooms', 'routines', 'teams', ...(termsOn ? ['terminals' as const] : [])] as const).map((p) => {
@@ -856,7 +856,7 @@ const needsYou = (a: Agent) => isLive(a) && a.asks && a.status !== 'working'
 const AGENT_FILTERS: Record<string, (a: Agent, t?: Task) => boolean> = {
   all: () => true,
   busy: (a) => isBusy(a.status),
-  free: (a) => (a.status === 'idle' || a.status === 'done') && !needsYou(a),
+  free: (a) => isResting(a.status) && !needsYou(a),
   needs: needsYou,
 }
 const shortPath = (p: string | null) => (p ? p.split('/').filter(Boolean).at(-1) ?? p : null)
@@ -1036,7 +1036,7 @@ function AgentsPage({ data, onOpen, onOpenFull, selected }: { data: Overview & {
                 <TableBody>
                   {rows.map((a) => {
                     const t = taskOf(a)
-                    const quiet = !needsYou(a) && (a.status === 'idle' || a.status === 'done') && !t
+                    const quiet = !needsYou(a) && isResting(a.status) && !t
                     const color = quiet ? 'secondary' : 'primary'
                     const summary = t ? `${t.adHoc ? '' : t.id + ' · '}${t.title}` : a.recap ?? '—'
                     // A handoff's --task label wins; its ticket stays a link when it is the linked task's.

@@ -90,7 +90,7 @@
  {
   "state": {
    "title": "Remote agents show pane ids / prompt text as names",
-   "body": "Evidence: sidebar lists 'code-reviewer/w5:p8', 'code-reviewer/w5:p9', 'Code-reviewer agent startup command railway' (herdr-box machine).\nImpact: remote agents unaddressable by name; wt-agents naming only covers local spawns.",
+   "body": "Evidence: sidebar lists 'code-reviewer/w5:p8', 'code-reviewer/w5:p9', 'Code-reviewer agent startup command railway' (hc-box machine).\nImpact: remote agents unaddressable by name; wt-agents naming only covers local spawns.",
    "candidates": []
   },
   "expect": "bug"

@@ -2,7 +2,7 @@
 // shell parsing on purpose (like wt-memory's pkill-guard.mjs, which stays): it stops accidents, not obfuscation.
 import type { Register } from 'claude-code'
 
-const SENDS = /handoff\.sh|wt-room|\broom\s+post|\bherdr\b|wt-ticket|wt-ask/ // commands whose strings reach another agent or a card
+const SENDS = /handoff\.sh|wt-room|\broom\s+post|\bhc\b|herdr-app\s+(?:-\S+\s+)*do\b|wt-ticket|wt-ask/ // commands whose strings reach another agent or a card
 const words = (seg: string) => [...seg.matchAll(/"[^"]*"|'[^']*'|\S+/g)].map((m) => m[0])
 const clip = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length > 120 ? t.slice(0, 119) + '…' : t }
 const TAKES_VALUE = new Set('FGgPstUucJjMNd'.split('')) // pkill/pgrep options that consume the next word
@@ -65,7 +65,28 @@ const WHERE = 'test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude-plu
 // WP-332: a command that might push, merge, delete outside the worktree or send files/secrets out is checked against the turn's
 // origin by `wt-gate` (the policy is wt-shared/scripts/gate.mjs; the mod has no Node and no env, so it asks the CLI). Cheap prefilter
 // first: only a command that could be gated pays for the process.
-const MAYBE_GATED = /\bgit\b[^|;&\n]*\b(push|merge|branch|worktree)\b|\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+// WP-378 F10: the prefilter is a plain WORD test that cannot drift from classify: no splitting, no quote blanking. On the text with every ' " \ removed, with and without backslash-newline joined (so a quote or
+// an escape can hide nothing, `g"i"t`, `\git`, `"git" push`), it passes a command that has
+//  - any of hc rm rmdir curl wget scp rsync nc ncat as a word (hc: every verb; rm/rmdir: rm-outside; the network tools: upload, secret-var, raw-socket); or
+//  - git AND any of push merge branch worktree anywhere; or gh AND pr anywhere (gh pr approve|merge|close); or
+//  - 7 or more shell/eval words (classify asks about a sh -c / eval nested deeper than 6, a command with no tool word in it); or
+//  - a command over 32 KB (classify fails closed past SCAN_MAX) that mentions any tool word, git and gh included.
+// Accepted cost: a command that merely MENTIONS a tool word spawns wt-gate (~60 ms); classify allows it. guards.test.ts holds this to wt-shared's fixtures (+ variants) rule by rule.
+// What the gate refuses outright instead of reading (it caps what it scans, and the command is an argv word, ~1 MB is the OS limit): a longer command that mentions any tool.
+export const GATE_MAX = 131072
+const SCAN_MAX = 32768 // wt-shared/scripts/gate.mjs SCAN_MAX
+const ALWAYS = /\b(?:hc|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+const ANY_TOOL = /\b(?:hc|git|gh|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+const GIT_SUB = /\b(?:push|merge|branch|worktree)\b/
+const SHELLISH = /\b(?:(?:ba|z|da|k|c)?sh|eval)\b/g
+const unquote = (s: string) => s.replace(/['"\\]/g, '')
+const toolWords = (t: string, long: boolean) => ALWAYS.test(t) || (/\bgit\b/.test(t) && GIT_SUB.test(t)) || (/\bgh\b/.test(t) && /\bpr\b/.test(t)) || (t.match(SHELLISH)?.length ?? 0) >= 7 || (long && ANY_TOOL.test(t))
+// Both readings of a backslash-newline: joined (`g\<NL>it` is `git`) and not (`"git"\<NL>nc` is two words after the join, classify's B reading still splits there).
+export const maybeGated = (cmd: string) => {
+  if (cmd.length > GATE_MAX) return ANY_TOOL.test(cmd)
+  const long = cmd.length > SCAN_MAX
+  return toolWords(unquote(cmd), long) || (cmd.includes('\\\n') && toolWords(unquote(cmd.replace(/\\\n/g, '')), long))
+}
 // WP-361: a gate deny names the rule id and the matched segment (wt-gate sends both) and says how to get the rest of a compound command through.
 const SPLIT = ' Only that segment is gated: run the other parts of the command as their own command.'
 const gateDeny = (stdout: string) => {
@@ -86,7 +107,8 @@ export const registerGuards = (on: Parameters<Register>[0], skills: (root: strin
       const at = await where
       if (at !== 1) deny = guard(e.command, true, at === 0)
     }
-    if (!deny && MAYBE_GATED.test(e.command.replace(/"[^"]*"|'[^']*'/g, '""'))) { // words inside a message are not subcommands
+    if (!deny && maybeGated(e.command) && e.command.length > GATE_MAX) deny = `wt-pack gate [rule: long-command]: command too long for the gate (over ${GATE_MAX / 1024} KB) and it mentions git, hc, rm or a network tool. Split it into smaller commands (or put the long text in a file).`
+    else if (!deny && maybeGated(e.command)) {
       // exit 3 = gated; anything else (allowed, spawn error, timeout) lets it through: a broken gate must not wedge every agent
       const r = await $.process.run([`${skills($.plugin.root)}/wt-shared/scripts/wt-gate`, 'check', '--', e.command], { timeoutMs: 8000 }).catch(() => undefined)
       if (r && r.exitCode === 3) deny = gateDeny(r.stdout)

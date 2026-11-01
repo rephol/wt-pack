@@ -60,7 +60,7 @@ export function reviewHolds(root) {
 }
 
 // WP-187: repos the background poller (watch-prs.sh serve) stopped watching, from <root>/unwatched.json — a
-// JSON array of {repo, reason, at} the poller appends to. No herdr pane exists to room-post from a launchd
+// JSON array of {repo, reason, at} the poller appends to. No hc terminal exists to room-post from a launchd
 // process, so this reuses the same read-only-scan idiom as reviewHolds instead: agent-written, so untrusted
 // (≤1 MB, no symlinks, fields length-capped), and a one-shot `server` item keyed on repo+at so re-scanning the
 // same row every dashboard poll tick never duplicates it (Inbox.add is idempotent by key).
