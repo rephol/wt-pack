@@ -8,6 +8,7 @@ import { createDecipheriv, createECDH, createHmac, randomBytes } from 'node:cryp
 import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { noCore } from './test-nocore.mjs'
 
 const u = (s) => Buffer.from(s, 'base64url')
 const hmac = (k, d) => createHmac('sha256', k).update(d).digest()
@@ -22,6 +23,7 @@ function decrypt(body, r) {
 }
 
 let child, base, cookie, svc, got = []
+const nc = noCore() // WP-378 F4: the real hc never runs (it would start a core)
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 before(async () => {
   svc = http.createServer((req, res) => { const c = []; req.on('data', (x) => c.push(x)); req.on('end', () => { got.push(Buffer.concat(c)); res.writeHead(201).end() }) })
@@ -29,12 +31,12 @@ before(async () => {
   const root = mkdtempSync(join(tmpdir(), 'wt-pushroutes-'))
   mkdirSync(join(root, 'data'), { recursive: true })
   child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: 'ignore',
-    env: { ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, WT_DASHBOARD_PUSH_HOSTS: `127.0.0.1:${svc.address().port}`, HOME: root } })
+    env: { ...nc.env(), PORT: String(PORT), WT_DASHBOARD_DATA: root, WT_DASHBOARD_PUSH_HOSTS: `127.0.0.1:${svc.address().port}`, HOME: root } })
   base = `http://127.0.0.1:${PORT}`
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
   cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
 })
-after(() => { child?.kill(); svc?.close() })
+after(() => { child?.kill(); svc?.close(); assert.equal(nc.started(), false, 'the server called hc: ' + nc.calls()); nc.close() })
 
 const call = (method, path, body, headers = {}) => fetch(base + path, { method, headers: { 'content-type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) })
 const authed = (method, path, body) => call(method, path, body, { cookie })

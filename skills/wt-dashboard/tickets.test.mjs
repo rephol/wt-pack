@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Tickets, deriveKey, ticketRow, ticketText, ticketMatches } from './tickets.mjs'
 import { exportTo } from './store.mjs'
+import { noCore } from './test-nocore.mjs'
 
 const tmp = () => mkdtemp(join(tmpdir(), 'tickets-'))
 const user = { name: 'Rep' }
@@ -174,8 +175,9 @@ test('server: unknown pane → 403 before body parsing, board unchanged', async 
   const board = JSON.stringify({ key: 'WP', next: 2, tickets: [{ id: 'WP-1', title: 'x', column: 'backlog', history: [] }] })
   await writeFile(file, board)
   const port = 20000 + Math.floor(Math.random() * 20000)
+  const nc = noCore() // WP-378 F4: the real hc never runs (it would start a core)
   const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
-    env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+    env: { ...nc.env(), PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     // Wait for the server's own "listening" line (WP-40): under a loaded `npm test` startup took > 5s, which a
     // fixed connect-retry budget read as a failure. Exit or 30s without it is a real failure.
@@ -192,7 +194,7 @@ test('server: unknown pane → 403 before body parsing, board unchanged', async 
     assert.equal((await call('POST', '/api/tickets', '{"title":"t","project":"wt-pack"}')).status, 403)
     assert.equal((await call('POST', '/api/tickets/WP-1/claim', '{}')).status, 403)
     assert.deepEqual((await new Tickets({ dir: join(root, 'data') }).list('wt-pack')).tickets, JSON.parse(board).tickets)
-  } finally { srv.kill() }
+  } finally { srv.kill(); const started = nc.calls(); nc.close(); assert.deepEqual(started, [], 'the server called hc') }
 })
 
 test('jevApply / jevUndo', async () => {
@@ -443,8 +445,9 @@ test('server: routing outcome recorded once on Done, once on reopen, via model-r
   ] }] })
   await writeFile(file, board)
   const port = 20000 + Math.floor(Math.random() * 20000)
+  const nc = noCore()
   const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname],
-    { env: { ...process.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+    { env: { ...nc.env(), PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     await new Promise((res, rej) => {
       let out = '', err = ''
@@ -494,7 +497,7 @@ test('server: routing outcome recorded once on Done, once on reopen, via model-r
     const outcomes = (await rf(join(root, '.local', 'share', 'wt-pack', 'routing-outcomes.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
     assert.deepEqual(outcomes.map((o) => [o.run, o.outcome]), [['abc12', 'ok'], ['abc12', 'returned']])
     assert.equal(outcomes[0].why, 'merged in abcdef1') // the move's own note, not a generic "reached done"
-  } finally { srv.kill() }
+  } finally { srv.kill(); const started = nc.calls(); nc.close(); assert.deepEqual(started, [], 'the server called hc') }
 })
 
 test('WP-225: moving a card to Ready clears its assignee and dispatch; naming one in the same call keeps it', async () => {
