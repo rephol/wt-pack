@@ -269,9 +269,9 @@ test('WP-378: a running user turn keeps its trust when an <hc> message lands in 
   await run('what does the <hc> tag mean?', { ...CLOSED, HC_TERMINAL_ID: 't13' }); assert.equal(turnOf('t13').trust, 'user')
   await run('<hcx>not a tag</hcx>', { ...CLOSED, HC_TERMINAL_ID: 't14' }); assert.equal(turnOf('t14').trust, 'user')
 })
-test('WP-378: HERDR_PANE_ID alone is no identity any more', async () => {
+test('WP-378: the old pane id alone is no identity any more', async () => {
   mode = 'ok'; seen.length = 0
-  const { ctx } = await run(MSG('real1'), { HC_TERMINAL_ID: '', HERDR_PANE_ID: 'w1:p3' })
+  const { ctx } = await run(MSG('real1'), { HC_TERMINAL_ID: '', HERDR_PANE_ID: 'w1:p3' }) // legacy-herdr
   assert.match(ctx, /UNVERIFIED wt-message \(no pane identity\)/)
   assert.equal(seen.length, 0)
 })

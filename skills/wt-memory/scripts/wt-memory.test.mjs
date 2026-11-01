@@ -448,9 +448,9 @@ test('the hc fallback never starts a stopped core: core down → no hc call; --s
   assert.equal(n.code, 0); assert.match(n.out, /## Global preferences/)
   assert.deepEqual(hcCalls(d), [])
 })
-test('HERDR_PANE_ID alone is no identity: no hc call', () => {
+test('the old pane id alone is no identity: no hc call', () => {
   const d = paneShim('ok')
-  runRaw(['context', '--cwd', '/', '--strict-pane'], { HERDR_PANE_ID: 'w1:p1', HC_TERMINAL_ID: '', WT_ROLE: '', PATH: `${d}:${process.env.PATH}` })
+  runRaw(['context', '--cwd', '/', '--strict-pane'], { HERDR_PANE_ID: 'w1:p1', HC_TERMINAL_ID: '', WT_ROLE: '', PATH: `${d}:${process.env.PATH}` }) // legacy-herdr
   assert.deepEqual(hcCalls(d), [])
 })
 test('remember: the author is the hc terminal name (bounded hc get)', () => {
