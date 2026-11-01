@@ -9,12 +9,12 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // get(): the agent's status object ({status}: idle|working|done|blocked, as hc.mjs get() returns it), or null while it
-// reports none. `agent_status` is accepted for a caller that still passes the old shape.
+// reports none.
 export async function waitReady(get, { timeoutMs = 60_000, intervalMs = 1000 } = {}) {
   const end = Date.now() + timeoutMs
   for (;;) {
     const a = await get().catch(() => null)
-    if (a && a.interactive_ready !== false && ['idle', 'done'].includes(a.status ?? a.agent_status)) return true
+    if (a && a.interactive_ready !== false && ['idle', 'done'].includes(a.status)) return true
     if (Date.now() >= end) return false
     await sleep(intervalMs)
   }

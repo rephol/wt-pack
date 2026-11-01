@@ -16,11 +16,14 @@ test('inputText: a ❯ outside the input box (a trust or picker menu) is never i
   assert.equal(inputText('❯ No, exit\n  Yes'), '')
 })
 test('waitReady: waits for registration and an idle, interactive session; times out', async () => {
-  const seq = [null, { agent_status: 'working', interactive_ready: false }, { agent_status: 'idle', interactive_ready: true }]
+  const seq = [null, { status: 'working', interactive_ready: false }, { status: 'idle', interactive_ready: true }]
   let n = 0
   assert.equal(await waitReady(async () => seq[Math.min(n++, 2)], { timeoutMs: 1000, intervalMs: 1 }), true)
   assert.equal(n, 3)
   assert.equal(await waitReady(async () => null, { timeoutMs: 20, intervalMs: 5 }), false)
+})
+test('waitReady (WP-378 U6): the herdr-era `agent_status` shape is gone: it is not a ready signal any more', async () => {
+  assert.equal(await waitReady(async () => ({ agent_status: 'idle', interactive_ready: true }), { timeoutMs: 20, intervalMs: 5 }), false)
 })
 test('confirmSubmitted: presses Enter again while the text is still in the box, bounded', async () => {
   let presses = 0, full = 2
