@@ -506,6 +506,14 @@ security/data/scope/adversarial/reliability/performance), an independent validat
   ended a run of splitter regressions structurally: `classify` is the union of a quote-aware reading (A) and the quote-blind 3da7fc3 reading (B), and the
   prefilter is a plain word test on the unquoted text (no splitting), so it cannot drift from `classify`; differential fuzz (~2.9M commands) finds 0 misses.
   Commits: F8 1456266 9d861f3 661d1ef 9e51fdc a0658f0; F9 50e1176 355b2ff 3cde6ec; F10 d82553f 78a6980 cf566f6.
+- **F11 (gate B QA batch, one round; orchestrator cap: only confirmed spawn/handoff/delivery/gate breakers are fixed).** QA's real captures showed the
+  picker answer route pressing digits while the cursor sat on the "Type something" row, where a digit is typed into the field (single: "3" left, 409;
+  multi: 200 with "1teal-ish mix"). Fixed in 8d535af: `leaveField` sends `up` before any digit when the cursor is on row n+1 (option pick, toggles, untick,
+  `chatPlan`); single-select free text sends no digit when the cursor is already there; text left in a single-select Other field parses as `other` and
+  answers 409. Red proof: 3 failing `parse.test.mjs` cases on the real captures (now `test-fixtures/picker-hc-*.txt`) before the fix.
+  Decisions on the rest of the batch: (2) the `turn-t8.json` leak is QA setup, not a bug: the isolation knob is `WT_TURN_DIR` (the hook writer and the
+  `wt-gate` reader both read it; agents.sh/hc-launch forward it) and QA's env set only `XDG_CACHE_HOME`; honouring XDG in one of the two would split
+  writer from reader. (3) and (4) are residuals below.
 
 ## Accepted residuals (gate B)
 Orchestrator instruction: F10 is the last fix round; everything below is accepted for this ticket (follow-up tickets if one bites).
@@ -533,6 +541,17 @@ Dashboard / agents / handoff:
 - `require_pack_agent` refuses a kept shell at an agent's address while the dashboard is down (fail-safe); `wt-deliver` does not recognise a holder at a path
   with spaces; `dispatch.mjs` still counts a `blocked` assignee as delivered (the handoff pre-check makes it benign).
 - Records keyed by old herdr ids go stale silently (D32; `docs/hc-cutover.md`).
+- Picker (F11): `up` out of the Other field landing on option n is not proven live (the multi `down` back into Other is); the leftover-text parse rests on the
+  one captured layout (text row right above the rule and "Chat about this"); a wrapped multi-line Other text is unread. QA re-check covers the live keys.
+- `handoff.sh` as a pane sender: the dashboard records the row `delivered` before `hc send` types it (WP-352 order: record before deliver). A failed type
+  exits 1 with the row left `delivered`; ack kinds are resent by the WP-257 sweep and the caller retries with the same `--request-id` (D16's blocked
+  pre-check removes the common case). A `queued`-then-`delivered` state split is a follow-up.
+- Respawn and the watchdog Resume are not proven live under hc (QA's shell carried `CLAUDE_CODE_CHILD_SESSION`); covered by tests only.
+- Red-before-green runs for U1-U7 and F4-F10 were not recorded (the tests exist and pass); F11 has a recorded red proof.
+- D28 dashboard path: `dispatch.mjs` never passes a goal (pre-existing on main, not part of this ticket); the dashboard's goal path is routines. QA's routine
+  run read UNVERIFIED because the agent loaded the main-checkout plugin, whose `inject.mjs` still reads `HERDR_PANE_ID`; it resolves when this branch's plugin
+  is loaded (after merge). `handoff.sh --goal` is Verified live.
+- Dashboard `npm test` needs a TMPDIR short enough for the hc-stub socket path and outside `/tmp` (`uploads.test.mjs` asserts `tmpdir()` is outside `/tmp`).
 Tests:
 - `nocore.guard` covers spawns of `server.mjs` only (agents.sh/handoff.sh tests rely on their fakes and `HERDR_DASH_URL` pinning); handoff.test's 20 ms
   `afterEach` yield is timing-based; the listAgents Jev/STALL gates and the web `isResting` sites are covered through their helpers only; the `wt-deliver`
