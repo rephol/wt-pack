@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hcStub, terminal } from './test-hc.mjs'
+import { finished, hcStub, terminal } from './test-hc.mjs'
 
 // WP-378: the agents are terminals of a stubbed hc core (test-hc.mjs)
 const T = () => [
@@ -14,8 +14,9 @@ const T = () => [
   terminal({ address: 't2', name: 'demo-orchestrator-01', status: 'idle', cwd: '/tmp', labels: {}, pid: 42, foreground: { name: '2.1', argv: ['claude'], cwd: '/tmp', pid: 42 } }),
   terminal({ address: 't3', name: 'demo-worker-02', status: 'idle', cwd: '/tmp', labels: {}, pid: 43, foreground: { name: '2.1', argv: ['claude'], cwd: '/tmp', pid: 43 } }),
   terminal({ address: 't4', name: 'demo-flooder', status: 'idle', cwd: '/tmp', labels: {}, pid: 44, foreground: { name: '2.1', argv: ['claude'], cwd: '/tmp', pid: 44 } }),
+  finished({ address: 't5', name: 'demo-gone', cwd: '/tmp', labels: { role: 'worker' } }), // WP-378 F5: a finished terminal still listed as an agent row ('exited')
 ]
-const KEYS = { 't1': 'a'.repeat(64), 't2': 'b'.repeat(64), 't3': 'c'.repeat(64), 't4': 'd'.repeat(64) }
+const KEYS = { 't1': 'a'.repeat(64), 't2': 'b'.repeat(64), 't3': 'c'.repeat(64), 't4': 'd'.repeat(64), 't5': 'e'.repeat(64) }
 let hc, child, base, cookie
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 const as = (pane) => ({ 'x-herdr-pane': pane, 'x-wt-pane-key': KEYS[pane], 'content-type': 'application/json' })
@@ -82,4 +83,17 @@ test('every producer leaves a verifiable row: check-finish nudge, the Ready nudg
   assert.match(src, /await deliver\(\{ id: pane \}, first,/) // spawn first prompt
   assert.match(src, /await deliver\(a, nudge,/) // Ready nudge
   assert.match(src, /msgSafe\(\(\) => messages\.record\(\{ \.\.\.env, target: pane, body: text \}\)\)/) // check-finish
+})
+
+test('WP-378 F5: an exited agent (finished / kept shell) is no pane identity: its address posts nothing, and as a sender it carries no role', async () => {
+  const r = await fetch(`${base}/api/deliveries`, { method: 'POST', headers: as('t5'), body: JSON.stringify({ pane: 't2', kind: 'handoff', body: 'x' }) })
+  assert.equal(r.status, 403, await r.text())
+  assert.equal((await verify('t5', 'whatever', 'handoff', 'x')).status, 403)
+  // a message recorded while t5 lived, verified later: its sender is no longer a live agent, so the role is the least one
+  const sent = await send('t1', 't2', { kind: 'handoff', body: 'go', ticket: 'WP-9' })
+  const id = sent.text.match(/id=([\w-]+)/)[1]
+  hc.set(hc.rows().map((x) => (x.address === 't1' ? { ...x, state: 'finished', status: null, alive: false } : x)))
+  await new Promise((r) => setTimeout(r, 4000)) // agents() cache
+  const v = await (await verify('t2', id, 'handoff', 'demo-worker-01')).json()
+  assert.equal(v.senderRole, 'agent', JSON.stringify(v))
 })

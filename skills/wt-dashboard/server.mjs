@@ -1,6 +1,6 @@
 // Agent control room: hc terminals (herdr-core) + git worktrees + PRs + Linear, joined into tasks.
 // ponytail: no deps, polling instead of websockets; switch to SSE if refresh feels laggy.
-import { list as hcList, get as hcGet, setLabels as hcSetLabels, clearLabel as hcClearLabel, read as hcRead, hc as hcRun, send as hcSendRaw, keys as hcKeysRaw, killRm as hcKillRm, spawnNumbered as hcSpawnNumbered, isAgent as hcIsAgent, coreUp, HcError } from '../wt-shared/scripts/hc.mjs'
+import { list as rawList, get as rawGet, setLabels as rawSetLabels, clearLabel as rawClearLabel, read as rawRead, hc as rawRun, send as rawSend, keys as rawKeys, killRm as rawKillRm, spawnNumbered as rawSpawnNumbered, isAgent as hcIsAgent, coreUp, HcError } from '../wt-shared/scripts/hc.mjs'
 import { PickerFocus } from './pickerFocus.mjs'
 import { BlockedQueue } from './blockedq.mjs'
 import { waitReady } from '../wt-shared/scripts/pane-submit.mjs'
@@ -94,7 +94,9 @@ const projectStore = new ProjectStore(() => psettings.db) // WP-347
 const agentTable = new AgentTable(() => psettings.db, (t) => t.importLegacy(DATA, (p, at) => projectStore.setPaused(p, at))) // WP-348: one row per local pane agent (agents-table.mjs)
 // WT_DASHBOARD_DIST: set by the desktop app (bundled resources); else the sibling web/dist.
 const DIST = envOf('DIST') ? join(envOf('DIST'), '/') : new URL('./web/dist/', import.meta.url).pathname
-const STALL_MS = 20 * 60_000
+export const STALL_MS = 20 * 60_000
+// WP-378 F5: under hc a finished turn rests at `done` (S1, kept distinct by hcagents.mjs); every rule that means "the agent is waiting for input" tests this, never `idle` alone.
+export const resting = (status) => status === 'idle' || status === 'done'
 // Linear team key → project name (project = basename of the repo root), from WT_LINEAR_TEAMS (WP-82).
 const PROJECT_BY_TEAM = parseTeams(cfg.list('WT_LINEAR_TEAMS'))
 const TEAM_KEYS = Object.keys(PROJECT_BY_TEAM)
@@ -531,6 +533,11 @@ const HC_REFUSAL = { blocked: 409, status_mismatch: 409, not_agent: 409, finishe
 const errStatus = (e) => e?.status ?? (e?.code === 'core_down' ? 503 : e instanceof HcError ? HC_REFUSAL[e.kind] : undefined) ?? 500
 let upAt = 0, upVal = false // coreUp() is a socket connect; one answer per second serves every caller of a request
 const coreIsUp = async () => { if (Date.now() - upAt < 1000) return upVal; upVal = await coreUp(); upAt = Date.now(); return upVal }
+// WP-378 F5 (D4): the ONE gate in front of every hc call this server makes. `hc connect|get|send|read|keys|kill|rm|label` start a stopped core,
+// so with the core down each call throws core_down (503 via errStatus) before any hc process runs. Calls go through these wrappers, never hc.mjs directly.
+const gated = (f) => async (...a) => { if (!(await coreIsUp())) throw hcDown(); return f(...a) }
+const hcList = gated(rawList), hcGet = gated(rawGet), hcSetLabels = gated(rawSetLabels), hcClearLabel = gated(rawClearLabel), hcRead = gated(rawRead)
+const hcRun = gated(rawRun), hcSendRaw = gated(rawSend), hcKeysRaw = gated(rawKeys), hcKillRm = gated(rawKillRm), hcSpawnNumbered = gated(rawSpawnNumbered)
 const hcRows = () => cached('hc:rows', 3000, async () => {
   if (!(await coreIsUp())) throw hcDown()
   return hcList({ all: true })
@@ -593,7 +600,7 @@ export function agentName(m, a, cwd) {
 export function paneStale(status, seen, seq, now, readEvery) {
   if (!seen) return true
   if (seen.seq !== seq) return true
-  if ((status === 'working' || status === 'idle' || status === 'blocked') && now - seen.at > readEvery) return true
+  if ((status === 'working' || resting(status) || status === 'blocked') && now - seen.at > readEvery) return true
   return Boolean(seen.p?.picker) // a picker itself can also advance without a status change
 }
 // WP-324: `claude agents --json` cross-check, sessionId -> live claude pid; best effort ({} when claude is absent), cached 3s so
@@ -635,12 +642,12 @@ async function listAgents(m) {
     const session = a.pid != null ? sessions.get(Number(a.pid)) ?? null : null // WP-378: the claude whose pid is the terminal's foreground
     // An AskUserQuestion picker on screen beats the reply-ends-with-? heuristic (kept for permission prompts).
     const pk = p.picker ?? null
-    const jevAsks = (a.agent_status === 'idle' || a.agent_status === 'blocked') && p.tail && !pk && jevOn('NEEDS_YOU')
+    const jevAsks = (resting(a.agent_status) || a.agent_status === 'blocked') && p.tail && !pk && jevOn('NEEDS_YOU')
       ? tails.get(`needs_you:${k}`, p.tail, (t) => jevAsk('NEEDS_YOU', { pane: t }, needsYouJudge.questions(), (x) => needsYouJudge.decide(x, minFor('needs_you')))
         .then((x) => (x ? needsYouJudge.decide(x, minFor('needs_you')) : undefined)))
       : undefined
     const ny = mergeNeedsYou(p, jevAsks)
-    const long = Date.now() - since.get(k).at > STALL_MS && (a.agent_status === 'idle' || a.agent_status === 'working')
+    const long = Date.now() - since.get(k).at > STALL_MS && (resting(a.agent_status) || a.agent_status === 'working')
     const stall = long && p.tail && jevOn('STALL')
       ? tails.get(`stall:${k}`, p.tail, (t) => jevAsk('STALL', { pane: t }, stallJudge.questions(), (x) => ['stuck', 'looping'].includes(stallJudge.decide(x)))
         .then((x) => stallJudge.decide(x) ?? undefined))
@@ -706,7 +713,7 @@ async function checkCore() {
   if (Date.now() - coreProbe < (Number(process.env.WT_HC_CORE_PROBE_MS) || 60_000) || !(await coreIsUp())) return
   coreProbe = Date.now()
   const st = await hcRun(['server', 'status', '--json'], { timeoutMs: 3000 }).catch(() => null)
-  const r = coreChanged(join(DATA, 'hc-core.json'), st?.core?.id, { dropRows: () => { for (const x of agentTable.list()) agentTable.remove(x.name) }, dropKeys: () => dropPaneKeys(PANE_KEYS) })
+  const r = coreChanged(join(DATA, 'hc-core.json'), st?.core?.id, { dropRows: () => { for (const x of agentTable.list()) { if (x.paused_at || (x.state === 'missing' && x.session)) agentTable.upsert(x.name, { pane: null, stable_pane: null }); else agentTable.remove(x.name) } } /* WP-378 F5: Resume needs a paused row's session and cwd; only the old core's addresses go */, dropKeys: () => dropPaneKeys(PANE_KEYS) })
   if (r === 'changed') { console.error('hc core changed: agents table and pane keys dropped'); store.delete('hc:rows'); store.delete('agents:local') }
 }
 
@@ -724,7 +731,7 @@ async function machineSummaries(ag) {
       label: m.label, host: m.host, local: m.local, enabled: m.enabled,
       status: 'online', lastSeen: Date.now(), error: null,
       working: mine.filter((a) => a.status === 'working').length,
-      idle: mine.filter((a) => a.status === 'idle').length,
+      idle: mine.filter((a) => resting(a.status)).length,
       total: mine.length,
     }
   })
@@ -1593,7 +1600,7 @@ export function deriveTasks({ agents, worktrees, prs, issues }) {
     // Jev's stall class, when there is one, decides: finished → not stalled, waiting_on_user → needs you,
     // stuck/looping → stalled (also a working agent found looping). No class → the idle-for-20-min rule.
     const asker = ag.find(waitsOnUser)
-    const idleLong = ag.find((a) => (a.status === 'idle' && now - a.statusSince > STALL_MS && !['finished', 'waiting_on_user'].includes(a.stall)) || a.stall === 'looping')
+    const idleLong = ag.find((a) => idleLongAgent(a, now))
     const worker = ag.find((a) => a.pool === 'worker')
     const planner = ag.find((a) => a.pool === 'planner')
     const state = asker ? 'needs_you'
@@ -1831,7 +1838,7 @@ async function overview() {
         stalled: n('stalled'),
         building: n('building'),
         inReview: n('in_review'),
-        idleAgents: ag.filter((a) => a.status === 'idle').length,
+        idleAgents: ag.filter((a) => resting(a.status)).length,
         today: todayCounts(pr, undefined, local),
       },
       host: await host(),
@@ -1840,7 +1847,9 @@ async function overview() {
 }
 
 // One needs-you rule for the task state and the inbox snapshot, so every needs-you task has an inbox item.
-export const waitsOnUser = (a) => ((a.status === 'idle' || a.status === 'blocked') && a.asks) || a.stall === 'waiting_on_user'
+export const waitsOnUser = (a) => ((resting(a.status) || a.status === 'blocked') && a.asks) || a.stall === 'waiting_on_user'
+// Jev's stall class, else the idle-for-STALL_MS rule (a resting agent: idle or done).
+export const idleLongAgent = (a, now) => (resting(a.status) && now - a.statusSince > STALL_MS && !['finished', 'waiting_on_user'].includes(a.stall)) || a.stall === 'looping'
 
 // ---- transition events (desktop notifications + tray) ----
 // Per-agent state + per-PR CI, so successive overviews can be diffed. Pure: tested in parse.test.mjs.
@@ -3007,13 +3016,13 @@ async function messagesApi(req, res, url, parts) {
       return send(res, 200, { verified: false, reason })
     }
     // WP-332: who the sender is, for the destructive-action gate: a server-sent row is 'server'; a pane-sent one is its sender's role.
-    const sp = row.sender_pane ? await agentFor((await agents().catch(() => [])).filter((x) => x.local), row.sender_pane) : null
+    const sp = row.sender_pane ? await agentFor((await agents().catch(() => [])).filter((x) => x.local && x.status !== 'exited'), row.sender_pane) : null // WP-378 F5: an exited sender has no role
     // WP-332 (c): a verified REPLY to an orchestrator is as good as the user's word when it is the current assignee's report on a
     // ticket this orchestrator handed off. All three facts come from the server's records, never from the message text.
     // WP-344: a server-sent reply from the user (their "Gate: Allow once" answer relayed by the dashboard: server token, no sender pane) is the user's own word.
     let replyAllowed = !rid && row.kind === 'reply' && row.sender === 'user' && !row.sender_pane
     if (!rid && row.kind === 'reply' && row.ticket && row.sender_pane) {
-      const me = (await agents().catch(() => [])).find((x) => x.local && x.id === author.pane)
+      const me = (await agents().catch(() => [])).find((x) => x.local && x.id === author.pane && x.status !== 'exited')
       const handed = messages.db.prepare("SELECT 1 FROM wt_messages WHERE ticket = ? AND kind IN ('handoff', 'dispatch') AND sender_pane = ? LIMIT 1").get(row.ticket, author.pane)
       const card = await tickets.get(row.ticket).catch(() => null)
       const assignee = card?.assignee?.pane ?? null
@@ -3090,7 +3099,7 @@ const roomsLoop = async () => {
 // Who is posting: an agent names its pane (x-herdr-pane, set by the wt-room CLI from $HC_TERMINAL_ID) and must be a
 // live local agent reached on 127.0.0.1 itself; anything else must be the dashboard page (Origin present).
 // WP-378: $HC_TERMINAL_ID is the terminal's address (`t7`), the same form `hc` lists: an id is compared as is.
-const liveAgent = async (id) => (/^t\d+$/.test(id) ? (await agents().catch(() => [])).find((x) => x.local && x.id === id) : undefined)
+const liveAgent = async (id) => (/^t\d+$/.test(id) ? (await agents().catch(() => [])).find((x) => x.local && x.id === id && x.status !== 'exited') : undefined) // WP-378 F5: an exited row (finished / kept shell) is no identity: its pane key is swept, it would sit in grace
 // WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
 // POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS / _DRIVER (cli|sdk, read by Headless).
 let headless
@@ -3679,7 +3688,7 @@ const terms = new TerminalSettings(DATA)
 // A shell is a live terminal labelled wt.pool=<project>-shells; a terminal that is not one (an agent, a stranger's) is refused, never typed into.
 async function shellPane(id) {
   if (!HC_ADDR.test(String(id))) throw Object.assign(new Error('not a dashboard shell (agents keep their own controls)'), { status: 404 })
-  const t = await hcGet(id).catch(() => null)
+  const t = await hcGet(id).catch((e) => { if (e?.code === 'core_down') throw e; return null })
   if (!isShellTerminal(t)) throw Object.assign(new Error('not a dashboard shell (agents keep their own controls)'), { status: 404 })
   return t
 }

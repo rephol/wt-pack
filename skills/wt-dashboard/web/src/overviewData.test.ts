@@ -12,7 +12,7 @@ test('agentsByProject: per-project state counts, busiest first, null → other',
   ])
   assert.deepEqual(g, [
     { project: 'acmeapp', working: 2, idle: 0, blocked: 1 },
-    { project: 'other', working: 0, idle: 0, blocked: 0 },
+    { project: 'other', working: 0, idle: 1, blocked: 0 }, // a done agent rests: counted idle (WP-378 F5)
     { project: 'wt-pack', working: 0, idle: 1, blocked: 0 },
   ])
 })
@@ -31,4 +31,9 @@ test('tileCounts: only my tasks, like Tasks → Mine', () => {
   const t = (state: string, mine?: boolean) => ({ state, mine })
   assert.deepEqual(tileCounts([t('in_review', true), t('in_review', false), t('in_review'), t('needs_you'), t('stalled', false)]),
     { needsYou: 1, stalled: 0, inReview: 2 })
+})
+
+test('WP-378 F5: a done agent (the resting state under hc) counts as idle', () => {
+  const g = agentsByProject([{ project: 'p', status: 'done' }, { project: 'p', status: 'idle' }, { project: 'p', status: 'working' }])
+  assert.deepEqual(g, [{ project: 'p', working: 1, idle: 2, blocked: 0 }])
 })

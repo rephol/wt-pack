@@ -36,7 +36,7 @@ import { OverviewPage } from './overview'
 import { HeadlessBar, HeadlessStopDialog } from './headless'
 import { agentKind, canStop, headlessBadge } from './headlessData'
 import { contextLabel, modelLabel, modelRows, type AgentInfo } from './agentInfo'
-import { tileCounts } from './overviewData'
+import { isResting, tileCounts } from './overviewData'
 import { useDraft } from './draft'
 import { useAgentOps } from './agentOps'
 import { SpawnHost, RemoveHost, openSpawn, takePrefill } from './spawn'
@@ -288,9 +288,9 @@ function scopeToProject(o: Overview, project: string): Overview & { allProjects:
     tasks,
     machines: o.machines.map((m) => {
       const mine = agents.filter((a) => a.machine === m.label)
-      return { ...m, total: mine.length, working: mine.filter((a) => a.status === 'working').length, idle: mine.filter((a) => a.status === 'idle').length }
+      return { ...m, total: mine.length, working: mine.filter((a) => a.status === 'working').length, idle: mine.filter((a) => isResting(a.status)).length }
     }),
-    counts: { needsYou: n('needs_you'), stalled: n('stalled'), building: n('building'), inReview: n('in_review'), idleAgents: agents.filter((a) => a.status === 'idle').length, today: o.counts.today },
+    counts: { needsYou: n('needs_you'), stalled: n('stalled'), building: n('building'), inReview: n('in_review'), idleAgents: agents.filter((a) => isResting(a.status)).length, today: o.counts.today },
   }
 }
 const activeTasks = (ts: Task[]) => ts.filter((t) => STATE[t.state].group !== 'done')

@@ -44,7 +44,7 @@ export const sessionsByPid = (rows) => new Map((Array.isArray(rows) ? rows : [])
 
 // D4: the dashboard remembers the core it last saw (`hc server status --json` core.id). A different id means a different core
 // (new machine state dir, reinstall, another HC_SESSION): its addresses t1.. alias nothing we know, so every agents-table row and
-// pane key is dropped. First sight stores the id and drops nothing. `file` holds {id}; dropRows()/dropKeys() are injected.
+// pane key is dropped (the caller keeps a paused / session-carrying missing row for Resume and clears only its addresses: WP-378 F5). First sight stores the id and drops nothing. `file` holds {id}; dropRows()/dropKeys() are injected.
 export function coreChanged(file, id, { dropRows = () => {}, dropKeys = () => {} } = {}) {
   if (!id) return 'unknown'
   let had = null

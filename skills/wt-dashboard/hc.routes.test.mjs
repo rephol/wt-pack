@@ -102,9 +102,19 @@ test('a different core id drops the agents table rows and every pane key; the sa
   await until(() => existsSync(join(root, 'data', 'hc-core.json')), 'first core id stored')
   await wait(400); await agentsList() // a second probe with the same id: nothing is dropped
   assert.ok(existsSync(join(root, 'pane-keys', 't1')))
+  // WP-378 F5: a paused row (Resume needs its session and cwd) and a missing row that carries a session survive; only their addresses go
+  { const db = new DatabaseSync(join(root, 'data', 'wt.db'))
+    db.prepare("INSERT OR REPLACE INTO agents (name, role, cwd, session, pane, stable_pane, state, paused_at, created_at) VALUES ('demo-paused', 'worker', '/tmp/p', 'sess-p', 't77', 't77', 'paused', 5, 1)").run()
+    db.prepare("INSERT OR REPLACE INTO agents (name, role, cwd, session, pane, state, created_at) VALUES ('demo-missing', 'worker', '/tmp/m', 'sess-m', 't78', 'missing', 1)").run()
+    db.prepare("INSERT OR REPLACE INTO agents (name, role, cwd, pane, state, created_at) VALUES ('demo-nosess', 'worker', '/tmp/n', 't79', 'missing', 1)").run(); db.close() }
   hc.core({ id: 'core-b', name: 'host' })
   await until(async () => { await agentsList(); return !existsSync(join(root, 'pane-keys', 't1')) }, 'pane keys dropped for the new core')
   assert.ok(!existsSync(join(root, 'pane-keys', 't2')))
   assert.equal((await fetch(`${base}/api/agents/by-name/demo-worker-04`)).status, 404, 'the old core\'s exited row is gone')
+  { const db = new DatabaseSync(join(root, 'data', 'wt.db'))
+    const row = (n) => db.prepare('SELECT name, cwd, session, pane, stable_pane, state, paused_at FROM agents WHERE name = ?').get(n)
+    assert.deepEqual({ ...row('demo-paused') }, { name: 'demo-paused', cwd: '/tmp/p', session: 'sess-p', pane: null, stable_pane: null, state: 'paused', paused_at: 5 }, 'a paused row keeps session and cwd, loses its address')
+    assert.deepEqual({ ...row('demo-missing') }, { name: 'demo-missing', cwd: '/tmp/m', session: 'sess-m', pane: null, stable_pane: null, state: 'missing', paused_at: null })
+    assert.equal(row('demo-nosess'), undefined, 'a row with nothing to resume is dropped (D14)'); db.close() }
   assert.equal((await fetch(`${base}/api/agents/by-name/demo-worker-01`)).status, 200, 'live agents are re-registered by the watcher')
 })

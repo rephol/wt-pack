@@ -1473,8 +1473,9 @@ test('WP-172: paneStale re-reads idle/blocked on the readEvery cadence, not just
   assert.equal(paneStale('idle', { seq: 5, at: old }, 5, now, readEvery), true)
   assert.equal(paneStale('blocked', { seq: 5, at: old }, 5, now, readEvery), true)
   assert.equal(paneStale('working', { seq: 5, at: old }, 5, now, readEvery), true)
-  // A status this predicate doesn't recognise (e.g. 'done') stays on seq-change-only, unaffected.
-  assert.equal(paneStale('done', { seq: 5, at: old }, 5, now, readEvery), false)
+  // WP-378 F5: `done` (the resting state under hc) is re-read like idle; a status this predicate doesn't recognise stays on seq-change-only.
+  assert.equal(paneStale('done', { seq: 5, at: old }, 5, now, readEvery), true)
+  assert.equal(paneStale('exited', { seq: 5, at: old }, 5, now, readEvery), false)
   // A held picker is always stale (it can advance to a different question with no seq bump), any status.
   assert.equal(paneStale('idle', { seq: 5, at: now, p: { picker: {} } }, 5, now, readEvery), true)
 })
@@ -1668,4 +1669,16 @@ test('WP-339: sidebar planUsage follows the picked limits (a fresh pane reading 
   assert.deepEqual(planUsageFromLimits(l, now), { session: { pct: 10, reset: '2h0m' }, weekly: { pct: 21, reset: '5d 0hr 0m' }, at: now })
   assert.equal(planUsageFromLimits({ ...l, stale: true }, now), null)
   assert.equal(planUsageFromLimits(null, now), null)
+})
+
+test('WP-378 F5: under hc a finished turn rests at `done`; it is idle for every rule (needs-you, stall, re-read, counts)', async () => {
+  const { waitsOnUser, paneStale, resting, idleLongAgent, STALL_MS } = await import('./server.mjs')
+  assert.deepEqual(['idle', 'done', 'working', 'blocked', 'exited'].map(resting), [true, true, false, false, false])
+  assert.equal(Boolean(waitsOnUser({ status: 'done', asks: ['Proceed?'] })), true, 'a done agent that asks a question is needs_you')
+  assert.equal(Boolean(waitsOnUser({ status: 'working', asks: ['Proceed?'] })), false)
+  const now = 10_000_000
+  assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - STALL_MS - 1 }, now)), true, 'a done agent past STALL_MS is stalled')
+  assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - 1000 }, now)), false)
+  assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - STALL_MS - 1, stall: 'finished' }, now)), false)
+  assert.equal(paneStale('done', { seq: 5, at: now - 60_000 }, 5, now, 5000), true, 'a done pane is re-read on the cadence like idle')
 })
