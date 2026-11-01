@@ -124,9 +124,9 @@ test('context_usage: read-only, runs `wt-agents context` and returns its JSON (W
 })
 
 // WP-378: the CLIs find their identity in the agent's own env; the server spawns them with the env it was started with, so HC_TERMINAL_ID
-// and WT_PANE_KEY reach them untouched (and nothing renames HERDR_PANE_ID into it).
+// and WT_PANE_KEY reach them untouched (and nothing renames HERDR_PANE_ID into it). legacy-herdr
 test('WP-378: HC_TERMINAL_ID and WT_PANE_KEY reach the CLI the tool runs', async () => {
-  const idCli = stub('wt-ticket-id', 'echo "{\\"id\\":\\"$HC_TERMINAL_ID/$WT_PANE_KEY/${HERDR_PANE_ID:-none}\\"}"')
-  const s = start({ WT_MCP_TICKET: idCli, HC_TERMINAL_ID: 't5', WT_PANE_KEY: 'pk', HERDR_PANE_ID: '' })
+  const idCli = stub('wt-ticket-id', 'echo "{\\"id\\":\\"$HC_TERMINAL_ID/$WT_PANE_KEY/${HERDR_PANE_ID:-none}\\"}"') // legacy-herdr
+  const s = start({ WT_MCP_TICKET: idCli, HC_TERMINAL_ID: 't5', WT_PANE_KEY: 'pk', HERDR_PANE_ID: '' }) // legacy-herdr
   try { assert.equal((await s.callTool('ticket_show', { id: 'WP-1' })).data.id, 't5/pk/none') } finally { s.stop() }
 })

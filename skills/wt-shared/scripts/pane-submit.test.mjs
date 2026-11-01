@@ -22,7 +22,7 @@ test('waitReady: waits for registration and an idle, interactive session; times 
   assert.equal(n, 3)
   assert.equal(await waitReady(async () => null, { timeoutMs: 20, intervalMs: 5 }), false)
 })
-test('waitReady (WP-378 U6): the herdr-era `agent_status` shape is gone: it is not a ready signal any more', async () => {
+test('waitReady (WP-378 U6): the old `agent_status` shape is gone: it is not a ready signal any more', async () => {
   assert.equal(await waitReady(async () => ({ agent_status: 'idle', interactive_ready: true }), { timeoutMs: 20, intervalMs: 5 }), false)
 })
 test('confirmSubmitted: presses Enter again while the text is still in the box, bounded', async () => {
@@ -35,7 +35,7 @@ test('confirmSubmitted: presses Enter again while the text is still in the box, 
   assert.equal(presses, 3)
 })
 
-// WP-267: real captures of a fresh claude session (throwaway agent in a temp repo), herdr pane read --source visible.
+// WP-267: real captures of a fresh claude session (throwaway agent in a temp repo), hc read.
 import { readFileSync } from 'node:fs'
 const fx = (n) => readFileSync(new URL(`./fixtures/pane-submit-${n}.txt`, import.meta.url), 'utf8')
 test('inputState: real captures — no box is null, an unrendered paste reads empty, the placeholder is the text', () => {
@@ -98,6 +98,6 @@ test('CLI ready: exit 0 once hc get reports idle or done, 1 on timeout; confirm 
   const verbs = fake.calls().map((c) => c.args.join(' '))
   assert.ok(verbs.includes('keys --json t3 enter'), verbs.join('\n'))
   assert.ok(verbs.includes('read t3 --lines 0'), verbs.join('\n'))
-  assert.ok(!verbs.some((v) => /herdr/.test(v)))
+  assert.ok(!verbs.some((v) => /herdr/.test(v))) // legacy-herdr
   fake.cleanup()
 })

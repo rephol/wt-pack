@@ -16,10 +16,10 @@ falls back to the pack's behaviour without them.
   `enabled(feature)` / `minFor(feature)` read `WT_JEV_<FEATURE>[_MIN]` from env, then the dashboard env file.
 - `scripts/jev-eval.mjs <feature>` — accuracy and p50/p95 of a feature on `jev-fixtures/<feature>.json`.
 
-- `scripts/task-state.sh` — a planner's task label lifecycle as herdr pane tokens (`task`, `task_state`,
+- `scripts/task-state.sh` — a planner's task label lifecycle as hc labels (`task`, `task_state`,
   source wt-dashboard): `own` (wt-plan), `planner "<state>"` / `planner --clear` (wt-ship, wt-work, wt-finish,
   from the worker's pane via `handoff_from_pane`; only a role=planner pane still on the same ticket). Silent
-  no-op outside herdr.
+  no-op outside an hc terminal.
 
 - `scripts/hc.mjs` — the node adapter for `hc` (herdr-core), WP-378: `hc()` runner with error kinds (`blocked` exit 9, `status_mismatch` 10,
   `finished` 11, `not_found`, `name_taken`, `timeout`, `unavailable`), `list()` (ONE `hc connect` `terminal.list` call = labels, status,

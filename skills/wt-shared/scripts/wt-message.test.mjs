@@ -118,7 +118,7 @@ test('wt-message show: sends the hc terminal id as x-herdr-pane with the pane ke
     const ok = await run('node', [cli, 'show', 'abc123'], { env: { ...base, HC_TERMINAL_ID: 't7', WT_PANE_KEY: 'k'.repeat(64) } })
     assert.equal(ok.stdout, 'the full body\n')
     assert.deepEqual(seen, [{ url: '/api/messages/abc123', pane: 't7', key: 'k'.repeat(64) }])
-    await assert.rejects(run('node', [cli, 'show', 'abc123'], { env: { ...base, HERDR_PANE_ID: 'wW:p1' } }), (e) => e.code === 1 && /needs an hc terminal \(HC_TERMINAL_ID\)/.test(e.stderr))
+    await assert.rejects(run('node', [cli, 'show', 'abc123'], { env: { ...base, HERDR_PANE_ID: 'wW:p1' } }), (e) => e.code === 1 && /needs an hc terminal \(HC_TERMINAL_ID\)/.test(e.stderr)) // legacy-herdr
     assert.equal(seen.length, 1)
   } finally { srv.close() }
 })

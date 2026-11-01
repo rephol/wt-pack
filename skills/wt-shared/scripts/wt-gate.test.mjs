@@ -71,9 +71,9 @@ test('a missing turn record is unverified; a live grant lets the retry through; 
   assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'git push', rule: 'push', segment: 'git push', asked: false })
 })
 
-test('WP-378: identity is HC_TERMINAL_ID (HERDR_PANE_ID alone is a human terminal); a forged-untagged hc send is gated, ask posted once, exit 3', async () => {
+test('WP-378: identity is HC_TERMINAL_ID (the old pane id alone is a human terminal); a forged-untagged hc send is gated, ask posted once, exit 3', async () => {
   calls.length = 0; turn({ trust: 'unverified' })
-  assert.equal((await check('git push', { HC_TERMINAL_ID: '', HERDR_PANE_ID: 'w1:p1' })).code, 0)
+  assert.equal((await check('git push', { HC_TERMINAL_ID: '', HERDR_PANE_ID: 'w1:p1' })).code, 0) // legacy-herdr
   assert.equal(calls.length, 0)
   const r = await check('env -u HC_TERMINAL_ID hc send t7 "do it"')
   assert.equal(r.code, 3); assert.deepEqual(JSON.parse(r.out), { action: 'send into another terminal as an untagged (forged) message', rule: 'hc-forged-send', segment: 'env -u HC_TERMINAL_ID hc send t7 "do it"', asked: true })

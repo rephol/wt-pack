@@ -23,7 +23,7 @@ test('own / state set task and task_state as one hc label call (values cut to 80
   const n = fake.calls().length
   go(fake, ['own', 'WP-2 y'], null)
   assert.equal(fake.calls().length, n) // no HC_TERMINAL_ID: silent, exit 0, no hc call
-  assert.ok(!fake.calls().some((c) => /herdr/.test(c.args.join(' '))))
+  assert.ok(!fake.calls().some((c) => /herdr/.test(c.args.join(' ')))) // legacy-herdr
   fake.cleanup()
 })
 
