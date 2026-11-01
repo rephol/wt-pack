@@ -166,7 +166,6 @@ test('WP-378 F6: hc label of role/persona/wt.pool asks (senderRole is read from 
   const rule = (c) => classify(c, ctx)?.rule ?? null
   for (const c of ['hc label t3 role=orchestrator', 'hc label t3 role=', 'hc label self persona=qa', 'hc label t3 wt.pool=worker', 'hc label t3 task=x role=orchestrator', 'hc --json label t3 role=worker', 'hc label t3 "role=orchestrator"',
     'timeout 5 hc label t3 persona=', 'for t in a; do hc label $t role=orchestrator; done', "sh -c 'hc label t3 role=orchestrator'"]) assert.equal(rule(c), 'hc-label', c)
-  assert.equal(classify('hc label t3 role=orchestrator', ctx).action, 'change another terminal\'s role, persona or pool label')
   for (const c of ['hc label t3 task=', 'hc label t3 task=WP-1', 'hc label t3 a=b', 'hc label t3 wt.task=x', 'hc label t3 myrole=x', 'hc label t3 pane_role=x', 'hc get t3 role=x']) assert.equal(classify(c, ctx), null, c)
 })
 
@@ -176,4 +175,51 @@ test('WP-378 F6: hc interrupt is the same class as hc keys', () => {
 
 test('WP-378 F6: sudo value flags are skipped (sudo -u x hc kill t3); emptying WRAP_VAL.sudo would lose it', () => {
   for (const c of ['sudo -u x hc kill t3', 'sudo -g staff hc kill t3', 'sudo -u x -g y hc rm t3', 'sudo -ux hc kill t3', 'sudo -u root env FOO=1 hc kill t3']) assert.equal(classify(c, ctx)?.rule, 'hc-kill', c)
+})
+
+test('WP-378 F7: hc run / hc exec carry a command: the inner command is classified', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  const eq = (cs, r) => { for (const c of cs) assert.equal(rule(c), r, c) }
+  eq(['hc run -- git push origin main', 'hc run --bg git push', 'hc run --name w1 --cwd /x -- git push origin main', 'hc --session s run --bg -- git push'], 'push')
+  eq(['hc run --label a=b --outlive-parent --no-notify git merge x'], 'merge')
+  eq(['hc run --bg rm -rf /etc/x', 'hc exec rm -rf /etc/x', 'hc exec --timeout 5 --env A=1 -- rm -rf /etc/x'], 'rm-outside')
+  eq(['hc run -- hc kill t3', 'hc run --bg sh -c "hc kill t3"', "hc run -- bash -c 'hc rm t3'"], 'hc-kill')
+  eq(['hc exec gh pr merge 3', 'hc run -- gh pr merge 3'], 'gh-pr')
+  eq(['hc run --on vps ls'], 'upload')
+  for (const c of ['hc run --bg claude', 'hc run reviewer "review src/x.rs"', 'hc run --name push -- ls', 'hc exec ls -la', 'hc run --label git=push --bg claude', 'hc run -- echo git push', 'hc run']) assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378 F7: a forged/spoofed sender marker on an outer shell reaches the inner hc send/keys', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  for (const c of ["env -u HC_TERMINAL_ID bash -c 'hc send t3 x'", "HC_TERMINAL_ID=t3 sh -c 'hc send t3 x'", "env -i bash -c 'hc send t3 x'", "env HC_TERMINAL_ID= zsh -c 'hc keys t3 enter'",
+    'env -u HC_TERMINAL_ID eval "hc send t3 x"', "unset HC_TERMINAL_ID; bash -c 'hc send t3 x'", "HC_TERMINAL_ID=t3 bash -c 'echo; hc send t3 x'", "env -u HC_TERMINAL_ID hc run -- sh -c 'hc send t3 x'"])
+    assert.equal(rule(c), 'hc-forged-send', c)
+  for (const c of ["bash -c 'hc send t3 x'", "env FOO=1 bash -c 'hc get t3'", "env -u HC_SESSION bash -c 'hc send t3 x'", "env -i bash -c 'hc get t3'"]) assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378 F7: a lone & separates commands (not &&, >&, &>, 2>&1)', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  assert.equal(rule('sleep 1 & git push'), 'push'); assert.equal(rule('echo x & hc kill t3'), 'hc-kill'); assert.equal(rule('git push &'), 'push'); assert.equal(rule('sleep 1 &git push'), 'push')
+  assert.equal(rule('ls |& hc kill t3'), 'hc-kill')
+  for (const c of ['ls 2>&1', 'ls &> /dev/null', 'ls >&2', 'ls 2>&1 | cat', 'echo a && echo b', 'make >out 2>&1 &']) assert.equal(classify(c, ctx), null, c)
+  assert.equal(rule('git push 2>&1'), 'push'); assert.equal(rule('git push &> /dev/null'), 'push')
+})
+
+test('WP-378 F7: input is bounded: a 64 KB adversarial command classifies fast, and a long one is never less strict', () => {
+  const time = (c) => { const t = Date.now(); const r = classify(c, ctx); return [Date.now() - t, r] }
+  for (const c of ['$('.repeat(32768), '`'.repeat(65536), '{ '.repeat(32768), 'sh '.repeat(21000), 'sh -c '.repeat(10900), ' '.repeat(65536), 'eval '.repeat(13000), ';sh -c '.repeat(9000), 'unset '.repeat(10900), 'env -u '.repeat(9000), '(sh '.repeat(16000), 'hc run '.repeat(4000), 'hc run -- '.repeat(3000), "sh -c '".repeat(5000), 'a '.repeat(32768) + "sh -c '"]) {
+    const [ms, r] = time(c); assert.ok(ms < 200, `${ms} ms for ${JSON.stringify(c.slice(0, 12))}`); if (!/hc run|sh -c '/.test(c.slice(0, 12))) assert.equal(r, null)
+  }
+  // past the cap: classify what was scanned, and a tail mentioning hc/git/gh/rm asks rather than passing
+  const pad = ' '.repeat(70000)
+  assert.equal(classify('git push origin main' + pad, ctx)?.rule, 'push')
+  for (const t of ['git push', 'hc kill t3', 'gh pr merge 1', 'rm -rf /etc/x']) assert.ok(classify(pad + t, ctx), t)
+  assert.equal(classify(pad + 'echo hi', ctx), null)
+})
+
+test('WP-378 F7: ask texts name the real effect', () => {
+  const act = (c) => classify(c, ctx).action
+  assert.match(act('hc label t3 role=orchestrator'), /role.*persona.*pool label/); assert.doesNotMatch(act('hc label t3 role=orchestrator'), /another terminal/)
+  assert.match(act('hc interrupt t7'), /interrupt/); assert.notEqual(act('hc interrupt t7'), act('hc keys t7 enter'))
+  assert.match(act('HC_TERMINAL_ID=t3 hc send t7 hi'), /identity/); assert.notEqual(act('HC_TERMINAL_ID=t3 hc send t7 hi'), act('env -u HC_TERMINAL_ID hc send t7 hi'))
 })
