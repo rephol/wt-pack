@@ -1682,3 +1682,41 @@ test('WP-378 F5: under hc a finished turn rests at `done`; it is idle for every 
   assert.equal(Boolean(idleLongAgent({ status: 'done', statusSince: now - STALL_MS - 1, stall: 'finished' }, now)), false)
   assert.equal(paneStale('done', { seq: 5, at: now - 60_000 }, 5, now, 5000), true, 'a done pane is re-read on the cadence like idle')
 })
+
+// WP-378 F11: real hc captures. Digit keys typed while the cursor sits on the free-text row go INTO the field.
+const hcFix = async (name) => {
+  const { parsePicker } = await import('./server.mjs')
+  const { readFileSync } = await import('node:fs')
+  return parsePicker(readFileSync(new URL(`./test-fixtures/picker-hc-${name}.txt`, import.meta.url), 'utf8'))
+}
+const digitKeys = (plan) => plan.flatMap((s) => s.keys ?? []).filter((k) => /^\d$/.test(k))
+test('F11 parses the real captures: cursor on Other is row n+1', async () => {
+  const s = await hcFix('single-cursor-on-other'), so = await hcFix('single-cursor-on-option')
+  const m = await hcFix('multi-cursor-on-other'), mo = await hcFix('multi-cursor-on-option')
+  assert.deepEqual([s.options.length, s.cursor, s.other, s.multiSelect], [2, 3, null, false])
+  assert.deepEqual([so.options.length, so.cursor, so.other], [2, 1, null])
+  assert.deepEqual([m.options.length, m.cursor, m.other, m.multiSelect], [3, 4, null, true])
+  assert.deepEqual([mo.options.length, mo.cursor, mo.other], [3, 1, null])
+})
+test('F11 parses text left in the Other field as other, not as an option', async () => {
+  const pk = await hcFix('single-leftover-text')
+  assert.deepEqual([pk.options.map((o) => o.label), pk.cursor, pk.other], [['Apple', 'Banana'], 3, '3'])
+})
+test('F11 single-select + other: no digit while the cursor is on Other', async () => {
+  const { answerPlan } = await import('./server.mjs')
+  assert.deepEqual(answerPlan(await hcFix('single-cursor-on-other'), { other: 'hello world' }), [{ text: 'hello world' }, { keys: ['enter'] }])
+  assert.deepEqual(answerPlan(await hcFix('single-cursor-on-option'), { other: 'hello world' }), [{ keys: ['3'] }, { text: 'hello world' }, { keys: ['enter'] }])
+  const left = await hcFix('single-leftover-text')
+  assert.throws(() => answerPlan(left, { other: 'hello world' }), { status: 409 })
+})
+test('F11 leaves the field (up) before any digit', async () => {
+  const { answerPlan, chatPlan } = await import('./server.mjs')
+  const s = await hcFix('single-cursor-on-other'), m = await hcFix('multi-cursor-on-other')
+  assert.deepEqual(answerPlan(s, { selected: ['Banana'] }), [{ keys: ['up'] }, { keys: ['2'] }])
+  assert.deepEqual(chatPlan(s), [{ keys: ['up'] }, { keys: ['4'] }])
+  assert.deepEqual(answerPlan(m, { selected: ['Red'] }), [{ keys: ['up'] }, { keys: ['1'] }, { keys: ['down', 'down', 'enter'] }])
+  assert.deepEqual(answerPlan(m, { selected: ['Red'], other: 'teal-ish mix' }),
+    [{ keys: ['up'] }, { keys: ['1'] }, { keys: ['down'] }, { text: 'teal-ish mix' }, { ensure: 'teal-ish mix' }, { keys: ['down', 'enter'] }])
+  assert.equal(digitKeys(answerPlan(m, { selected: [], other: 'x' })).length, 0) // nothing to toggle: no digit, no up
+  assert.deepEqual(answerPlan(await hcFix('multi-cursor-on-option'), { selected: ['Red'] }), [{ keys: ['1'] }, { keys: ['down', 'down', 'down', 'down', 'enter'] }])
+})

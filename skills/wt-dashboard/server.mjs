@@ -438,13 +438,13 @@ function parsePickerText(text) {
       : null
   }
   const options = []
-  let multiSelect = false, cursor = 1, other = null, otherChecked = false
+  let multiSelect = false, cursor = 1, other = null, otherChecked = false, typeRow = false
   for (let i = first; i < foot; i++) {
     const m = lines[i].match(OPT)
     if (m) {
       if (/^\s*❯/.test(lines[i])) cursor = Number(m[1])
       const label = m[3].trim()
-      if (/^(Type something\.?|Chat about this)$/.test(label)) break
+      if (/^(Type something\.?|Chat about this)$/.test(label)) { typeRow = true; break }
       if (m[2] !== undefined) multiSelect = true
       const chosen = m[2] === '✔' || /\s✔\s*$/.test(label)
       options.push({ label: label.replace(/\s*✔\s*$/, ''), description: '', checked: chosen })
@@ -459,6 +459,11 @@ function parsePickerText(text) {
       const d = unbox([lines[i]])
       if (d) o.description = (o.description ? o.description + ' ' : '') + d
     }
+  }
+  // F11: single-select with text already in the Other field: that row is drawn "N. <text>" right above the rule and the "Chat about this" row.
+  if (!multiSelect && !typeRow && other === null && options.length > 1) {
+    const next = lines.slice(lines.findIndex((l, i) => i >= first && /^\s*─{10,}/.test(l)) + 1, foot).find((l) => l.trim())
+    if (next && /^\s*(?:❯\s*)?\d+\.\s+Chat about this\s*$/.test(next)) other = options.pop().label
   }
   return question && options.length ? { review: false, tabs, current: tabs.findIndex((t) => !t.done), question, multiSelect, options, other, ...(other !== null ? { otherChecked } : {}), cursor } : null
 }
@@ -2203,9 +2208,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const move = (from, to) => Array(Math.abs(to - from)).fill(to > from ? 'down' : 'up')
 // "Chat about this" (declines the question, then the agent asks what to clarify; recorded as a rejected tool_result):
 // numbered row N+2 in the normal/multiSelect layouts; unnumbered below the last option in the preview layout.
+// F11: with the cursor on the free-text row (n+1) a digit is TYPED into the field, so leave it first (up lands on option n).
+const leaveField = (pk) => (pk.cursor === pk.options.length + 1 ? [{ keys: ['up'] }] : [])
 export function chatPlan(pk) {
   const n = pk.options.length
-  return pk.layout === 'preview' ? [{ keys: [String(n)] }, { keys: ['down'] }, { keys: ['enter'] }] : [{ keys: [String(n + 2)] }]
+  return pk.layout === 'preview' ? [{ keys: [String(n)] }, { keys: ['down'] }, { keys: ['enter'] }] : [...leaveField(pk), { keys: [String(n + 2)] }]
 }
 export function answerPlan(pk, { selected = [], other = null }) {
   const n = pk.options.length
@@ -2218,21 +2225,28 @@ export function answerPlan(pk, { selected = [], other = null }) {
     return [{ keys: [String(idx[0])] }, { keys: ['enter'] }] // digit = focus only in this layout
   }
   if (!pk.multiSelect) {
-    if (other) return [{ keys: [String(n + 1)] }, { text: other }, { keys: ['enter'] }]
+    if (other) {
+      if (pk.other) throw Object.assign(new Error('custom text already typed in the terminal; edit it there'), { status: 409 })
+      // cursor already in the field: no digit (it would be typed there)
+      return [...(pk.cursor === n + 1 ? [] : [{ keys: [String(n + 1)] }]), { text: other }, { keys: ['enter'] }]
+    }
     if (idx.length !== 1) throw Object.assign(new Error('pick exactly one option'), { status: 400 })
-    return [{ keys: [String(idx[0])] }]
+    return [...leaveField(pk), { keys: [String(idx[0])] }]
   }
   if (!idx.length && !other) throw Object.assign(new Error('pick at least one option'), { status: 400 })
-  const steps = []
-  pk.options.forEach((o, i) => { if (o.checked !== idx.includes(i + 1)) steps.push({ keys: [String(i + 1)] }) }) // toggle the difference
+  const toggles = []
+  pk.options.forEach((o, i) => { if (o.checked !== idx.includes(i + 1)) toggles.push({ keys: [String(i + 1)] }) }) // toggle the difference
+  if (other && pk.other) throw Object.assign(new Error('custom text already typed in the terminal; edit it there'), { status: 409 })
+  if (!other && pk.other) toggles.push({ keys: [String(n + 1)] }) // untick custom text typed earlier
+  const off = pk.cursor === n + 1 && toggles.length > 0 // digits typed in the field: leave it first (cursor is then on option n)
+  const steps = off ? [{ keys: ['up'] }, ...toggles] : toggles
+  const at = off ? n : pk.cursor
   if (other) {
-    if (pk.other) throw Object.assign(new Error('custom text already typed in the terminal; edit it there'), { status: 409 })
     // D26 (checked live on hc 0.1.16): the forced paste+Enter commits the text but leaves the row unticked, so no digit first; `ensure` re-reads
     // the screen and presses Enter once more if the Other row is not ticked with the text, and refuses to go on (409) when it still is not.
-    steps.push({ keys: move(pk.cursor, n + 1) }, { text: other }, { ensure: other }, { keys: ['down', 'enter'] })
+    steps.push({ keys: move(at, n + 1) }, { text: other }, { ensure: other }, { keys: ['down', 'enter'] })
   } else {
-    if (pk.other) steps.push({ keys: [String(n + 1)] }) // untick custom text typed earlier
-    steps.push({ keys: [...move(pk.cursor, n + 2), 'enter'] })
+    steps.push({ keys: [...move(at, n + 2), 'enter'] })
   }
   return steps.filter((st) => st.text || st.ensure || st.keys.length)
 }
