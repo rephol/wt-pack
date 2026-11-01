@@ -2,7 +2,7 @@
 //  - terminal(over): a terminal.list row, a RECORDED claude row (wt-shared/scripts/fixtures/hc/connect.json, case claude_states,
 //    t2) with the fields a test names overridden; shell()/finished() likewise from the recorded keep shell and finished one-offs.
 //  - hcStub({root, terminals}): a PATH-first `hc` for a spawned server (a node script reading <dir>/terminals.json on every call:
-//    `connect` terminal.list, `get`, `label`, `read`, `server status`; anything else exits 99), a core.lock + listening socket so
+//    `connect` terminal.list/terminal.run, `get`, `label`, `read`, `send`, `keys`, `kill`, `rm`, `server status`; anything else exits 99), a core.lock + listening socket so
 //    the server's coreUp() says up (down() closes the socket: the core is "stopped"), and the call log.
 //  Child env never carries HC_*/HERDR_* from the test process (CLAUDE.md: a child must not act as an agent terminal).
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -34,6 +34,14 @@ const bad = (kind, message, exit) => { process.stderr.write(JSON.stringify({ err
 const find = (t) => rows.find((r) => r.address === t || r.name === t)
 if (args[0] === 'connect') {
   const q = JSON.parse(stdin.split('\\n')[0])
+  if (q.method === 'terminal.run') {
+    const pr = q.params || {}
+    if (rows.some((r) => r.state === 'live' && r.name === pr.name)) { process.stdout.write(JSON.stringify({ id: q.id, jsonrpc: '2.0', error: { code: -1, message: 'a live terminal is already named ' + pr.name, data: { kind: 'name_taken' } } }) + '\\n'); process.exit(0) }
+    const n = 200 + rows.length
+    const row = { address: 't' + n, name: pr.name, cwd: pr.cwd || '/', state: 'live', labels: pr.labels || {}, argv: pr.argv, status: null, turn: 0, foreground: { name: 'zsh', argv: pr.argv, pid: 5000 + n }, keep: false }
+    rows.push(row); wr('terminals.json', rows)
+    process.stdout.write(JSON.stringify({ id: q.id, jsonrpc: '2.0', result: row }) + '\\n'); process.exit(0)
+  }
   if (q.method !== 'terminal.list') bad('method_not_found', q.method, 99)
   const list = q.params?.all ? rows : rows.filter((r) => r.state === 'live')
   process.stdout.write(JSON.stringify({ id: q.id, jsonrpc: '2.0', result: { hidden_finished: 0, terminals: list } }) + '\\n')
@@ -45,6 +53,26 @@ if (args[0] === 'connect') {
   for (const kv of args.slice(3)) { const i = kv.indexOf('='); const k = kv.slice(0, i), v = kv.slice(i + 1); if (v === '') delete r.labels[k]; else r.labels[k] = v }
   wr('terminals.json', rows)
   process.stdout.write(JSON.stringify(r) + '\\n')
+} else if (args[0] === 'send') {
+  // hc send [--json] [--if idle|working] <t> <text>: the recorded refusals (blocked 9, status_mismatch 10, finished 11); a shell has no status
+  const rest = args.slice(1).filter((a) => a !== '--json'); let cond = null
+  if (rest[0] === '--if') { cond = rest[1]; rest.splice(0, 2) }
+  const r = find(rest[0]); if (!r) bad('not_found', 'no terminal', 3)
+  const st = r.status && r.status.state
+  if (r.state === 'finished') bad('finished', r.address + ' has finished', 11)
+  if (st === 'blocked') bad('blocked', r.address + ' is blocked (' + (r.status.kind || 'permission') + ')', 9)
+  if (cond && st !== cond) bad('status_mismatch', r.address + ' is ' + (st || 'silent') + ', not ' + cond, 10)
+  process.stdout.write(JSON.stringify({ started: true, status: st || null, turn: r.turn || 0 }) + '\\n')
+} else if (args[0] === 'keys') {
+  const r = find(args[2]); if (!r) bad('not_found', 'no terminal', 3)
+  process.stdout.write(JSON.stringify({ status: (r.status && r.status.state) || null, turn: r.turn || 0 }) + '\\n')
+} else if (args[0] === 'kill') {
+  const r = find(args[2]); if (!r) bad('not_found', 'no terminal', 3)
+  if (r.state === 'finished') bad('finished', r.address + ' has finished', 11)
+  r.state = 'finished'; wr('terminals.json', rows); process.stdout.write(JSON.stringify(r) + '\\n')
+} else if (args[0] === 'rm') {
+  const i = rows.findIndex((r) => r.address === args[2] || r.name === args[2]); if (i < 0) bad('not_found', 'no terminal', 3)
+  const [r] = rows.splice(i, 1); wr('terminals.json', rows); process.stdout.write(JSON.stringify({ removed: r.address }) + '\\n')
 } else if (args[0] === 'read') {
   const f = path.join(dir, 'screens', args[1] + '.txt'); process.stdout.write(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '')
 } else if (args[0] === 'server' && args[1] === 'status') {

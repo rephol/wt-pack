@@ -4,7 +4,7 @@
 #   loginctl enable-linger "$USER"      # keep it running after you log out
 # Edit the paths if the checkout is not ~/wt-pack or node is not on the PATH below.
 [Unit]
-Description=wt-dashboard (herdr agent control room)
+Description=wt-dashboard (hc agent control room)
 After=network.target
 
 [Service]
@@ -12,7 +12,7 @@ WorkingDirectory=%h/wt-pack/skills/wt-dashboard
 ExecStart=/usr/bin/env node server.mjs
 Restart=on-failure
 RestartSec=10
-# gh, herdr, claude and git must be on this PATH (herdr's installer uses ~/.local/bin).
+# gh, hc, claude and git must be on this PATH (hc's installer uses ~/.local/bin). The hc core is NOT started by this service: run `hc server start`.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Loopback only. Reach it with Tailscale (tailscale serve) or ssh -L; a non-loopback
 # WT_DASHBOARD_HOST is refused unless WT_ALLOW_REMOTE=1 is also set.

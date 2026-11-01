@@ -712,23 +712,32 @@ test('service plist: valid, crash-only KeepAlive, launchd marker, escaped paths'
   assert.equal(j.ThrottleInterval, 10)
 })
 
-import { herdrKeys, allowedCwd, isShellPane, TerminalSettings } from './terminals.mjs'
-test('terminals: key whitelist maps to herdr names and refuses anything else', () => {
-  assert.deepEqual(herdrKeys(['C-c', 'Enter', 'Up']), ['ctrl+c', 'enter', 'up'])
-  assert.throws(() => herdrKeys(['C-c', 'rm -rf']), /not allowed/)
-  assert.throws(() => herdrKeys(['__proto__']), /not allowed/)
-  assert.throws(() => herdrKeys([]), /1–32/)
+import { hcKeys, typeKeys, allowedCwd, isShellTerminal, shellsLabel, TerminalSettings } from './terminals.mjs'
+test('terminals: key whitelist maps to hc key names and refuses anything else', () => {
+  assert.deepEqual(hcKeys(['C-c', 'Enter', 'Up']), ['ctrl+c', 'enter', 'up'])
+  assert.throws(() => hcKeys(['C-c', 'rm -rf']), /not allowed/)
+  assert.throws(() => hcKeys(['__proto__']), /not allowed/)
+  assert.throws(() => hcKeys([]), /1–32/)
+})
+test('terminals (WP-378): typing without Enter goes key by key, only characters hc keys types faithfully (no shifted ones: they arrive lowercase or not at all)', () => {
+  assert.deepEqual(typeKeys('ls -la /tmp'), ['l', 's', 'space', '-', 'l', 'a', 'space', '/', 't', 'm', 'p'])
+  assert.deepEqual(typeKeys('a=1,b.c'), ['a', '=', '1', ',', 'b', '.', 'c'])
+  for (const bad of ['Ls', 'a<b', 'echo "x"', 'a:b', 'a_b', 'a&b', 'é']) assert.throws(() => typeKeys(bad), (e) => e.status === 400 && /cannot be typed/.test(e.message), bad)
+  assert.throws(() => typeKeys(''), /1–/)
+  assert.throws(() => typeKeys('a'.repeat(65)), /1–/)
 })
 test('terminals: a shell starts only in a project, a worktree, $HOME or tmp', () => {
   const pl = { roots: ['/r/acmeapp'], worktrees: ['/r/acmeapp/.wt/acm-1'], home: '/Users/me', tmp: ['/private/tmp'] }
   for (const ok of ['/r/acmeapp', '/r/acmeapp/', '/r/acmeapp/.wt/acm-1', '/Users/me', '/private/tmp']) assert.ok(allowedCwd(ok, pl), ok)
   for (const bad of ['/', '/etc', '/r/acmeapp/src', '/r/acmeapp/../x', 'relative', null]) assert.ok(!allowedCwd(bad, pl), String(bad))
 })
-test('terminals: only agent-less panes in a -shells workspace are shells', () => {
-  const ws = new Set(['wS'])
-  assert.ok(isShellPane({ workspace_id: 'wS', agent: null }, ws))
-  assert.ok(!isShellPane({ workspace_id: 'wS', agent: 'claude' }, ws))
-  assert.ok(!isShellPane({ workspace_id: 'wM', agent: null }, ws))
+test('terminals (WP-378): only a LIVE terminal in a <project>-shells pool is a shell; an agent, a finished one or a stranger is not', () => {
+  assert.equal(shellsLabel('acme'), 'acme-shells')
+  assert.ok(isShellTerminal({ alive: true, labels: { 'wt.pool': 'acme-shells' } }))
+  assert.ok(!isShellTerminal({ alive: false, labels: { 'wt.pool': 'acme-shells' } }))
+  assert.ok(!isShellTerminal({ alive: true, labels: { 'wt.pool': 'acme-workers' } }))
+  assert.ok(!isShellTerminal({ alive: true, labels: {} }))
+  assert.ok(!isShellTerminal(null))
 })
 test('terminals: off by default; tailnet needs its own switch; audit is appended', async () => {
   const dir = mkdtempSync(pj(tmpdir(), 'wtd-term-'))
@@ -1263,6 +1272,30 @@ test('watchdog probe: notifies once on down, once on back up (WP-70)', () => {
   assert.match(said()[1], /server is back/)
 })
 
+test('watchdog probe (WP-378): reports a stopped hc core once, never starts one (hc server status / ls / get all start a stopped core)', async () => {
+  const home = mkdtempSync(pj(tmpdir(), 'wtd-pc-'))
+  const bin = pj(home, 'bin'); mkdirSync(bin)
+  for (const n of ['hc', 'herdr', 'herdr-core', 'nohup']) { wfs(pj(bin, n), `#!/bin/sh\necho "${n} $*" >> "$HOME/started"\n`); chmodSync(pj(bin, n), 0o755) }
+  wfs(pj(bin, 'osascript'), '#!/bin/sh\n:\n'); chmodSync(pj(bin, 'osascript'), 0o755)
+  const state = pj(home, 'st'), lockDir = pj(state, 'herdr-core', 'default'); mkdirSync(lockDir, { recursive: true })
+  const run = () => xfs('/bin/sh', [new URL('./scripts/watchdog-probe.sh', import.meta.url).pathname, 'file:///etc/hosts'], { env: { HOME: home, XDG_STATE_HOME: state, PATH: `${bin}:/usr/bin:/bin` } })
+  const log = () => (existsSync(pj(home, 'Library/Logs/wt-dashboard/server.log')) ? rfs(pj(home, 'Library/Logs/wt-dashboard/server.log'), 'utf8').trim().split('\n') : [])
+  run(); run() // no core.lock: down
+  assert.equal(log().length, 1, 'said once')
+  assert.match(log()[0], /hc core is not running/)
+  const net = await import('node:net')
+  const sock = pj(home, 'c.sock'), srv = net.createServer((c) => c.end())
+  await new Promise((r) => srv.listen(sock, r))
+  wfs(pj(lockDir, 'core.lock'), sock)
+  try {
+    // async: a sync child would block this process's event loop, and the stub core could never accept the probe's connect
+    const { promisify } = await import('node:util'), { execFile } = await import('node:child_process')
+    await promisify(execFile)('/bin/sh', [new URL('./scripts/watchdog-probe.sh', import.meta.url).pathname, 'file:///etc/hosts'], { env: { HOME: home, XDG_STATE_HOME: state, PATH: `${bin}:/usr/bin:/bin` } })
+  } finally { srv.close() }
+  assert.match(log().at(-1), /hc core is running again/)
+  assert.equal(existsSync(pj(home, 'started')), false, 'no hc / herdr / nohup was ever run')
+})
+
 test('sourceIssue: a failed overview source becomes a hint, not a 500 (WP-79)', () => {
   assert.match(sourceIssue('hc', 'hc core not running'), /hc core not running — run `hc server start`/)
   assert.match(sourceIssue('hc', 'hc is not installed (not on PATH)'), /hc core not running/)
@@ -1317,78 +1350,6 @@ test('rooms: a new room takes its project at create (WP-96); none by default; th
   const { checkProject } = await import('./rooms.mjs')
   assert.throws(() => checkProject('../x'), (e) => e.status === 400) // POST /api/rooms checks it
   assert.doesNotThrow(() => checkProject(null))
-})
-
-test('streamRemote (WP-97): tail window, ids <file>:<byte offset>, ?since= resumes, unmatched/unreachable states', async () => {
-  const { streamRemote } = await import('./server.mjs')
-  const { Limiter } = await import('./remoteTranscript.mjs')
-  const { EventEmitter } = await import('node:events')
-  const ID = '655088a9-831f-4fb0-bbf2-28b96c355918'
-  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
-  let file = Buffer.from(line('a', 'hello there') + line('b', 'café 🎉'))
-  // A fake remote: `find` lists the file, `tail -c N` / `tail -c +K | head -c L` slice it.
-  const fake = (mode) => async (host, script) => {
-    if (mode === 'down') throw Object.assign(new Error('ssh: connect timed out'), { code: 255 })
-    if (script.includes('find')) return Buffer.from(mode === 'none' ? '' : `2 ${file.length} ${ID}.jsonl\n`)
-    let m = script.match(/^tail -c (\d+) /)
-    if (m) return file.subarray(Math.max(0, file.length - Number(m[1])))
-    m = script.match(/^tail -c \+(\d+) .*head -c (\d+)$/)
-    return file.subarray(Number(m[1]) - 1, Number(m[1]) - 1 + Number(m[2]))
-  }
-  const run = async (mode, qs = '', grow = null) => {
-    const req = Object.assign(new EventEmitter(), { headers: {} })
-    let out = ''
-    const res = { writeHead() {}, write(s) { out += s }, end() {} }
-    const p = streamRemote(req, res, new URL(`http://x/${qs}`), { host: 'herdr-box', pane: 'w5:p8', cwd: '/work/projects/acmeapp', prompt: 'hello there' },
-      { run: fake(mode), limiter: new Limiter(4), pullMs: 5, retry: { unreachable: 5, unmatched: 5 } })
-    await new Promise((r) => setTimeout(r, 20))
-    if (grow) { file = Buffer.concat([file, Buffer.from(grow)]); await new Promise((r) => setTimeout(r, 30)) }
-    req.emit('close'); await p
-    return {
-      out,
-      ids: [...out.matchAll(/^id: (.+)$/gm)].map((m) => m[1]),
-      texts: [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text)),
-      states: [...out.matchAll(/^event: remote\ndata: (.*)$/gm)].map((m) => JSON.parse(m[1]).state),
-    }
-  }
-  const full = await run('ok', '', line('c', 'more'))
-  assert.deepEqual(full.texts, ['hello there', 'café 🎉', 'more'])
-  const firstLen = Buffer.byteLength(line('a', 'hello there'))
-  assert.equal(full.ids[0], `${ID}:${firstLen + Buffer.byteLength(line('b', 'café 🎉'))}`)
-  assert.equal(full.ids.at(-1), `${ID}:${file.length}`)
-  assert.deepEqual(full.states, ['loading', 'ok'])
-  assert.match(full.out, new RegExp(`event: session\\ndata: "${ID}"`))
-  assert.deepEqual((await run('ok', `?since=${ID}:${firstLen}`)).texts, ['café 🎉', 'more'])
-  assert.deepEqual((await run('ok', `?since=other:${firstLen}`)).texts, ['hello there', 'café 🎉', 'more']) // another file's cursor: ignored
-  assert.ok((await run('none')).states.includes('unmatched'))
-  const down = await run('down')
-  assert.ok(down.states.includes('unreachable'))
-  assert.deepEqual(down.texts, [])
-})
-
-test('streamRemote (WP-97): a transcript over 4 MB loads only its tail, from the first whole line, with absolute offsets', async () => {
-  const { streamRemote } = await import('./server.mjs')
-  const { Limiter, WINDOW } = await import('./remoteTranscript.mjs')
-  const { EventEmitter } = await import('node:events')
-  const ID = '37b2a164-fbe5-4a47-8ebb-d8b353718924'
-  const line = (u, text) => JSON.stringify({ type: 'user', uuid: u, timestamp: 't', message: { content: text } }) + '\n'
-  const pad = line('pad', 'x'.repeat(1000))
-  const file = Buffer.from(pad.repeat(Math.ceil(WINDOW / pad.length) + 50) + line('z', 'the end'))
-  const run = async (host, script) => {
-    if (script.includes('find')) return Buffer.from(`2 ${file.length} ${ID}.jsonl\n`)
-    let m = script.match(/^tail -c (\d+) /)
-    if (m) return file.subarray(file.length - Number(m[1]))
-    m = script.match(/^tail -c \+(\d+) .*head -c (\d+)$/)
-    return file.subarray(Number(m[1]) - 1, Number(m[1]) - 1 + Number(m[2]))
-  }
-  const req = Object.assign(new EventEmitter(), { headers: {} })
-  let out = ''
-  const p = streamRemote(req, { writeHead() {}, write(s) { out += s }, end() {} }, new URL('http://x/'), { host: 'h', pane: 'p', cwd: '/w', prompt: 'the end' }, { run, limiter: new Limiter(), pullMs: 5 })
-  await new Promise((r) => setTimeout(r, 30)); req.emit('close'); await p
-  const texts = [...out.matchAll(/^data: (\[.*\])$/gm)].flatMap((m) => JSON.parse(m[1]).map((x) => x.text))
-  assert.equal(texts.at(-1), 'the end')
-  assert.ok(texts.length < 200 + 1 && texts.every((t) => t === 'the end' || t.startsWith('xxx'))) // no torn first line
-  assert.match(out, new RegExp(`^id: ${ID}:${file.length}$`, 'm'))
 })
 
 test('wt-message send sites (WP-104): routine prompt and spawn tagged, spawn dialog untagged, Ready nudge kind=system', async () => {

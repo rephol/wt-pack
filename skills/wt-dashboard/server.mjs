@@ -1,6 +1,9 @@
 // Agent control room: hc terminals (herdr-core) + git worktrees + PRs + Linear, joined into tasks.
 // ponytail: no deps, polling instead of websockets; switch to SSE if refresh feels laggy.
-import { list as hcList, get as hcGet, setLabels as hcSetLabels, clearLabel as hcClearLabel, read as hcRead, hc as hcRun, coreUp, HcError } from '../wt-shared/scripts/hc.mjs'
+import { list as hcList, get as hcGet, setLabels as hcSetLabels, clearLabel as hcClearLabel, read as hcRead, hc as hcRun, send as hcSendRaw, keys as hcKeysRaw, killRm as hcKillRm, spawnNumbered as hcSpawnNumbered, isAgent as hcIsAgent, coreUp, HcError } from '../wt-shared/scripts/hc.mjs'
+import { PickerFocus } from './pickerFocus.mjs'
+import { BlockedQueue } from './blockedq.mjs'
+import { waitReady } from '../wt-shared/scripts/pane-submit.mjs'
 import { snapshot as hcSnapshot, sessionsByPid, coreChanged, dropPaneKeys } from './hcagents.mjs'
 import http from 'node:http'
 import { execFile } from 'node:child_process'
@@ -11,7 +14,6 @@ import { homedir, hostname, tmpdir, totalmem, freemem } from 'node:os'
 import { join, extname, normalize, basename, dirname, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wrap, unTag, parseEnvelope as parseWt, pointerOf, bodyHash } from '../wt-shared/scripts/wt-message.mjs'
-import { ssh as sshRun, locate as locateRemote, paneHints, readScript as remoteRead, cutLines, Limiter, WINDOW as REMOTE_WINDOW } from './remoteTranscript.mjs'
 import { Rooms, slugify, ticketSuggestions, roomResolve, agentMayDelete, checkProject } from './rooms.mjs'
 import { Tickets, ticketRow, ticketText } from './tickets.mjs'
 import { memStats } from './memstats.mjs'
@@ -26,7 +28,7 @@ import { Headless, ROLE as ROLE_RE, SEND_FILE, defaultName, enabledPlugins } fro
 import { paneInfo, headlessInfo } from './agentinfo.mjs'
 import { open as openDb } from './store.mjs'
 import { Deliveries } from './deliveries.mjs'
-import { Messages, envelopeOf, movedOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
+import { Messages, envelopeOf, movedOn, workingOn, nudgeText, nudgeEligible, CARD_OPEN } from './messages.mjs'
 import { Changes } from './changes.mjs'
 import { promptOn } from './promptOn.mjs'
 import * as receipts from '../wt-shared/scripts/receipts.mjs'
@@ -56,8 +58,8 @@ import { Keepwarm, DEFAULTS as KW_DEFAULTS } from './keepwarm.mjs'
 import { isClosed } from './contracts.mjs'
 import { housekeep, cleanSettings, DEFAULTS as HK_DEFAULTS } from './housekeeping.mjs'
 import { webStale, freshener } from './webfresh.mjs'
-import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
-import { TerminalSettings, herdrKeys, shellsLabel, isShellPane, allowedCwd } from './terminals.mjs'
+import { CHECKS as WD_CHECKS, cleanWatchdogSettings, evaluate as wdEvaluate, diffFindings, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, resumeBlock, respawnArgs, psStarts, staleAgents } from './watchdog.mjs'
+import { TerminalSettings, hcKeys, typeKeys, shellsLabel, isShellTerminal, SHELL_POOL, SHELL_TITLE, allowedCwd } from './terminals.mjs'
 
 // ~/.config/wt-dashboard/env (legacy ~/.config/herdr-dash/env), read by the server itself: under launchd nothing
 // else passes it in. A variable already in the environment wins.
@@ -104,9 +106,6 @@ const run = (cmd, args, cwd, timeout = 20_000, extraEnv) =>
     execFile(cmd, args, { cwd, maxBuffer: 32 << 20, timeout, ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}) }, (err, out, stderr) =>
       err ? reject(new Error(stderr || err.message)) : resolve(out)),
   )
-// WP-378: reads, labels and the core probe go through hc.mjs. `herdr`/`herdrOn` below are only the write side (sends, keys, terminals,
-// goal-clear, resume) that U6 converts; nothing U5 touches calls them.
-const herdr = (...args) => run('herdr', args)
 // A tool the server starts for an agent-less purpose (claude agents, memory, handoff.sh) must not act as an agent terminal.
 const NO_TERMINAL = { HC_TERMINAL_ID: '', HC_SCOPE: '', HC_TERMINAL_SOCKET: '' }
 const git = (dir, ...args) => run('git', ['-C', dir, ...args])
@@ -147,7 +146,7 @@ export function parseActivity(text) {
   return null
 }
 
-export function parsePane(text, raw = '') {
+export function parsePane(text, raw = '', track = null) {
   const lines = text.split('\n')
   // Footer = from the rule opening the input box downward. Two rules wrap the ❯ input box.
   const rules = lines.map((l, i) => (RULE.test(l) ? i : -1)).filter((i) => i >= 0)
@@ -219,7 +218,7 @@ export function parsePane(text, raw = '') {
   const background = [...statusLine.matchAll(BG)].reduce((n, m) => n + Number(m[1]), 0)
 
   return {
-    picker: parsePicker(text, raw),
+    picker: parsePicker(text, raw, track),
     background,
     recap,
     context: ctx ? { used: ctx[1], total: ctx[2], pct: Number(ctx[3]) } : null,
@@ -285,8 +284,24 @@ const LOCAL_MACHINE = { id: 'local', label: LOCAL_LABEL, host: 'localhost', sess
 async function machines() { return [LOCAL_MACHINE] }
 // Label → machine, only from the list: user input never becomes an argv flag.
 const machineBy = async (label) => (await machines()).find((m) => m.label === label && m.enabled) ?? null
-// U6 converts the sends that still go through this.
-const herdrOn = (m, ...args) => herdr(...args)
+// ---- hc write side (WP-378 U6): sends, keys, terminals ----
+// `hc send` pastes the text and presses Enter (a pasted single-line slash command still runs: checked on an isolated core), waits for a
+// typing pause, and refuses a blocked agent (exit 9, kind `blocked`) unless forced: the pack NEVER forces. `--if idle` additionally refuses a
+// working agent. A plain send also types into anything, so it first checks the terminal is an agent (never a shell); an `ifIdle` send is
+// refused for a shell by hc itself ("silent, not idle").
+const pickerFocus = new PickerFocus()
+async function typeInto(pane, text, { ifIdle = false } = {}) {
+  if (!ifIdle) {
+    const t = await hcGet(pane)
+    if (t.status === 'blocked') throw new HcError('blocked', `${pane} is blocked (${t.statusKind ?? 'dialog'})`)
+    if (!hcIsAgent(t)) throw new HcError('not_agent', `${pane} is not an agent terminal: nothing is typed into a shell`)
+  }
+  return hcSendRaw(pane, text, { ifIdle })
+}
+const pressKeys = (pane, ...keys) => { pickerFocus.keys(pane, keys); return hcKeysRaw(pane, ...keys) }
+const hcIo = { send: typeInto, keys: pressKeys, read: (pane) => hcRead(pane, { lines: 0 }), status: async (pane) => (await hcGet(pane)).status ?? undefined }
+// A refusal that typed nothing: the agent is blocked on a dialog, or (an ifIdle send) not idle.
+const notTyped = (e) => e?.kind === 'blocked' || e?.kind === 'status_mismatch'
 
 // ---- projects ----
 // Project = the repo a cwd belongs to; worktrees resolve to their main repo via --git-common-dir.
@@ -337,10 +352,12 @@ function focusedTab(raw, tabs) {
   const i = tabs.findIndex((t) => t.header === seg)
   return i >= 0 ? i : null
 }
-export function parsePicker(text, raw = '') {
+// track: { focus: PickerFocus, pane } -> the focused tab of a plain-text frame comes from the dashboard's own tracking (pickerFocus.mjs, WP-378 D6).
+export function parsePicker(text, raw = '', track = null) {
   const pk = parsePickerText(text)
   const f = pk && pk.tabs.length && raw ? focusedTab(raw, pk.tabs) : null
   if (pk && !pk.review && f != null) pk.current = f
+  if (track) { const i = track.focus.read(track.pane, pk); if (pk && !pk.review && f == null && i != null) pk.current = i }
   return pk
 }
 // WP-115: text drawn inside a terminal box. Drops border-only rows (╭──╮, └──┘), strips │ ┃ ║ at line edges, joins
@@ -507,7 +524,11 @@ const roleStore = new RoleStore(DATA).attach(agentTable) // WP-348: tags live in
 // listing, the label sync and the watcher. A pane token is a label of the same name; the pool (herdr's workspace) is the `wt.pool` label.
 // The core is probed first with coreUp(): `hc connect`/`ls`/`get`/`server status` START a stopped core on macOS (S5-5, U5 re-checked
 // `connect` on an isolated core: it starts it too), and the dashboard must never start one (D4).
-const hcDown = () => Object.assign(new Error('hc core not running'), { code: 'core_down' })
+const hcDown = () => Object.assign(new Error('hc core not running — run hc server start'), { code: 'core_down' })
+// WP-378 D19: the HTTP status of a thrown error, in ONE place. A stopped hc core is "not available" (503), not a server bug (agents() keeps throwing
+// core_down for the soft('hc') banner); an hc refusal of the request itself (a blocked dialog, a shell, a finished terminal) is the caller's state (409).
+const HC_REFUSAL = { blocked: 409, status_mismatch: 409, not_agent: 409, finished: 409, not_found: 404 }
+const errStatus = (e) => e?.status ?? (e?.code === 'core_down' ? 503 : e instanceof HcError ? HC_REFUSAL[e.kind] : undefined) ?? 500
 let upAt = 0, upVal = false // coreUp() is a socket connect; one answer per second serves every caller of a request
 const coreIsUp = async () => { if (Date.now() - upAt < 1000) return upVal; upVal = await coreUp(); upAt = Date.now(); return upVal }
 const hcRows = () => cached('hc:rows', 3000, async () => {
@@ -609,7 +630,7 @@ async function listAgents(m) {
     if (stale) {
       try {
         const raw = await readPane(m, a.pane_id, '120')
-        const p = parsePane(stripAnsi(raw), raw)
+        const p = parsePane(stripAnsi(raw), raw, { focus: pickerFocus, pane: a.pane_id })
         parsed.set(k, { p, seq: a.state_change_seq, at: Date.now() })
         notePlanUsage(p.planUsage, Date.now(), k)
       } catch {}
@@ -1031,78 +1052,6 @@ export async function streamTranscript(req, res, session, url, fileOverride, { o
   req.on('close', () => (w.close(), clearInterval(poll), clearInterval(beat)))
 }
 
-// WP-97: a remote agent's transcript over SSH (remoteTranscript.mjs), same SSE framing as streamTranscript. The ids
-// are `<file id>:<byte offset>` so a cursor from another file (a re-match) is ignored. `event: remote` says
-// loading / ok / unmatched / unreachable; the client keeps the pane view until messages arrive. Nothing runs
-// without an open stream: the SSH calls stop (and ssh is killed) when the client goes.
-const remoteLimiter = new Limiter(4)
-export async function streamRemote(req, res, url, { host, pane, cwd, prompt }, { run = sshRun, limiter = remoteLimiter, pullMs = 3000, retry = { unreachable: 30_000, unmatched: 60_000 } } = {}) {
-  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
-  const ac = new AbortController(), { signal } = ac
-  const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
-  req.on('close', () => { ac.abort(); clearInterval(beat) })
-  const state = (st) => res.write(`event: remote\ndata: ${JSON.stringify({ state: st })}\n\n`)
-  const sleep = (ms) => new Promise((r) => {
-    const stop = () => { clearTimeout(t); r() }
-    const t = setTimeout(() => { signal.removeEventListener('abort', stop); r() }, ms)
-    signal.addEventListener('abort', stop, { once: true })
-  })
-  // One SSH job per pane at a time (null = another stream of this pane is busy: try again shortly).
-  const job = (fn) => limiter.run(host, pane, fn)
-  state('loading')
-  let hit
-  for (;;) {
-    let st = null
-    try { hit = await job(() => locateRemote({ host, cwd, prompt, run, signal }).then((h) => h ?? false)) } catch { st = 'unreachable' }
-    if (signal.aborted) return
-    if (hit) break
-    if (hit === false) st = 'unmatched'
-    if (st) state(st)
-    await sleep(st === 'unreachable' ? retry.unreachable : st === 'unmatched' ? retry.unmatched : pullMs)
-    if (signal.aborted) return
-  }
-  const { dir, id, size } = hit
-  res.write(`event: session\ndata: ${JSON.stringify(id)}\n\n`)
-  const emit = (msgs, off) => { if (msgs.length) res.write(`id: ${id}:${off}\ndata: ${JSON.stringify(msgs)}\n\n`) }
-  emit.id = (off) => `${id}:${off}`
-  const [cid, coff] = String(req.headers['last-event-id'] ?? url?.searchParams.get('since') ?? '').split(':')
-  const since = cid === id ? Number(coff) : NaN
-  // First load: the last WINDOW bytes only (transcripts run to tens of MB), from the first whole line in them.
-  const start = Math.max(0, size - REMOTE_WINDOW)
-  let buf = null
-  while (!buf) { // unreadable: wait and retry here (ending the stream would make EventSource re-locate every ~3s)
-    let down = false
-    try { buf = await job(() => run(host, remoteRead(dir, id, start, size - start), { signal })) } catch { down = true }
-    if (signal.aborted) return
-    if (down) state('unreachable')
-    if (!buf) await sleep(down ? retry.unreachable : pullMs)
-    if (signal.aborted) return
-  }
-  let from = start
-  if (start > 0) { const nl = buf.indexOf(0x0a); buf = nl < 0 ? Buffer.alloc(0) : buf.subarray(nl + 1); from = nl < 0 ? start + buf.length : start + nl + 1 }
-  const asks = new Set()
-  const first = cutLines(Buffer.alloc(0), buf, from)
-  let offset = first.end ?? from, left = first.left
-  state('ok')
-  firstBatch(emit, res, first.text, from, offset, since, asks)
-  let down = false
-  while (!signal.aborted) {
-    await sleep(pullMs)
-    if (signal.aborted) break
-    const at = offset + left.length
-    try {
-      const b = await job(() => run(host, remoteRead(dir, id, at, REMOTE_WINDOW), { signal }))
-      if (down) { down = false; state('ok') }
-      if (!b?.length) continue
-      const r = cutLines(left, b, at)
-      left = r.left
-      if (r.end !== null) { emit(parseLines(r.text, asks), r.end); offset = r.end }
-      // ponytail: a line over 16 MB is skipped (its tail parses as garbage and is dropped) rather than buffered.
-      if (left.length > 4 * REMOTE_WINDOW) { offset = at + b.length; left = Buffer.alloc(0) }
-    } catch { if (!signal.aborted && !down) { down = true; state('unreachable') } }
-  }
-}
-
 // ---- roles (Settings › Roles) ----
 // WP-237: every project's team files with who fills them and where their tickets are (GET only). wt-shared is
 // imported dynamically (a checkout without it just has no teams).
@@ -1465,7 +1414,7 @@ const projectDeps = () => ({
 })
 async function projectMutation(req, res, fn) {
   if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
-  const [code, out] = await fn().then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
+  const [code, out] = await fn().then((r) => [200, r], (e) => [errStatus(e), { error: e.message }])
   store.delete('projectRoots'); store.delete('agents:local'); store.delete('overview')
   return send(res, code, out)
 }
@@ -1492,9 +1441,9 @@ async function spawnAgent(b) {
   const machine = (await machines()).find((m) => m.local)?.label
   let prompted = false
   if (typeof b.prompt === 'string' && b.prompt.trim()) {
-    await herdr('agent', 'wait', pane, '--until', 'idle', '--timeout', '60000').catch(() => {})
+    await waitReady(() => hcGet(pane), { timeoutMs: 60_000 }).catch(() => {})
     const first = spawnText(b) // WP-329: recorded before it is delivered, or the new agent's hook treats a tagged first prompt as unverified
-    await deliver({ id: pane }, first, (t) => herdr('agent', 'prompt', pane, t))
+    await deliver({ id: pane }, first, (t) => typeInto(pane, t))
     prompted = true
   }
   return { name, pane, machine, key: `${machine}/${pane}`, prompted }
@@ -2330,17 +2279,17 @@ export async function scanTabs(io, nap = sleep) {
 }
 async function answerQuestion(a, req) {
   const m = await machineBy(a.machine)
+  const track = { focus: pickerFocus, pane: a.id }
   const raw = await readPane(m, a.id, '80')
-  const pk = parsePicker(stripAnsi(raw), raw)
+  const pk = parsePicker(stripAnsi(raw), raw, track)
   if (!pk) return [409, { error: 'no question is waiting on screen' }]
   const sendSteps = async (steps) => {
-    for (const st of steps) {
-      if (st.text) await herdrOn(m, 'pane', 'send-text', a.id, st.text)
-      else await herdrOn(m, 'agent', 'send-keys', a.id, ...st.keys)
-      await sleep(150)
-    }
+    // A free-text answer would have to be typed into a BLOCKED agent: `hc send` refuses that (and the pack never forces it), and `hc keys`
+    // cannot type arbitrary characters. Refused before any key is pressed, so the picker is left as the user saw it.
+    if (steps.some((st) => st.text)) throw Object.assign(new Error('a typed answer cannot be sent through hc to a waiting question — answer it in the terminal'), { status: 409 })
+    for (const st of steps) { await pressKeys(a.id, ...st.keys); await sleep(150) }
   }
-  const io = { read: async () => { const r = await readPane(m, a.id, '80'); return parsePicker(stripAnsi(r), r) }, send: sendSteps }
+  const io = { read: async () => { const r = await readPane(m, a.id, '80'); return parsePicker(stripAnsi(r), r, track) }, send: sendSteps }
   if (req.action === 'scan') return [200, { questions: await scanTabs(io) }]
   if (req.action === 'bulk') {
     if (!Array.isArray(req.answers) || req.answers.length > 4) return [400, { error: 'bad answers' }]
@@ -2541,10 +2490,8 @@ const readyNotes = readyBatcher(async (project, ts) => {
   const busy = (t) => ags.some((x) => x.name === t.assignee?.name && tagTicket(x) === t.id)
   ts = readyToNotify(await Promise.all(ts.map((t) => tickets.get(t.id).catch(() => null))), a.name, busy)
   if (!ts.length) return
-  const m = await machineBy(a.machine)
-  if (!m) throw new Error(`machine ${a.machine} unavailable`)
   const nudge = readyNudge(project, ts)
-  await deliver(a, nudge, (t) => herdrOn(m, 'agent', 'prompt', a.id, t)) // WP-329: recorded so the orchestrator's hook verifies it
+  await deliver(a, nudge, (t) => typeInto(a.id, t)) // WP-329: recorded so the orchestrator's hook verifies it
 })
 setInterval(() => readyNotes.flush(), 60_000).unref()
 // WP-159: 'ok'/'returned' once per ref, however Done was reached or left (manual move, merge reconcile, any
@@ -2612,22 +2559,42 @@ const msgSafe = (fn) => { try { return fn() } catch (e) { console.error('message
 // and the pointer could never be read: it gets the text as before and verifies through the grace path).
 const hasPaneKey = (pane) => { try { return readFileSync(join(PANE_KEYS, String(pane).replace(/[^\w.:-]/g, '_')), 'utf8').trim() !== '' } catch { return false } }
 const typedFor = (pane, text) => (envelopeOf(text) && hasPaneKey(pane) ? pointerOf(text) ?? text : text)
+// WP-378: a send that typed nothing because the target is blocked on a dialog (or, for an ifIdle send, busy) waits behind it here; the row stays
+// `queued` and its attempt is not counted (attempts count typed sends only, WP-360). `pending` in the sweep keeps the resend from doubling it.
+const blockedQ = new BlockedQueue()
 async function deliver(a, text, paste, o = {}) { // a slash command (/goal arms, /wt-audit …) never queues: its paste() callback types it (promptOn)
   const env = envelopeOf(text)
   const mid = env && msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text }, { bump: !o.resend }))?.row.id
   const mark = (to, extra) => mid && msgSafe(() => messages.move(mid, to, extra))
   if (a.local !== false && !text.startsWith('/') && deliveries.live(a.id)) { deliveries.enqueue(a.id, text); broadcastEvent('deliveries', { pane: a.id }); return 'queued' } // 'delivered' once the mod acks
   // WP-352: typed (no live mod) = a short recorded pointer, never the full text; paste(typed) receives it, a non-envelope stays as it is.
-  try { await paste(typedFor(a.id, text)) } catch (e) { mark('failed', { error: e.message.slice(0, 200) }); throw e }
+  try { await paste(typedFor(a.id, text)) } catch (e) {
+    if (notTyped(e)) {
+      if (o.resend) throw e // the sweep un-counts its own attempt and tries again later
+      if (mid) msgSafe(() => messages.uncount(mid))
+      blockedQ.add(a.id, { id: mid, run: async () => {
+        if (mid) msgSafe(() => messages.record({ ...env, target: a.id, requestId: o.requestId ?? null, body: text })) // the typed send counts now
+        await paste(typedFor(a.id, text)); mark('delivered')
+      } })
+      return 'queued'
+    }
+    mark('failed', { error: e.message.slice(0, 200) }); throw e
+  }
   mark('delivered')
   return 'pasted'
 }
+setInterval(() => blockedQ.flush(async (pane) => (await agents()).find((x) => x.local && x.id === pane)?.status, (e, why) => {
+  if (e.id) msgSafe(() => messages.move(e.id, 'failed', { error: `not delivered: ${why}`.slice(0, 200) }))
+  console.error('deliver:', why)
+}).catch((e) => console.error('deliver:', e.message)), 10_000).unref()
 // A mod that died with rows queued: paste them (and say so in the row) rather than strand them.
 setInterval(async () => {
   for (const r of deliveries.stranded()) {
     if (!deliveries.settle(r.id, 'pasted')) continue // the mod got there first
     const env = envelopeOf(r.body)
-    try { await herdr('agent', 'prompt', r.pane, typedFor(r.pane, r.body)); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) { deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
+    try { await typeInto(r.pane, typedFor(r.pane, r.body)); env && msgSafe(() => messages.move(env.id, 'delivered')) } catch (e) {
+      if (notTyped(e)) { blockedQ.add(r.pane, { id: env?.id ?? null, run: async () => { await typeInto(r.pane, typedFor(r.pane, r.body)); env && msgSafe(() => messages.move(env.id, 'delivered')) } }); continue }
+      deliveries.settle(r.id, 'failed', 'pasted'); env && msgSafe(() => messages.move(env.id, 'failed', { error: e.message.slice(0, 200) })); console.error('deliveries:', e.message) }
   }
 }, 15_000).unref()
 // WP-257 expiry: an unacknowledged handoff/dispatch is resent with the same envelope id, then flagged in the Inbox.
@@ -2638,8 +2605,9 @@ const messageSweep = async () => {
   const ags = await agents().catch(() => null)
   if (!ags) return
   await messages.sweep({
-    pending: (row) => deliveries.live(row.target) && deliveries.queuedFor(row.target, row.id), // WP-258: queued behind a running turn, not lost
-    seen: async (row) => (await tickets.get(row.ticket).then((c) => movedOn(c, row), () => false)) || await agentFor(ags, row.target).then((a) => !!a && ['working', 'blocked'].includes(a.status) && (!row.ticket || tagTicket(a) === row.ticket)),
+    pending: (row) => (deliveries.live(row.target) && deliveries.queuedFor(row.target, row.id)) || blockedQ.has(row.id), // WP-258: queued behind a running turn, not lost (WP-378: or behind a blocked dialog)
+    // WP-378: only `working` proves the target took it; a `blocked` agent is waiting on a dialog and was probably refused (hc send exit 9).
+    seen: async (row) => (await tickets.get(row.ticket).then((c) => movedOn(c, row), () => false)) || await agentFor(ags, row.target).then((a) => workingOn(a, row, tagTicket)),
     // WP-263: only our own project's agents are ever re-typed (other projects' agents don't know --ack); WT_MESSAGE_RESEND=off stops all resends.
     resendable: async (row) => cfg.get('WT_MESSAGE_RESEND') !== 'off' && (await agentFor(ags, row.target))?.project === REPO_PROJECT,
     resend: async (row) => {
@@ -2647,7 +2615,7 @@ const messageSweep = async () => {
       if (!t || t.local === false) throw new Error(`${row.target} is gone`)
       const body = row.body.startsWith('/') ? row.body.replace(/^(?:\/\S+ )+/, '') : row.body // never re-arm a /goal, only repeat the message
       msgSafe(() => messages.reopen(row.id)) // WP-352: a resend is a new typed pointer for the same id; the first one's use-once mark must not refuse it
-      await deliver({ id: t.id }, body, (p) => herdr('agent', 'prompt', t.id, p), { resend: true }) // the sweep already counted this attempt
+      await deliver({ id: t.id }, body, (p) => typeInto(t.id, p, { ifIdle: true }), { resend: true }) // the sweep already counted this attempt
     },
     flag: (row) => inbox.add({ kind: 'server', key: `message-expired|${row.id}`, title: `${row.ticket ? `${row.ticket}: ` : ''}${row.kind} to ${row.target} was never acknowledged`,
       body: `${row.attempts} send${row.attempts === 1 ? '' : 's'}, no ack (${row.error ?? 'no reply'}). Check the pane.`, target: row.ticket ? { ticket: row.ticket } : {} }),
@@ -2658,7 +2626,7 @@ const messageSweep = async () => {
     send: async (row) => {
       const a = await agentFor(ags, row.target)
       const text = wrap({ kind: 'system', from: 'wt-dashboard', ticket: row.ticket }, nudgeText(a?.tags?.role ?? a?.pool, row.ticket))
-      return deliver({ id: a?.id ?? row.target }, text, (p) => herdr('agent', 'prompt', a?.id ?? row.target, p))
+      return deliver({ id: a?.id ?? row.target }, text, (p) => typeInto(a?.id ?? row.target, p, { ifIdle: true }))
     },
   }).catch((e) => console.error('messages nudge:', e.message))
   // WP-261: acknowledged, then the agent went idle or vanished and the card never moved on and nothing was reported.
@@ -3090,9 +3058,7 @@ const rooms = new Rooms({
   },
   agents: () => agents(),
   prompt: async (a, text) => {
-    const m = await machineBy(a.machine)
-    if (!m) throw new Error(`machine ${a.machine} unavailable`)
-    await deliver(a, text, (t) => promptOn(herdrOn, m, a.id, t, { confirm: true }))
+    await deliver(a, text, (t) => promptOn(hcIo, a.id, t, { confirm: true }))
     store.delete('agents:local')
   },
 })
@@ -3612,7 +3578,7 @@ function pauseDeps(project) {
       return gone ? { fallback: { from: r.cwd, to: root } } : null
     },
     send: async (pane, text) => { await new Promise((r) => setTimeout(r, 8000)); // let claude finish starting
-      await herdr('pane', 'send-text', pane, text); await herdr('pane', 'send-keys', pane, 'enter') },
+      await typeInto(pane, text) },
     spawn: (row) => resumeSpawn(row, row.project),
   }
 }
@@ -3704,28 +3670,22 @@ async function resumeSpawn(a, project) {
   return { pane, fallback }
 }
 
-// ---- Terminals (terminals.mjs): shells owned by herdr, mirrored and typed into from the dashboard ----
+// ---- Terminals (terminals.mjs): shells owned by hc, mirrored (plain text) and typed into from the dashboard ----
 const terms = new TerminalSettings(DATA)
-const hj = async (...a) => JSON.parse(await herdr(...a))
-async function shellWorkspaces() {
-  const ws = (await hj('workspace', 'list')).result.workspaces
-  return new Map(ws.filter((w) => w.label?.endsWith('-shells')).map((w) => [w.workspace_id, w.label]))
-}
+// A shell is a live terminal labelled wt.pool=<project>-shells; a terminal that is not one (an agent, a stranger's) is refused, never typed into.
 async function shellPane(id) {
-  const ws = await shellWorkspaces()
-  const p = await hj('pane', 'get', id).then((j) => j.result.pane, () => null)
-  if (!isShellPane(p, new Set(ws.keys()))) throw Object.assign(new Error('not a dashboard shell (agents keep their own controls)'), { status: 404 })
-  return p
+  if (!HC_ADDR.test(String(id))) throw Object.assign(new Error('not a dashboard shell (agents keep their own controls)'), { status: 404 })
+  const t = await hcGet(id).catch(() => null)
+  if (!isShellTerminal(t)) throw Object.assign(new Error('not a dashboard shell (agents keep their own controls)'), { status: 404 })
+  return t
 }
 async function listShells() {
-  const ws = await shellWorkspaces()
-  const panes = (await hj('pane', 'list')).result.panes.filter((p) => isShellPane(p, new Set(ws.keys())))
-  return Promise.all(panes.map(async (p) => {
-    const tab = await hj('tab', 'get', p.tab_id).then((j) => j.result.tab, () => null)
-    const tail = await herdr('pane', 'read', p.pane_id, '--source', 'recent-unwrapped', '--lines', '20').catch(() => '')
+  const shells = (await hcRows()).filter(isShellTerminal)
+  return Promise.all(shells.map(async (t) => {
+    const tail = await hcRead(t.id, { lines: 20 }).catch(() => '')
     return {
-      pane: p.pane_id, name: tab?.label || basename(p.cwd ?? '') || p.pane_id, cwd: p.foreground_cwd ?? p.cwd, workspace: ws.get(p.workspace_id),
-      title: p.terminal_title_stripped || null, rows: p.scroll?.viewport_rows ?? null,
+      pane: t.id, name: t.labels[SHELL_TITLE] || basename(t.cwd ?? '') || t.name || t.id, cwd: t.foreground?.cwd ?? t.cwd, workspace: t.labels[SHELL_POOL],
+      title: t.title || null, rows: null,
       lastLine: stripAnsi(tail).split('\n').map((l) => l.trimEnd()).filter(Boolean).at(-1) ?? '',
     }
   }))
@@ -3740,15 +3700,13 @@ async function createShell(b) {
   const cwd = typeof b.cwd === 'string' ? b.cwd : places.byRoot.find(([n]) => n === b.project)?.[1]
   if (!allowedCwd(cwd, places)) throw Object.assign(new Error('cwd must be a project, one of its worktrees, $HOME or /private/tmp'), { status: 400 })
   const project = places.byRoot.find(([, root]) => cwd === root || cwd.startsWith(root + '/') || places.worktrees.includes(cwd))?.[0] ?? REPO_PROJECT
-  const label = shellsLabel(project)
   const name = typeof b.name === 'string' && /^[\w .:@+-]{1,40}$/.test(b.name) ? b.name : basename(cwd) || 'shell'
-  const ws = [...(await shellWorkspaces())].find(([, l]) => l === label)?.[0]
-  // A new workspace comes with a tab and a shell pane: that is the first terminal. Otherwise, a new tab.
-  const res = ws ? await hj('tab', 'create', '--workspace', ws, '--cwd', cwd, '--label', name, '--no-focus')
-    : await hj('workspace', 'create', '--label', label, '--cwd', cwd, '--no-focus')
-  const pane = res.result.root_pane?.pane_id
-  if (!ws && res.result.tab?.tab_id) await herdr('tab', 'rename', res.result.tab.tab_id, name).catch(() => {})
-  return { pane, name, cwd }
+  // hc names are unique among live terminals: sh-<project>-NN, the lowest free number (a taken-race retries).
+  const prefix = `sh-${slug(project)}`.slice(0, 26).replace(/[-_]+$/, '') || 'sh'
+  const taken = (await hcRows().catch(() => [])).map((t) => t.name).filter(Boolean)
+  const r = await hcSpawnNumbered({ prefix, taken, cwd, argv: [process.env.SHELL || '/bin/zsh', '-l'], labels: { [SHELL_POOL]: shellsLabel(project), [SHELL_TITLE]: name } })
+  store.delete('hc:rows')
+  return { pane: r.id, name, cwd }
 }
 // One poller per pane, only while someone is watching; unchanged screens are not re-sent.
 const screenSubs = new Map() // pane -> { clients:Set<res>, timer, last }
@@ -3760,7 +3718,7 @@ function watchScreen(pane, res) {
       if (w.busy) return
       w.busy = true
       try {
-        const screen = await herdr('pane', 'read', pane, '--source', 'visible', '--format', 'ansi')
+        const screen = await hcRead(pane, { lines: 0 })
         if (screen !== w.last) { w.last = screen; for (const c of w.clients) c.write(`event: screen\ndata: ${JSON.stringify(screen)}\n\n`) }
       } catch (e) { for (const c of w.clients) c.write(`event: gone\ndata: ${JSON.stringify(e.message)}\n\n`) } finally { w.busy = false }
     }, 300)
@@ -3800,25 +3758,24 @@ async function terminalsApi(req, res, url, parts) {
   const p = await shellPane(pane)
   const sub = parts[3]
   if (req.method === 'DELETE' && !sub) {
-    await herdr('pane', 'close', p.pane_id)
-    await terms.log({ pane: p.pane_id, action: 'close', ...who(req) })
+    await hcKillRm(p.id); store.delete('hc:rows')
+    await terms.log({ pane: p.id, action: 'close', ...who(req) })
     return send(res, 200, { ok: true })
   }
   if (req.method === 'PATCH' && !sub) {
     const b = JSON.parse((await body(req)) || '{}')
     if (typeof b.name !== 'string' || !/^[\w .:@+-]{1,40}$/.test(b.name)) return send(res, 400, { error: 'name: 1–40 letters, digits, space . : @ + -' })
-    await herdr('tab', 'rename', p.tab_id, b.name)
+    await hcSetLabels(p.id, { [SHELL_TITLE]: b.name }); store.delete('hc:rows')
     return send(res, 200, { ok: true })
   }
   if (sub === 'screen' && req.method === 'GET') {
     const lines = Math.min(Number(url.searchParams.get('lines')) || 0, 5000)
-    const screen = lines ? await herdr('pane', 'read', p.pane_id, '--source', 'recent', '--format', 'ansi', '--lines', String(lines))
-      : await herdr('pane', 'read', p.pane_id, '--source', 'visible', '--format', 'ansi')
-    return send(res, 200, { screen, rows: p.scroll?.viewport_rows ?? null })
+    const screen = await hcRead(p.id, { lines })
+    return send(res, 200, { screen, rows: null })
   }
   if (sub === 'stream' && req.method === 'GET') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
-    const stop = watchScreen(p.pane_id, res)
+    const stop = watchScreen(p.id, res)
     const beat = setInterval(() => res.write(': hb\n\n'), 15_000)
     req.on('close', () => { stop(); clearInterval(beat) })
     return
@@ -3827,16 +3784,16 @@ async function terminalsApi(req, res, url, parts) {
     const b = JSON.parse((await body(req)) || '{}')
     if (typeof b.text === 'string' && b.text) {
       if (b.text.length > 8000) return send(res, 400, { error: 'text too long' })
-      await herdr('pane', 'send-text', p.pane_id, b.text)
-      if (b.submit) await herdr('pane', 'send-keys', p.pane_id, 'enter')
-      await terms.log({ pane: p.pane_id, action: 'input', text: b.text + (b.submit ? '⏎' : ''), ...who(req) })
+      if (b.submit) await hcSendRaw(p.id, b.text) // pastes the line and presses Enter
+      else await hcKeysRaw(p.id, ...typeKeys(b.text)) // no Enter: key by key, the typeable subset only
+      await terms.log({ pane: p.id, action: 'input', text: b.text + (b.submit ? '⏎' : ''), ...who(req) })
     } else if (b.keys) {
-      const keys = herdrKeys(b.keys)
-      await herdr('pane', 'send-keys', p.pane_id, ...keys)
-      await terms.log({ pane: p.pane_id, action: 'keys', text: b.keys.join(' '), ...who(req) })
+      const keys = hcKeys(b.keys)
+      await hcKeysRaw(p.id, ...keys)
+      await terms.log({ pane: p.id, action: 'keys', text: b.keys.join(' '), ...who(req) })
     } else if (b.submit) {
-      await herdr('pane', 'send-keys', p.pane_id, 'enter')
-      await terms.log({ pane: p.pane_id, action: 'keys', text: 'Enter', ...who(req) })
+      await hcKeysRaw(p.id, 'enter')
+      await terms.log({ pane: p.id, action: 'keys', text: 'Enter', ...who(req) })
     } else return send(res, 400, { error: 'text, keys or submit' })
     return send(res, 200, { ok: true })
   }
@@ -3871,7 +3828,7 @@ const server = http.createServer(async (req, res) => {
         return await (url.pathname === '/api/unfurl/image' ? unfurlImage(res, url) : unfurlApi(res, url)).catch((e) => send(res, 502, { error: e.message }))
       }
       if (parts[0] === 'api' && (parts[1] === 'rooms' || parts[1] === 'settings'))
-        return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+        return await roomsApi(req, res, url, parts[1] === 'settings' ? ['api', 'settings'] : parts).catch((e) => send(res, errStatus(e), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'tickets') return await ticketsApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'messages') return await messagesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'deliveries') return await deliveriesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
@@ -3879,22 +3836,22 @@ const server = http.createServer(async (req, res) => {
       if (parts[0] === 'api' && parts[1] === 'gate') return await gateApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'routines') return await routinesApi(req, res, url, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'board' && parts[2] === 'events' && req.method === 'GET') return send(res, 200, dispatcher.events(url.searchParams.get('limit')))
-      if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (parts[0] === 'api' && parts[1] === 'watch-prs' && parts[2] === 'event') return await watchPrsEvent(req, res).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'watchdog') return await watchdogApi(req, res, parts[2]).catch((e) => send(res, errStatus(e), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'watch-prs' && parts[2] === 'event') return await watchPrsEvent(req, res).catch((e) => send(res, e instanceof SyntaxError ? 400 : errStatus(e), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'keepwarm') return await keepwarmApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
-      if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (url.pathname === '/api/teams' || url.pathname.startsWith('/api/teams/')) return await teamsApi(req, res, url.pathname.split('/').filter(Boolean).slice(0, 5)).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, e.status ?? 500, { error: e.message }))
-      if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'housekeeping') return await housekeepingApi(req, res, parts[2]).catch((e) => send(res, errStatus(e), { error: e.message }))
+      if (url.pathname === '/api/teams' || url.pathname.startsWith('/api/teams/')) return await teamsApi(req, res, url.pathname.split('/').filter(Boolean).slice(0, 5)).catch((e) => send(res, errStatus(e), { error: e.message }))
+      if (url.pathname === '/api/roles') return await rolesApi(req, res).catch((e) => send(res, errStatus(e), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'memory') return await memoryApi(req, res, url, parts).catch((e) => send(res, errStatus(e), { error: e.message }))
+      if (url.pathname === '/api/terminal-settings') return await terminalSettingsApi(req, res).catch((e) => send(res, errStatus(e), { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'terminals') return await terminalsApi(req, res, url, parts).catch((e) => send(res, errStatus(e), { error: e.message }))
       if (url.pathname === '/api/observability' || url.pathname === '/api/logs/server') return await observabilityApi(req, res, url)
       if (parts[0] === 'api' && parts[1] === 'projects' && parts.length === 3 && req.method === 'DELETE') return projectMutation(req, res, () => hideProject(projectDeps(), decodeURIComponent(parts[2])))
       if (parts[0] === 'api' && parts[1] === 'projects' && parts[2]) return await projectSettingsApi(req, res, parts).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
-      if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'config') return await configApi(req, res, parts).catch((e) => send(res, errStatus(e), { error: e.message }))
       if (url.pathname === '/api/overview') return send(res, 200, await overview())
       if (url.pathname === '/api/uploads' && req.method === 'POST') {
-        const [code, out] = await saveUpload(req).catch((e) => [e.status ?? 500, { error: e.message }])
+        const [code, out] = await saveUpload(req).catch((e) => [errStatus(e), { error: e.message }])
         return send(res, code, out)
       }
       if (parts[0] === 'api' && parts[1] === 'uploads' && req.method === 'GET') {
@@ -3918,24 +3875,24 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/projects' && req.method === 'POST') return projectMutation(req, res, async () => createProject(projectDeps(), JSON.parse((await body(req)) || '{}')))
       if (url.pathname === '/api/agents/spawn' && req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
-        const [code, out] = await spawnAgent(JSON.parse((await body(req)) || '{}')).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
+        const [code, out] = await spawnAgent(JSON.parse((await body(req)) || '{}')).then((r) => [200, r], (e) => [errStatus(e), { error: e.message }])
         return send(res, code, out)
       }
       if (parts[0] === 'api' && parts[1] === 'tasks' && parts[3] === 'handoff' && parts.length === 4 && req.method === 'POST') {
         if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
         const b = JSON.parse((await body(req)) || '{}')
-        const [code, out] = await handoffTask(decodeURIComponent(parts[2]), b.mode).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message }])
+        const [code, out] = await handoffTask(decodeURIComponent(parts[2]), b.mode).then((r) => [200, r], (e) => [errStatus(e), { error: e.message }])
         return send(res, code, out)
       }
       if (url.pathname === '/api/agents/forget-stored') return await forgetStoredApi(req, res).catch((e) => send(res, e.status ?? (e instanceof SyntaxError ? 400 : 500), { error: e.message }))
-      if (parts[0] === 'api' && parts[1] === 'agents' && parts[2] === 'by-name' && parts[3]) return await agentByNameApi(req, res, decodeURIComponent(parts[3]), parts[4]).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+      if (parts[0] === 'api' && parts[1] === 'agents' && parts[2] === 'by-name' && parts[3]) return await agentByNameApi(req, res, decodeURIComponent(parts[3]), parts[4]).catch((e) => send(res, errStatus(e), { error: e.message }))
       if (parts[0] === 'api' && parts[1] === 'agents') {
         if (!parts[2]) { // WP-348: paused and missing agents stay listed (no pane), so they never disappear
           const ag = await agents().catch(() => []), have = new Set(ag.filter((a) => a.local).map((a) => a.name)) // core down: the stored rows still list
           const stored = agentTable.list().filter((r) => ['paused', 'missing', 'exited'].includes(r.state) && !have.has(r.name)).map((r) => { const a = rowAsAgent(r); return { ...a, info: paneInfo(a, null, null, null, r) } })
           return send(res, 200, [...ag, ...stored, ...(await headlessRows(ag.find((a) => a.local)?.machine ?? (await machines())[0].label))])
         }
-        if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, e.status ?? 500, { error: e.message }))
+        if ((parts[3] ?? '').startsWith('hl-')) return await headlessAgentRoute(req, res, url, parts).catch((e) => send(res, errStatus(e), { error: e.message }))
         // /api/agents/:machine/:pane[/stream]
         const m = await machineBy(decodeURIComponent(parts[2]))
         if (!m) return send(res, 404, { error: 'unknown machine' })
@@ -3954,7 +3911,7 @@ const server = http.createServer(async (req, res) => {
           if (!req.headers['content-type']?.startsWith('application/json')) return send(res, 415, { error: 'json only' })
           const a = (await agents()).find((x) => x.machine === m.label && x.id === pane)
           if (!a) return send(res, 404, { error: 'unknown agent' })
-          const [code, out] = await answerQuestion(a, JSON.parse(await body(req))).catch((e) => [e.status ?? 500, { error: e.message }])
+          const [code, out] = await answerQuestion(a, JSON.parse(await body(req))).catch((e) => [errStatus(e), { error: e.message }])
           store.delete('agents:local')
           store.delete('overview')
           return send(res, code, out)
@@ -3968,7 +3925,7 @@ const server = http.createServer(async (req, res) => {
           if (!a) return send(res, 404, { error: 'unknown agent' })
           if (a.asks) return send(res, 409, { error: 'a question is pending; use the question card' })
           if (a.status !== 'working') return send(res, 409, { error: `agent is ${a.status}, not working` })
-          await herdrOn(m, 'agent', 'send-keys', pane, 'esc')
+          await pressKeys(pane, 'esc')
           store.delete('agents:local')
           store.delete('overview')
           return send(res, 200, { ok: true })
@@ -4008,14 +3965,14 @@ const server = http.createServer(async (req, res) => {
         // an orchestrator needs its name typed back.
         if (req.method === 'DELETE') {
           const b = JSON.parse((await body(req)) || '{}')
-          const [code, out] = await removeAgent(pane, { force: b.force === true, confirmName: b.confirmName }).then((r) => [200, r], (e) => [e.status ?? 500, { error: e.message, needs: e.needs }])
+          const [code, out] = await removeAgent(pane, { force: b.force === true, confirmName: b.confirmName }).then((r) => [200, r], (e) => [errStatus(e), { error: e.message, needs: e.needs }])
           return send(res, code, out)
         }
         if (req.method === 'GET') {
           const lines = String(Math.min(2000, Number(url.searchParams.get('lines')) || 300))
           const raw = url.searchParams.get('visible') ? await hcRead(pane, { lines: 0 }) : await readPane(m, pane, lines)
           const text = stripAnsi(raw)
-          return send(res, 200, { text, ...parsePane(text, raw) })
+          return send(res, 200, { text, ...parsePane(text, raw, { focus: pickerFocus, pane }) })
         }
         if (req.method === 'POST') {
           // JSON content-type forces a CORS preflight we never answer → no cross-site simple POSTs.
@@ -4023,8 +3980,8 @@ const server = http.createServer(async (req, res) => {
           const { text, keys } = JSON.parse(await body(req))
           if (Array.isArray(keys)) {
             if (!keys.length || !keys.every((k) => typeof k === 'string' && KEY.test(k))) return send(res, 400, { error: 'bad keys' })
-            await herdrOn(m, 'agent', 'send-keys', pane, ...keys)
-          } else if (typeof text === 'string' && text.trim()) { recordSent(text); await herdrOn(m, 'agent', 'prompt', pane, text) }
+            await pressKeys(pane, ...keys)
+          } else if (typeof text === 'string' && text.trim()) { recordSent(text); await typeInto(pane, text) }
           else return send(res, 400, { error: 'text or keys required' })
           store.delete('agents:local')
           store.delete('overview')
@@ -4041,7 +3998,7 @@ const server = http.createServer(async (req, res) => {
       }
       send(res, 404, { error: 'not found' })
     } catch (e) {
-      send(res, 500, { error: String(e.message ?? e) })
+      send(res, errStatus(e), { error: String(e.message ?? e) })
     }
   })
 // WP-337: wt-watch-prs's launchd poller has no pane and is no child of this server, so it cannot carry a credential (a token file would
@@ -4057,8 +4014,7 @@ async function watchPrsEvent(req, res) {
   const id = await canonicalPane(String(pane ?? '')).catch(() => null)
   const a = id && (await agents()).find((x) => x.local && x.id === id)
   if (!a) return send(res, 404, { error: `unknown pane ${pane}` })
-  const m = await machineBy(a.machine)
-  const how = await deliver(a, msg, (t) => promptOn(herdrOn, m, a.id, t, { confirm: true }))
+  const how = await deliver(a, msg, (t) => promptOn(hcIo, a.id, t, { confirm: true }))
   store.delete('agents:local')
   return send(res, 200, { ok: true, delivery: how })
 }
@@ -4153,7 +4109,7 @@ const routines = new Routines({
     prompt: async (a, text, o) => {
       const m = await machineBy(a.machine)
       if (!m) throw new Error(`machine ${a.machine} unavailable`)
-      const send = () => deliver(a, routineText(text, o), (t) => promptOn(herdrOn, m, a.id, t, { confirm: true }), { requestId: o?.requestId })
+      const send = () => deliver(a, routineText(text, o), (t) => promptOn(hcIo, a.id, t, { confirm: true }), { requestId: o?.requestId })
       await (o?.requestId ? receipts.once(o.requestId, async () => (await send()) ?? '') : send()) // WP-251
       store.delete('agents:local')
     },
@@ -4338,7 +4294,7 @@ async function watchdogSnapshot() {
     stale: await staleHooks(ag).catch(() => null),
     starts: await readFile(join(DATA, 'server-starts.json'), 'utf8').then(JSON.parse, () => null),
     queue: [...rooms.queue].flatMap(([key, items]) => items.map((it) => ({ agent: nameOf.get(key) ?? key, slug: it.slug, ts: it.msg.ts }))),
-    boards, agents: ag, panes, herdr: SOURCES.hc, // U6 renames the watchdog's 'herdr' check
+    boards, agents: ag, panes, hc: SOURCES.hc,
     diskFree: fs ? fs.bavail * fs.bsize : null,
     dbBytes: await stat(join(DATA, 'wt.db')).then((x) => x.size, () => null),
     errors: serverErrors,
@@ -4349,8 +4305,8 @@ async function watchdogSnapshot() {
 async function clearLoopedGoal(g, snap) {
   let note = ''
   try {
-    await herdr('agent', 'send-keys', g.pane, 'esc')
-    await herdr('agent', 'prompt', g.pane, '/goal clear', '--wait', '--until', 'idle', '--until', 'done', '--timeout', '8000')
+    await pressKeys(g.pane, 'esc')
+    await typeInto(g.pane, '/goal clear')
   } catch { note = ' (goal clear unverified)' }
   const rs = (await rooms.list()).filter((r) => !r.archived && r.project === g.project)
   const room = rs.find((r) => r.slug === g.project) ?? rs[0]
@@ -4425,10 +4381,9 @@ async function resumeExited(req, res) {
   if (resuming.has(pane)) return send(res, 409, { error: 'a Resume for this pane is already running' })
   resuming.add(pane)
   try {
-    const mcp = await run(AGENTS_SH, ['mcp-file', r.role, r.cwd, r.name], r.cwd, 30_000).then((o) => o.trim().split(/\s+/).filter(Boolean), () => null)
-    if (!mcp) return send(res, 409, { error: `could not rebuild the MCP config in ${r.cwd} (worktree gone?)` })
-    await run('herdr', resumeArgv(pane, r, mcp), undefined, 30_000)
-    await herdr('agent', 'rename', pane, r.name).catch(() => {})
+    // agents.sh respawn rebuilds the MCP config, labels and launcher env itself, and resumes the remembered session under the same name.
+    const out = await run(AGENTS_SH, respawnArgs(r), r.cwd, 120_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' }).catch((e) => ({ error: e.message }))
+    if (out.error) return send(res, 409, { error: `could not respawn ${r.name}: ${out.error.trim().slice(0, 200)}` })
   } finally { resuming.delete(pane) }
   store.delete('agents:local')
   await runWatchdog()

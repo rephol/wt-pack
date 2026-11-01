@@ -158,7 +158,7 @@ fn healthy_launchd() -> bool {
     body.contains("\"managedBy\":\"launchd\"")
 }
 
-/// GUI apps get a minimal PATH; herdr/git/gh/node live in user dirs. Ask a login shell, then add the usual suspects.
+/// GUI apps get a minimal PATH; hc/git/gh/node live in user dirs. Ask a login shell, then add the usual suspects.
 fn login_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let mut parts: Vec<String> = vec![];

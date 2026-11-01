@@ -48,8 +48,8 @@ export function enabledPlugins(home) {
   } catch { return [] }
 }
 export const STUCK_ACTIONS = ['flag', 'interrupt', 'kill']
-// WP-306: the herdr scheme (agents.sh spawn): <repo slug>-<role>-<lowest unused NN>. The slug is lowercase [a-z0-9_-], cut to 20, and
-// shortened further for a long role so the whole name stays <= 32. `taken` = names of live herdr agents and non-ended headless runs.
+// WP-306: the hc scheme (agents.sh spawn): <repo slug>-<role>-<lowest unused NN>. The slug is lowercase [a-z0-9_-], cut to 20, and
+// shortened further for a long role so the whole name stays <= 32. `taken` = names of live hc agents and non-ended headless runs.
 export function defaultName(repo, role, taken) {
   const lrole = String(role).toLowerCase().replace(/[^a-z0-9_-]/g, '-')
   const slug = String(repo).toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, Math.min(20, Math.max(1, 28 - lrole.length)))
@@ -157,9 +157,9 @@ export class Headless {
         '--mcp-config', JSON.stringify({ mcpServers: { 'wt-files': { command: process.execPath, args: [fileURLToPath(new URL('../wt-shared/mcp/wt-server.mjs', import.meta.url))], env: { WT_MCP_ONLY: 'send_file' } } } })] : // WP-300: only read tools exist, so no allow-rule in the user's settings can open a write/exec/MCP tool
          r.req_permission_mode ? ['--permission-mode', r.req_permission_mode] : []), ...(r.model ? ['--model', r.model] : []), ...(r.effort ? ['--effort', r.effort] : []),
       ...this.#pluginArgs(r), ...(r.session ? ['--resume', r.session] : [])]
-    // A minimal env: the login lives in the keychain and HOME, never an API key; no HERDR_* so it is not mistaken for a pane.
-    // WT_ROLE / WT_PERSONA (WP-307): a herdr pane's role comes from its pane token, which a headless run has not got; wt-memory's context
-    // and the role files read these instead, so it is briefed exactly like a herdr agent of that role.
+    // A minimal env: the login lives in the keychain and HOME, never an API key; no HC_* / HERDR_* so it is not mistaken for an agent terminal.
+    // WT_ROLE / WT_PERSONA (WP-307): an hc terminal's role comes from its pane token (label), which a headless run has not got; wt-memory's context
+    // and the role files read these instead, so it is briefed exactly like an hc agent of that role.
     const env = { TERM: 'dumb', WT_ROLE: r.role, WT_HEADLESS_ID: id, WT_RUN_KEY: r.run_key ?? '', ...(r.persona ? { WT_PERSONA: r.persona } : {}),
       ...Object.fromEntries(['HOME', 'PATH', 'USER'].filter((k) => this.env[k]).map((k) => [k, this.env[k]])) }
     let child, bin = this.cmd
