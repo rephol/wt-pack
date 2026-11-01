@@ -216,7 +216,7 @@ export function nextName(prefix, taken = []) {
 }
 
 // terminal.run over `hc connect` (WP-378 D3): the one spawn shape. Always detached from the spawner (`outlive_parent`) and silent
-// towards its parent (`no_notify`). `runEnv` is the terminal's environment on top of the core's: it travels in the request body
+// towards its parent (`no_notify`), and kept (`keep`: a lost program becomes a login shell at the same address, never a re-run). `runEnv` is the terminal's environment on top of the core's: it travels in the request body
 // (stdin of the hc process), so a secret is in neither a command line nor a file. With `launch` (hc-launch) the program is
 // `<launch> -- <argv>` and `WT_LAUNCH_KEYS` names the keys the spawner set, so the launcher keeps those and scrubs the rest.
 export async function spawn({ name, cwd, labels = {}, argv, launch, runEnv = {}, roles, env } = {}) {
@@ -225,7 +225,7 @@ export async function spawn({ name, cwd, labels = {}, argv, launch, runEnv = {},
   const { set } = planLabels(labels, {}, { roles })
   const termEnv = { ...runEnv }
   if (launch) termEnv.WT_LAUNCH_KEYS = Object.keys(runEnv).join(',')
-  const params = { argv: launch ? [launch, '--', ...argv] : argv, env: termEnv, labels: set, name, no_notify: true, outlive_parent: true }
+  const params = { argv: launch ? [launch, '--', ...argv] : argv, env: termEnv, labels: set, name, no_notify: true, outlive_parent: true, keep: true }
   if (cwd) params.cwd = cwd
   const row = await rpc('terminal.run', params, { timeoutMs: TIMEOUT.run, env })
   return { id: row.address, name: row.name ?? name }
