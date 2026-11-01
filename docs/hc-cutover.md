@@ -17,5 +17,19 @@ agents from before the switch are simply not seen afterwards.
    `notes = false` is set in `~/.config/herdr-core/config.toml` (read only; wt-pack never edits it), and warns, without
    removing anything, about leftovers of the old setup (a `~/.claude/settings.json` hook, launchd entries). Remove those by hand.
 
+## What goes stale (not migrated)
+
+Records made against the old pane ids (for example `w5:p8`) are matched by exact id and are not migrated: hc addresses
+look like `t3`, so no old id ever matches a new terminal. After the switch, silently (no error, no banner):
+
+- messages and deliveries still queued or awaiting an ack for an old pane are never delivered and never acked; they stay
+  as `queued`/`sent` rows and show up as agents that never answered;
+- a ticket assigned to an old pane (its `agent`/`pair` field) keeps showing that id, which resolves to no agent, so the
+  card reads as assigned to an unknown pane and nothing picks it up;
+- pending asks and Inbox cards that came from an old pane cannot be answered into it.
+
+Finishing or closing these before step 1 (answer the asks, let queued messages land, reassign or release the tickets so
+they read as unassigned) avoids all of it. After the switch, reassign the tickets to a new agent by hand.
+
 Things that differ from the old setup are listed in [features.md](features.md): no remote machines yet, plain-text
 terminal views, key-by-key typing limits in the Terminals view, and the blocked-agent queue.
