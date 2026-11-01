@@ -112,6 +112,13 @@ describe('send', () => {
     await hc.send('s1', 'hello'); await hc.send('s1', 'hello', { ifIdle: true })
     for (const a of argsOf('send')) assert.ok(!a.includes('--force'))
   })
+  test('{ force: true } passes --force (only the picker answer route asks for it); it is never combined with --if', async () => {
+    use({ send: 'ok_done' })
+    await hc.send('s1', 'my own words', { force: true })
+    assert.deepEqual(argsOf('send')[0], ['send', '--json', '--force', 's1', 'my own words'])
+    await hc.send('s1', 'x', { force: true, ifIdle: true })
+    assert.deepEqual(argsOf('send')[1], ['send', '--json', '--force', 's1', 'x'])
+  })
   test('blocked: thrown once, no retry, nothing forced', async () => {
     use({ send: ['blocked', 'ok_done'] })
     await assert.rejects(hc.send('s3', 'hi', { ifIdle: true }), (e) => e.kind === 'blocked')

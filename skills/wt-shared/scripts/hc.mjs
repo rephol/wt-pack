@@ -154,10 +154,13 @@ export async function setLabels(t, want, { current, roles, env } = {}) {
 export const clearLabel = (t, ...keys) => setLabels(t, Object.fromEntries(keys.map((k) => [k, ''])), { current: {} })
 
 // ---- talking ------------------------------------------------------------------------------------------------------------
-// Never --force: a blocked agent throws kind `blocked` and the caller queues the message. ifIdle types only while the agent
+// Never --force by default: a blocked agent throws kind `blocked` and the caller queues the message. `force: true` (WP-378 D26) is for ONE
+// caller, the dashboard's session-cookie answer route, where the user has chosen to answer the agent's dialog; no delivery, sweep or flush passes it.
+// force wins over ifIdle/ifWorking (a forced send is the user's act, not a conditional one). ifIdle types only while the agent
 // is idle, or rests at `done` (hc refuses `--if idle` for done, which is the normal resting state after a turn); a shell
 // has no status, so hc refuses it too and nothing is typed into it.
-export async function send(t, text, { ifIdle = false, ifWorking = false, env } = {}) {
+export async function send(t, text, { ifIdle = false, ifWorking = false, force = false, env } = {}) {
+  if (force) return hc(['send', '--json', '--force', t, text], { timeoutMs: TIMEOUT.send, env })
   const args = ['send', '--json', ...(ifIdle ? ['--if', 'idle'] : ifWorking ? ['--if', 'working'] : []), t, text]
   try {
     return await hc(args, { timeoutMs: TIMEOUT.send, env })
