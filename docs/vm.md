@@ -1,6 +1,6 @@
 # Running wt-pack on a Linux VM
 
-One machine holds everything: herdr, a logged-in Claude Code, your repos, and the dashboard. You reach the
+One machine holds everything: hc (herdr-core), a logged-in Claude Code, your repos, and the dashboard. You reach the
 dashboard from your laptop or phone through **Tailscale** (preferred) or an **SSH tunnel**. Never through a
 public URL or an open port: whoever reaches the dashboard can type into agents that run with bypassed
 permissions.
@@ -11,7 +11,7 @@ As in the README's Linux quick start, on the VM (Debian/Ubuntu shown; use `sudo`
 
 ```sh
 sudo apt-get install -y git curl jq gh                          # plus Node ≥ 22.13 (nodesource or nvm)
-curl -fsSL https://herdr.dev/install.sh | sh                    # installs to ~/.local/bin
+# install hc (herdr-core) and put it on PATH; `hc update` keeps it current
 npm i -g @anthropic-ai/claude-code && claude                    # log in once
 gh auth login
 git clone https://github.com/rephol/wt-pack.git ~/wt-pack
@@ -21,13 +21,13 @@ git clone https://github.com/rephol/wt-pack.git ~/wt-pack
 
 `test/docker/` runs the same install in a clean `node:22` container, if you want to see it work first.
 
-## 2. Keep herdr running
+## 2. Keep the hc core running
 
-The dashboard reads agents from the herdr server; without it the Overview cannot load. Start it from an SSH
-session and detach. The server keeps running after the client leaves, as tmux does:
+The dashboard reads agents from the hc core; without it the Overview cannot load, and nothing in wt-pack starts it for you.
+Start it once from an SSH session; it keeps running after you log out, and terminals persist across a core restart:
 
 ```sh
-herdr        # then detach; `herdr status server` should say "status: running"
+hc server start        # `./setup doctor` should then print "hc core running"
 ```
 
 ## 3. Run the dashboard as a service
@@ -42,7 +42,7 @@ loginctl enable-linger "$USER"          # keep it running when you log out
 journalctl --user -u wt-dashboard -f    # its log
 ```
 
-Edit the unit's paths if your checkout is not `~/wt-pack`, or if `node`, `gh`, `herdr` and
+Edit the unit's paths if your checkout is not `~/wt-pack`, or if `node`, `gh`, `hc` and
 `claude` are not on its `PATH` line.
 
 ### The PR-watch poller (wt-watch-prs)

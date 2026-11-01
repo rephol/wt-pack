@@ -6,7 +6,7 @@ change either without breaking the other.
 ## Set up
 
 You need macOS or Linux, Node ≥ 22.13 (for `node:sqlite`), Git, [`gh`](https://cli.github.com),
-[herdr](https://herdr.dev) and Claude Code.
+`hc` (herdr-core) and Claude Code.
 
 ```sh
 git clone https://github.com/rephol/wt-pack.git ~/wt-pack
