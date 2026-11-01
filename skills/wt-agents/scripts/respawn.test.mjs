@@ -55,7 +55,7 @@ test('respawn <name>: ends the old terminal first, the new one has the shims, re
   const labelCalls = r.calls.filter((c) => c.args[0] === 'label').map((c) => c.args.slice(2))
   assert.ok(labelCalls.some((a) => a[0] === 't9' && a[1] === 'task=WP-9 fix'), JSON.stringify(labelCalls))
   assert.ok(labelCalls.some((a) => a[0] === 't9' && a[1] === 'ticket=WP-9'))
-  assert.ok(!labelCalls.some((a) => /^(created|wt\.pool|herdr\.space)=/.test(a[1])), 'spawn sets those itself')
+  assert.ok(!labelCalls.some((a) => /^(created|wt\.pool|herdr\.space)=/.test(a[1])), 'spawn sets those itself') // legacy-herdr
 })
 
 test('respawn refuses a working agent without --force; no transcript → fresh start', () => {

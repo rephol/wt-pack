@@ -93,7 +93,7 @@ back over whatever the rc set and re-prepends the kill-shim dir to `PATH`. It ne
 
 herdr-app shows a terminal only with `herdr.space=<id>`: spawn looks the pool's space up by name in `herdr-app ls` (lowest id if
 two) or makes it under a per-pool lock, then closes the plain shell the new space opened. If herdr-app is missing or fails, the
-agent runs hidden (no `herdr.*` label), a warning is printed and the spawn still succeeds. Adopting a terminal enables hc's
+agent runs hidden (no `herdr.space`/`herdr.tab` label), a warning is printed and the spawn still succeeds. Adopting a terminal enables hc's
 *keep*, so a dead agent can become a login shell.
 
 ## Lean MCP

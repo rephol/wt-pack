@@ -26,11 +26,11 @@ const run = (extra = {}, args = ['--', '/usr/bin/env']) => {
 
 test('denylist: what the core inherited from another agent is scrubbed, what the spawner set is kept', () => {
   const r = run({ HOME: join(tmp, 'norc'), // no rc here, so a surviving value can only have come from the core's environment
- GH_TOKEN: 'leaked-gh', WT_PANE_KEY: 'mine', WT_DELIVER_TOKEN: 'leak', WT_HEADLESS_ID: 'hl-1', CLAUDE_ENV_FILE: '/other/env.sh', HERDR_PANE_ID: 'w1:p1', HERDR_ENV: '1', WT_ROLE: 'other-role',
+ GH_TOKEN: 'leaked-gh', WT_PANE_KEY: 'mine', WT_DELIVER_TOKEN: 'leak', WT_HEADLESS_ID: 'hl-1', CLAUDE_ENV_FILE: '/other/env.sh', HERDR_PANE_ID: 'w1:p1', HERDR_ENV: '1', /* legacy-herdr */ WT_ROLE: 'other-role',
     WT_LAUNCH_KEYS: 'WT_PANE_KEY,WT_ROLE' })
   assert.equal(r.status, 0, r.stderr)
   assert.equal(r.env.WT_PANE_KEY, 'mine')
-  for (const k of ['GH_TOKEN', 'WT_DELIVER_TOKEN', 'WT_HEADLESS_ID', 'CLAUDE_ENV_FILE', 'HERDR_PANE_ID', 'HERDR_ENV']) assert.equal(r.env[k], undefined, k)
+  for (const k of ['GH_TOKEN', 'WT_DELIVER_TOKEN', 'WT_HEADLESS_ID', 'CLAUDE_ENV_FILE', 'HERDR_PANE_ID', 'HERDR_ENV']) assert.equal(r.env[k], undefined, k) // legacy-herdr
   assert.equal(r.env.WT_ROLE, 'other-role', 'WT_ROLE was named in WT_LAUNCH_KEYS so it is the spawner\'s value') // here the spawner "set" it
   assert.equal(r.env.HC_SESSION, 'wtt-x', 'HC_SESSION is the core\'s own for this terminal: an isolated core\'s agents must keep it')
   assert.equal(r.env.HC_TERMINAL_ID, 't7')

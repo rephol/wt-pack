@@ -60,7 +60,7 @@
 # (GH_TOKEN, WT_PANE_KEY) travel in the terminal.run request body, never in argv or a file.
 set -eu
 
-# WP-293: --headless goes to wt-dashboard's /api/headless, never to herdr. Prints the body; exit 1 on a non-2xx or no answer.
+# WP-293: --headless goes to wt-dashboard's /api/headless, never to the terminal core. Prints the body; exit 1 on a non-2xx or no answer.
 hl_call() { # method path [json]
   hl_out=$(curl -sS --max-time 10 -X "$1" ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} -w '\n%{http_code}' "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless$2" 2>/dev/null) \
