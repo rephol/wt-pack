@@ -41,12 +41,13 @@ const DENY = ['GH_TOKEN', 'GITHUB_TOKEN', 'WT_PANE_KEY', 'WT_DELIVER_TOKEN', 'CL
   'WT_HEADLESS_ID', 'WT_HEADLESS_X', 'HERDR_PANE_ID', 'HERDR_DASH_URL', 'HERDR_ENV', 'WT_RUN_KEY', 'WT_GATE', 'WT_TURN_DIR', 'WT_MEMORY_CACHE', 'WT_DASHBOARD_DATA',
   'WT_DASHBOARD_ENV', 'WT_TRUSTED_PROJECTS', 'WT_MEMORY_HOME', 'WT_MESSAGES_DIR', 'WT_RECEIPTS_DIR']
 test('denylist, every name: scrubbed when only the core had it, kept (the spawner\'s value) when listed in WT_LAUNCH_KEYS', () => {
-  const inherited = Object.fromEntries(DENY.map((k) => [k, `core-${k}`]))
+  const val = (k) => (k === 'WT_DASHBOARD_DATA' ? join(tmp, 'core-data') : `core-${k}`) // a real path: the launcher writes pane-keys under it
+  const inherited = Object.fromEntries(DENY.map((k) => [k, val(k)]))
   const gone = run({ HOME: join(tmp, 'norc'), ...inherited, WT_LAUNCH_KEYS: '' })
   assert.equal(gone.status, 0, gone.stderr)
   assert.deepEqual(DENY.filter((k) => gone.env[k] !== undefined), [], 'inherited and not listed: still present')
   const kept = run({ HOME: join(tmp, 'norc'), ...inherited, WT_LAUNCH_KEYS: DENY.join(',') })
-  assert.deepEqual(DENY.filter((k) => kept.env[k] !== `core-${k}`), [], 'listed by the spawner: must survive')
+  assert.deepEqual(DENY.filter((k) => kept.env[k] !== val(k)), [], 'listed by the spawner: must survive')
 })
 
 test('the pack beats the rc: an rc that sets GH_TOKEN/WT_PANE_KEY and rewrites PATH does not win; rc-only variables still arrive; bookkeeping is gone', () => {
