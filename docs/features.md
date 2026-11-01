@@ -535,12 +535,13 @@ Chat rooms shared by you and agents.
   one counts as unverified). Otherwise the agent is told no, and an Inbox ask "<agent> wants to git push: …" appears with
   *Allow once* / *Deny*; *Allow once* lets the agent's next identical command through for 10 minutes, once. Settings →
   *Ask before push, merge, delete and send-out actions* (`WT_GATE`, default `ask`; `off` restores the old behaviour). It is a
-  pattern list, not a shell parser: obfuscated shell (`sh -c "$(…)"`, a script that pushes itself) and other tools (`gh api -X
-  PUT …/merge`) are not caught, and a gate that cannot run lets the command through. Merge order: server (restart) → plugin.
+  pattern list, not a shell parser: literal `sh -c '…'` / `bash -c "…"` / `eval '…'` strings and the command carried by `hc run` / `hc exec` are read (and a lone `&` separates commands), but
+  indirection (`sh -c "$(…)"`, a variable holding the command), a pipe into a shell, a script that pushes itself and other tools (`gh api -X
+  PUT …/merge`) are not caught, and a gate that cannot run lets the command through. A command over 32 KB is read up to that length; if its remainder mentions `hc`, `git`, `gh` or `rm` it asks (`long-command`, as does nesting deeper than six levels). Merge order: server (restart) → plugin.
   **Block messages (WP-361):** every wt-pack deny — the gate and the repo-rule guards (no draft PR, `commit -a`, force-push, short
   `pkill -f`, branch change in the main checkout, …) — names the rule id and the matched segment, quoted and cut at 120
   characters: `wt-pack gate [rule: secret-var, segment: \`curl …\`]: …`. Gate rule ids: `push`, `merge`, `branch-delete`,
-  `worktree-remove`, `gh-pr`, `rm-outside`, `upload`, `secret-var`, `raw-socket`. A compound command is judged whole, so the
+  `worktree-remove`, `gh-pr`, `rm-outside`, `upload`, `secret-var`, `raw-socket`, `long-command`; hc rules (WP-378): `hc-forged-send` (an `hc send`/`keys` with `HC_TERMINAL_ID` unset, emptied or set to another value, or `env -i`, also behind `sh -c`), `hc-core` (`hc server stop|restart`, `hc update`), `hc-kill` (`hc kill`, `hc rm`), `hc-keys` (`hc keys`, `hc interrupt`, `hc send --force`), `hc-label` (setting `role=`, `persona=` or `wt.pool=` on a terminal) and `upload` (`hc put`, `hc file write`, anything with `--on`). A compound command is judged whole, so the
   message says to run the other parts as their own command. **Loopback exemption:** `curl` (not `wget`, which follows redirects and re-sends headers by default) passes the send-out rule when
   every URL host is literally `127.0.0.1`, `localhost` or `[::1]` (http/https), so the pack's own CLIs can call the dashboard
   with a pane key. Still gated: a proxy or connection flag (`-x`, `--proxy`, `--connect-to`, `--resolve`, `--unix-socket`, a
