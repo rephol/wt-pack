@@ -465,3 +465,9 @@ terminal's size to the viewer's (it would reflow the agent's TUI).
   remote machines. (3) CLAUDE.md Traps: `hc keys` names keys (capitals only as `shift+<letter>`, no shifted punctuation); `--force` only on the user's answer
   route; the in-memory blocked queue. (4) QA brief step 2 gains D28's `--goal` checks and a free-text picker answer (single-select, and multi-select per D26)
   on the isolated core. (5) Doctor: `hc` version line (probe used 0.1.16; key names and `send --force` semantics are version-bound).
+- **F3 landed** (25763e0 wt-shared, 153a525 wt-dashboard; dashboard 808/808 + web 109/109, root 491/491; link guard unchanged, default core untouched).
+  D26 live: single-select Other = key `n+1` + forced send, submits. Multi-select: a forced paste+Enter commits the text but leaves Other unticked, so
+  `answerPlan` multi = toggles, move to Other (no digit), `{text}` forced, `{ensure:text}` (re-read, one Enter if Other is not ticked with the text, 409
+  before Submit if still not), `down enter`; `parsePicker` returns `otherChecked`. **U-Q2 is dropped**: multi-select Other works. D32 reached ~12 users of
+  `canonicalPane`: exact id matches, and the pane-identity routes (`/api/deliveries`, `/api/messages`, `/api/watch-prs/event`, keepwarm, `roomAuthor`)
+  now use `liveAgent` (a `tN` that hc lists as a local agent). That identity change gets a diff review (security lens) at 153a525 before U7.
