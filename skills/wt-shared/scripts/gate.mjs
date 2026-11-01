@@ -12,7 +12,7 @@ const inside = (p, root) => p === root || p.startsWith(root.endsWith(sep) ? root
 const SECRET_VAR = /\$\{?[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]*\}?/
 
 // WP-361: every hit names its rule id (`rule`) and the segment that matched (`segment`: whitespace-collapsed, ≤120 chars), so a deny says
-// what to split out of a compound command. Rule ids: push, merge, branch-delete, worktree-remove, gh-pr, rm-outside, upload, secret-var, raw-socket.
+// what to split out of a compound command. Rule ids: push, merge, branch-delete, worktree-remove, gh-pr, rm-outside, upload, secret-var, raw-socket; WP-378 hc: hc-forged-send, hc-core, hc-kill, hc-keys (and upload for hc put / file write / --on).
 export const SEGMENT_MAX = 120
 const clip = (seg) => { const t = seg.replace(/\s+/g, ' ').trim(); return t.length > SEGMENT_MAX ? t.slice(0, SEGMENT_MAX - 1) + '…' : t }
 
@@ -60,6 +60,24 @@ const blankSingle = (seg) => {
   return out
 }
 
+// WP-378: the hc terminal runner. Pack scripts call `env -u HC_TERMINAL_ID hc send` INSIDE their own process (D5: the tag-free route), which this
+// never sees; a Bash command that does it itself is an agent forging an untagged message. `hcCall` finds the `hc` command of a segment (after
+// VAR=val / env / sudo wrappers and their flags) → { verb, sub, args, wrap } or null.
+const WRAP = new Set(['env', 'sudo', 'command', 'nohup', 'time'])
+const ID_UNSET = /(?:-u\s+HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
+function hcCall(w) {
+  for (let k = 0; k < w.length; k++) {
+    if (w[k].split('/').pop() === 'hc') {
+      const pre = w.slice(0, k)
+      if (!pre.every((t, n) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t) || WRAP.has(t) || t.startsWith('-') || pre[n - 1] === '-u')) return null
+      const args = w.slice(k + 1), nonFlag = args.filter((a) => !a.startsWith('-'))
+      return { verb: nonFlag[0], sub: nonFlag[1], args, wrap: pre }
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[k]) && !WRAP.has(w[k]) && !w[k].startsWith('-') && w[k - 1] !== '-u') return null
+  }
+  return null
+}
+
 // → null | { action, rule, segment }. `ctx`: { cwd, root } — the session's cwd and its worktree/checkout root (for the rm-outside test).
 export function classify(cmd, ctx = {}) {
   const cwd = ctx.cwd ?? process.cwd(), root = ctx.root ?? cwd
@@ -72,6 +90,17 @@ export function classify(cmd, ctx = {}) {
     while (i < w.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[i]) || ['env', 'sudo', 'command', 'nohup', 'time'].includes(w[i]))) i++
     const [c, ...rest] = w.slice(i)
     if (!c) continue
+    const hc = hcCall(w)
+    if (hc) {
+      const { verb, sub, args } = hc
+      const cleared = hc.wrap.includes('-i') || ID_UNSET.test(String(cmd))
+      if ((verb === 'send' || verb === 'keys') && cleared) return hit('send into another terminal as an untagged (forged) message', 'hc-forged-send')
+      if (verb === 'server' && ['stop', 'restart'].includes(sub) || verb === 'update') return hit('stop, restart or update the hc core', 'hc-core')
+      if (verb === 'kill' || verb === 'rm') return hit('end or remove another terminal', 'hc-kill')
+      if (verb === 'keys' || (verb === 'send' && args.includes('--force'))) return hit('press keys in another terminal (answer its dialog)', 'hc-keys')
+      if (verb === 'put' || (verb === 'file' && sub === 'write') || args.some((a) => a === '--on' || a.startsWith('--on='))) return hit('send files or secrets off the machine', 'upload')
+      continue
+    }
     const name = c.split('/').pop()
     if (name === 'git') {
       let j = 0

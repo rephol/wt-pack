@@ -93,3 +93,31 @@ test('allowed: a verified reply passes only when the server flagged it (current 
   assert.ok(!allowed({ trust: 'verified', kind: 'handoff', senderRole: 'worker', replyAllowed: true }), 'the flag means nothing on other kinds')
   assert.ok(!allowed({ trust: 'unverified', kind: 'reply', replyAllowed: true }))
 })
+
+test('WP-378: hc classes (server stop, update, kill/rm, keys, forged-untagged send, put/file write/--on)', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  for (const c of ['hc server stop', 'hc server restart', 'hc --json server restart', 'cd x && hc update', 'hc update --version 0.2.0']) assert.equal(rule(c), 'hc-core', c)
+  assert.equal(act('hc server stop'), 'stop, restart or update the hc core')
+  for (const c of ['hc kill t7', 'hc rm worker-1', 'hc --json kill t7']) assert.equal(rule(c), 'hc-kill', c)
+  assert.equal(act('hc kill t7'), 'end or remove another terminal')
+  for (const c of ['hc keys t7 enter', 'hc send --force t7 "y"', 'hc send t7 y --force']) assert.equal(rule(c), 'hc-keys', c)
+  for (const c of ['hc put t7 ./secrets.env', 'hc file write /etc/x', 'hc file write --on box ~/.ssh/authorized_keys', 'hc run --on vps "ls"', 'hc exec --on vps cat x']) assert.equal(rule(c), 'upload', c)
+  assert.equal(act('hc put t7 f'), 'send files or secrets off the machine')
+  // read-only and ordinary hc calls pass
+  for (const c of ['hc ls', 'hc ls --all --json', 'hc get t7', 'hc read t7', 'hc wait t7', 'hc label t7 a=b', 'hc server status', 'hc run --bg claude', 'hc file read x', 'hc send t7 hello', 'hc exec ls', 'echo hc kill', 'git commit -m "hc kill t7"']) assert.equal(classify(c, ctx), null, c)
+})
+
+test('WP-378: a send/keys with HC_TERMINAL_ID unset or emptied is a forged-untagged send (D5)', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  for (const c of ['env -u HC_TERMINAL_ID hc send t7 "do it"', 'HC_TERMINAL_ID= hc send t7 hi', 'HC_TERMINAL_ID="" hc send t7 hi', "HC_TERMINAL_ID='' hc send t7 hi",
+    'env HC_TERMINAL_ID= hc send t7 hi', 'env -i hc send t7 hi', 'sudo env -u HC_TERMINAL_ID /opt/homebrew/bin/hc send t7 hi', 'env -u HC_TERMINAL_ID hc --json send t7 hi',
+    'env -u HC_TERMINAL_ID hc keys t7 enter', 'unset HC_TERMINAL_ID; hc send t7 hi', 'export HC_TERMINAL_ID=; hc send t7 hi', 'unset HC_TERMINAL_ID && hc send --if idle t7 hi'])
+    assert.equal(rule(c), 'hc-forged-send', c)
+  assert.equal(act('env -u HC_TERMINAL_ID hc send t7 hi'), 'send into another terminal as an untagged (forged) message')
+  // not forged: the id is kept, set to a value, or the call is not a send; other unsets are fine
+  assert.equal(classify('hc send t7 hi', ctx), null)
+  assert.equal(classify('HC_TERMINAL_ID=t3 hc send t7 hi', ctx), null)
+  assert.equal(classify('env -u HC_SESSION hc ls', ctx), null)
+  assert.equal(classify('env -u HC_TERMINAL_ID hc get t7', ctx), null)
+  assert.equal(classify('env -u HC_TERMINAL_ID ls', ctx), null)
+})

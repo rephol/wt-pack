@@ -27,6 +27,6 @@
  {"state": {"skill": "wt-plan", "role": "planner", "task": "Design the plugin-only install so every skill works without the setup links"}, "expect": "opus"},
  {"state": {"skill": "wt-review", "role": "reviewer", "lens": "data", "task": "Review the backfill that rewrites every ticket history row"}, "expect": "opus"},
  {"state": {"skill": "wt-research", "role": "researcher", "task": "Decide whether the SSRF guard on /api/unfurl covers DNS rebinding and redirects"}, "expect": "opus"},
- {"state": {"skill": "wt-work", "role": "worker", "task": "Fix an intermittent deadlock between the terminal websocket and the herdr pane reader"}, "expect": "opus"},
+ {"state": {"skill": "wt-work", "role": "worker", "task": "Fix an intermittent deadlock between the terminal websocket and the hc terminal reader"}, "expect": "opus"},
  {"state": {"skill": "wt-audit", "role": "auditor", "task": "Audit the pipeline for places where a failed step is reported as passed"}, "expect": "opus"}
 ]
