@@ -65,7 +65,22 @@ const WHERE = 'test -f "$(git rev-parse --show-toplevel 2>/dev/null)/.claude-plu
 // WP-332: a command that might push, merge, delete outside the worktree or send files/secrets out is checked against the turn's
 // origin by `wt-gate` (the policy is wt-shared/scripts/gate.mjs; the mod has no Node and no env, so it asks the CLI). Cheap prefilter
 // first: only a command that could be gated pays for the process.
-const MAYBE_GATED = /\bgit\b[^|;&\n]*\b(push|merge|branch|worktree)\b|\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+// WP-378 F8: the prefilter must pass EVERY command gate.mjs classifies (guards.test.ts holds it to wt-shared/scripts/fixtures/gate-cases.mjs): hc (any verb), and commands inside
+// a quoted `sh -c '…'` / `eval '…'` / `hc run "…"` string, which blanking the quotes would hide. Linear: one pass per segment, no regex that rescans a long line per `git`.
+const GIT_SUB = /\b(push|merge|branch|worktree)\b/
+const TOOLS = /\bgh\s+pr\b|\b(rm|rmdir|curl|wget|scp|rsync|nc|ncat|hc)\b/
+const WRAPPER = /\b(?:ba|z|da|k|c)?sh\b|\beval\b/
+const blank = (s: string) => s.replace(/"[^"]*"|'[^']*'/g, '""') // words inside a message are not subcommands
+const SIMPLE = /^(["'])[\w./~=-]+\1$/
+const hit = (text: string) => text.split(/[|;&\n]/).some((seg) => TOOLS.test(seg) || (/\bgit\b/.test(seg) && GIT_SUB.test(seg)))
+// What the gate refuses outright instead of reading (it caps what it scans, and the command is an argv word, ~1 MB is the OS limit): a longer command that mentions any tool.
+export const GATE_MAX = 131072
+const ANY_TOOL = /\b(?:hc|git|gh|rm|rmdir|curl|wget|scp|rsync|nc|ncat)\b/
+export const maybeGated = (cmd: string) => {
+  if (cmd.length > GATE_MAX) return ANY_TOOL.test(cmd)
+  const b = blank(cmd)
+  return hit(b) || /\bhc\b/.test(cmd.replace(/"[^"]*"|'[^']*'/g, (m) => (SIMPLE.test(m) ? m : '""'))) || (WRAPPER.test(b) && hit(cmd))
+}
 // WP-361: a gate deny names the rule id and the matched segment (wt-gate sends both) and says how to get the rest of a compound command through.
 const SPLIT = ' Only that segment is gated: run the other parts of the command as their own command.'
 const gateDeny = (stdout: string) => {
@@ -86,7 +101,8 @@ export const registerGuards = (on: Parameters<Register>[0], skills: (root: strin
       const at = await where
       if (at !== 1) deny = guard(e.command, true, at === 0)
     }
-    if (!deny && MAYBE_GATED.test(e.command.replace(/"[^"]*"|'[^']*'/g, '""'))) { // words inside a message are not subcommands
+    if (!deny && maybeGated(e.command) && e.command.length > GATE_MAX) deny = `wt-pack gate [rule: long-command]: command too long for the gate (over ${GATE_MAX / 1024} KB) and it mentions git, hc, rm or a network tool. Split it into smaller commands (or put the long text in a file).`
+    else if (!deny && maybeGated(e.command)) {
       // exit 3 = gated; anything else (allowed, spawn error, timeout) lets it through: a broken gate must not wedge every agent
       const r = await $.process.run([`${skills($.plugin.root)}/wt-shared/scripts/wt-gate`, 'check', '--', e.command], { timeoutMs: 8000 }).catch(() => undefined)
       if (r && r.exitCode === 3) deny = gateDeny(r.stdout)

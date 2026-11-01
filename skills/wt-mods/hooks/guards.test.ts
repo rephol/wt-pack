@@ -1,5 +1,6 @@
 import { test, expect } from 'claude-code/testing'
-import { guard } from './guards'
+import { guard, maybeGated, GATE_MAX } from './guards'
+import cases from '../../wt-shared/scripts/fixtures/gate-cases.mjs'
 
 test('refuses draft PRs, commit -a, a foreign author, skills paths in sent strings', () => {
   expect(guard('gh pr create --draft --title x')).toMatch(/draft/)
@@ -145,4 +146,39 @@ test('WP-332: a gate that cannot run fails open (it must not wedge every agent)'
   gateRig(on, () => 'throw')
   const r: any = await $.tool.call({ tool: 'Bash', command: 'git push' })
   expect(r.deny).toBeUndefined()
+})
+
+// WP-378 F8: the prefilter must pass every command wt-gate would classify. The cases are wt-shared's fixtures/gate-cases.mjs, the same list gate.test.mjs holds the
+// policy to, so a new gate class with no prefilter path fails here.
+test('WP-378 F8: the prefilter lets every command the gate classifies through to wt-gate', () => {
+  expect((cases as { cmd: string }[]).length).toBeGreaterThan(150)
+  const missed = (cases as { cmd: string; rule: string }[]).filter((c) => !maybeGated(c.cmd)).map((c) => `${c.rule}: ${c.cmd.slice(0, 80)}`)
+  expect(missed).toEqual([])
+})
+
+test('WP-378 F8: the prefilter reads quoted hc, wrapped hc and hc run payloads; plain commit messages still do not spawn the gate', () => {
+  for (const c of ['hc kill t3', '"hc" kill t3', "'hc' rm t3", '\\hc kill t3', "sh -c 'hc kill t3'", 'eval "hc kill t3"', 'hc run "git push"', "hc run 'rm -rf /etc/x'", "bash -c 'git push'", 'env -i hc send t3 x'])
+    expect(maybeGated(c)).toBe(true)
+  for (const c of ['npm test', 'git status', 'git commit skills/a -m "push"', 'git commit -m "docs: A & git merge notes"', 'git commit -m "hc kill t3"', 'echo "git push"', 'ls -la', "sh -c 'echo hi'", 'eval "echo hi"', 'echo hi && cat x'])
+    expect(maybeGated(c)).toBe(false)
+})
+
+test('WP-378 F8: a command over the gate limit that reaches the gate is denied by the mod, not passed to argv', async ($, on) => {
+  const runs = gateRig(on, () => ({ exitCode: 0, stdout: '' }))
+  const big = 'git push ' + ' '.repeat(GATE_MAX + 10)
+  const r: any = await $.tool.call({ tool: 'Bash', command: big })
+  expect(r.deny).toMatch(/too long for the gate/)
+  expect(r.deny).toMatch(/Split/)
+  expect(r.deny).toMatch(/long-command/)
+  expect(runs.length).toBe(0)
+  const ok: any = await $.tool.call({ tool: 'Bash', command: 'echo ' + 'a'.repeat(GATE_MAX + 10) }) // nothing gated in it: runs
+  expect(ok.deny).toBeUndefined()
+  expect(runs.length).toBe(0)
+})
+
+test('WP-378 F8: the prefilter is linear on a long line (git git git … of 120 KB)', () => {
+  const t = Date.now()
+  expect(maybeGated('git '.repeat(30000))).toBe(false)
+  expect(maybeGated('(' .repeat(120000) + 'sh -c')).toBe(false)
+  expect(Date.now() - t).toBeLessThan(500)
 })
