@@ -54,6 +54,6 @@ export const runCase = (address) => ({ exit: 0, stdout: JSON.stringify({ jsonrpc
 // Everything one agents.sh run needs: PATH with the fake hc (and optional fake herdr-app) first, HOME/XDG in tmp.
 export function harness({ tmp, cases = {}, app = null, extraEnv = {} } = {}) {
   const fake = installFakeHc({ cases })
-  const env = { ...fake.env, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env'), ...(app ? { ...app.env, PATH: `${app.bin}:${fake.env.PATH}` } : {}), ...extraEnv }
+  const env = { ...fake.env, HOME: tmp, WT_HC_TIMEOUT_SCALE: '5', XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env'), ...(app ? { ...app.env, PATH: `${app.bin}:${fake.env.PATH}` } : {}), ...extraEnv }
   return { fake, env }
 }
