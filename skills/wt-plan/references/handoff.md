@@ -49,12 +49,12 @@ where the user reads it and decides:
 
 ## Handing it to a worker
 
-**When `herdr` is on PATH, always offer** — one line naming the worker and the worktree — **and wait for a
+**When `hc` is on PATH, always offer** — one line naming the worker and the worktree — **and wait for a
 yes.** Spawning an agent that starts writing code is the user's call, never an inference from how the ticket
 was phrased. On anything other than a yes, print the prompt and stop. The exception is a standing instruction
 to hand off automatically.
 
-Workers live in their own herdr workspace, `<repo>-workers`, so handed-off work never lands among your own
+Workers live in their own pool (an hc label and a herdr-app space), `<repo>-workers`, so handed-off work never lands among your own
 tabs and finished workers are recycled instead of piling up. List the free ones — idle **or done**, sitting
 in the repo's **main checkout**; a worker parked inside a worktree is work already in flight:
 
@@ -104,9 +104,9 @@ directive, so it is one message, not a prompt followed by a goal.
 
 Three constraints the script handles, worth knowing because each fails silently:
 
-- **One line, because of the transport.** `herdr agent prompt` types into the worker's pane, so a newline is
+- **One line, because of the transport.** `hc send` types into the worker's terminal, so a newline is
   Enter: a three-line prompt submits `/goal <first line>` and types the rest as separate turns. Claude Code
-  itself accepts a multi-line `/goal` when a human pastes one — this constraint is herdr's, not the
+  itself accepts a multi-line `/goal` when a human pastes one — this constraint is the terminal's, not the
   command's. The script flattens the prompt, so write it normally.
 - **4,000 characters**, checked before sending rather than letting the command be rejected mid-handoff.
 - **The evaluator reads only the conversation.** It cannot run commands or read files, so it judges from what
@@ -140,12 +140,9 @@ agents.sh spawn planner [cwd]          # planner starts in the MAIN checkout —
 agents.sh rm <name|pane> [--force]     # closes the tab
 ```
 
-**Every agent is named, and the name needs its own step.** `herdr agent start <NAME>` names only what it
-actually *starts*; when it instead DETECTS a claude already running in that pane — the path a
-timeout-and-retry takes — it reports success and the name never lands. Four of this pool's six workers were
-unnamed for exactly that reason, findable only through their tab label. `agents.sh` always follows a start
-with an explicit `agent rename`, and backfills any unnamed agent in the pool from its tab label on every
-call, so `rm <name>` works on agents that predate it.
+**Every agent is named at spawn.** `agents.sh spawn` starts the terminal with `hc run --name <NAME>` and the same
+name goes to `claude --name`. Names are unique in the core and cannot be renamed, so there is no repair step: a
+taken name makes the spawn pick the next number, and `rm <name>` works on every agent the script started.
 
 **`rm` refuses a `working` agent** unless given `--force`. A turn in flight is discarded with it, and until
 the worker commits, its work exists only in that pane.
