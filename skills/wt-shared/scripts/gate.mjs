@@ -63,22 +63,25 @@ const blankSingle = (seg) => {
 // WP-378: the hc terminal runner. Pack scripts call `env -u HC_TERMINAL_ID hc send` INSIDE their own process (D5: the tag-free route), which this
 // never sees; a Bash command that does it itself is an agent forging an untagged message. `hcCall` finds the `hc` command of a segment (after
 // VAR=val / env / sudo wrappers and their flags) → { verb, sub, args, wrap } or null.
-const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
+const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|--unset(?:=|\s+)HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
 // Wrappers that run their next word as a command, and the flags of each that take a VALUE as the next word (`-uNAME` attached needs none).
-const WRAP_VAL = { env: ['-u', '-C', '-S'], sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], command: [], nohup: [], time: ['-f', '-o'], exec: ['-a'],
+const WRAP_VAL = { env: ['-u', '-C', '-S', '--unset', '--chdir', '--split-string'], sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], command: [], nohup: [], time: ['-f', '-o'], exec: ['-a'],
   timeout: ['-s', '-k', '--signal', '--kill-after'], nice: ['-n', '--adjustment'], xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '-J'], eval: [] }
 // Shell keywords that precede a command word (`for …; do hc kill $t; done`, `if …; then hc …`, `! hc …`): skipped like a wrapper without flags.
 const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!'])
 // `sh|bash|zsh|dash|ksh|csh -c '<cmd>'` and `eval '<cmd>'` in command position: the quoted string is itself a command line (classified recursively).
-const SHELL_C = /(?:^|[;&|\n(`{]|\$\()[^;&|\n'"]{0,300}?\b(?:ba|z|da|k|c)?sh\b(?:\s+-[A-Za-z-]+)*?\s+-[A-Za-z]*c[A-Za-z]*\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
-const EVAL_Q = /(?:^|[;&|\n(`{]|\$\()[^;&|\n'"]{0,300}?\beval\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+// Linear on purpose (WP-378 F8): the prefix stops at every character that can start another prefix (`(`, `{`, backtick too), so each character is scanned by at most one
+// start, and the flag words are bounded (`sh -ccc…` of 32 KB was quadratic). No length bound on the prefix: a bound at 300 let `<301 spaces>bash -c '…'` through.
+const SHELL_C = /(?:^|[;&|\n(`{]|\$\()[^;&|\n'"(`{]*?\b(?:ba|z|da|k|c)?sh\b(?:\s+-[A-Za-z-]{1,24}){0,12}?\s+-[A-Za-z]{0,12}c[A-Za-z]{0,12}\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
+const EVAL_Q = /(?:^|[;&|\n(`{]|\$\()[^;&|\n'"(`{]*?\beval\s+(?:'([^']*)'|"((?:[^"\\]|\\.)*)")/g
 // `env -i …` (or --ignore-environment) before a shell: the inner hc send runs with no HC_TERMINAL_ID. Applied to the (bounded) prefix of a SHELL_C / EVAL_Q match.
 const ENV_I = /\benv\s+(?:-\S*\s+){0,8}?(?:-[A-Za-z]*i[A-Za-z]*|--ignore-environment)(?=\s)/
 // hc run / hc exec: flags that take the next word as their value (the carried command starts after them, or after `--`).
 const RUN_VAL = { run: ['--name', '--cwd', '--on', '--label', '--parent', '--timeout'], exec: ['--on', '--cwd', '--env', '--timeout'] }
-// One command line is scanned up to this many characters (the regexes below are bounded, but keep the worst case small); what lies past it is only checked for hc/git/gh/rm.
+// One command line is scanned up to this many characters (the regexes below are linear, but keep the worst case small). Over it the command fails CLOSED: a quote opened in the
+// head can close in the tail, so the head's verdict is not trusted to be the whole story; any mention of a risky tool anywhere asks.
 const SCAN_MAX = 32768
-const LONG_WORD = /\b(?:hc|git|gh|rm)\b/
+const LONG_WORD = /\b(?:hc|git|gh|rm|curl|wget|scp|rsync|nc|ncat)\b/
 const TOKEN = /"[^"]*"|'[^']*'|\S+/g
 // A spoofed sender: HC_TERMINAL_ID set to any non-empty value (the empty/unset forms are the forged-untagged case above).
 const ID_SPOOF = /\bHC_TERMINAL_ID=(?!(?:""|'')?(?:[\s;&|)]|$))\S/
@@ -118,6 +121,28 @@ function hcCall(w) {
   return null
 }
 
+// Command separators: && || |& ; newline | always, and a lone & (not >& &> <& 2>&1) only OUTSIDE quotes and not escaped: `curl "…?a=1&b=2"` is one command.
+const splitSegs = (s) => {
+  const out = []
+  let q = '', from = 0
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (q === "'") { if (ch === "'") q = ''; continue }
+    if (ch === '\\') { i++; continue }
+    if (ch === '"') { q = q ? '' : '"'; continue }
+    if (!q && ch === "'") { q = "'"; continue }
+    let n = 0
+    if (ch === '&' && s[i + 1] === '&') n = 2
+    else if (ch === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) n = 2
+    else if (ch === ';' || ch === '\n' || ch === '|') n = 1
+    else if (ch === '&' && !q && !'>&<'.includes(s[i - 1] ?? ' ') && !'>&'.includes(s[i + 1] ?? ' ')) n = 1
+    if (!n) continue
+    out.push(s.slice(from, i)); from = i + n; i += n - 1
+  }
+  out.push(s.slice(from))
+  return out
+}
+
 // → null | { action, rule, segment }. `ctx`: { cwd, root } — the session's cwd and its worktree/checkout root (for the rm-outside test).
 // `carry` (internal): { cleared, spoof } sender-identity markers of an outer shell / hc run, which the carried command inherits.
 export function classify(cmd, ctx = {}, carry = {}) {
@@ -125,8 +150,8 @@ export function classify(cmd, ctx = {}, carry = {}) {
   if (full.length > SCAN_MAX) {
     const r = classify(full.slice(0, SCAN_MAX), ctx, carry)
     if (r) return r
-    const tail = full.slice(SCAN_MAX - 16)
-    return LONG_WORD.test(tail) ? { action: 'run a command too long to read that mentions hc, git, gh or rm', rule: 'long-command', segment: clip(tail.slice(Math.max(0, tail.search(LONG_WORD) - 20))) } : null
+    const at = full.search(LONG_WORD)
+    return at >= 0 ? { action: 'run a command too long to read that mentions hc, git, gh, rm or a network tool', rule: 'long-command', segment: clip(full.slice(Math.max(0, at - 20), at + 100)) } : null
   }
   const depth = carry.depth ?? 0
   if (depth > 6) return { action: 'run a command nested too deep to read (sh -c / eval / hc run)', rule: 'long-command', segment: clip(full) } // never let nesting crash the gate open
@@ -137,7 +162,7 @@ export function classify(cmd, ctx = {}, carry = {}) {
     const r = inner.length < full.length ? classify(inner, ctx, { cleared: cleared0 || ENV_I.test(m[0]), spoof: spoof0, depth: depth + 1 }) : null
     if (r) return r
   }
-  for (const seg of full.split(/&&|\|\||\|&|[;\n|]|(?<![>&<])&(?![>&])/)) {
+  for (const seg of splitSegs(full)) {
     const hit = (action, rule) => ({ action, rule, segment: clip(seg) })
     const bare = seg.replace(/"[^"]*"|'[^']*'/g, (m) => (/^(["'])[\w./~=-]+\1$/.test(m) ? m.slice(1, -1) : '""')) // words inside a message are not subcommands
     const w = words(bare)
@@ -149,7 +174,7 @@ export function classify(cmd, ctx = {}, carry = {}) {
     const hc = hcCall(w)
     if (hc) {
       const { verb, sub, args } = hc
-      const cleared = hc.wrap.includes('-i') || cleared0
+      const cleared = hc.wrap.includes('-i') || hc.wrap.includes('--ignore-environment') || cleared0
       if ((verb === 'send' || verb === 'keys') && cleared) return hit('send into another terminal as an untagged (forged) message', 'hc-forged-send')
       if ((verb === 'send' || verb === 'keys') && spoof0) return hit("send into another terminal as another terminal's identity (HC_TERMINAL_ID set)", 'hc-forged-send')
       if (verb === 'server' && ['stop', 'restart'].includes(sub) || verb === 'update') return hit('stop, restart or update the hc core', 'hc-core')
@@ -162,7 +187,9 @@ export function classify(cmd, ctx = {}, carry = {}) {
         const raw = [...seg.matchAll(TOKEN)].map((m) => m[0]), toks = (raw.length === w.length ? raw : w).slice(hc.from + 1)
         let p = 0
         while (p < toks.length && toks[p].startsWith('-')) { if (toks[p] === '--') { p++; break } p += RUN_VAL[verb].includes(toks[p]) ? 2 : 1 }
-        const carried = toks.slice(p).join(' ')
+        const rest = toks.slice(p)
+        // `hc run "<one string>"`: hc runs a single argument as a shell command line, so unquote it; several words are argv (and `hc exec` always is)
+        const carried = verb === 'run' && rest.length === 1 && /^(["']).*\1$/s.test(rest[0]) ? (rest[0][0] === "'" ? rest[0].slice(1, -1) : rest[0].slice(1, -1).replace(/\\(["$`\\])/g, '$1')) : rest.join(' ')
         const r = carried && carried.length < full.length ? classify(carried, ctx, { cleared, spoof: spoof0, depth: depth + 1 }) : null
         if (r) return r
       }
