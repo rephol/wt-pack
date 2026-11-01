@@ -234,64 +234,70 @@ describe('names', () => {
     assert.throws(() => hc.nextName('x'.repeat(30), []), (e) => e.kind === 'invalid_params')
     assert.throws(() => hc.nextName('Wt-Pack', []), (e) => e.kind === 'invalid_params')
   })
-  test('name_taken (recorded) maps to kind name_taken', async () => {
-    use({ run: 'name_taken' })
+  test('name_taken (recorded terminal.run error) maps to kind name_taken', async () => {
+    use({ 'connect:terminal.run': 'terminal.run_name_taken' })
     await assert.rejects(hc.spawn({ name: 'rec-a', argv: ['sleep', '5'] }), (e) => e.kind === 'name_taken')
   })
   test('spawnNumbered retries on name_taken with the next number', async () => {
-    use({ run: ['name_taken', 'bg'] })
+    use({ 'connect:terminal.run': ['terminal.run_name_taken', 'terminal.run'] })
     const r = await hc.spawnNumbered({ prefix: 'rec', argv: ['sleep', '5'] })
-    const names = argsOf('run').map((a) => a[a.indexOf('--name') + 1])
-    assert.deepEqual(names, ['rec-01', 'rec-02']); assert.ok(r.id)
+    assert.deepEqual(runCalls().map((p) => p.name), ['rec-01', 'rec-02']); assert.ok(r.id)
   })
   test('spawnNumbered gives up after three tries', async () => {
-    use({ run: 'name_taken' })
+    use({ 'connect:terminal.run': 'terminal.run_name_taken' })
     await assert.rejects(hc.spawnNumbered({ prefix: 'rec', argv: ['sleep', '5'] }), (e) => e.kind === 'name_taken')
-    assert.equal(argsOf('run').length, 3)
+    assert.equal(runCalls().length, 3)
   })
 })
 
+// WP-378 D3: spawn is terminal.run over `hc connect`; the env rides in the request body.
+const runCalls = () => fake.calls().filter((c) => c.args[0] === 'connect' && c.stdin).map((c) => JSON.parse(c.stdin)).filter((q) => q.method === 'terminal.run').map((q) => q.params)
 describe('spawn', () => {
-  test('always detached and silent: --bg --outlive-parent --no-notify before the program', async () => {
-    use({ run: 'bg' })
-    await hc.spawn({ name: 'rec-a', cwd: '/tmp', labels: { 'wt.pool': 'rec-workers', role: 'worker' }, argv: ['claude', '--model', 'sonnet'] })
-    const a = argsOf('run')[0]
-    for (const f of ['--bg', '--json', '--outlive-parent', '--no-notify']) assert.ok(a.indexOf(f) >= 0 && a.indexOf(f) < a.indexOf('--'), f)
-    assert.deepEqual(a.slice(a.indexOf('--') + 1), ['claude', '--model', 'sonnet'])
-    assert.ok(a.includes('wt.pool=rec-workers') && a.includes('role=worker'))
+  test('always detached and silent: outlive_parent and no_notify, labels and cwd as given', async () => {
+    use({})
+    const r = await hc.spawn({ name: 'rec-r', cwd: '/tmp', labels: { 'wt.pool': 'rec-workers', role: 'worker' }, argv: ['claude', '--model', 'sonnet'] })
+    const [p] = runCalls()
+    assert.equal(p.outlive_parent, true); assert.equal(p.no_notify, true)
+    assert.deepEqual(p.argv, ['claude', '--model', 'sonnet']); assert.equal(p.cwd, '/tmp'); assert.equal(p.name, 'rec-r')
+    assert.deepEqual(p.labels, { 'wt.pool': 'rec-workers', role: 'worker' })
+    assert.equal(r.id, 't1')
   })
-  test('with a launcher the env file is an argument, its CONTENT never is', async () => {
-    use({ run: 'bg' })
-    const f = join(fake.dir, 'env-1'); writeFileSync(f, 'GH_TOKEN=ghp_SECRETVALUE\nWT_PANE_KEY=k3y\n', { mode: 0o600 })
-    await hc.spawn({ name: 'rec-a', argv: ['claude'], launch: { script: '/pack/hc-launch', envFile: f } })
-    const a = argsOf('run')[0]
-    assert.deepEqual(a.slice(a.indexOf('--') + 1), ['/pack/hc-launch', f, '--', 'claude'])
-    assert.ok(!JSON.stringify(fake.calls()).includes('SECRETVALUE'))
-  })
-  test('the env file is gone after a FAILED hc run (and a good run leaves it to the launcher)', async () => {
-    use({ run: ['name_taken', 'bg'] })
-    const f = join(fake.dir, 'env-2'); writeFileSync(f, 'GH_TOKEN=x\n')
-    await assert.rejects(hc.spawn({ name: 'rec-a', argv: ['claude'], launch: { script: '/l', envFile: f } }), (e) => e.kind === 'name_taken')
-    assert.ok(!existsSync(f), 'failed run removes the env file')
-    const g = join(fake.dir, 'env-3'); writeFileSync(g, 'GH_TOKEN=x\n')
-    await hc.spawn({ name: 'rec-b', argv: ['claude'], launch: { script: '/l', envFile: g } })
-    assert.ok(existsSync(g), 'hc-launch deletes it on success, not the adapter')
+  test('with a launcher: program is <launch> -- <argv> and WT_LAUNCH_KEYS names the keys set; the env value is in the body, never in argv', async () => {
+    use({})
+    await hc.spawn({ name: 'rec-r', argv: ['claude'], launch: '/pack/hc-launch', runEnv: { GH_TOKEN: 'ghp_SECRETVALUE', WT_PANE_KEY: 'k3y' } })
+    const [p] = runCalls()
+    assert.deepEqual(p.argv, ['/pack/hc-launch', '--', 'claude'])
+    assert.equal(p.env.GH_TOKEN, 'ghp_SECRETVALUE'); assert.equal(p.env.WT_LAUNCH_KEYS, 'GH_TOKEN,WT_PANE_KEY')
+    assert.ok(!JSON.stringify(fake.calls().map((c) => c.args)).includes('SECRETVALUE'), 'no hc argument carries a value')
   })
   test('labels past the limits are refused before hc runs', async () => {
-    use({ run: 'bg' })
+    use({})
     const labels = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`k${i}`, 'v']))
     await assert.rejects(hc.spawn({ name: 'rec-a', argv: ['x'], labels }), (e) => e.kind === 'too_many_labels')
-    assert.equal(argsOf('run').length, 0)
+    assert.equal(runCalls().length, 0)
   })
-  test('CLI: spawn --prefix prints the id and name', async () => {
-    use({ run: 'bg' })
-    const { stdout } = await run(process.execPath, [HC_MJS, 'spawn', '--prefix', 'rec', '--cwd', '/tmp', '--label', 'role=worker', '--taken', 'rec-01', '--', 'sleep', '5'], { env: fake.env })
+  test('CLI: spawn --prefix prints the id and name; --env-names reads VALUES from its own env, not argv', async () => {
+    use({})
+    const { stdout } = await run(process.execPath, [HC_MJS, 'spawn', '--prefix', 'rec', '--cwd', '/tmp', '--label', 'role=worker', '--taken', 'rec-01', '--launch', '/pack/hc-launch', '--env-names', 'GH_TOKEN', '--', 'sleep', '5'], { env: { ...fake.env, GH_TOKEN: 'ghp_FROMENV' } })
     const o = JSON.parse(stdout); assert.ok(o.id)
-    const a = argsOf('run')[0]; assert.equal(a[a.indexOf('--name') + 1], 'rec-02')
+    const [p] = runCalls(); assert.equal(p.name, 'rec-02'); assert.equal(p.env.GH_TOKEN, 'ghp_FROMENV')
+    assert.ok(!JSON.stringify(fake.calls().map((c) => c.args)).includes('FROMENV'))
+  })
+  test('CLI: --env-names with an unset name exits 2 and runs nothing', async () => {
+    use({})
+    await assert.rejects(run(process.execPath, [HC_MJS, 'spawn', '--name', 'ok-name', '--env-names', 'NOPE_NOT_SET', '--', 'sleep'], { env: fake.env }), (e) => e.code === 2)
+    assert.equal(runCalls().length, 0)
   })
   test('CLI: a failed spawn exits non-zero with the error on stderr', async () => {
-    use({ run: 'bad_name' })
+    const bad = { exit: 0, stdout: JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'bad name', data: { kind: 'invalid_params' } } }) + '\n' }
+    use({ 'connect:terminal.run': bad })
     await assert.rejects(run(process.execPath, [HC_MJS, 'spawn', '--name', 'ok-name', '--', 'sleep'], { env: fake.env }), (e) => e.code === 6 && JSON.parse(e.stderr).error.kind === 'invalid_params')
+  })
+  test('CLI: core-up exits 1 when no core is running (and starts nothing)', async () => {
+    use({})
+    const st = mkdtempSync(join('/tmp', 'hcu-'))
+    try { await assert.rejects(run(process.execPath, [HC_MJS, 'core-up'], { env: { ...fake.env, XDG_STATE_HOME: st, HC_SESSION: 'wtt-none' } }), (e) => e.code === 1) } finally { rmSync(st, { recursive: true, force: true }) }
+    assert.equal(fake.calls().length, 0)
   })
 })
 

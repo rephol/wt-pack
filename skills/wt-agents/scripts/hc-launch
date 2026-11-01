@@ -1,0 +1,64 @@
+#!/bin/sh
+# WP-378: the program every pack-spawned agent terminal runs under hc:  hc-launch -- claude <args>   (agents.sh spawn, via hc.mjs).
+# Why it exists: a terminal started with an explicit command gets the CORE's environment (whoever started the core), no login
+# shell, and no way to say "these are mine". The spawner sends its values in the terminal.run `env` (never argv, never a file)
+# and names them in WT_LAUNCH_KEYS; this script then
+#   stage 1  scrubs what the core may have inherited from some other agent (GH_TOKEN, WT_PANE_KEY, ... and HERDR_*), keeps the
+#            keys the spawner set, writes pane-keys/$HC_TERMINAL_ID (closes the first-call-before-key window), stashes the pack
+#            values as __WTL_<KEY>, and runs  $SHELL -l -i -c  so claude sees the same environment the user's shell would give it
+#            (.zshrc-only variables: NVM, JAVA_HOME, BUN_INSTALL ... which `-l -c` alone drops);
+#   stage 2  (--after-rc, inside that shell) puts the pack values back over whatever the rc files set, re-prepends the kill-shim
+#            dir to PATH (the rc rewrote it), drops its own bookkeeping and execs the program.
+# HC_SESSION is NOT scrubbed: the core sets it to its own session for the terminal, and an isolated core's agents must call it.
+set -u
+
+if [ "${1:-}" = --after-rc ]; then
+  shift; [ "${1:-}" = -- ] && shift
+  for k in $(printf '%s' "${WT_LAUNCH_KEYS:-}" | tr ',' ' '); do
+    case "$k" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+    eval "v=\${__WTL_$k-}"
+    export "$k=$v"
+    unset "__WTL_$k"
+  done
+  unset WT_LAUNCH_KEYS v k
+  if [ -n "${WT_KILL_SHIM_DIR:-}" ] && [ -d "$WT_KILL_SHIM_DIR" ]; then
+    case "$PATH" in "$WT_KILL_SHIM_DIR":*) ;; *) PATH="$WT_KILL_SHIM_DIR:$PATH"; export PATH ;; esac
+  fi
+  [ $# -gt 0 ] || { echo "hc-launch: no program" >&2; exit 2; }
+  exec "$@"
+fi
+
+[ "${1:-}" = -- ] && shift
+[ $# -gt 0 ] || { echo "hc-launch: usage: hc-launch -- <program> [args]" >&2; exit 2; }
+keys=${WT_LAUNCH_KEYS:-}
+
+# stage 1: scrub the denylist except the keys this spawn set
+keep=",$keys,"
+for k in $(env | awk -F= '$1 ~ /^(GH_TOKEN|WT_PANE_KEY|WT_DELIVER_TOKEN|CLAUDE_ENV_FILE|WT_KILL_SHIM_DIR|WT_ROLE|WT_PERSONA|WT_PROJECT|WT_MEMORY_MCP|WT_HEADLESS_[A-Za-z0-9_]*|HERDR_[A-Za-z0-9_]*|__WTL_[A-Za-z0-9_]*)$/ { print $1 }'); do
+  case "$keep" in *",$k,"*) continue ;; esac
+  unset "$k"
+done
+# stash the pack values where an rc file will not touch them
+for k in $(printf '%s' "$keys" | tr ',' ' '); do
+  case "$k" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) continue ;; esac
+  eval "v=\${$k-}"
+  export "__WTL_$k=$v"
+done
+unset v k keep
+export WT_LAUNCH_KEYS="$keys"
+
+# the pane key: a 0600 file in a 0700 dir, so the dashboard knows this terminal before its first call
+if [ -n "${WT_PANE_KEY:-}" ] && [ -n "${HC_TERMINAL_ID:-}" ]; then
+  kd="${WT_DASHBOARD_DATA:-$HOME/.local/share/wt-dashboard}/pane-keys"
+  (umask 077; mkdir -p "$kd" && chmod 700 "$kd" && printf '%s\n' "$WT_PANE_KEY" > "$kd/.tmp.$$" && mv "$kd/.tmp.$$" "$kd/$HC_TERMINAL_ID") 2>/dev/null \
+    || echo "hc-launch: could not write the pane key for $HC_TERMINAL_ID (grace mode)" >&2
+fi
+
+self=$0
+case "$self" in /*) ;; *) self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")" ;; esac
+sh_=${SHELL:-/bin/sh}; [ -x "$sh_" ] || sh_=/bin/sh
+case "$(basename "$sh_")" in
+  fish) exec "$sh_" -l -i -c 'exec $argv' "$self" --after-rc -- "$@" ;;
+  zsh|bash|sh|dash|ksh|ash) exec "$sh_" -l -i -c 'exec "$0" --after-rc -- "$@"' "$self" "$@" ;;
+  *) exec "$self" --after-rc -- "$@" ;; # a shell we cannot drive with -c: no rc, the pack values still apply
+esac
