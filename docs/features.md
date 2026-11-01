@@ -35,7 +35,7 @@ A queue of work across PRs, agents and the local board, with a **Mine / Everyone
   behind-base badges), Nudge, Reassign (asks to confirm), Plan it, Finish.
 - A local board card becomes a task once it is Ready (shown as Up next) or has live work; it links to
   `#board/<ID>`.
-- An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)).
+- An agent counts as stalled after 20 minutes idle (Jev can refine this, see [Jev](#jev-features)). Under hc an agent rests at `done` after a turn, so a `done` agent counts as idle everywhere: the idle tiles and machine counts, the needs-you rule and this stall rule.
 - Skills: wt-plan, wt-work, wt-babysit, wt-finish, wt-handoff.
 
 ## Project store (WP-347)
@@ -793,6 +793,7 @@ Projects, Terminals, Usage, Observability, Server, About.
   idle/done terminal whose shell is back in the foreground (hc's foreground process) shows as **exited** in the agent
   list, is never picked by Dispatch, a buddy pick or wt-handoff, counts as gone for reconcile (its ticket returns
   to Ready), and feeds the watchdog's exited-session finding (with **Resume**).
+  An exited terminal is not an identity: its address cannot post, send or verify through any pane route (a finished or kept-shell terminal is refused, and as the sender of an old message it carries no role).
 - **Server**: state, pid, uptime, build time, per-source status; **Restart server** (or **Install as
   service** when not managed).
 - **Web build stays current** (WP-81): a server running from a checkout rebuilds `web/dist` itself when
