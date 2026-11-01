@@ -33,8 +33,8 @@ scripts/agents.sh spawn <role> [cwd]      # any other role: <repo>-<role>s works
 scripts/agents.sh dnd <name|pane>              # print current dnd state (on/off, until-when if it expires)
 scripts/agents.sh dnd <name|pane> on [--for 2h]  # set dnd; --for writes an expiry, omitted never auto-clears
 scripts/agents.sh dnd <name|pane> off          # clear dnd
-scripts/agents.sh rm <name|pane> [--force]
-scripts/agents.sh respawn <name|pane> [--force]  # same name/role/cwd/tokens, claude --resume, in a NEW tab
+scripts/agents.sh rm <name|pane> [--force]       # pack agents only: a plain shell or any other terminal is refused (WP-378)
+scripts/agents.sh respawn <name|pane> [--force]  # same name/role/cwd/tokens, claude --resume, in a NEW terminal
 scripts/agents.sh respawn --stale [--force]      # every pool agent lacking the kill shim or plugin guard
 scripts/agents.sh spawn --headless <role> [cwd] [--prompt t] [--model m] [--effort e] [--name n]  # WP-293: a wt-dashboard headless run, no pane; prints "<name> <id> <state>"
 scripts/agents.sh list --headless   # the dashboard's headless runs: "<name> <id> <state> <cwd> <role>" (idle = free to reuse, working = busy)
