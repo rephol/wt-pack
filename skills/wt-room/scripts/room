@@ -1,5 +1,5 @@
 #!/bin/sh
-# room — talk in Herdr Dash chat rooms from inside an agent terminal. POSIX sh + curl, no deps.
+# room — talk in wt-dashboard chat rooms from inside an agent terminal. POSIX sh + curl, no deps.
 #   room list
 #   room read <slug> [--since N]
 #   room post <slug> "text" [--attach <file>]...   (@name addresses someone; agents cannot @all)

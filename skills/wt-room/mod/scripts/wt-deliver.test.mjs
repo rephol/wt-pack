@@ -42,7 +42,7 @@ test('WP-378: an hc process that is not a holder (no `hold` argument) is no boun
   // `hc run …` in the chain: the claude above it still counts, so two claudes means nested
   assert.equal(run(1, { holder: 'none', above: 1 }), false)
 })
-test('WP-378: without HC_TERMINAL_ID it stands down; HERDR_PANE_ID alone is no identity', () => {
+test('WP-378: without HC_TERMINAL_ID it stands down; the old pane id alone is no identity', () => {
   assert.equal(run(1, { env: {} }), false)
-  assert.equal(run(1, { env: { HERDR_PANE_ID: 'w1:p1' } }), false)
+  assert.equal(run(1, { env: { HERDR_PANE_ID: 'w1:p1' } }), false) // legacy-herdr
 })
