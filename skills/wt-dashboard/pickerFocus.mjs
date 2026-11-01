@@ -1,4 +1,4 @@
-// WP-378 D6: which tab of an AskUserQuestion picker is focused. herdr drew it in ANSI (the focused tab is highlighted); `hc read` is plain
+// WP-378 D6: which tab of an AskUserQuestion picker is focused. the old multiplexer drew it in ANSI (the focused tab is highlighted); `hc read` is plain
 // text, where the tab bar is identical on every tab and only the question under it changes (spike S2). So the dashboard tracks it:
 //  - a picker seen for the first time starts at its first unanswered tab (tab 0 for a new one; `pk.current` from the plain parse); the tabs'
 //    headers are its signature (a different bar = a different picker)

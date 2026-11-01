@@ -40,7 +40,7 @@ test('without a re-dispatch the card is flagged interrupted, once', async () => 
   assert.equal(notes.length, 1)
 })
 
-test('live agents, human assignees, other columns and a herdr outage are left alone', async () => {
+test('live agents, human assignees, other columns and an hc outage are left alone', async () => {
   const { tickets, mk, deps } = await setup([live])
   await mk('live', 'building', { name: 'w-1', pane: 'p1' })
   await mk('human', 'building', { name: 'Rep' }) // no pane

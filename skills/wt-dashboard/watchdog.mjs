@@ -23,7 +23,7 @@ const BY_ID = new Map(CHECKS.map((c) => [c.id, c]))
 // { [id]: { on, threshold } } for every check; unknown ids dropped, bad values fall back to the default.
 export function cleanWatchdogSettings(s = {}) {
   return Object.fromEntries(CHECKS.map((c) => {
-    const v = s?.[c.id] ?? (c.id === 'hc' ? s?.herdr : undefined) ?? {} // WP-378: the check was called `herdr`; a saved setting carries over
+    const v = s?.[c.id] ?? (c.id === 'hc' ? s?.herdr : undefined) ?? {} // WP-378: the check was called `herdr`; a saved setting carries over (legacy-herdr)
     const th = Number(v.threshold)
     return [c.id, { on: v.on !== false, threshold: Number.isFinite(th) && th >= 0 && th <= 1e6 ? th : c.threshold }]
   }))

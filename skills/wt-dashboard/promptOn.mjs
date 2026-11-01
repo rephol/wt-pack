@@ -1,5 +1,5 @@
 // A prompt into an agent terminal. WP-378: hc's `send` pastes the line and presses Enter, and a pasted single-line slash command (/goal arms,
-// /wt-audit …) still runs under Claude Code (checked on an isolated core: a pasted `/cost` ran as a command), so the herdr-era "type it key by
+// /wt-audit …) still runs under Claude Code (checked on an isolated core: a pasted `/cost` ran as a command), so the earlier "type it key by
 // key" path (WP-240) is gone: one send for everything. `hc keys` cannot type arbitrary characters anyway.
 // WP-352: a long `/goal <wt-message …>` is sent as its short recorded POINTER (`/goal <wt-message …>Read it with: wt-message show <id></wt-message>`):
 // deliver() already hands over the pointer, and a full envelope arriving here is shortened.

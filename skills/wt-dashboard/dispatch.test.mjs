@@ -195,7 +195,7 @@ test('reconcile: origin without origin/<base> falls back to the local base (WP-2
   assert.ok(seen.includes('log --merges --first-parent --since=7.days --format=%H%x09%ct%x09%s main'), seen.join('|'))
 })
 
-test('reconcile: gone twice → Ready with assignee null; gone once, herdr down or a user claim → untouched', async () => {
+test('reconcile: gone twice → Ready with assignee null; gone once, hc down or a user claim → untouched', async () => {
   const other = { name: 'someone-else', local: true, status: 'working' }
   const { tickets, d } = await setup({ agents: [other] })
   await tickets.setSettings('wt-pack', { dispatch: false })
@@ -206,7 +206,7 @@ test('reconcile: gone twice → Ready with assignee null; gone once, herdr down 
   await tickets.patch(u.id, {}, user, { name: 'Rep' })
   await d.tick()
   assert.equal((await tickets.get(t.id)).column, 'building') // once
-  d.deps.agents = async () => [] // herdr down / no local agents: skipped, the count holds
+  d.deps.agents = async () => [] // hc down / no local agents: skipped, the count holds
   await d.tick()
   assert.equal((await tickets.get(t.id)).column, 'building')
   d.deps.agents = async () => [other]

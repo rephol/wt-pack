@@ -40,7 +40,7 @@ test('tags: inference, cleaning, and the token diff sends only what changed', ()
   assert.deepEqual(clean({ junk: 'y', role: ' ' }), {})
   assert.deepEqual(tokenDiff({ role: 'worker', project: 'a', b: 'foreign' }, { role: 'planner', project: 'a' }), { set: [['role', 'planner']], clear: [] })
   assert.deepEqual(tokenDiff({ role: 'worker', ticket: 'ACM-1' }, { role: 'worker' }), { set: [], clear: ['ticket'] })
-  assert.deepEqual(tokenDiff({}, { role: 'worker' }), { set: [['role', 'worker']], clear: [] }) // after a herdr restart: re-applied
+  assert.deepEqual(tokenDiff({}, { role: 'worker' }), { set: [['role', 'worker']], clear: [] }) // after a core restart: re-applied
 })
 
 test('tags: a newer handoff adopts its ticket into the mirror; live keys are never mirrored or cleared', () => {

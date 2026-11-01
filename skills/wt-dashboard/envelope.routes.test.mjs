@@ -1,5 +1,5 @@
 // Run: node --test envelope.routes.test.mjs — WP-328: a pane sends fields (kind, body); the server builds the envelope and
-// stamps from= with the verified sender. Real server process, isolated data dir, fake herdr with keyed panes t1 (sender)
+// stamps from= with the verified sender. Real server process, isolated data dir, fake hc with keyed panes t1 (sender)
 // and t2 (target). The server-token caller (Dispatch/routines, via handoff.sh) shares the non-pane branch with the user
 // (cookie) caller, which stands in for it here: the token itself is random per process.
 import test, { after, before } from 'node:test'

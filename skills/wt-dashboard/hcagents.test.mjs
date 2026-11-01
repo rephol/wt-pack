@@ -34,7 +34,7 @@ test('a <project>-shells terminal is the Terminals view\'s, never an agent', () 
   assert.equal(agentStatus(N(shell({ name: 'x', labels: { [POOL_LABEL]: 'wt-pack-shells', role: 'worker' } })), new Set(['x'])), null)
 })
 
-test('snapshot: agents in herdr shape, the pool as workspace, only the mirrored keys as tokens, finished ones kept in ids', () => {
+test('snapshot: agents in the pane-record shape, the pool as workspace, only the mirrored keys as tokens, finished ones kept in ids', () => {
   const raw = terminal({ address: 't1', name: 'a-worker-01', status: 'blocked', labels: { role: 'worker', task: 'WP-1', 'wt.pool': 'a-workers', mine: 'x' }, cwd: '/w' })
   Object.assign(raw.status, { kind: 'permission', msg: 'approve Write: /w/x' })
   const a = N(raw)

@@ -456,7 +456,7 @@ test('parsePane: WP-179 plan usage — ccstatusline\'s own Session/Weekly line, 
 
 // Follow-up: real ccstatusline output separates fields with U+00A0 (non-breaking space) around a single
 // powerline-style glyph (here U+E0B0), never a run of plain spaces — a real capture from wt-pack-worker-04
-// (w1Q:p1A, `herdr pane read`) came back null against the ASCII-space fixture above.
+// (w1Q:p1A, `hc read`) came back null against the ASCII-space fixture above.
 test('parsePane: WP-179 follow-up — a real ccstatusline capture (NBSP + glyph separators, not plain spaces)', () => {
   const box = '─'.repeat(40)
   const real = '   Session: 0.0%  Reset: 4h57m  Weekly: 47.0%  Weekly Reset: 3d 15hr 7m'
@@ -1129,7 +1129,7 @@ test('syncTickets ignores local board tasks', async () => {
   assert.deepEqual([...r.taskPrev.keys()], ['ACM-1'])
 })
 
-test('parsePane: a truncated cwd is dropped (herdr cwd wins)', () => {
+test('parsePane: a truncated cwd is dropped (the core cwd wins)', () => {
   assert.equal(parsePane(pane.replace('/tmp/wt/acm-12', '/Users/x/Work/projects/acmeapp...')).cwd, undefined)
   assert.equal(parsePane(pane).cwd, '/tmp/wt/acm-12')
 })
@@ -1274,7 +1274,7 @@ test('watchdog probe (WP-378): reports a stopped hc core once, never starts one 
     await promisify(execFile)('/bin/sh', [new URL('./scripts/watchdog-probe.sh', import.meta.url).pathname, 'file:///etc/hosts'], { env: { HOME: home, XDG_STATE_HOME: state, PATH: `${bin}:/usr/bin:/bin` } })
   } finally { srv.close() }
   assert.match(log().at(-1), /hc core is running again/)
-  assert.equal(existsSync(pj(home, 'started')), false, 'no hc / herdr / nohup was ever run')
+  assert.equal(existsSync(pj(home, 'started')), false, 'no hc / nohup was ever run')
 })
 
 test('sourceIssue: a failed overview source becomes a hint, not a 500 (WP-79)', () => {

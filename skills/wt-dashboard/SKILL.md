@@ -1,6 +1,6 @@
 ---
 name: wt-dashboard
-description: The local wt-dashboard (herdr agent control room) at http://127.0.0.1:7777 and its macOS app. Use when asked to open, start, restart or debug the dashboard, find its data or logs, or change its server/web/app code. Needs wt-dashboard (the full ./setup install, not the plugin alone).
+description: The local wt-dashboard (hc agent control room) at http://127.0.0.1:7777 and its macOS app. Use when asked to open, start, restart or debug the dashboard, find its data or logs, or change its server/web/app code. Needs wt-dashboard (the full ./setup install, not the plugin alone).
 ---
 
 # wt-dashboard
@@ -8,7 +8,7 @@ description: The local wt-dashboard (herdr agent control room) at http://127.0.0
 Paths to scripts and files are relative to this skill's base directory (announced when it loads), so they
 work both from the `./setup` links and from a plugin install (WP-122).
 
-A local control room for herdr-managed Claude Code agents: overview, tasks (worktrees, PRs, Linear), agent panels, chat rooms (see wt-room) and a notifications inbox.
+A local control room for hc-managed Claude Code agents: overview, tasks (worktrees, PRs, Linear), agent panels, chat rooms (see wt-room) and a notifications inbox.
 
 - **Open:** http://127.0.0.1:7777, or the `wt-dashboard` app (⌥⌘H toggles its window). Loopback only; never expose it.
 - **Who runs the server:** a launchd LaunchAgent (`id.local.wtdashboard.server`, installed by `npm run service:install`): it starts at login, restarts after a crash (at most every 10s) and keeps running when the app quits. The app only connects, and kickstarts the service if it is down. Without the service the app falls back to spawning `node server.mjs` from this directory (`$WT_DASHBOARD_HOME` overrides) or its bundled sidecar, restarts it at most 3 times in 5 minutes, and stops it on quit.
@@ -25,4 +25,4 @@ Never use the dashboard to type into, answer or stop real agents unless the user
 
 ## Terminals
 
-Shells that herdr owns: each is a pane with no agent in a `<project>-shells` workspace. The dashboard mirrors the screen (`pane read --format ansi`, streamed at ~300ms only while someone watches) and types into it (`send-text`, plus whitelisted `send-keys`: Enter, Tab, Esc, arrows, Backspace, Ctrl+C/D/Z/L, PageUp/PageDown, Home/End). A shell may start only in a project, one of its worktrees, `$HOME` or `/private/tmp`, and agent panes are refused. **Off by default:** Settings › Terminals turns it on, and separately allows the tailnet, both changeable only from `http://127.0.0.1` on this machine; every endpoint needs the page's session cookie. Creation, input, keys, close and settings changes are appended to `~/.local/share/wt-dashboard/data/terminal-audit.jsonl` (viewable in Settings). The command bar's Enter always runs the line, on a phone too.
+Shells that hc owns: each is a terminal with no agent, labelled `wt.pool=<project>-shells`. The dashboard mirrors the screen as plain text (`hc read`, polled only while someone watches) and types into it (`hc send` for a line with Enter; `hc keys` for whitelisted keys: Enter, Tab, Esc, arrows, Backspace, Ctrl+C/D/Z/L, PageUp/PageDown, Home/End). Typing without Enter sends letters (capitals as `shift+<letter>`), digits, space and `/ = . - , ; ' \ [ ] backtick`; other punctuation and non-ASCII are refused (the input line takes any character). A shell may start only in a project, one of its worktrees, `$HOME` or `/private/tmp`, and agent panes are refused. **Off by default:** Settings › Terminals turns it on, and separately allows the tailnet, both changeable only from `http://127.0.0.1` on this machine; every endpoint needs the page's session cookie. Creation, input, keys, close and settings changes are appended to `~/.local/share/wt-dashboard/data/terminal-audit.jsonl` (viewable in Settings). The command bar's Enter always runs the line, on a phone too.

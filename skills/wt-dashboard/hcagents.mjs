@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 // hc status word -> the dashboard's AgentState. `done` is the resting state after a turn (S1); `error` has no state of its own.
 const STATUS = { idle: 'idle', working: 'working', done: 'done', blocked: 'blocked', error: 'unknown' }
-export const POOL_LABEL = 'wt.pool' // the pool a terminal belongs to (herdr's workspace): `<repo>-<role>s`
+export const POOL_LABEL = 'wt.pool' // the pool a terminal belongs to (the app's space): `<repo>-<role>s`
 
 // Is this terminal one of the pack's agents, and in which state? null = not an agent (a user's shell, a finished one-off).
 //  - live and running claude (or any program that reports a status) -> its reported state; a claude that has not reported yet is idle
@@ -19,7 +19,7 @@ export function agentStatus(t, known = new Set()) {
   return (t.name && known.has(t.name)) || t.labels?.role ? 'exited' : null
 }
 
-// The rows listAgents() builds from: the herdr-shaped record per agent terminal, plus the maps paneMeta() serves.
+// The rows listAgents() builds from: the legacy-shaped record per agent terminal, plus the maps paneMeta() serves.
 // `tagKeys`: the pane-token names the pack mirrors (roles.mjs TAG_KEYS); other labels (wt.pool, a user's own) are not tokens.
 export function snapshot(terminals, { known = new Set(), tagKeys = [] } = {}) {
   const agents = [], ws = new Map(), tokens = new Map(), ids = new Set()

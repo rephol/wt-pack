@@ -521,7 +521,7 @@ export function planUsageFromLimits(l, now = Date.now()) {
 // Loaded at startup, not top-level await: the sidecar bundles this as CJS (WP-24).
 const roleStore = new RoleStore(DATA).attach(agentTable) // WP-348: tags live in the agents table (agent-tags.json is imported once)
 // WP-378: ONE `hc connect terminal.list` per refresh (hc.mjs list({all:true}), full rows with labels and status), shared by the agents
-// listing, the label sync and the watcher. A pane token is a label of the same name; the pool (herdr's workspace) is the `wt.pool` label.
+// listing, the label sync and the watcher. A pane token is a label of the same name; the pool (the app's space) is the `wt.pool` label.
 // The core is probed first with coreUp(): `hc connect`/`ls`/`get`/`server status` START a stopped core on macOS (S5-5, U5 re-checked
 // `connect` on an isolated core: it starts it too), and the dashboard must never start one (D4).
 const hcDown = () => Object.assign(new Error('hc core not running — run hc server start'), { code: 'core_down' })

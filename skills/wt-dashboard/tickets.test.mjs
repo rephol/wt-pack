@@ -412,10 +412,10 @@ test('ticketMatches: id, title, body, label, comment and move note; never author
       { kind: 'create', author: 'jev' },
       { kind: 'edit', author: 'Rep', text: 'priority, size' },
       { kind: 'comment', author: 'Quinn', text: 'Workers stopped posting' },
-      { kind: 'move', author: 'w', to: 'blocked', text: 'waiting on herdr' },
+      { kind: 'move', author: 'w', to: 'blocked', text: 'waiting on hc' },
     ],
   }
-  for (const q of ['wp-3', 'DISPATCH', 'the room', 'needs-plan', 'stopped posting', 'herdr', '', '  ', 'report  room']) assert.equal(ticketMatches(t, q), true, q)
+  for (const q of ['wp-3', 'DISPATCH', 'the room', 'needs-plan', 'stopped posting', 'hc', '', '  ', 'report  room']) assert.equal(ticketMatches(t, q), true, q)
   for (const q of ['jev', 'quinn', 'priority', 'dispatch nowhere']) assert.equal(ticketMatches(t, q), false, q)
   assert.equal(ticketMatches({ id: 'WP-4', title: 'x' }, 'x'), true) // no body, labels or history
 })

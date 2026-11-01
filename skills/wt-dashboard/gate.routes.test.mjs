@@ -1,4 +1,4 @@
-// Run: node --test gate.routes.test.mjs — WP-332 routes against a real server process (isolated data dir, fake herdr, keyed panes):
+// Run: node --test gate.routes.test.mjs — WP-332 routes against a real server process (isolated data dir, fake hc, keyed panes):
 // the gate ask, the one-shot grant the user's "Allow once" mints, and senderRole on the verify route.
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'

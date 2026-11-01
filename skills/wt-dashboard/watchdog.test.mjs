@@ -15,8 +15,8 @@ test('settings: defaults, off switch, bad thresholds fall back', () => {
   const s = cleanWatchdogSettings({ disk: { on: false }, db: { threshold: -1 }, jev: { threshold: 50 }, nope: {} })
   assert.equal(Object.keys(s).length, CHECKS.length)
   assert.deepEqual([s.disk.on, s.db.threshold, s.jev.threshold, s.hc.on], [false, 200, 50, true])
-  assert.equal(s.herdr, undefined)
-  assert.deepEqual(cleanWatchdogSettings({ herdr: { on: false, threshold: 9 } }).hc, { on: false, threshold: 9 }, 'a setting saved under the old id carries over')
+  assert.equal(s.herdr, undefined) // legacy-herdr
+  assert.deepEqual(cleanWatchdogSettings({ herdr: { on: false, threshold: 9 } }).hc, { on: false, threshold: 9 }, 'a setting saved under the old id carries over') // legacy-herdr
 })
 
 test('restarts: counts starts in the last hour', () => {

@@ -1,5 +1,5 @@
 // Run: node --test verify.routes.test.mjs — WP-329: GET /api/messages/:id/verify tells a pane whether the server recorded that
-// envelope for it; a failure raises one Inbox card. Real server process, isolated data dir, fake herdr, keyed panes t1/p2/p3.
+// envelope for it; a failure raises one Inbox card. Real server process, isolated data dir, fake hc, keyed panes t1/p2/p3.
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'

@@ -1,5 +1,5 @@
 // Run: node --test pane-key.routes.test.mjs — WP-327: x-herdr-pane alone is not identity once a pane has a key.
-// Real server process, isolated data dir, a fake `herdr` knowing panes t1 (keyed), t2 (keyed, the "foreign" one), t3 (no key).
+// Real server process, isolated data dir, a fake `hc` knowing panes t1 (keyed), t2 (keyed, the "foreign" one), t3 (no key).
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
