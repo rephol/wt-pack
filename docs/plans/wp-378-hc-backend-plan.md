@@ -471,3 +471,33 @@ terminal's size to the viewer's (it would reflow the agent's TUI).
   before Submit if still not), `down enter`; `parsePicker` returns `otherChecked`. **U-Q2 is dropped**: multi-select Other works. D32 reached ~12 users of
   `canonicalPane`: exact id matches, and the pane-identity routes (`/api/deliveries`, `/api/messages`, `/api/watch-prs/event`, keepwarm, `roomAuthor`)
   now use `liveAgent` (a `tN` that hc lists as a local agent). That identity change gets a diff review (security lens) at 153a525 before U7.
+
+## Tech-lead decisions at diff review (pinned b879918; fix rounds F4-F7)
+Review: wt-review diff mode, 168 files / 6314+ 2753-, five per-lens agents (correctness+regression, standards, agent-native, testing+learnings,
+security/data/scope/adversarial/reliability/performance), an independent validator for high/medium (7 confirmed, 1 refuted: `watchdog-probe.sh` is tested at
+`parse.test.mjs` "watchdog probe"), then a delta review per fix round.
+- **F4 (known items):** the forced picker send and the multi-select `ensure` Enter re-read the screen and need the same question, else 409 (2c1cd5b); every test
+  that spawns `server.mjs` is pinned to `hcStub`/`noCore` and `nocore.guard.test.mjs` fails one that is not (45bfd4f, hardened per spawn in F6); records keyed
+  by old pane ids go stale silently, listed in `docs/hc-cutover.md` (ce31307, f5d6472).
+- **F5 (review findings):** exited rows are no identity (`liveAgent`, `/verify` senderRole); one `coreIsUp` gate over every server hc call (503); `done` rests like
+  `idle` everywhere (`resting`/`isResting`); a core.id change keeps paused rows and session-carrying missing rows (addresses cleared; refines D14); `agents.sh
+  rm|respawn` refuse a terminal that is not a pack agent (no override; refines D12's scope); the `hc-launch` denylist covers every pack `WT_*`/token name;
+  `hc.mjs` CLI guard compares real paths (was fail-open: `core-up` exited 0); `handoff.sh` gates on `core-up` (headless targets exempt); `wt-deliver` holder =
+  argv[0] `hc`/`herdr-core` + `hold` (D7 as written).
+- **F6/F7 (delta findings):** gate reads hc after shell keywords, inside literal `sh -c`/`eval` strings, `hc run|exec` carried commands, quoted/escaped/absolute
+  `hc`, a lone `&`; `HC_TERMINAL_ID=<value>` spoof and outer markers through `sh -c` are forged sends; new classes `hc-label` (role/persona/wt.pool only; `task`
+  stays free for wt-finish) and `hc interrupt` (as keys); input bounded (32 KB, over-cap or nesting > 6 asks as `long-command`); the forced picker send also needs
+  the cursor on Other (single and multi). handoff/agents messages never tell an agent to start the core.
+- **Accepted, not fixed (follow-ups if they bite):** gate indirection (`$(…)`, pipe-to-shell, `$X kill`) stays unseen (gate is loose by design); a role label is
+  writable by its own terminal outside the gate (pre-existing under herdr pane tokens; the gate now asks for `hc label role=`); a timed-out `terminal.run` may
+  leave an orphan terminal; `hcList({all:true})` per 3 s tick grows with kept finished terminals; respawn of a kept persona agent comes back as its base role;
+  the pane-key sweep at spawn can race a concurrent spawn; the handoff test's 20 ms `afterEach` yield is timing-based (the fake core accepts only between
+  sync spawns).
+- **R4 opt-in setup action: not added.** D5's untagged route (server `deliver()`, script `env -u HC_TERMINAL_ID hc send`) works without `notes = false`, so
+  editing the user's `~/.config/herdr-core/config.toml` buys nothing and would also silence notes for the user's own hc use; doctor keeps reporting it (info).
+  The user's consent stays recorded and unused.
+- **QA addition (step 2):** capture a real Claude Code picker screen with the cursor on the Other/"Type something" row, single- and multi-select, on the
+  isolated core, and confirm the free-text answer still submits (the F6/F7 cursor check is proven only on a hand-edited screen; no recorded capture exists, so
+  a wrong cursor read would 409 every free-text answer). Keep the capture as a fixture under `skills/wt-dashboard/test-fixtures/` in a follow-up commit.
+- **Open user question (docs):** `hc` has no public install URL or command known to the pack, so `docs/hc-cutover.md` step 2, the README and setup's hint say
+  "install hc" without saying how. Answer = the install source (URL / brew tap / internal build) or "unpublished, say so"; it changes only those three texts.
