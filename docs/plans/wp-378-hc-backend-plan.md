@@ -221,11 +221,14 @@ Owner: wt-pack:wt-engineer
 - [ ] Each new guard or fix has a red proof; `<hc>`-wrapped prompts are peer; gate classes for hc verbs; wt-deliver nested-claude stand-down under hc; `SENDS` refuses an `hc`
   call carrying the user-level skills path.
 - [ ] Nothing in the pack starts an hc core or a herdr server or edits the user's hc config; `./setup doctor` reports hc state; docs, SKILL.md files and CLAUDE.md are hc-only.
+- [ ] The user's `~/.local/bin/claude` still points at the same target and resolves after every spike, recorder and QA run (U1's isolated-`XDG_DATA_HOME` spike once repointed it into a
+  deleted temp dir). Check: `node skills/wt-shared/scripts/claude-link-guard.mjs snapshot <file>` before, `... check <file>` after (exit 1 on any change or a dangling link); isolated children
+  run with `quietEnv()` (DISABLE_AUTOUPDATER=1, DISABLE_INSTALLATION_CHECKS=1, no isolated `XDG_DATA_HOME`); `hc-record.mjs` and the `WT_REAL_HC` test enforce it themselves.
 - [ ] One commit per skill touched; pushed only after Gate B; no real terminal touched (QA compares `hc ls`, `pane-keys/` and `turn-*` before/after).
 
 ## 7. QA brief
-A user (or the auditor) does, in a temp repo on a throwaway isolated core (`HC_SESSION=wtqa-<id>`, scratch `XDG_*`, `WT_DASHBOARD_DATA`, `XDG_CACHE_HOME`,
-`XDG_DATA_HOME`; the user's own core is only read with `hc ls`, except step 4):
+A user (or the auditor) does, in a temp repo on a throwaway isolated core (`HC_SESSION=wtqa-<id>`, scratch `XDG_STATE_HOME`/`XDG_RUNTIME_DIR`, `WT_DASHBOARD_DATA`, `XDG_CACHE_HOME`
+(not `XDG_DATA_HOME`: see the isolation rule below); the user's own core is only read with `hc ls`, except step 4):
 1. `agents.sh spawn worker` twice; `list --json`; `dnd on/off`; `respawn`; `rm`. Confirm names `<repo>-worker-01/02`, labels, `hc get` shows no secret in argv, the terminal outlives the spawning shell.
 2. `handoff.sh --task` a short prompt to a spawned agent; read its screen; confirm the typed line is the exact recorded pointer (no `<hc>` wrapper) and the message row existed before delivery; a blocked agent is not forced and its message stays queued.
 3. Start a dashboard against a PATH shim (hc on the isolated session), open Agents, send a room message to an agent; confirm the status shown matches S1's tier.
@@ -234,6 +237,8 @@ A user (or the auditor) does, in a temp repo on a throwaway isolated core (`HC_S
 Evidence kept (nothing else): command transcripts with exit codes for 1, 2, 5; `hc ls --json`, `pane-keys/` listing and `turn-*` listing before/after on the default session
 (equal except step 4's recorded `wtqa-` ids, gone at teardown); one `agent-browser` screenshot of the Agents list (session `<agent name>`); test summaries; the grep output.
 Teardown: kill/rm recorded terminals by address, remove the recorded space, stop only the isolated core.
+Isolation rule: never give a `claude` child an isolated `XDG_DATA_HOME` (its installer keeps versions and the `~/.local/bin/claude` link there) and start children with `DISABLE_AUTOUPDATER=1 DISABLE_INSTALLATION_CHECKS=1`.
+Run `claude-link-guard.mjs snapshot` before step 1 and `check` as the last teardown step; a failure fails QA (do not repair the link from QA, report it).
 
 **Flip runbook (U7 doc, used at merge).** The plugin is the checkout (`CLAUDE_CODE_PLUGIN_DIRS`), so the merge switches every live herdr agent's hooks to
 `HC_TERMINAL_ID` at once: they lose identity, including the lead and orchestrator driving this ticket. Steps: finish everything gate C needs on the ticket
