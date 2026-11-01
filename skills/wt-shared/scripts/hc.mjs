@@ -12,10 +12,11 @@
 //  - hc stores any label (no limits): the pack's 32 labels / 80-char values / key shape / known roles are enforced here.
 //  - a kept (recovered) terminal is a login shell at the same address and has lost its labels.
 import { execFile } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { connect as netConnect } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const MAX_LABELS = 32
 export const MAX_VALUE = 80
@@ -286,4 +287,8 @@ async function cli(argv) {
     process.exit(e.exit > 0 ? e.exit : EXIT_OF_KIND[e.kind] ?? 1)
   }
 }
-if (import.meta.url === `file://${process.argv[1]}`) cli(process.argv.slice(2))
+// Compare REAL paths: through a symlink or a path with a space (import.meta.url is percent-encoded and resolved) a string compare is false, nothing runs
+// and `core-up` exits 0 as if the core were up (fail-open). No top-level await: the dashboard bundles this as CJS for the sidecar (5b5073a), where
+// import.meta.url is empty and the check is false.
+const isMain = (() => { try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]) } catch { return false } })()
+if (isMain) cli(process.argv.slice(2))

@@ -63,17 +63,39 @@ const blankSingle = (seg) => {
 // WP-378: the hc terminal runner. Pack scripts call `env -u HC_TERMINAL_ID hc send` INSIDE their own process (D5: the tag-free route), which this
 // never sees; a Bash command that does it itself is an agent forging an untagged message. `hcCall` finds the `hc` command of a segment (after
 // VAR=val / env / sudo wrappers and their flags) → { verb, sub, args, wrap } or null.
-const WRAP = new Set(['env', 'sudo', 'command', 'nohup', 'time'])
-const ID_UNSET = /(?:-u\s+HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
+const ID_UNSET = /(?:-u\s*HC_TERMINAL_ID\b|\bunset\s+[^;&|\n]*\bHC_TERMINAL_ID\b|\bHC_TERMINAL_ID=(?:""|'')?(?=[\s;&|]|$))/
+// Wrappers that run their next word as a command, and the flags of each that take a VALUE as the next word (`-uNAME` attached needs none).
+const WRAP_VAL = { env: ['-u', '-C', '-S'], sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'], command: [], nohup: [], time: ['-f', '-o'], exec: ['-a'],
+  timeout: ['-s', '-k', '--signal', '--kill-after'], nice: ['-n', '--adjustment'], xargs: ['-n', '-I', '-L', '-P', '-s', '-d', '-E', '-a', '-J'] }
+const DURATION = /^\d+(\.\d+)?[smhd]?$/
+const lead = (t) => t.replace(/^(?:\$\(|[({`])+/, '') // `(hc`, `{`, `$(hc`: a group or substitution opening before the command
+// hc's own global flags that take a value before the verb: `--session x`, `-s x` (`--session=x` needs none).
+const HC_GLOBAL_VAL = new Set(['--session', '-s'])
 function hcCall(w) {
-  for (let k = 0; k < w.length; k++) {
-    if (w[k].split('/').pop() === 'hc') {
-      const pre = w.slice(0, k)
-      if (!pre.every((t, n) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t) || WRAP.has(t) || t.startsWith('-') || pre[n - 1] === '-u')) return null
-      const args = w.slice(k + 1), nonFlag = args.filter((a) => !a.startsWith('-'))
-      return { verb: nonFlag[0], sub: nonFlag[1], args, wrap: pre }
+  const pre = []
+  let k = 0
+  while (k < w.length) {
+    const t = lead(w[k])
+    if (t === '') { k++; continue }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) { pre.push(t); k++; continue }
+    const base = t.split('/').pop()
+    if (base === 'hc') {
+      const rest = w.slice(k + 1)
+      const kept = []
+      let a = 0
+      while (a < rest.length && rest[a].startsWith('-')) { if (HC_GLOBAL_VAL.has(rest[a])) a += 2; else kept.push(rest[a++]) }
+      const nonFlag = rest.slice(a).filter((x) => !x.startsWith('-'))
+      return { verb: nonFlag[0], sub: nonFlag[1], args: [...kept, ...rest.slice(a)], wrap: pre }
     }
-    if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(w[k]) && !WRAP.has(w[k]) && !w[k].startsWith('-') && w[k - 1] !== '-u') return null
+    if (!(base in WRAP_VAL)) return null
+    pre.push(base); k++
+    const takes = WRAP_VAL[base]
+    while (k < w.length && w[k].startsWith('-') && w[k] !== '-') {
+      pre.push(w[k])
+      if (takes.includes(w[k]) && k + 1 < w.length) { k++; pre.push(w[k]) }
+      k++
+    }
+    if (base === 'timeout' && k < w.length && DURATION.test(w[k])) { pre.push(w[k]); k++ }
   }
   return null
 }

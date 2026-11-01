@@ -2,7 +2,7 @@
 import { test, describe, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -305,6 +305,20 @@ describe('spawn', () => {
     const st = mkdtempSync(join('/tmp', 'hcu-'))
     try { await assert.rejects(run(process.execPath, [HC_MJS, 'core-up'], { env: { ...fake.env, XDG_STATE_HOME: st, HC_SESSION: 'wtt-none' } }), (e) => e.code === 1) } finally { rmSync(st, { recursive: true, force: true }) }
     assert.equal(fake.calls().length, 0)
+  })
+})
+
+describe('CLI entry (WP-378 F5)', () => {
+  // a symlinked or space-containing path: import.meta.url (percent-encoded, realpath) never equals argv[1]; the CLI must still run, and core-up must say DOWN (exit 1), never 0
+  test('core-up through a symlink / a path with a space still runs and exits 1 with the core down', async () => {
+    const d = mkdtempSync(join('/tmp', 'hcl-')), st = mkdtempSync(join('/tmp', 'hcu-'))
+    try {
+      mkdirSync(join(d, 'a b'))
+      symlinkSync(HC_MJS, join(d, 'a b', 'hc link.mjs'))
+      const env = { ...process.env, XDG_STATE_HOME: st, HC_SESSION: 'wtt-none', PATH: '/usr/bin:/bin' }
+      await assert.rejects(run(process.execPath, [join(d, 'a b', 'hc link.mjs'), 'core-up'], { env }), (e) => e.code === 1)
+      await assert.rejects(run(process.execPath, [join(d, 'a b', 'hc link.mjs'), 'bogus'], { env }), (e) => e.code === 2)
+    } finally { rmSync(d, { recursive: true, force: true }); rmSync(st, { recursive: true, force: true }) }
   })
 })
 

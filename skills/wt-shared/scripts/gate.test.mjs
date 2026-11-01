@@ -121,3 +121,19 @@ test('WP-378: a send/keys with HC_TERMINAL_ID unset or emptied is a forged-untag
   assert.equal(classify('env -u HC_TERMINAL_ID hc get t7', ctx), null)
   assert.equal(classify('env -u HC_TERMINAL_ID ls', ctx), null)
 })
+
+test('WP-378 F5: hc is found behind wrappers (timeout, nice, exec, command, nohup, xargs, env -uNAME), inside ( or {, and after global flags', () => {
+  const rule = (c) => classify(c, ctx)?.rule ?? null
+  const kill = ['timeout 5 hc kill t7', 'timeout -s KILL 5 hc kill t7', 'nice hc kill t7', 'nice -n 10 hc kill t7', 'exec hc kill t7', 'command hc rm t7', 'nohup hc kill t7', 'echo t7 | xargs hc kill',
+    'xargs -n 1 hc kill', '(hc kill t7)', '( hc kill t7 )', '{ hc kill t7', 'hc --session x kill t7', 'hc -s x kill t7', 'hc --session=x rm t7', 'timeout 5 nice -n 5 env FOO=1 hc kill t7', 'FOO=1 nohup timeout 9 hc kill t7', '$(hc kill t7)']
+  for (const c of kill) assert.equal(rule(c), 'hc-kill', c)
+  assert.equal(rule('hc --session x server stop'), 'hc-core')
+  assert.equal(rule('timeout 5 hc update'), 'hc-core')
+  assert.equal(rule('hc -s x keys t7 enter'), 'hc-keys')
+  assert.equal(rule('hc --session x put t7 f'), 'upload')
+  for (const c of ['env -uHC_TERMINAL_ID hc send t7 hi', 'timeout 5 env -u HC_TERMINAL_ID hc send t7 hi', '(env -u HC_TERMINAL_ID hc send t7 hi)', 'hc -s x send t7 hi; unset HC_TERMINAL_ID', 'xargs env -uHC_TERMINAL_ID hc keys t7 enter'])
+    assert.equal(rule(c), 'hc-forged-send', c)
+  // ordinary calls through the same wrappers still pass
+  for (const c of ['timeout 5 hc ls', 'nice hc get t7', '(hc read t7)', 'hc --session x ls', 'hc -s x send t7 hi', 'xargs -n 1 hc get', 'exec hc server status', 'timeout 5 ls kill', 'nohup echo hc kill'])
+    assert.equal(classify(c, ctx), null, c)
+})
