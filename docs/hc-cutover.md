@@ -24,8 +24,8 @@ look like `t3`, so no old id ever matches a new terminal. After the switch, sile
 
 - messages and deliveries still queued or awaiting an ack for an old pane are never delivered and never acked; they stay
   as `queued`/`sent` rows and show up as agents that never answered;
-- a ticket assigned to an old pane (its `agent`/`pair` field) keeps showing that id, which resolves to no agent, so the
-  card reads as assigned to an unknown pane and nothing picks it up;
+- a ticket assigned to an old pane (its `assignee` pane, and a buddy's `pair`) keeps that id, which resolves to no agent, so the
+  card reads as assigned to an unknown agent and nothing picks it up;
 - pending asks and Inbox cards that came from an old pane cannot be answered into it.
 
 Finishing or closing these before step 1 (answer the asks, let queued messages land, reassign or release the tickets so
