@@ -38,6 +38,15 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "watch-prs: $*" >&2; exit 1; }
 
+# WP-378: terminals are hc's. `hc get`/`ls`/`connect` START a stopped core (spike S5), so every lookup is gated on a probe that does not:
+# hc.mjs coreUp reads core.lock and connects to its socket (a poller on launchd must never start the user's core). Dynamic import, one
+# subcommand's need (CLAUDE.md top-level import trap); no hc.mjs or no node = down.
+core_up() { node --input-type=module -e "import(process.argv[1]).then((m)=>m.coreUp()).then((u)=>process.exit(u?0:1),()=>process.exit(1))" "file://$here/../../wt-shared/scripts/hc.mjs" >/dev/null 2>&1; }
+# One terminal row ($1 = address) or nothing: core down, unknown address, or hc missing all read as "no row".
+hc_row() { command -v hc >/dev/null 2>&1 && core_up && hc get --json "$1" 2>/dev/null; }
+# Every terminal, one JSON array (labels + status object come only from terminal.list over `hc connect`).
+hc_rows() { command -v hc >/dev/null 2>&1 && core_up && printf '{"jsonrpc":"2.0","id":1,"method":"terminal.list","params":{}}\n' | hc connect 2>/dev/null | head -1 | jq -c '.result.terminals // []' 2>/dev/null; }
+
 repo() {
   local r; r=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || r=""
   printf '%s\n' "$r" | grep -qE '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' || return 1
@@ -181,8 +190,8 @@ diff)
 mode)
   case "${1:-}" in dispatch|review) echo "$1"; exit 0;; '') ;;
     *) printf '%s' "$1" | grep -qE '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' && { echo standalone; exit 0; }; die "mode: dispatch, review or owner/repo, not $1";; esac
-  role=""; command -v herdr >/dev/null 2>&1 && [ -n "${HERDR_PANE_ID:-}" ] \
-    && role=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.tokens.role // empty' 2>/dev/null)
+  # the launcher's WT_ROLE first (no lookup); a hand-started terminal falls back to its hc `role` label
+  role=${WT_ROLE:-}; [ -n "$role" ] || { [ -n "${HC_TERMINAL_ID:-}" ] && role=$(hc_row "$HC_TERMINAL_ID" | jq -r '.labels.role // empty' 2>/dev/null); }
   case "$role" in orchestrator) echo dispatch;; *) echo standalone;; esac
   ;;
 dispatch)
@@ -191,20 +200,19 @@ dispatch)
   printf '%s' "$X" | grep -qE '^[0-9a-f]{40}$' || die "dispatch needs --sha <40-char head SHA>"
   sess "$D"; setup
   # The reviewer replies to this pane (handoff's footer), and only that reply releases the claim.
-  command -v herdr >/dev/null 2>&1 && [ -n "$(herdr pane get "${HERDR_PANE_ID:-none}" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)" ] \
-    || die "dispatch needs a herdr pane (the reviewer replies to it)"
+  [ -n "${HC_TERMINAL_ID:-}" ] || die "dispatch needs an hc terminal (the reviewer replies to it)"
   # Held by D itself = an earlier dispatch whose reviewer never replied (died, stopped): hand it again, keep the claim.
   c=$("$0" claim "$P" "$D") || { [ "$(head -1 "$CLAIMS/pr$P/owner" 2>/dev/null)" = "$D" ] || { echo "$c"; exit 1; }; }
   undo() { "$0" release "$P" "$D" >/dev/null 2>&1; }
   MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
-  ag=$(herdr agent list 2>/dev/null) || ag='{}'
-  ws=$(herdr workspace list 2>/dev/null | jq -r --arg l "$(basename "$MAIN")-reviewers" '.result.workspaces[]? | select(.label == $l) | .workspace_id' | head -1)
+  ag=$(hc_rows) || ag='[]'; [ -n "$ag" ] || ag='[]'
+  pool="$(basename "$MAIN")-reviewers" # the pool label (wt.pool) the reviewers are spawned under
   # The reviewer that held this PR gets it back when free; else handoff reuses a free pool reviewer or spawns one.
   prev=$(jq -r --arg n "$P" '.reviewed[$n].reviewer // ""' "$STATE")
-  # WP-348: the agents table says whether the previous reviewer can take it (paused/exited/missing cannot); herdr's list still decides idle.
+  # WP-348: the agents table says whether the previous reviewer can take it (paused/exited/missing cannot); hc's status still decides idle.
   . "$here/../../wt-shared/scripts/agent-pane.sh"
   case "$( [ -n "$prev" ] && agent_state "$prev" || true)" in paused|exited|missing) prev="" ;; esac
-  pane=""; [ -n "$prev" ] && pane=$(printf '%s' "$ag" | jq -r --arg n "$prev" '.result.agents[]? | select(.name == $n and (.agent_status == "idle" or .agent_status == "done")) | .pane_id' | head -1)
+  pane=""; [ -n "$prev" ] && pane=$(printf '%s' "$ag" | jq -r --arg n "$prev" '.[]? | select(.name == $n and .state == "live" and (.status.state == "idle" or .status.state == "done")) | .address' | head -1)
   # WP-147: a paired ticket's branch (wp-N-…) routes the review to its buddy instead — the pairing is the
   # deliberate choice, so it wins over both the last reviewer and a free pool pick.
   T="$here/../../wt-ticket/scripts/wt-ticket"
@@ -218,8 +226,8 @@ dispatch)
     fi
   fi
   if [ -z "$pane" ]; then
-    free=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w and (.agent_status == "idle" or .agent_status == "done"))] | length')
-    live=$(printf '%s' "$ag" | jq --arg w "$ws" '[.result.agents[]? | select(.workspace_id == $w)] | length')
+    free=$(printf '%s' "$ag" | jq --arg w "$pool" '[.[]? | select(.state == "live" and .labels["wt.pool"] == $w and (.status.state == "idle" or .status.state == "done"))] | length')
+    live=$(printf '%s' "$ag" | jq --arg w "$pool" '[.[]? | select(.state == "live" and .labels["wt.pool"] == $w)] | length')
     max=$(node "$here/../../wt-shared/scripts/project-setting.mjs" get maxReviewers --cwd "$MAIN" 2>/dev/null); max=${max:-2}
     # ponytail: counts from one agent list — two dispatches in the same second can both spawn (cap +1 at worst).
     { [ "$max" -gt 0 ] && { [ "${free:-0}" -gt 0 ] || [ "${live:-0}" -lt "$max" ]; }; } || { undo; echo "queued: at maxReviewers ($max)"; exit 3; }
@@ -346,9 +354,8 @@ register|unregister)
     jq --arg repo "$REPO" --arg s "$S" '[.[] | select(.session != $s or .repo != $repo)]' "$WF" > "$WF.tmp" && mv "$WF.tmp" "$WF"
     echo "unregistered $REPO session $S"
   else
-    # HERDR_PANE_ID may be the stable id, not the display id handoff.sh needs — resolve it (CLAUDE.md trap).
-    pane=""; command -v herdr >/dev/null 2>&1 && [ -n "${HERDR_PANE_ID:-}" ] \
-      && pane=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.pane_id // empty' 2>/dev/null)
+    # WP-378: the hc address ($HC_TERMINAL_ID, `t7`) is the one id: no stable-id resolution to do.
+    pane=${HC_TERMINAL_ID:-}
     cwd=$(pwd)
     at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     jq --arg repo "$REPO" --arg pane "$pane" --arg s "$S" --arg cwd "$cwd" --arg at "$at" \
@@ -468,12 +475,13 @@ serve)
       wrepo=$(printf '%s' "$w" | jq -r .repo); wpane=$(printf '%s' "$w" | jq -r .pane)
       wsess=$(printf '%s' "$w" | jq -r .session); wcwd=$(printf '%s' "$w" | jq -r .cwd)
       [ -n "$wcwd" ] && [ -d "$wcwd" ] || continue
-      # a watcher with no resolved pane (herdr missing/failed at register time) can never deliver anything —
+      # a watcher with no resolved pane (no HC_TERMINAL_ID at register time) can never deliver anything —
       # without this it polls forever as a silent black hole, never firing an unwatched notice.
       [ -n "$wpane" ] || { mark_unwatched "$wrepo" "no resolved pane at registration -- never delivered"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
       # decision 5 (1/3): the pane itself is gone.
-      if command -v herdr >/dev/null 2>&1; then
-        herdr pane get "$wpane" >/dev/null 2>&1 || { mark_unwatched "$wrepo" "reviewer pane $wpane is gone"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
+      # (a down core, or no hc, says nothing about the terminal: never declared gone from that, and never started to find out)
+      if command -v hc >/dev/null 2>&1 && core_up; then
+        hc get --json "$wpane" 2>/dev/null | jq -e '.state == "live"' >/dev/null 2>&1 || { mark_unwatched "$wrepo" "reviewer pane $wpane is gone"; (cd "$wcwd" && "$0" unregister --session "$wsess" >/dev/null 2>&1); continue; }
       fi
       out=$(cd "$wcwd" && "$0" poll-shas --once 2>/dev/null)
       # the missed heads themselves need no replay step: poll-shas seeds from state.json, so this poll just found them

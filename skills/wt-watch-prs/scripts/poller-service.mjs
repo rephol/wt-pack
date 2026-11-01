@@ -31,7 +31,7 @@ const launchctl = (...a) => execFileSync('/bin/launchctl', a, { encoding: 'utf8'
 const loaded = () => { try { launchctl('print', `${DOMAIN}/${LABEL}`); return true } catch { return false } }
 
 // The same PATH the dashboard's plist builds: the login shell's, plus nvm, Homebrew, cargo and ~/.local/bin —
-// serve shells out to gh/jq/herdr, none of which launchd's own minimal PATH carries.
+// serve shells out to gh/jq/hc, none of which launchd's own minimal PATH carries.
 export function loginPath() {
   const parts = []
   if (LINUX) parts.push(process.env.PATH ?? '') // systemd's own user PATH is minimal; the installing shell's is not

@@ -24,7 +24,7 @@ this file is the judgement. Run everything from the repo's main checkout (a revi
 ## Modes (WP-121)
 
 `$W mode [arg]` picks: `dispatch` or `review` when given, `standalone` for an `owner/repo` argument; with none,
-the pane's role token decides (orchestrator → dispatch; reviewer, none or no herdr → standalone). All three share
+the terminal's role decides (`WT_ROLE`, else its hc `role` label; orchestrator → dispatch; reviewer, none or no hc → standalone). All three share
 `state.json` and the claims, so no head is reviewed twice across modes.
 
 **Dispatch** (orchestrator). §1 preflight, then arm `$W poll-shas` and `$W poll-replies --session D` (D is your
@@ -80,7 +80,7 @@ $W identity           # "<login> <source>" — the account reviews post as
   - A poller that hangs is restarted by its supervisor (WP-196), and one that comes back after a 3+ min gap sends this pane a `poller resumed after Nm; replayed missed heads` system message — treat it as "events may have been late", not as an error. Never arm Monitors alongside the poller (duplicate events).
   - **Exit 0 → `$W register --session S`**, confirm with `$W poller-status --expect-registered` (exit 1 "running but 0 watchers" → register again), and stop here; the poller drains the backlog and delivers events
     to this pane from now on. No Monitor, no polling loop in this session — `register` records this pane
-    (resolved via `herdr pane get`, the `HERDR_PANE_ID`-may-be-the-stable-id trap) and this repo's checkout
+    (its `HC_TERMINAL_ID`, the bare hc address) and this repo's checkout
     path once, and returns immediately.
   - **Exit non-zero, standalone mode → `$W poller-install` once, then `$W poller-status` again** (WP-191). It
     installs the poller as a launchd agent (macOS), a systemd user unit (Linux) or — on a host with neither, such
