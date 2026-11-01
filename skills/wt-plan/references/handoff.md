@@ -79,7 +79,7 @@ printf '%s\n' "$PROMPT" | ../wt-handoff/scripts/handoff.sh \
   [--pane <id> [--clear] | --new] [--task "<TICKET> <short title>"] --skill wt-plan --buddy self <worktree>
 ```
 
-`--buddy self` pairs the worker with you (WP-147): a `pair` pane token on both, and the local ticket's own
+`--buddy self` pairs the worker with you (WP-147): a `pair` label on both, and the local ticket's own
 `pair` field, so a review round or a question addressed with `--task <TICKET>` reaches whichever of you it's
 for instead of a free agent. Only skip it if the ticket has no local board card (Linear-only).
 
@@ -137,7 +137,7 @@ have one definition:
 agents.sh list [worker|planner]        # name, pane, status, cwd
 agents.sh spawn worker [cwd]           # worker starts in the worktree
 agents.sh spawn planner [cwd]          # planner starts in the MAIN checkout — its first job is to make a worktree
-agents.sh rm <name|pane> [--force]     # closes the tab
+agents.sh rm <name|pane> [--force]     # ends the terminal
 ```
 
 **Every agent is named at spawn.** `agents.sh spawn` starts the terminal with `hc run --name <NAME>` and the same
