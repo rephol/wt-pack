@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { installFakeHc } from './fake-hc.mjs'
 import * as hc from './hc.mjs'
+import { quietEnv, snapshot, verify } from './claude-link-guard.mjs'
 
 const run = promisify(execFile)
 const HC_MJS = new URL('./hc.mjs', import.meta.url).pathname
@@ -330,6 +331,8 @@ const real = process.env.WT_REAL_HC === '1' && process.env.HC_SESSION && process
 describe('real hc (WT_REAL_HC=1, isolated session)', { skip: real ? false : 'set WT_REAL_HC=1 HC_SESSION=wtt-x XDG_STATE_HOME=… to run' }, () => {
   test('spawn, label, list, send refused for a program, kill and rm', async () => {
     const made = []
+    const link = snapshot(), was = { ...process.env }
+    Object.assign(process.env, quietEnv(process.env)); delete process.env.XDG_DATA_HOME // no claude installer in the isolated env
     try {
       const r = await hc.spawnNumbered({ prefix: `wtt-real${process.pid}`, cwd: tmpdir(), labels: { 'wt.pool': 'real-test', role: 'worker' }, argv: ['sleep', '120'] })
       made.push(r.id)
@@ -339,6 +342,11 @@ describe('real hc (WT_REAL_HC=1, isolated session)', { skip: real ? false : 'set
       await assert.rejects(hc.send(r.id, 'nope', { ifIdle: true }), (e) => e.kind === 'status_mismatch')
       await hc.clearLabel(r.id, 'task')
       assert.equal((await hc.get(r.id)).labels.task, undefined)
-    } finally { for (const t of made) await hc.killRm(t).catch(() => {}) }
+    } finally {
+      for (const t of made) await hc.killRm(t).catch(() => {})
+      for (const k of ['DISABLE_AUTOUPDATER', 'DISABLE_INSTALLATION_CHECKS', 'DISABLE_UPDATES']) if (!(k in was)) delete process.env[k]
+      if (was.XDG_DATA_HOME) process.env.XDG_DATA_HOME = was.XDG_DATA_HOME
+      assert.equal(verify(link), null) // ~/.local/bin/claude untouched
+    }
   })
 })

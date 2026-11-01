@@ -13,9 +13,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { quietEnv, snapshot, verify } from './claude-link-guard.mjs'
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hc')
 const HC = process.env.HC_BIN || 'hc'
+// Throwaway claude terminals must not run the installer (it repointed ~/.local/bin/claude once): quiet env + a link check at exit.
+const LINK = snapshot()
+process.on('exit', (code) => { const bad = verify(LINK); if (bad) { console.error(`hc-record: ${bad}`); process.exitCode = code || 3 } })
 
 function guard() {
   const s = process.env.HC_SESSION
@@ -26,7 +30,7 @@ function guard() {
 }
 
 function run(args, input) {
-  const r = spawnSync(HC, args, { encoding: 'utf8', input, timeout: 30_000 })
+  const r = spawnSync(HC, args, { encoding: 'utf8', input, timeout: 30_000, env: quietEnv() })
   return { args, exit: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 
@@ -35,7 +39,7 @@ export function store(verb, name, entry) {
   const f = join(DIR, `${verb}.json`)
   let doc = { verb, recorded: '', cases: {} }
   try { doc = JSON.parse(readFileSync(f, 'utf8')) } catch {}
-  const v = spawnSync(HC, ['-V'], { encoding: 'utf8' }).stdout.trim()
+  const v = spawnSync(HC, ['-V'], { encoding: 'utf8', env: quietEnv() }).stdout.trim()
   doc.recorded = `${v} ${new Date().toISOString().slice(0, 10)}`
   doc.cases[name] = entry
   // keep real output but not the recorder's username or hostname
