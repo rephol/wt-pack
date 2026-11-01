@@ -17,10 +17,10 @@ writeFileSync(join(tmp, 'curl'), `#!/bin/sh\necho hit >> ${hit}\nprintf '{}\\n20
 const deliver = join(import.meta.dirname, 'wt-deliver')
 const q = (c) => `'${c.replaceAll("'", `'\\''`)}'`
 // depth = claudes below the holder; above = claudes above it (the core started from an agent's shell); holder = hc | herdr-core | none
-const run = (depth, { above = 0, holder = 'hc', env = { HC_TERMINAL_ID: 't7' } } = {}) => {
+const run = (depth, { above = 0, holder = 'hc', env = { HC_TERMINAL_ID: 't7' }, decoy = false } = {}) => {
   rmSync(hit, { force: true })
   let cmd = `${deliver} hello; echo $? > ${tmp}/rc`
-  for (let i = 0; i < depth; i++) cmd = `${tmp}/claude -c ${q(cmd)}; :`
+  for (let i = 0; i < depth; i++) cmd = `${tmp}/claude -c ${q(cmd)}${decoy && i === depth - 1 ? ' x "see hc hold --socket y herdr-core hold z"' : ''}; :`
   if (holder !== 'none') cmd = `${tmp}/${holder} hold --socket /x/holder.t7.sock ${q(cmd)}; :`
   for (let i = 0; i < above; i++) cmd = `${tmp}/claude -c ${q(cmd)}; :`
   spawnSync('sh', ['-c', cmd], { env: { PATH: `${tmp}:${process.env.PATH}`, ...env } })
@@ -45,4 +45,8 @@ test('WP-378: an hc process that is not a holder (no `hold` argument) is no boun
 test('WP-378: without HC_TERMINAL_ID it stands down; the old pane id alone is no identity', () => {
   assert.equal(run(1, { env: {} }), false)
   assert.equal(run(1, { env: { HERDR_PANE_ID: 'w1:p1' } }), false) // legacy-herdr
+})
+test('WP-378 F5: only an argv[0] hc/herdr-core with `hold` next is the holder: a claude whose args merely mention `hc hold` is no boundary', () => {
+  assert.equal(run(2, { decoy: true }), false, 'the decoy outer claude must still count as a nested claude')
+  assert.equal(run(1, { decoy: true }), true, 'a lone claude with such args still reaches the dashboard')
 })
