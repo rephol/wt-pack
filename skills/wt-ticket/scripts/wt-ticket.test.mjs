@@ -19,7 +19,7 @@ async function stub(handler) {
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   return { url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() }
 }
-const run = (args, env) => execFileP(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: 'w1:p2', ...env } })
+const run = (args, env) => execFileP(BIN, args, { encoding: 'utf8', env: { ...process.env, HC_TERMINAL_ID: 't2', ...env } })
 
 test('WP-276: move <ID> cancelled --note sends the column and the reason', async () => {
   let seen

@@ -22,7 +22,15 @@ test('lets the normal forms through', () => {
 test('repo rules apply only in a wt-pack checkout; the skills-path rule everywhere', () => {
   expect(guard('gh pr create --draft', false)).toBeNull()
   expect(guard('git commit -am m', false)).toBeNull()
-  expect(guard('herdr pane send p "see ~/.claude/skills/x"', false)).toMatch(/skills/)
+  expect(guard('hc send t7 "see ~/.claude/skills/x"', false)).toMatch(/skills/)
+})
+
+test('WP-378: SENDS covers every hc verb and herdr-app do (flag before the verb too)', () => {
+  for (const c of ['hc send t7 "see ~/.claude/skills/x"', 'hc label t7 note="~/.claude/skills/x"', 'hc put t7 ~/.claude/skills/x/f', 'hc --json send t7 "$HOME/.claude/skills/x"',
+    'env -u HC_TERMINAL_ID hc keys t7 "~/.claude/skills/x"', 'herdr-app do send "~/.claude/skills/x"', 'herdr-app --json do open ~/.claude/skills/x'])
+    expect(guard(c, false)).toMatch(/skills/)
+  expect(guard('hc ls', false)).toBeNull()
+  expect(guard('echo "wchc" ~/.claude/skills/x', false)).toBeNull() // \bhc\b is a word, not a substring
 })
 
 const stub = (on: any, exitCode: number) => {

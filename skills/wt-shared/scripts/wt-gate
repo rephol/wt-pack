@@ -14,7 +14,7 @@ import { classify, allowed } from './gate.mjs'
 const [sub, dd, ...rest] = process.argv.slice(2)
 if (sub !== 'check' || dd !== '--' || !rest.length) { console.error('usage: wt-gate check -- <command>'); process.exit(2) }
 const cmd = rest.join(' ')
-const key = process.env.HERDR_PANE_ID || process.env.WT_HEADLESS_ID
+const key = process.env.HC_TERMINAL_ID || process.env.WT_HEADLESS_ID
 if (!key) process.exit(0) // a human's own terminal is never gated
 
 const cwd = process.cwd()
@@ -39,7 +39,7 @@ const api = process.env.HERDR_DASH_URL || 'http://127.0.0.1:7777'
 const hash = createHash('sha1').update(cmd.replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16)
 const post = async (path, body) => {
   const r = await fetch(`${api}${path}`, { method: 'POST', signal: AbortSignal.timeout(4000),
-    headers: { 'content-type': 'application/json', 'x-herdr-pane': process.env.HERDR_PANE_ID ?? '', ...(process.env.WT_PANE_KEY ? { 'x-wt-pane-key': process.env.WT_PANE_KEY } : {}) }, body: JSON.stringify(body) })
+    headers: { 'content-type': 'application/json', 'x-herdr-pane': process.env.HC_TERMINAL_ID ?? '', ...(process.env.WT_PANE_KEY ? { 'x-wt-pane-key': process.env.WT_PANE_KEY } : {}) }, body: JSON.stringify(body) })
   if (!r.ok) throw new Error(`${path} ${r.status}`)
   return r.json()
 }

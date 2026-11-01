@@ -8,7 +8,7 @@
 //     does nothing (handoff passes it on as --request-id, WP-251; the others use wt-shared's receipts);
 //   - a deadline under Claude Code's ~60 s abort of an MCP call (WT_MCP_TIMEOUT_MS, default 50 s): a CLI still running
 //     then is killed and the call fails `timeout`, retryable with the same key.
-// Identity is the pane the CLIs read from $HERDR_PANE_ID, inherited from the agent's own env.
+// Identity is the terminal the CLIs read from $HC_TERMINAL_ID (and WT_PANE_KEY), inherited from the agent's own env.
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { statSync } from 'node:fs'
@@ -39,7 +39,7 @@ function classify(exit, text) {
   if (exit === 2 || /^usage|refused|is on team|not on a team/i.test(t)) return new ToolError('refused', t, { exit })
   return new ToolError('failed', t || `exit ${exit}`, { exit })
 }
-// The CLI runs in its own process group so a deadline kills what it started too (handoff.sh spawns herdr and claude
+// The CLI runs in its own process group so a deadline kills what it started too (handoff.sh spawns hc and claude
 // helpers; killing only the shell would leave them holding the pipes and the call hanging).
 function run(bin, args, { input, timeoutMs = TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {

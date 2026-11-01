@@ -12,7 +12,7 @@ Posts a question to the user as a room chip and Inbox card (WP-164's 'A'). The u
 the answer comes back to you as a `<wt-message kind="reply" from="user">` through `handoff.sh --reply`, the
 same as any other reply.
 
-**WP-206:** with the wt-pack plugin loaded (`./setup install`), a herdr agent's native `AskUserQuestion` is
+**WP-206:** with the wt-pack plugin loaded (`./setup install`), an hc agent's native `AskUserQuestion` is
 already routed to the dashboard and blocks until it is answered — don't call `wt-ask` by hand for that. In a room,
 handoff or dispatch context where you must not block, `wt-ask` below is still the fire-and-forget way. The mod's own
 building blocks: `--wait <id> [--timeout S]` (print the answer JSON; exit 3 on resolved/timeout), `--ping`,
@@ -41,7 +41,7 @@ wt-ask --resolve <id>
 - `--resolve <id>`: closes the ask without an answer (e.g. the question no longer applies). Only the pane
   that asked it may resolve it.
 
-Prints the ask id on success. Identity is `$HERDR_PANE_ID` (the server rejects unknown panes), same as
+Prints the ask id on success. Identity is `$HC_TERMINAL_ID` (the server rejects unknown panes), same as
 `wt-room`'s `room` CLI. Exit codes: 0 ok, 1 API error, 2 usage.
 
 ## Example
