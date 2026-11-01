@@ -415,3 +415,53 @@ No textual conflicts. U5's `hc.mjs` change (CLI guard without top-level await, f
   target still records a `delivered` reply row before `hc_send … any` refuses it. Replies are not in `ACK_KINDS`, so the sweep neither acks nor
   resends it (a wrong state, no duplicate); U6 gives the reply path the same pre-check when it touches delivery states. `uploads.test.mjs`
   assumes `TMPDIR` is set (fails under a bare `env -i`): run suites with `TMPDIR` kept.
+
+## Tech-lead decisions after U6 (b4a394e wt-shared, c8a2589 wt-handoff, b9f2409 wt-dashboard; dashboard 808/808, root 490/490)
+Probe (tech lead, isolated core `HC_SESSION=wtkprobe`, scratch `XDG_*`, one `/bin/cat -v` terminal, no claude; core stopped, dir removed; default core untouched):
+`hc keys` sends a key NAME per argument. `A` arrives as `a`; `shift+a` arrives as `A` (every letter); `shift+9`/`shift+1`/`shift+/` arrive UNshifted (`9 1 /`);
+`; ] \`` are accepted; `! @ # $ % ^ & * ( ) _ + { } | : " < > ? ~`, `shift+minus`, `shift+semicolon` and non-ASCII (`é`) are `invalid_params` (unknown key).
+`pageup home end pagedown` arrive as `ESC[5~ ESC[H ESC[F ESC[6~` (standard xterm). `hc attach` refuses a pipe ("attach needs a terminal"); the API
+`terminal.attach` takes raw DATA bytes only on a framed connection whose frame format `hc schema` does not document, and a non-observe attach sets the
+terminal's size to the viewer's (it would reflow the agent's TUI).
+- **D26 picker free text (Q1): `hc send --force` on the user's answer route only.** Reason: `--force` exists for exactly this ("it may answer its dialog");
+  the never-force rule protects deliveries from answering a dialog nobody chose, while `POST /api/agents/<m>/<pane>/answer` needs the session cookie (no
+  `x-herdr-pane` exemption, server.mjs:2439-2465), so the force is the user's own act, as herdr's `send-text` was. `answerPlan`'s `{text}` + following `enter`
+  becomes one forced send (paste + Enter); keys stay `hc keys`. hc.mjs gains `send(..., { force: true })`, used by `answerQuestion` and nothing else; every
+  `deliver()`/sweep/flush path still refuses `force` (test asserts no `--force` in their argv). Single-select: verified live on an isolated core (throwaway
+  claude, `AskUserQuestion` with Other, link guard) that the pasted text lands in the Other field and Enter submits it. Multi-select (`text` then `down enter`):
+  the forced Enter lands inside the Other field; the engineer verifies live what it does and re-reads the screen (Other checked with the text) before
+  continuing to Submit. If that cannot be made reliable, multi-select Other alone keeps the 409 and goes to gate B as an open user question.
+- **D27 xterm typing without Enter (Q2): capitals via `shift+<letter>`, the rest stays refused.** Reason: probe above. `typeKeys` maps `A-Z` to
+  `shift+a`..`shift+z` and adds `; ] \``; everything else in the list above keeps the 400 with the "use the input line" message (a line with Enter goes
+  through `hc send`, any character). No technical route for the remaining characters inside this ticket (undocumented framed attach, resize side effect):
+  open user question at gate B (U-Q1 below).
+- **D28 pasted `/goal <pointer>` under hc (Q3): a gate B QA item, no code change now.** Reason: S4 showed the pointer arrives as the exact single line, U6
+  checked a pasted slash command runs, and `inject.mjs` verification is the same code as under herdr; what is unproven is only the live pair. QA step 2 adds
+  `handoff.sh --goal` and one dashboard dispatch with goal: the target's reminder says Verified and the goal arms. A failure routes to `inject.mjs` (U4 area).
+- **D29 blocked queue in memory (Q4): accepted as built.** Reason: a dashboard restart is rare and operator-driven (CLAUDE.md: don't restart repeatedly);
+  ack kinds (`handoff|dispatch|routine`) stay `queued` and the WP-257 sweep resends them after a restart; the only non-ack envelope kinds are `reply`/`system`,
+  whose senders wait on nothing, and a reply to a blocked target is refused at the script before recording (c8a2589). The 30-min give-up marks the row
+  `failed` with the reason; the question/Inbox card already asks the user to answer the dialog. No persistence.
+- **D30 `hcKeys` pageup/pagedown/home/end (Q5): verified** (probe above). No change.
+- **D31 `remoteName` and the remote branch of `agentName` (Q6): remove now (U6 fix).** Reason: §5 U6 deletes remote code; under hc every terminal has a
+  name and `machines()` is the single `LOCAL_MACHINE`, so the branch is dead, and its tests carry herdr pane ids (`w5:p8`) and `'Herdr Box'` that fail the
+  DoD grep. `agentName` keeps `a.name`, else a name-shaped title, else `<cwd slug>-<tN>`; tests use `tN`. The `machines()`/`m.local` stub itself stays
+  (the disabled remote UI reads `/api/machines`); collapsing it is out of scope.
+- **D32 `canonicalPane` (found in this pass): delete.** Under hc an address is its own canonical form, so `agentFor`'s fallback (server.mjs:2603) and the
+  gate-grant clause (server.mjs:2823) are dead and the name fails the DoD grep. Exact id match only; drop its `parse.test.mjs` test.
+- **Fix round F3 (one engineer, wt-dashboard + wt-shared hc.mjs):** D26, D27, D31, D32. Red proofs: free-text single-select answer on the fake hc → keys
+  `[n+1]` then `send --force <text>` (409 before); a delivery to a blocked target never carries `--force`; `typeKeys('Ab;')` → `['shift+a','b',';']`
+  (400 before). Commits: wt-shared (hc.mjs) and wt-dashboard separately; dashboard `npm test` and root `npm test` green.
+- **Open user questions for gate B.**
+  - **U-Q1 (D27) Terminals view direct typing.** Typing straight into a shell in the dashboard's Terminals view can no longer send `! @ # $ % ^ & * ( ) _ + { } | : " < > ? ~`
+    or non-ASCII without Enter (letters incl. capitals, digits and the input line with Enter all work). (a) Accept: such text goes through the input line
+    (Run); interactive programs needing those keys mid-line (vim, a `y/N` that wants `?`) are used from herdr-app. (b) Follow-up ticket: a raw input stream over
+    hc's framed `terminal.attach`, which would also give the Terminals view colour (R5's alternative) — needs hc's frame format and a fix for the resize-on-attach.
+  - **U-Q2 (D26, only if the multi-select live check fails)** A multi-select question's free-text "Other" cannot be answered from the dashboard: (a) accept,
+    answer it in the terminal/herdr-app; (b) follow-up ticket with the same attach stream as U-Q1(b).
+- **U7 brief additions.** (1) The DoD grep over code comments and test names too: 52 lines remain in `skills/wt-dashboard` after the exclusions
+  (server.mjs 14, parse.test.mjs 13, the rest 1-2 per file), plus every other skill. (2) `docs/features.md`: Terminals direct typing limits (D27) and the
+  free-text picker answer (D26 outcome), blocked-queue behaviour (D29: queued behind a dialog, given up after 30 min, a restart falls back to the sweep), no
+  remote machines. (3) CLAUDE.md Traps: `hc keys` names keys (capitals only as `shift+<letter>`, no shifted punctuation); `--force` only on the user's answer
+  route; the in-memory blocked queue. (4) QA brief step 2 gains D28's `--goal` checks and a free-text picker answer (single-select, and multi-select per D26)
+  on the isolated core. (5) Doctor: `hc` version line (probe used 0.1.16; key names and `send --force` semantics are version-bound).
