@@ -73,7 +73,7 @@ once, after QA, through the flip runbook (§7). Units are branches off U1 to run
 - **Spawn: one path, agents.sh (U2).** Dashboard Dispatch, routines, pause/resume, watchdog Resume and `handoff.sh --session` already spawn through
   agents.sh (server.mjs:1152,1420,1463; handoff.sh:833); they keep doing so. agents.sh `spawn|respawn` calls `node hc.mjs spawn`, which runs
   `hc run --bg --outlive-parent --no-notify --name N --cwd D --label ... -- hc-launch <file> -- claude ...`.
-- **Launcher `skills/wt-agents/scripts/hc-launch <envfile> -- <argv...>`.** Why: no CLI `--env`; the terminal env is the core's (whoever started it),
+- **Launcher `skills/wt-agents/scripts/hc-launch <envfile> -- <argv...>`** (superseded in part by D2/D3: API `env`, no file, `-l -i`). Why: no CLI `--env`; the terminal env is the core's (whoever started it),
   not a login shell. The spawner writes `GH_TOKEN`, `WT_PANE_KEY`, kill-shim `PATH`/`WT_KILL_SHIM_DIR`, `CLAUDE_ENV_FILE`, `WT_MEMORY_MCP`, and
   `WT_ROLE`/`WT_PERSONA`/`WT_PROJECT` as `KEY=value` lines to a 0600 file in a 0700 dir `~/.local/share/wt-agents/launch/` (name + nonce). The launcher:
   (1) reads the lines **without evaluating them** and deletes the file first; (2) unsets a fixed denylist inherited from the core (`GH_TOKEN`, `WT_PANE_KEY`,
@@ -200,7 +200,7 @@ Owner: wt-pack:wt-engineer
   deleted, lessons that still apply kept and worded "the old multiplexer"). The flip runbook (§7) in docs.
 - The final grep gate (DoD) and root `npm test` green.
 
-### U8 — status bridge (skill: wt-memory), conditional on S1 tier 2
+### U8 — status bridge (skill: wt-memory), conditional on S1 tier 2 — DROPPED (S1 tier 1, D10)
 Owner: wt-pack:wt-engineer
 - Hooks emit OSC 7501 per §4 (permission-prompt matcher for blocked, working again on PreToolUse); tests with a fake tty file incl. an idle notification that
   leaves status idle; hook stays inside its timeouts; no behaviour change when `HC_TERMINAL_ID` is unset.
@@ -326,3 +326,39 @@ turn records `$WT_TURN_DIR/turn-<id>.json` (inject.mjs:52, wt-gate:31) — **not
 (no aliasing, but an isolated run still writes the real `~/.cache/wt-memory/<session>.{recalled,hash,ctx}`): inject.mjs:120,139 (U4 may honour `WT_TURN_DIR`/`WT_MEMORY_CACHE` there).
 `XDG_DATA_HOME` is honoured by none of them. The isolation set for spikes/QA is therefore `WT_DASHBOARD_DATA`, `WT_TURN_DIR`, `WT_MESSAGES_DIR`, `WT_MEMORY_CACHE`, `XDG_CACHE_HOME`
 (+ `HERDR_DASH_URL`), and U2's new launch dir (`~/.local/share/wt-agents/launch/`) needs an env override honoured the same way.
+
+## Tech-lead decisions after U1 (override §4/§5 where they differ)
+- **D1 list.** Confirmed: `hc.mjs list()` = one `hc connect` `terminal.list` per tick (full rows: labels, status object, foreground, argv); `hc ls --json`
+  is not used for state. Every caller that must not start a core (dashboard tick, doctor, the wt-memory fallback) calls `coreUp()` first and skips hc when it
+  is down; U5 records whether `hc connect` itself starts a stopped core (fixture + test), but the `coreUp()` gate stays either way.
+- **D2 launcher shell: `$SHELL -l -i -c`.** Reason: agents ran in the user's interactive shell under herdr; S5-2 shows `-l -c` drops every `.zshrc`-only
+  var (NVM, JAVA_HOME, BUN, …) that claude's Bash tool relies on today. Pack values must win over the rc: stage 1 (before the shell) scrubs the denylist
+  except keys the spawner set, writes the pane-key file and keeps the pack values in the env; the shell runs `hc-launch --after-rc -- claude …` (no value
+  in argv), which re-applies the pack values and the shim-first `PATH`, unsets its own bookkeeping vars and `exec`s claude. Red test: an rc that sets
+  `GH_TOKEN` and rewrites `PATH` does not win. **`HC_SESSION` leaves the denylist**: the core sets it to its own session for the terminal (S5-1), and
+  scrubbing it would point an isolated-core agent's `hc` calls at the default core.
+- **D3 secrets: `terminal.run` API `env`, no env file.** Reason: S5-4 shows the values reach the program and appear in neither `hc get --json` nor `ps`
+  argv, so nothing secret touches disk; the 0600 file, its launch dir, the delete-on-failed-run path and the 10-min sweep are dropped (the launch-dir env
+  override is moot). `hc.mjs spawn` sends `terminal.run` over `hc connect` with `argv,cwd,env,labels,name,no_notify:true,outlive_parent:true` and passes
+  `WT_LAUNCH_KEYS=<names it set>` so stage 1 knows which denylisted names to keep; `name_taken` over the API is recorded as a fixture and mapped like the CLI.
+  Red proofs kept: no value in argv/`hc get`, denylist scrubbed, pack values beat the rc.
+- **D4 core never started.** `hc server status`, `hc ls`, `hc get` start a stopped core (S5-5). Doctor and the dashboard use `coreUp()`, then (only if up)
+  `hc server status --json` for `core.id`. `agents.sh spawn|respawn` refuses with "hc core is down" when `coreUp()` is false. The dashboard stores `core.id`
+  and drops agents-table rows and pane keys when it changes (the §4 "if S5 finds a core identity" is now a U5 task).
+- **D5 sends (S4).** Server sends: `deliver()` from the launchd dashboard (untagged). Script sends (`handoff.sh`, the `herdr agent prompt`/`send-text` sites
+  at handoff.sh:274,299,301,470,498,500 today): `env -u HC_TERMINAL_ID hc send`, after the record, pointer only. Ready = status `idle` or `done` (S1: `done` is
+  the resting state) everywhere: dispatch's free-worker check, handoff waits, watchdog, `hc.mjs send({ifIdle})` (its retry on "is done, not idle" is
+  approved; it never retries for working/blocked/a shell). R4: the user allows `notes = false`; the pack does not need or set it, doctor reports it (info).
+  New gate class (U4, red first): a Bash command that calls `hc send`/`hc keys` itself with `HC_TERMINAL_ID` unset or emptied (`env -u HC_TERMINAL_ID`,
+  `HC_TERMINAL_ID=`) is a forged-untagged send to another terminal: ask. Pack scripts run that call inside their own process, so they are not affected.
+- **D6 picker focus (S2).** No `terminal.attach` ANSI reader. U6 tracks the focused tab: index 0 when a picker first appears (new blocked `kind:"question"`),
+  updated on each key the dashboard sends, and resynced by matching the displayed question text (and the blocked `msg` question) against questions seen
+  on earlier frames. Red test on the `picker-*.txt` fixtures plus a recorded multi-tab sequence.
+- **D7 wt-deliver walk (S3).** Holder = a process whose argv[0] basename is `hc` or `herdr-core` with argv[1] `hold`; stand down when more than one `claude`
+  lies between it and the caller. Red test with a faked process table.
+- **D8 identity after keep.** Labels are lost on a kept terminal (S5-8): the agents-table row (name, address) is the identity; a terminal whose foreground is not
+  claude is exited (Resume offered), never typed into.
+- **D9 isolation paths.** U4 makes `inject.mjs` write its `<session>.{recalled,hash,ctx}` under `$WT_MEMORY_CACHE` (default unchanged), so an isolated run
+  touches no real `~/.cache/wt-memory` file. Isolation set for tests/QA: `WT_DASHBOARD_DATA`, `WT_TURN_DIR`, `WT_MESSAGES_DIR`, `WT_MEMORY_CACHE`,
+  `XDG_CACHE_HOME`, `HERDR_DASH_URL`, scratch `XDG_STATE_HOME` under a short path (socket ≤103 bytes).
+- **D10 U8 dropped** (S1 tier 1). The tier-2/3 fallback text in §4 is history.
