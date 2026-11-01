@@ -14,7 +14,7 @@
 #   wt-ticket keys                                  (known board keys, one per line)
 #   --json on any command prints the raw API body. Columns: backlog ready planning building review done blocked cancelled (terminal, like done; --note says why).
 #   Priority is Linear's scale: 0 none (default), 1 urgent, 2 high, 3 medium, 4 low.
-# Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
+# Identity: $HC_TERMINAL_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 usage() { sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -26,7 +26,7 @@ fmt() { [ $json = 1 ] && echo "" || echo "format=text"; }
 # call METHOD PATH [JSON]: prints the body; exit 1 on an HTTP error or an unreachable server.
 call() {
   local out code
-  out=$(curl -sS --max-time "${MAXT:-5}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+  out=$(curl -sS --max-time "${MAXT:-5}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API — wt-ticket needs it running (see README › Install)" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ticket: $code $out" >&2; exit 1; fi
