@@ -52,7 +52,7 @@ test('/wt dnd acts on the current terminal (HC_TERMINAL_ID, no lookup: the addre
 
 test('/wt dnd outside an hc terminal says so and runs nothing', async ($, on) => {
   const ran: string[][] = []
-  mock.env(on, { HERDR_PANE_ID: 'w1:p2' }) // the old id is no identity
+  mock.env(on, { HERDR_PANE_ID: 'w1:p2' }) // the old id is no identity (legacy-herdr)
   on('process.run', (_$: unknown, e: { argv: string[] }) => { ran.push(e.argv); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
   on('command.register', () => ({}))
   const r: any = await $.command.run({ command: 'wt', args: 'dnd on' } as never)
