@@ -275,7 +275,7 @@ settled() { # <id> <secs>
 HL_URL="${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless"
 hl_resolve() { # <target>
   [ -n "$1" ] || return 1
-  ! printf '%s' "$1" | grep -qE '^t[0-9]+$' || return 1 # WP-378: a terminal address (t7) is never a headless run
+  ! printf '%s' "$1" | grep -qE '^t[0-9a-z]+$' || return 1 # WP-378: a terminal address (t7) is never a headless run
   r=$(curl -sS --max-time 3 ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$HL_URL" 2>/dev/null | jq -r --arg t "$1" \
     '[.[]? | select(.state != "ended" and .state != "failed")] as $l | ($l | map(select(.id == $t or .name == $t))) as $x
      | ($x | if length > 0 then . else ($l | map(select(.id | startswith($t)))) end) | if length == 1 then "\(.[0].id) \(.[0].name)" else empty end' 2>/dev/null) || return 1
