@@ -2476,7 +2476,7 @@ const LOCAL = {
     LOOPBACK_HOST.test(h) || (BIND_OK.remote && h.toLowerCase() === bindHostHeader(BIND, PORT)) || cfg.list('WT_DASHBOARD_ALLOWED_HOSTS').map((x) => x.toLowerCase()).includes(h.toLowerCase().replace(/:443$/, '')),
 }
 const PANE = /^[\w.:-]+$/
-const HC_ADDR = /^t\d+$/ // an hc terminal address
+const HC_ADDR = /^t[0-9a-z]+$/ // an hc terminal address (t7, t12, t1p: letters appear past t19)
 const KEY = /^[\w+-]{1,20}$/
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png' }
 
@@ -3120,7 +3120,7 @@ const roomsLoop = async () => {
 // Who is posting: an agent names its pane (x-herdr-pane, set by the wt-room CLI from $HC_TERMINAL_ID) and must be a
 // live local agent reached on 127.0.0.1 itself; anything else must be the dashboard page (Origin present).
 // WP-378: $HC_TERMINAL_ID is the terminal's address (`t7`), the same form `hc` lists: an id is compared as is.
-const liveAgent = async (id) => (/^t\d+$/.test(id) ? (await agents().catch(() => [])).find((x) => x.local && x.id === id && x.status !== 'exited') : undefined) // WP-378 F5: an exited row (finished / kept shell) is no identity: its pane key is swept, it would sit in grace
+const liveAgent = async (id) => (HC_ADDR.test(id) ? (await agents().catch(() => [])).find((x) => x.local && x.id === id && x.status !== 'exited') : undefined) // WP-378 F5: an exited row (finished / kept shell) is no identity: its pane key is swept, it would sit in grace
 // WP-293: headless agents (headless.mjs) — claude -p stream-json processes this server owns. Opt-in: nothing runs until a
 // POST /api/headless; built lazily so importing this module (tests) opens nothing. Settings: WT_HEADLESS_CAP / _IDLE_MIN / _STUCK_MIN / _STUCK_ACTION / _RESUMES / _GRACE_MS / _DRIVER (cli|sdk, read by Headless).
 let headless
