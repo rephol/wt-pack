@@ -551,7 +551,8 @@ respawn)
     pn=$(printf '%s' "$row" | jq -r '.tokens.persona // empty')
     if [ -n "$pn" ] && node "$here/../../wt-shared/scripts/roles.mjs" resolve "$pn" --cwd "$dir" >/dev/null 2>&1; then r=$pn; fi
     [ -z "$old" ] || "$self" rm "$old" --force --keep-row >/dev/null || return 1
-    out=$(cd "$dir" && "$self" spawn "$r" "$dir" --label "$name" ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
+    lbl=$name; case "$name" in t[0-9a-z]*) case "$name" in *[!0-9a-z]*) ;; *) lbl= ;; esac ;; esac  # an unnamed terminal is "named" by its address (t31), which hc refuses: let spawn number a fresh name
+    out=$(cd "$dir" && "$self" spawn "$r" "$dir" ${lbl:+--label "$lbl"} ${sess:+--resume "$sess"} ${m:+--model "$m"} ${e:+--effort "$e"}) || return 1
     new=${out#* }
     # Spawn writes its own pool/role/project/spawned_by/created/model/effort; carry the rest (task, ticket, task_state, team …) over.
     carry=$(printf '%s' "$row" | jq -r '.tokens // {} | del(.role, .persona, .project, .spawned_by, .created, .model, .effort, ."wt.pool", ."herdr.space", ."herdr.tab") | to_entries[] | "\(.key)=\(.value)"')
