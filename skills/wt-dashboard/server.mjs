@@ -3697,7 +3697,7 @@ async function resumeSpawn(a, project) {
     fallback = { from: cwd ?? null, to: root }; cwd = root
   }
   const t = a.tokens ?? {}, sess = !fallback && a.session && (await findTranscript(a.session)) ? a.session : null // a session that never took a prompt has no transcript to resume
-  const out = await run(AGENTS_SH, ['spawn', a.persona || a.role, cwd, '--label', a.name, ...(sess ? ['--resume', sess] : []), ...(t.model ? ['--model', t.model] : []), ...(t.effort ? ['--effort', t.effort] : [])], cwd, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
+  const out = await run(AGENTS_SH, ['spawn', a.persona || a.role, cwd, ...(HC_ADDR.test(a.name) ? [] : ['--label', a.name]), ...(sess ? ['--resume', sess] : []), ...(t.model ? ['--model', t.model] : []), ...(t.effort ? ['--effort', t.effort] : [])], cwd, 300_000, { WT_AGENTS_SPAWNED_BY: 'dashboard' })
   const pane = out.trim().split(/\s+/).pop()
   const rest = Object.fromEntries(Object.entries(t).filter(([k]) => !['role', 'persona', 'project', 'spawned_by', 'created', 'model', 'effort'].includes(k)))
   if (Object.keys(rest).length) await setPaneLabels(pane, rest).catch(() => {})
