@@ -1,11 +1,11 @@
 #!/bin/sh
-# room — talk in wt-dashboard chat rooms from inside an agent terminal. POSIX sh + curl, no deps.
+# room — talk in Herdr Dash chat rooms from inside an agent pane. POSIX sh + curl, no deps.
 #   room list
 #   room read <slug> [--since N]
 #   room post <slug> "text" [--attach <file>]...   (@name addresses someone; agents cannot @all)
 #   room create <slug> "title" [--invite name1,name2]  (only if the user enabled it; you become the responder)
 #       --attach: a png/jpeg/webp/gif (<=10MB) or a .txt/.md/.markdown/.log/.csv/.json text file (UTF-8, <=1MB), <=5, under your cwd or /tmp; the server copies it.
-# Identity: the hc terminal you run in ($HC_TERMINAL_ID); the server rejects unknown panes.
+# Identity: the pane herdr runs you in ($HERDR_PANE_ID); the server rejects unknown panes.
 set -eu
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 die() { echo "room: $*" >&2; exit 1; }
@@ -13,7 +13,7 @@ esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk 'BEGIN{ORS=""} NR>
 # WP-122: an unreachable server says what is missing (a plugin-only install has no dashboard); an HTTP error still
 # prints its body (--fail-with-body) and exits 1, as wt-ticket's call() does.
 call() {
-  rc=0; curl -sS --max-time "${MAXT:-10}" --fail-with-body -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$@" || rc=$?
+  rc=0; curl -sS --max-time "${MAXT:-10}" --fail-with-body -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$@" || rc=$?
   case $rc in 0) ;; 6|7|28) die "needs wt-dashboard running at $API (see README › Install)" ;; 22) die "request failed (see the error above)" ;; *) die "curl failed ($rc, see above)" ;; esac
 }
 cmd=${1:-}; [ $# -gt 0 ] && shift
@@ -26,7 +26,7 @@ case "$cmd" in
     call "$API/api/rooms/$slug/messages?format=text&since=$since" ;;
   post)
     [ $# -ge 2 ] || die 'usage: room post <slug> "text" [--attach <file>]...'
-    [ -n "${HC_TERMINAL_ID:-}" ] || die "not inside an hc terminal (HC_TERMINAL_ID is unset)"
+    [ -n "${HERDR_PANE_ID:-}" ] || die "not inside a herdr pane (HERDR_PANE_ID is unset)"
     slug=$1; text=$2; shift 2; atts=""
     while [ $# -gt 0 ]; do
       [ "$1" = "--attach" ] && [ $# -ge 2 ] || die "unknown argument: $1"
@@ -38,13 +38,13 @@ case "$cmd" in
     echo "posted to #$slug" ;;
   create)
     [ $# -ge 2 ] || die 'usage: room create <slug> "title" [--invite name1,name2]'
-    [ -n "${HC_TERMINAL_ID:-}" ] || die "not inside an hc terminal (HC_TERMINAL_ID is unset)"
+    [ -n "${HERDR_PANE_ID:-}" ] || die "not inside a herdr pane (HERDR_PANE_ID is unset)"
     slug=$1; title=$2; shift 2; inv=""
     if [ $# -gt 0 ]; then
       [ "$1" = "--invite" ] && [ $# -ge 2 ] || die "unknown argument: $1"
       inv=$(printf '%s\n' "$2" | tr ',' '\n' | sed '/^$/d' | while read -r n; do printf '"%s",' "$(esc "$n")"; done); inv=${inv%,}
     fi
-    out=$(curl -sS -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
+    out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -X POST -H 'content-type: application/json' -w '\n%{http_code}' \
       --data "{\"slug\":\"$(esc "$slug")\",\"title\":\"$(esc "$title")\"${inv:+,\"invite\":[$inv]}}" "$API/api/rooms") || die "needs wt-dashboard running at $API (see README › Install)"
     code=$(printf '%s' "$out" | tail -n1); body=$(printf '%s' "$out" | sed '$d')
     if [ "$code" != 200 ]; then die "$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"; fi
@@ -52,7 +52,7 @@ case "$cmd" in
     case "$body" in *'"unknown":["'*) echo "not invited (unknown agents): $(printf '%s' "$body" | sed -n 's/.*"unknown":\[\([^]]*\)\].*/\1/p')" ;; esac ;;
   delete)
     [ $# -ge 1 ] || die 'usage: room delete <tmp-slug>'
-    out=$(curl -sS -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -X DELETE -w '\n%{http_code}' "$API/api/rooms/$1") || die "needs wt-dashboard running at $API (see README › Install)"
+    out=$(curl -sS -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -X DELETE -w '\n%{http_code}' "$API/api/rooms/$1") || die "needs wt-dashboard running at $API (see README › Install)"
     [ "$(printf '%s' "$out" | tail -n1)" = 200 ] || die "$(printf '%s' "$out" | sed '$d' | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"
     echo "deleted #$1" ;;
   *) die 'usage: room list | room read <slug> [--since N] | room post <slug> "text" [--attach <file>]... | room create <slug> "title" [--invite a,b] | room delete <tmp-slug>' ;;

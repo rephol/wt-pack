@@ -1,5 +1,5 @@
 // WP-313: ONE AgentInfo for a pane agent and a headless run (types in contracts.d.mts). The server builds it here and nowhere else,
-// from facts the callers gather (the hc terminal row + parsed pane, or the run row); the web consumes only this. Anything not known is
+// from facts the callers gather (the herdr row + parsed pane, or the run row); the web consumes only this. Anything not known is
 // null, never invented: a pane has no cost or plugin list, a run has no tags.
 const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' && v !== undefined ? Number(v) : null)
 const arr = (j) => { try { const v = typeof j === 'string' ? JSON.parse(j) : j; return Array.isArray(v) ? v : null } catch { return null } }

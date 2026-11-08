@@ -1,6 +1,6 @@
 # wt-dashboard
 
-Local dashboard over hc terminals (planners, workers, orchestrator), your repo's git worktrees, their PRs and Linear tickets.
+Local dashboard over herdr panes (planners, workers, orchestrator), your repo's git worktrees, their PRs and Linear tickets.
 
 ```sh
 npm --prefix web install      # once
@@ -10,7 +10,7 @@ npm test                      # pane-parser self-check
 ```
 
 - `LINEAR_API_KEY=lin_api_… npm run dev` shows Linear tickets (read-only GraphQL). Without it the board uses worktrees, PRs and agents only.
-- `WT_DASHBOARD_REPO` (legacy `UMKMALL_REPO`) overrides the checkout path (default: this wt-pack checkout). `WT_LINEAR_TEAMS=ENG=my-app` adds a Linear team's open tickets and recognises its ids. Needs `hc`, `git` and an authenticated `gh` on PATH.
+- `WT_DASHBOARD_REPO` (legacy `UMKMALL_REPO`) overrides the checkout path (default: this wt-pack checkout). `WT_LINEAR_TEAMS=ENG=my-app` adds a Linear team's open tickets and recognises its ids. Needs `herdr`, `git` and an authenticated `gh` on PATH.
 - Refresh: agents/overview cached 3s, worktrees 10s, PRs 30s (GitHub rate limit), Linear 60s.
 
 **Security:** the server binds to 127.0.0.1 only and rejects non-local `Host`/`Origin` headers and non-JSON POSTs. It can type into agents that run with bypassed permissions — never expose or proxy it beyond your machine.
@@ -47,4 +47,4 @@ Env names are `WT_DASHBOARD_*`; the old `HERDR_DASH_*` names still work as a fal
 
 ## Terminals
 
-Shells that hc owns: each is a terminal with no agent, labelled `wt.pool=<project>-shells`. The dashboard mirrors the screen as plain text (`hc read`, polled only while someone watches) and types into it (`hc send` for a line with Enter; `hc keys` for whitelisted keys: Enter, Tab, Esc, arrows, Backspace, Ctrl+C/D/Z/L, PageUp/PageDown, Home/End). Typing without Enter sends letters (capitals as `shift+<letter>`), digits, space and `/ = . - , ; ' \ [ ] backtick`; other punctuation and non-ASCII are refused (the input line takes any character). A shell may start only in a project, one of its worktrees, `$HOME` or `/private/tmp`, and agent panes are refused. **Off by default:** Settings › Terminals turns it on, and separately allows the tailnet, both changeable only from `http://127.0.0.1` on this machine; every endpoint needs the page's session cookie. Creation, input, keys, close and settings changes are appended to `~/.local/share/wt-dashboard/data/terminal-audit.jsonl` (viewable in Settings). The command bar's Enter always runs the line, on a phone too.
+Shells that herdr owns: each is a pane with no agent in a `<project>-shells` workspace. The dashboard mirrors the screen (`pane read --format ansi`, streamed at ~300ms only while someone watches) and types into it (`send-text`, plus whitelisted `send-keys`: Enter, Tab, Esc, arrows, Backspace, Ctrl+C/D/Z/L, PageUp/PageDown, Home/End). A shell may start only in a project, one of its worktrees, `$HOME` or `/private/tmp`, and agent panes are refused. **Off by default:** Settings › Terminals turns it on, and separately allows the tailnet, both changeable only from `http://127.0.0.1` on this machine; every endpoint needs the page's session cookie. Creation, input, keys, close and settings changes are appended to `~/.local/share/wt-dashboard/data/terminal-audit.jsonl` (viewable in Settings). The command bar's Enter always runs the line, on a phone too.

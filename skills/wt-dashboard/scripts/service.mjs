@@ -55,9 +55,9 @@ ${Object.entries(env).map(([k, v]) => `    <key>${k}</key><string>${esc(v)}</str
 `
 }
 
-// No KeepAlive: launchd runs the probe every StartInterval seconds and it exits. WP-378: the probe only looks at the hc core (core.lock) and
-// never starts it. AbandonProcessGroup stays (WP-218): harmless now, and if a probe ever did start something detached, launchd would kill it
-// (and every agent under it) as soon as the probe exited.
+// No KeepAlive: launchd runs the probe every StartInterval seconds and it exits. AbandonProcessGroup (WP-218): the
+// probe may start herdr's server (`nohup herdr server &`); without it launchd kills that herdr — and every agent —
+// as soon as the probe exits (verified with a throwaway job; the dashboard's own detached spawn survives without it).
 export function probePlist({ root, log }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

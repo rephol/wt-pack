@@ -5,7 +5,7 @@
  {"state": {"skill": "wt-agents", "role": "worker", "task": "Show which agents are idle right now"}, "expect": "haiku"},
  {"state": {"skill": "wt-finish", "role": "worker", "task": "Retire the merged worktree wp-90-foo and delete its branch"}, "expect": "haiku"},
  {"state": {"skill": "wt-pr", "role": "worker", "task": "Open the PR with the prepared title and body"}, "expect": "haiku"},
- {"state": {"skill": "Explore", "role": "reviewer", "task": "Grep for every caller of resolvePane and list them"}, "expect": "haiku"},
+ {"state": {"skill": "Explore", "role": "reviewer", "task": "Grep for every caller of canonicalPane and list them"}, "expect": "haiku"},
  {"state": {"skill": "wt-research", "role": "researcher", "task": "Read the three config files and report the value of maxWorking in each"}, "expect": "haiku"},
  {"state": {"skill": "wt-babysit", "role": "worker", "task": "Check whether CI on PR 42 is green yet"}, "expect": "haiku"},
  {"state": {"skill": "wt-work", "role": "worker", "task": "Rename the variable tmp to next in inbox.tsx"}, "expect": "haiku"},
@@ -27,6 +27,6 @@
  {"state": {"skill": "wt-plan", "role": "planner", "task": "Design the plugin-only install so every skill works without the setup links"}, "expect": "opus"},
  {"state": {"skill": "wt-review", "role": "reviewer", "lens": "data", "task": "Review the backfill that rewrites every ticket history row"}, "expect": "opus"},
  {"state": {"skill": "wt-research", "role": "researcher", "task": "Decide whether the SSRF guard on /api/unfurl covers DNS rebinding and redirects"}, "expect": "opus"},
- {"state": {"skill": "wt-work", "role": "worker", "task": "Fix an intermittent deadlock between the terminal websocket and the hc terminal reader"}, "expect": "opus"},
+ {"state": {"skill": "wt-work", "role": "worker", "task": "Fix an intermittent deadlock between the terminal websocket and the herdr pane reader"}, "expect": "opus"},
  {"state": {"skill": "wt-audit", "role": "auditor", "task": "Audit the pipeline for places where a failed step is reported as passed"}, "expect": "opus"}
 ]

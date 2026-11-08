@@ -386,14 +386,14 @@ test('multi-byte characters split across chunks survive', async (t) => {
   assert.ok(JSON.stringify(msg.event).includes('héllo wörld'))
 })
 
-test('the child gets a minimal env: no API key, no HERDR_*, no HC_* (it must not pose as an agent terminal)', async (t) => {
-  const env = { ...process.env, ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_AUTH_TOKEN: 't', /* legacy-herdr */ HERDR_PANE_ID: 'p1', HERDR_ENV: '1', HC_TERMINAL_ID: 't1', HC_SCOPE: 's1', HC_SESSION: 'x', HC_TERMINAL_SOCKET: '/tmp/s', SECRET_THING: 'x' }
+test('the child gets a minimal env: no API key, no HERDR_*', async (t) => {
+  const env = { ...process.env, ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_AUTH_TOKEN: 't', HERDR_PANE_ID: 'p1', HERDR_ENV: '1', SECRET_THING: 'x' }
   const { h, start, state, events } = await setup(t, { env })
   const r = start('env')
   await until(() => state(r.id) === 'idle', 'idle')
   const keys = events(r.id).find((e) => e.type === 'system/init').event.env
   assert.ok(keys.includes('PATH') && keys.includes('HOME'))
-  assert.deepEqual(keys.filter((k) => /^(ANTHROPIC|HERDR|HC_|SECRET)/.test(k)), []) // legacy-herdr
+  assert.deepEqual(keys.filter((k) => /^(ANTHROPIC|HERDR|SECRET)/.test(k)), [])
   assert.ok(keys.includes('WT_HEADLESS_ID')) // WP-312: how context_usage finds its own run
   assert.ok(keys.includes('WT_RUN_KEY')) // WP-330: the run's own secret for verifying messages addressed to it
   assert.ok(keys.length <= 8, keys.join(','))

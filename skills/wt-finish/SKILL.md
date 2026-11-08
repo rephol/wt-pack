@@ -85,11 +85,11 @@ git -C <main> branch -d <branch>        # -D only after the user accepts the los
 silence it is the failure this skill is written to prevent.
 
 Then drop the task labels: the planner's that handed you this work (only while it is still on this ticket),
-then the one wt-handoff put on your pane (display-only; best effort, a no-op outside an hc terminal):
+then the one wt-handoff put on your pane (display-only; best effort, a no-op outside herdr):
 
 ```
 ../wt-shared/scripts/task-state.sh planner --clear
-[ -n "${HC_TERMINAL_ID:-}" ] && hc label --json "$HC_TERMINAL_ID" task= >/dev/null 2>&1 || true
+[ -n "${HERDR_PANE_ID:-}" ] && herdr pane report-metadata "$HERDR_PANE_ID" --source wt-dashboard --clear-token task >/dev/null 2>&1 || true
 ```
 
 A local board ticket (the branch's `<KEY>-N`, not a Linear team key) goes to **done** if it is not there already (best effort):

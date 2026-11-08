@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tool-agnostic agent preferences: plain markdown files any agent runtime can be fed.
 //
-//   wt-memory context [--role R] [--project P] [--cwd D] [--strict-pane]   # --strict-pane: terminal lookup failed → print nothing, exit 75 (WP-369)
+//   wt-memory context [--role R] [--project P] [--cwd D] [--strict-pane]   # --strict-pane: herdr pane lookup failed → print nothing, exit 75 (WP-369)
 //   (a store line may start with [role: a, b] / [project: p] tags: only matching agents get it, WP-369)
 //   # merged markdown: global → role → project → project-role files (.wt-pack/roles/, WP-204)
 //   wt-memory hash    [same flags]                         # short content hash of that output
@@ -11,8 +11,8 @@
 //   wt-memory forget <id> · accept <id> · reject <id> · list [--scope S] [--json]
 //
 // Store: $WT_MEMORY_HOME or ~/.config/wt-memory → global.md, roles/<role-id>.md, projects/<repo>.md.
-// Without flags the scope is inferred: $WT_ROLE/$WT_PROJECT/$WT_PERSONA (set by the agent launcher), else $HC_TERMINAL_ID → a bounded
-// `hc get` (labels role/project/persona and the terminal's cwd; never started on a stopped core, WP-378); project falls back to the git repo of the cwd (a worktree resolves to its MAIN repo, as the dashboard does).
+// Without flags the scope is inferred: $HERDR_PANE_ID → `herdr pane get` → tokens role/project and the pane's
+// cwd; project falls back to the git repo of the cwd (a worktree resolves to its MAIN repo, as the dashboard does).
 // Runs inside agent hooks, so `context`/`hash` never fail loudly: any error → exit 0 and empty output.
 import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -92,32 +92,18 @@ async function merge({ role, project, persona, cwd }) {
 }
 
 const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] })
-// WP-378: the terminal row of $HC_TERMINAL_ID (labels = the old pane tokens, name, cwd), bounded to 500 ms like every hook helper. `hc get`
-// STARTS a stopped core (spike S5), so the core is probed first with hc.mjs coreUp (dynamic import: only this lookup needs wt-shared);
-// a down core or any failure is a failed lookup (null). One lookup per process.
-let termRow
-async function terminal(id) {
-  if (termRow !== undefined) return termRow
-  try {
-    const { coreUp } = await import(new URL('../../wt-shared/scripts/hc.mjs', import.meta.url).href)
-    if (!(await coreUp({ timeoutMs: 200 }))) return (termRow = null)
-    termRow = JSON.parse(sh(process.env.HC_BIN || 'hc', ['get', '--json', id]))
-  } catch { termRow = null }
-  return termRow
-}
-async function infer({ role, project, cwd, persona }) {
+function infer({ role, project, cwd, persona }) {
   let paneFailed = false
-  // WT_ROLE / WT_PROJECT / WT_PERSONA: set by agents.sh's launcher (and WT_ROLE/WT_PERSONA by a headless run, WP-307): no lookup at all.
-  // Only a hand-started terminal (or a missing one of the three) falls back to its hc labels.
-  role ||= process.env.WT_ROLE; persona ||= process.env.WT_PERSONA; project ||= process.env.WT_PROJECT
-  if ((!role || !project) && process.env.HC_TERMINAL_ID) {
-    const p = await terminal(process.env.HC_TERMINAL_ID)
-    if (p) {
-      role ||= p.labels?.role
-      project ||= p.labels?.project
-      persona ||= p.labels?.persona
+  // WT_ROLE / WT_PERSONA: set by a headless run (WP-307), which has no herdr pane token to read them from.
+  role ||= process.env.WT_ROLE; persona ||= process.env.WT_PERSONA
+  if ((!role || !project) && process.env.HERDR_PANE_ID) {
+    try {
+      const p = JSON.parse(sh('herdr', ['pane', 'get', process.env.HERDR_PANE_ID])).result?.pane ?? {}
+      role ||= p.tokens?.role
+      project ||= p.tokens?.project
+      persona ||= p.tokens?.persona
       cwd ||= p.cwd
-    } else paneFailed = true
+    } catch { paneFailed = true }
   }
   if (!project) {
     try { project = basename(dirname(sh('git', ['-C', cwd || process.cwd(), 'rev-parse', '--path-format=absolute', '--git-common-dir']).trim())) } catch {}
@@ -142,10 +128,10 @@ const PENDING = join(HOME, 'pending')
 const atomic = (f, text) => { mkdirSync(dirname(f), { recursive: true }); const t = `${f}.${process.pid}.tmp`; writeFileSync(t, text); renameSync(t, f) }
 const norm = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const today = () => new Date().toISOString().slice(0, 10)
-async function author() {
-  const pane = process.env.HC_TERMINAL_ID
+function author() {
+  const pane = process.env.HERDR_PANE_ID
   if (!pane) return process.env.USER || 'unknown'
-  return (await terminal(pane))?.name || pane
+  try { return JSON.parse(sh('herdr', ['agent', 'list'])).result.agents.find((a) => a.pane_id === pane)?.name || pane } catch { return pane }
 }
 // Every scope file present: [{scope, name, file}].
 function files() {
@@ -204,7 +190,7 @@ async function remember(o) {
   const text = own.text.trim()
   if (!text) throw new Error('remember: a note is required')
   if (raw.includes('<!--') || raw.length > 500) throw new Error('remember: one line, up to 500 chars, no HTML comments')
-  const { role, project } = await infer(o)
+  const { role, project } = infer(o)
   const scope = o.scope || (project ? 'project' : role ? 'role' : null)
   if (!['role', 'project', 'global'].includes(scope)) throw new Error('remember: --scope role|project|global (none inferable)')
   const name = scope === 'role' ? role : scope === 'project' ? project : null
@@ -216,7 +202,7 @@ async function remember(o) {
   if (o.project && scope !== 'project') tags.project = [o.project]
   for (const [k, v] of Object.entries(own.tags)) tags[k] = [...new Set([...(tags[k] ?? []), ...v])]
   for (const [k, v] of Object.entries(tags)) if (!NAME.test(v[0])) throw new Error(`remember: bad ${k} name: ${v[0]}`)
-  const e = { id: randomBytes(3).toString('hex'), by: (await author()).replace(/\s+/g, '_'), at: today(), text, ...(tagStr(tags) ? { tags } : {}) }
+  const e = { id: randomBytes(3).toString('hex'), by: author().replace(/\s+/g, '_'), at: today(), text, ...(tagStr(tags) ? { tags } : {}) }
   const lines = (g) => read(f).split('\n').map((l) => strip(l).replace(/^\s*[-*]\s*/, '')).filter((l) => l.trim()).concat(g)
   const pend = scope === 'global' ? pending() : []
   // Before either exact-dup branch, so global (proposed) and scoped remembers both get it.
@@ -255,8 +241,8 @@ const STOP = new Set('about after again also because been before being could doe
 const words = (t) => new Set(norm(t).split(' ').filter((w) => w.length >= 4 && !STOP.has(w)))
 // Entries of this agent's scopes (global, its role, its project) that share a word with the prompt, best first,
 // minus the ids already recalled in this session (state in ~/.cache/wt-memory, cleared by SessionStart's inject).
-async function recall(prompt, o) {
-  const { role, project, persona } = await infer(o)
+function recall(prompt, o) {
+  const { role, project, persona } = infer(o)
   const seen = join(process.env.WT_MEMORY_CACHE || join(homedir(), '.cache', 'wt-memory'), `${String(o.session ?? 'none').replace(/[^\w-]/g, '_')}.recalled`)
   const shown = new Set(read(seen).split('\n'))
   const pw = words(prompt.slice(0, 4000))
@@ -277,14 +263,14 @@ async function recall(prompt, o) {
   if (cmd === 'context' || cmd === 'hash') {
     let out = ''
     try {
-      const o = flags(rest), i = await infer(o)
+      const o = flags(rest), i = infer(o)
       if (cmd === 'context' && o.strictPane && i.paneFailed) process.exit(75) // WP-369: a lost pane lookup is not a preference change
       out = await merge(i)
     } catch {}
     if (cmd === 'hash') console.log(createHash('sha256').update(out).digest('hex').slice(0, 16))
     else if (out) console.log(out)
   } else if (cmd === 'recall') { // like context: never fails loudly
-    try { const o = flags(rest); const out = await recall(o._.join(' '), o); if (out) console.log(out) } catch {}
+    try { const o = flags(rest); const out = recall(o._.join(' '), o); if (out) console.log(out) } catch {}
   } else if (['remember', 'forget', 'accept', 'reject', 'list'].includes(cmd)) {
     try {
       const o = flags(rest)

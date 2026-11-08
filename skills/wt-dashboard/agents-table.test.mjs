@@ -62,7 +62,7 @@ test('reconcile: fresh-session respawn under an exited name rebinds the row', ()
   assert.deepEqual([r[0].name, r[0].patch.state, r[0].patch.session], ['w', 'idle', 'new'])
 })
 
-test('reconcile: terminal exited → exited; pane gone → missing and kept', () => {
+test('reconcile: herdr exited → exited; pane gone → missing and kept', () => {
   assert.equal(reconcile([row()], [live({ status: 'exited' })], new Set(['%1']))[0].patch.state, 'exited')
   const m = reconcile([row()], [], new Set(['%other']), 99)
   assert.deepEqual([m[0].patch.state, m[0].patch.gone_at], ['missing', 99])

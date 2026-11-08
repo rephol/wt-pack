@@ -24,7 +24,7 @@ async function stub(handler) {
 }
 // A synchronous execFileSync would block this process's event loop, starving the in-process stub server
 // above of the callback that answers it — run() must be async so both sides of the loopback call proceed.
-const run = (args, env) => execFileP(BIN, args, { encoding: 'utf8', env: { ...process.env, HC_TERMINAL_ID: 't2', ...env } })
+const run = (args, env) => execFileP(BIN, args, { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: 'w1:p2', ...env } })
 
 test('post: builds the questions shape, prints the id', async () => {
   let seen
@@ -37,7 +37,7 @@ test('post: builds the questions shape, prints the id', async () => {
     assert.equal(stdout.trim(), 'ask-1')
     assert.equal(seen.method, 'POST')
     assert.equal(seen.url, '/api/asks')
-    assert.equal(seen.pane, 't2')
+    assert.equal(seen.pane, 'w1:p2')
     assert.deepEqual(seen.body.questions, [{ question: 'Which env?', header: 'Env', options: [{ label: 'staging' }, { label: 'prod' }], multiSelect: false, recommended: 'staging' }])
     assert.equal(seen.body.ticket, 'WP-164')
     assert.equal(seen.body.room, 'wp-164') // defaulted from the ticket, lowercased
@@ -138,7 +138,7 @@ test('--ping: exits 1 on a 403 (unknown pane); --json - reads stdin', async () =
   })
   try {
     await assert.rejects(run(['--ping'], { HERDR_DASH_URL: s.url }), (e) => e.code === 1)
-    const child = execFile(BIN, ['--json', '-', '--no-deliver'], { encoding: 'utf8', env: { ...process.env, HC_TERMINAL_ID: 't2', HERDR_DASH_URL: s.url } })
+    const child = execFile(BIN, ['--json', '-', '--no-deliver'], { encoding: 'utf8', env: { ...process.env, HERDR_PANE_ID: 'w1:p2', HERDR_DASH_URL: s.url } })
     const done = new Promise((r) => child.on('close', r))
     child.stdin.end(JSON.stringify({ questions: [{ question: 'Q?', header: 'H', options: [{ label: 'x' }] }] }))
     assert.equal(await done, 0)

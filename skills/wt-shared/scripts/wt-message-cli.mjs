@@ -10,12 +10,12 @@ if (process.argv[2] === 'pointer') {
   t = t.replace(/\n$/, '')
   process.stdout.write(pointerOf(t) ?? t); process.exit(0)
 }
-// `show <id>` (WP-352): the body of a message addressed to THIS terminal, read through the dashboard (terminal id as x-herdr-pane + pane key).
+// `show <id>` (WP-352): the body of a message addressed to THIS pane, read through the dashboard (pane + pane key).
 if (process.argv[2] === 'show') {
   const id = process.argv[3]
   if (!/^[\w-]+$/.test(id ?? '')) { console.error('usage: wt-message show <id>'); process.exit(2) }
-  const pane = process.env.HC_TERMINAL_ID
-  if (!pane) { console.error('wt-message show: needs an hc terminal (HC_TERMINAL_ID)'); process.exit(1) }
+  const pane = process.env.HERDR_PANE_ID
+  if (!pane) { console.error('wt-message show: needs a pane (HERDR_PANE_ID)'); process.exit(1) }
   try {
     const r = await fetch(`${process.env.HERDR_DASH_URL || 'http://127.0.0.1:7777'}/api/messages/${encodeURIComponent(id)}`,
       { headers: { 'x-herdr-pane': pane, ...(process.env.WT_PANE_KEY ? { 'x-wt-pane-key': process.env.WT_PANE_KEY } : {}) }, signal: AbortSignal.timeout(5000) })

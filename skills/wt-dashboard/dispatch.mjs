@@ -1,7 +1,7 @@
 // Board Dispatch + reconcile (WP-52). Dispatch (per-board switch, default off) hands the top unassigned Ready ticket
 // to a free agent through wt-handoff; reconcile (always on) moves a card to Done once its merge lands on origin/main,
 // returns a dispatched card to Ready when its agent is gone, and flags an idle assignee. Not a routine: it keeps no
-// routines row, but shares their cap and memory guard. The server injects every side effect, so tests need no hc.
+// routines row, but shares their cap and memory guard. The server injects every side effect, so tests need no herdr.
 import { fileURLToPath } from 'node:url'
 import { guard } from './routines.mjs'
 import { isClosed } from './contracts.mjs'
@@ -53,7 +53,7 @@ export function mergeIds(subject, key) {
 }
 
 // report (WP-75): { room, orch } from the board's 'Report to' — where the one-line result goes. A dispatched agent has
-// no sender (handoff runs with HC_TERMINAL_ID blank), so the orchestrator is named with its pane.
+// no sender (handoff runs with HERDR_PANE_ID blank), so the orchestrator is named with its pane.
 export function reportLine(report) {
   const parts = [
     report?.room && `post a one-line result in #${report.room} with \`room post ${report.room} "…"\``,
@@ -278,7 +278,7 @@ export class Dispatch {
     const { tickets: cards, stallMin } = await this.tickets.list(project)
     await this.#merged(project, key, cards, now)
     await this.#escalate(project, cards).catch((e) => this.log(`routing escalation ${project}: ${e.message}`))
-    // hc down (or no local agents at all) is not "every agent is gone".
+    // herdr down (or no local agents at all) is not "every agent is gone".
     const local = ags?.filter((a) => a.local) ?? []
     if (!local.length) return
     for (const t of cards) {
@@ -291,7 +291,7 @@ export class Dispatch {
       // skips assigned cards (a Ready/Review/Blocked card just loses its stale assignee).
       // WP-221: a pane whose claude exited (status 'exited') is as gone as a closed one.
       if ((!a || a.status === 'exited') && t.assignee.pane) {
-        if (!this.#debounceGone(g)) continue // one miss may be an hc blip
+        if (!this.#debounceGone(g)) continue // one miss may be a herdr blip
         // WP-147: a paired ticket is replaced in place (or flagged), never just returned to Ready.
         if (t.pair) { await this.#pairReplace(project, t, 'worker', local, now).catch((e) => this.log(`pair replace ${t.id}: ${e.message}`)); continue }
         const name = t.assignee.name
@@ -332,7 +332,7 @@ export class Dispatch {
     }
   }
 
-  // Two consecutive ticks missing = gone (one miss may be an hc blip); shared by the worker- and buddy-gone
+  // Two consecutive ticks missing = gone (one miss may be a herdr blip); shared by the worker- and buddy-gone
   // checks in reconcile(), which key it differently (`${id}|${name}` vs `pair-buddy|${id}|${name}`).
   #debounceGone(key) {
     const n = (this.gone.get(key) ?? 0) + 1
@@ -377,7 +377,7 @@ export class Dispatch {
     this.event(project, 'pair-replaced', t.id, `${role} ${p.name} → ${repl.name}`, now)
   }
 
-  // WP-177: handoff.sh reporting success only means hc accepted the prompt — a Remote Control disconnect
+  // WP-177: handoff.sh reporting success only means herdr accepted the prompt — a Remote Control disconnect
   // (or anything else between there and the pane) can still drop it, leaving the card silently in Building
   // with an idle worker. Within ~60s of a 'sent' dispatch, confirm the assignee actually went working (or
   // finished fast); not yet → resend the identical prompt once; still not within another ~60s → flag it
@@ -473,8 +473,8 @@ export class Dispatch {
   }
 }
 
-// wt-handoff from the server: prompt on stdin, 120 s cap, and HC_TERMINAL_ID (+ its scope and socket) blanked so a service started from an
-// agent terminal does not pose as that terminal (sender tokens, wt-ticket auth).
+// wt-handoff from the server: prompt on stdin, 120 s cap, and HERDR_PANE_ID blanked so a service started from a pane
+// does not pose as that pane (sender tokens, wt-ticket auth).
 // WP-251: one id per dispatch of a card at a given point in its life — a retry or re-evaluation repeats it (sends once);
 // a move (a return from review, a new stage) changes it, so a real re-dispatch still goes out.
 export const dispatchRequestId = (t, role) => `dispatch:${t.id}:${role}:${(t.history ?? []).filter((h) => h.kind === 'move').length}`
@@ -482,7 +482,7 @@ export const dispatchRequestId = (t, role) => `dispatch:${t.id}:${role}:${(t.his
 // card carries it; #sent clears it. Two sweeps of one interruption stamp the same id, hence send once.
 export const recoveryRequestId = (t) => dispatchRequestId(t, isLead(t) ? 'lead' : t.column === 'planning' ? 'planner' : 'worker')
 export const runHandoff = (execFile, bin, env = {}) => (args, prompt, cwd) => new Promise((resolve, reject) => {
-  const child = execFile(bin, args, { cwd, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HC_TERMINAL_ID: '', HC_SCOPE: '', HC_TERMINAL_SOCKET: '', ...env } },
+  const child = execFile(bin, args, { cwd, maxBuffer: 1 << 20, timeout: 120_000, env: { ...process.env, HERDR_PANE_ID: '', ...env } },
     (err, o, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(o))
   child.stdin.end(prompt)
 })

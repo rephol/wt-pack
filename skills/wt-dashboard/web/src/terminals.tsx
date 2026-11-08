@@ -1,4 +1,4 @@
-// Terminals: shells hc owns, mirrored here (the server streams `hc read`; xterm.js draws it — a
+// Terminals: shells herdr owns, mirrored here (the server streams `pane read --format ansi`; xterm.js draws it — a
 // mirror, not a pty) and typed into (printable text → send-text, whitelisted keys → send-keys). Off by default;
 // Settings › Terminals turns it on, only from http://127.0.0.1 on this machine.
 import { useEffect, useRef, useState } from 'react'
@@ -32,7 +32,8 @@ export const useTermSettings = () => useQuery({ queryKey: ['terminal-settings'],
 const paneUrl = (pane: string) => `/api/terminals/${encodeURIComponent(pane)}`
 const sendInput = (pane: string, body: object) => api(`${paneUrl(pane)}/input`, { method: 'POST', body: JSON.stringify(body) })
 
-// Close = `hc kill` + `hc rm` on the server (a running process is ended). Confirmed with an in-page AlertDialog: window.confirm() returns false in the desktop app's
+// Close = `herdr pane close` on the server (a running process is ended; herdr drops an emptied -shells
+// workspace itself). Confirmed with an in-page AlertDialog: window.confirm() returns false in the desktop app's
 // WKWebView without a UI delegate, which silently cancelled every close.
 function useCloseShell(onClosed?: () => void) {
   const qc = useQueryClient()
@@ -59,7 +60,7 @@ export function TerminalsPage({ onOpen, phone }: { onOpen: (pane: string) => voi
   return (
     <VStack gap={3}>
       <HStack justify="between" align="center">
-        <Text type="supporting" size="sm">Shells in the &lt;project&gt;-shells hc pool. Everything typed is audited (Settings › Terminals).</Text>
+        <Text type="supporting" size="sm">Shells in herdr&apos;s &lt;project&gt;-shells workspaces. Everything typed is audited (Settings › Terminals).</Text>
         <Button label="New terminal" size="sm" variant="primary" onClick={() => setCreating(true)} />
       </HStack>
       {q.isError && <LoadError what="terminals" error={q.error} retry={() => q.refetch()} />}
@@ -208,7 +209,7 @@ export function TerminalsSection() {
       <Banner status="warning" title="A terminal is a shell as you" description="Anyone who can open this dashboard with terminals on can run any command on this machine. Everything typed is logged below." />
       {!s.loopback && <Text size="sm">These switches can be changed only from http://127.0.0.1:7777 on this machine.</Text>}
       <SettingsCard title="Access">
-        <SettingsRow title="Enable terminals" description="Shells in the <project>-shells hc pool, mirrored and typed into from here."
+        <SettingsRow title="Enable terminals" description="Shells in herdr's <project>-shells workspaces, mirrored and typed into from here."
           control={<Switch label="Enable terminals" isLabelHidden value={s.enabled} isDisabled={!s.loopback} onChange={(v) => set.mutate({ enabled: v })} />} />
         <SettingsRow title="Allow terminals over the tailnet" description="Off: only a browser on this machine (127.0.0.1) can use them."
           control={<Switch label="Allow terminals over the tailnet" isLabelHidden value={s.tailnet} isDisabled={!s.loopback || !s.enabled} onChange={(v) => set.mutate({ tailnet: v })} />} />

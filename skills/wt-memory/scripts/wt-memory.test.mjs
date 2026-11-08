@@ -1,12 +1,11 @@
-// node --test: merge order, empty-scope skipping, inference from hc labels and git, and never failing loudly.
+// node --test: merge order, empty-scope skipping, inference from herdr tokens and git, and never failing loudly.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from 'node:net'
 
 const BIN = new URL('./wt-memory', import.meta.url).pathname
 const home = mkdtempSync(join(tmpdir(), 'wt-memory-'))
@@ -18,25 +17,17 @@ writeFileSync(join(home, 'global.md'), 'G1\n')
 writeFileSync(join(home, 'roles', 'worker.md'), '<!-- template only -->\n')
 writeFileSync(join(home, 'roles', 'planner.md'), '<!--\n  template\n-->\nP1 <!-- note -->')
 writeFileSync(join(home, 'projects', 'demo.md'), 'D1')
-// WP-378: a fake hc whose `get --json <t>` answers a terminal row (the labels are the pack's old pane tokens); `calls` logs every invocation.
-const hcRow = (labels, cwd = '/nowhere', name = 'worker-1') => JSON.stringify({ address: 't1', name, cwd, labels, state: 'live', status: null, turn: 0, title: '', argv: ['claude'] })
-const writeHc = (dir, body) => { writeFileSync(join(dir, 'hc'), `#!/bin/sh\necho "$@" >> "$0.calls"\n${body}\n`); chmodSync(join(dir, 'hc'), 0o755); try { execFileSync(join(dir, 'hc'), { stdio: 'ignore' }) } catch {} }
-const hcCalls = (dir) => { try { return readFileSync(join(dir, 'hc.calls'), 'utf8').trim().split('\n').filter(Boolean) } catch { return [] } }
-writeHc(fakeBin, `echo '${hcRow({ role: 'planner', project: 'demo' })}'`)
-// The core must look UP without being started (hc get/ls/server status START a stopped core, spike S5): core.lock names a socket that
-// accepts. A unix socket path is limited to 103 bytes, so it lives under /tmp. XDG_STATE_HOME points hc.mjs coreUp() at it.
-const coreState = mkdtempSync('/tmp/wm-core-')
-mkdirSync(join(coreState, 'herdr-core', 'default'), { recursive: true })
-writeFileSync(join(coreState, 'herdr-core', 'default', 'core.lock'), join(coreState, 's') + '\n')
-const coreSrv = createServer((c) => c.destroy()); await new Promise((r) => coreSrv.listen(join(coreState, 's'), r)); coreSrv.unref()
-process.on('exit', () => { coreSrv.close(); rmSync(coreState, { recursive: true, force: true }) })
-const downState = mkdtempSync(join(tmpdir(), 'wm-down-')) // no core.lock: the core is down
+// A fake herdr that answers `pane get` with role/project tokens.
+writeFileSync(join(fakeBin, 'herdr'), `#!/bin/sh\necho '{"result":{"pane":{"cwd":"/nowhere","tokens":{"role":"planner","project":"demo"}}}}'\n`)
+chmodSync(join(fakeBin, 'herdr'), 0o755)
+// Run it once now: macOS scans a new executable on its first launch (~0.7s), past the CLI's 500ms herdr timeout.
+execFileSync(join(fakeBin, 'herdr'))
 
-// A hermetic child env: nothing of the terminal this suite runs in (HC_*, HERDR_*, WT_PANE_KEY, WT_ROLE/PROJECT/PERSONA) reaches the CLI under test.
-const baseEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(HERDR_|HC_)/.test(k) && !/^WT_(PANE_KEY|ROLE|PROJECT|PERSONA|MEMORY_CACHE)$/.test(k))), XDG_STATE_HOME: coreState })
+// A hermetic child env: nothing of the pane this suite runs in (HERDR_*, WT_PANE_KEY) reaches the CLI under test.
+const baseEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^HERDR_/.test(k) && k !== 'WT_PANE_KEY'))
 
 // Jev off unless a test turns it on with a stub judge: tests never call the real API.
-const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...baseEnv(), HC_TERMINAL_ID: '', WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', WT_JEV_MEMORY_SUGGEST: 'off', ...env } }).trimEnd()
+const run = (args, env = {}) => execFileSync(BIN, args, { encoding: 'utf8', env: { ...baseEnv(), HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', WT_JEV_MEMORY_SUGGEST: 'off', ...env } }).trimEnd()
 
 test('merges global → role → project with headings', () => {
   assert.equal(run(['context', '--role', 'planner', '--project', 'demo', '--cwd', '/']),
@@ -48,8 +39,8 @@ test('skips empty and template-only scopes, and bad names', () => {
 test('prints nothing when every scope is empty', () => {
   assert.equal(run(['context', '--cwd', '/'], { WT_MEMORY_HOME: join(home, 'none') }), '')
 })
-test('infers role and project from the hc terminal labels (bounded `hc get`, hand-started terminal)', () => {
-  const out = run(['context'], { HC_TERMINAL_ID: 't1', PATH: `${fakeBin}:${process.env.PATH}` })
+test('infers role and project from the herdr pane tokens', () => {
+  const out = run(['context'], { HERDR_PANE_ID: 'w1:p1', PATH: `${fakeBin}:${process.env.PATH}` })
   assert.match(out, /\(planner\)[\s\S]*\(demo\)/)
 })
 test('WT_ROLE (a headless run, no pane) selects the role context (WP-307)', () => {
@@ -61,9 +52,9 @@ test('falls back to the git repo name of the cwd', () => {
   execFileSync('git', ['init', '-q', repo])
   assert.match(run(['context', '--cwd', repo]), /Project preferences \(demo\)/)
 })
-test('a broken hc still exits 0', () => {
-  writeHc(fakeBin, 'exit 7')
-  assert.equal(run(['context', '--cwd', '/'], { HC_TERMINAL_ID: 't1', PATH: `${fakeBin}:${process.env.PATH}` }), '## Global preferences\n\nG1')
+test('a broken herdr still exits 0', () => {
+  writeFileSync(join(fakeBin, 'herdr'), '#!/bin/sh\nexit 7\n')
+  assert.equal(run(['context', '--cwd', '/'], { HERDR_PANE_ID: 'w1:p1', PATH: `${fakeBin}:${process.env.PATH}` }), '## Global preferences\n\nG1')
 })
 test('hash changes with content', () => {
   const a = run(['hash', '--cwd', '/'])
@@ -103,7 +94,7 @@ test('MCP server: initialize, tools/list, remember, list, error', () => {
   ]
   const out = execFileSync(new URL('../mcp/server.mjs', import.meta.url).pathname, {
     input: reqs.map((r) => JSON.stringify(r)).join('\n') + '\n', encoding: 'utf8',
-    env: { ...baseEnv(), HC_TERMINAL_ID: '', WT_MEMORY_HOME: h, WT_JEV_MEMORY_DUP: 'off' },
+    env: { ...baseEnv(), HERDR_PANE_ID: '', WT_MEMORY_HOME: h, WT_JEV_MEMORY_DUP: 'off' },
   }).trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(out.map((m) => m.id), [1, 2, 3, 4, 5])
   assert.equal(out[0].result.protocolVersion, '2025-06-18')
@@ -132,7 +123,7 @@ test('remember + Jev: similar/conflict printed and still written; --strict refus
 
 const HOOK = new URL('../claude-plugin/hooks/inject.mjs', import.meta.url).pathname
 const hook = (input, env) => execFileSync(process.execPath, [HOOK], { input: JSON.stringify(input), encoding: 'utf8',
-  env: { ...baseEnv(), HC_TERMINAL_ID: '', WT_MEMORY_HOME: home, WT_MEMORY_BIN: BIN, HOME: mkdtempSync(join(tmpdir(), 'hook-home-')), ...env } })
+  env: { ...baseEnv(), HERDR_PANE_ID: '', WT_MEMORY_HOME: home, WT_MEMORY_BIN: BIN, HOME: mkdtempSync(join(tmpdir(), 'hook-home-')), ...env } })
 test('hook + Jev suggest: a standing preference adds the remember hint; off or no answer adds nothing', () => {
   const ev = { hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'from now on always answer in English', cwd: '/' }
   const on = hook(ev, { WT_JEV_MEMORY_SUGGEST: 'on', WT_TYPESAFE_MODULE: stubAnswers({ standing: { noul: 0.93 } }) })
@@ -221,10 +212,10 @@ test('an untrusted repo with role files gets one notice and no role section (WP-
   assert.match(out, /## Project roles\n\nThis repo has \.wt-pack\/roles but is not trusted; base roles apply\. Trust it in wt-dashboard Settings › untrusted\./)
   assert.doesNotMatch(out, /Planted|Project role \(/)
 })
-test('persona label from the terminal is picked up', () => {
+test('persona token from the pane is picked up', () => {
   const repo = join(home, 'rolerepo')
-  writeHc(fakeBin, `echo '${hcRow({ role: 'worker', project: 'x', persona: 'frontend-worker' }, repo)}'`)
-  assert.match(run(['context'], { HC_TERMINAL_ID: 't1', PATH: `${fakeBin}:${process.env.PATH}` }), /Project role \(frontend-worker/)
+  writeFileSync(join(fakeBin, 'herdr'), `#!/bin/sh\necho '{"result":{"pane":{"cwd":"${repo}","tokens":{"role":"worker","project":"x","persona":"frontend-worker"}}}}'\n`)
+  assert.match(run(['context'], { HERDR_PANE_ID: 'w1:p1', PATH: `${fakeBin}:${process.env.PATH}` }), /Project role \(frontend-worker/)
 })
 
 test('recall (WP-235): keyword match in own scopes, once per session, logged', async () => {
@@ -269,7 +260,7 @@ function hookEnv() {
   writeFileSync(join(wm, 'projects', 'demo.md'), '- demo-line\n')
   const cache = join(hh, '.cache', 'wt-memory')
   const h = (event, extra = {}, env = {}) => { const o = execFileSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: event, session_id: 'sx', cwd: '/', prompt: 'hello', ...extra }), encoding: 'utf8',
-    env: { ...baseEnv(), HC_TERMINAL_ID: '', WT_ROLE: 'worker', WT_MEMORY_HOME: wm, WT_MEMORY_BIN: BIN, HOME: hh, WT_JEV_MEMORY_SUGGEST: 'off', ...env } }); return o ? JSON.parse(o).hookSpecificOutput.additionalContext : '' }
+    env: { ...baseEnv(), HERDR_PANE_ID: '', WT_ROLE: 'worker', WT_MEMORY_HOME: wm, WT_MEMORY_BIN: BIN, HOME: hh, WT_JEV_MEMORY_SUGGEST: 'off', ...env } }); return o ? JSON.parse(o).hookSpecificOutput.additionalContext : '' }
   return { wm, hh, cache, h }
 }
 test('hook (WP-369): edit after SessionStart → only the changed lines, not the rest', () => {
@@ -312,23 +303,24 @@ test('hook (WP-369): every preference removed → (all standing preferences were
 // ---- WP-369 U1b: a failed pane lookup is not a preference change ----
 function paneShim(ok) {
   const d = mkdtempSync(join(tmpdir(), 'wp369-shim-'))
-  writeHc(d, ok === 'ok' ? `echo '${hcRow({ role: 'worker' }, '/')}'` : ok === 'norole' ? `echo '${hcRow({}, '/')}'` : 'exit 1')
+  writeFileSync(join(d, 'herdr'), ok === 'ok' ? `#!/bin/sh\necho '{"result":{"pane":{"cwd":"/","tokens":{"role":"worker"}}}}'\n` : ok === 'norole' ? `#!/bin/sh\necho '{"result":{"pane":{"cwd":"/","tokens":{}}}}'\n` : '#!/bin/sh\nexit 1\n')
+  chmodSync(join(d, 'herdr'), 0o755); try { execFileSync(join(d, 'herdr'), { stdio: 'ignore' }) } catch {}
   return d
 }
 const runRaw = (args, env) => { try { return { code: 0, out: execFileSync(BIN, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...baseEnv(), WT_MEMORY_HOME: home, WT_JEV_MEMORY_DUP: 'off', ...env } }).trimEnd() } } catch (e) { return { code: e.status, out: String(e.stdout ?? '') } } }
-test('context --strict-pane: failing hc → exit 75, empty; without the flag unchanged; no role token is not a failure', () => {
+test('context --strict-pane: failing herdr → exit 75, empty; without the flag unchanged; no role token is not a failure', () => {
   const bad = paneShim('bad'), none = paneShim('norole')
-  const env = (d) => ({ HC_TERMINAL_ID: 't1', WT_ROLE: '', PATH: `${d}:${process.env.PATH}` })
+  const env = (d) => ({ HERDR_PANE_ID: 'p1', WT_ROLE: '', PATH: `${d}:${process.env.PATH}` })
   const s = runRaw(['context', '--cwd', '/', '--strict-pane'], env(bad))
   assert.equal(s.code, 75); assert.equal(s.out, '')
   const n = runRaw(['context', '--cwd', '/'], env(bad))
   assert.equal(n.code, 0); assert.match(n.out, /## Global preferences/)
   assert.equal(runRaw(['context', '--cwd', '/', '--strict-pane'], env(none)).code, 0)
 })
-test('hook (WP-369 U1b): hc failing on a prompt → no preference text, .hash kept; healthy again → only the edited line', () => {
+test('hook (WP-369 U1b): herdr failing on a prompt → no preference text, .hash kept; healthy again → only the edited line', () => {
   const { wm, cache, h } = hookEnv()
   const ok = paneShim('ok'), bad = paneShim('bad')
-  const pe = (d) => ({ WT_ROLE: '', HC_TERMINAL_ID: 't1', PATH: `${d}:${process.env.PATH}` })
+  const pe = (d) => ({ WT_ROLE: '', HERDR_PANE_ID: 'p1', PATH: `${d}:${process.env.PATH}` })
   h('SessionStart', {}, pe(ok))
   const before = readFileSync(join(cache, 'sx.hash'), 'utf8')
   writeFileSync(join(wm, 'roles', 'worker.md'), '- worker-one\n- worker-NEW\n')
@@ -403,7 +395,7 @@ test('scoping (WP-369 U2): worker context never has orchestrator text; a project
 test('hook (WP-369 review): a failed pane lookup still emits the recall block, no preference text, .hash kept', () => {
   const { wm, cache, h } = hookEnv()
   const ok = paneShim('ok'), bad = paneShim('bad')
-  const pe = (d) => ({ WT_ROLE: '', HC_TERMINAL_ID: 't1', PATH: `${d}:${process.env.PATH}` })
+  const pe = (d) => ({ WT_ROLE: '', HERDR_PANE_ID: 'p1', PATH: `${d}:${process.env.PATH}` })
   h('SessionStart', {}, pe(ok))
   const before = readFileSync(join(cache, 'sx.hash'), 'utf8')
   writeFileSync(join(wm, 'global.md'), 'GLOBAL-LINE\n- Always run the zebra linter <!-- wtm:id=aaaa1111 by=x at=2026-01-01 -->\n')
@@ -425,37 +417,4 @@ test('remember: tags written in the note text are parsed once and dedupe on the 
   assert.match(r(['remember', '[role: orchestrator] x', '--scope', 'project', '--project', 'p']), /already remembered/)
   assert.equal(readFileSync(join(t, 'projects', 'p.md'), 'utf8').trim().split('\n').length, 1)
   assert.match(readFileSync(join(t, 'projects', 'p.md'), 'utf8'), /^- \[role: orchestrator\] x </)
-})
-
-// ---- WP-378 U4: identity is HC_TERMINAL_ID; role/project come from the launcher's env, hc is a bounded fallback ----
-test('WT_ROLE / WT_PROJECT / WT_PERSONA select the scope without calling hc at all', () => {
-  const d = paneShim('bad') // an hc that fails: it must not matter, nor be called
-  const out = runRaw(['context', '--cwd', '/', '--strict-pane'], { HC_TERMINAL_ID: 't1', WT_ROLE: 'planner', WT_PROJECT: 'demo', PATH: `${d}:${process.env.PATH}` })
-  assert.equal(out.code, 0); assert.match(out.out, /\(planner\)[\s\S]*\(demo\)/)
-  assert.deepEqual(hcCalls(d), [])
-})
-test('hand-started terminal: hc get --json <HC_TERMINAL_ID> is the fallback, once', () => {
-  const d = paneShim('ok')
-  assert.match(runRaw(['context', '--cwd', '/', '--project', 'demo'], { HC_TERMINAL_ID: 't1', PATH: `${d}:${process.env.PATH}` }).out, /Role preferences|\(demo\)/)
-  assert.deepEqual(hcCalls(d), ['get --json t1'])
-})
-test('the hc fallback never starts a stopped core: core down → no hc call; --strict-pane → exit 75, plain context unchanged', () => {
-  const d = paneShim('ok')
-  const env = { HC_TERMINAL_ID: 't1', WT_ROLE: '', XDG_STATE_HOME: downState, PATH: `${d}:${process.env.PATH}` }
-  const s = runRaw(['context', '--cwd', '/', '--strict-pane'], env)
-  assert.equal(s.code, 75); assert.equal(s.out, '')
-  const n = runRaw(['context', '--cwd', '/'], env)
-  assert.equal(n.code, 0); assert.match(n.out, /## Global preferences/)
-  assert.deepEqual(hcCalls(d), [])
-})
-test('the old pane id alone is no identity: no hc call', () => {
-  const d = paneShim('ok')
-  runRaw(['context', '--cwd', '/', '--strict-pane'], { HERDR_PANE_ID: 'w1:p1', HC_TERMINAL_ID: '', WT_ROLE: '', PATH: `${d}:${process.env.PATH}` }) // legacy-herdr
-  assert.deepEqual(hcCalls(d), [])
-})
-test('remember: the author is the hc terminal name (bounded hc get)', () => {
-  const d = paneShim('ok'), t = mkdtempSync(join(tmpdir(), 'wp378-by-'))
-  const env = { WT_MEMORY_HOME: t, WT_ROLE: 'worker', PATH: `${d}:${process.env.PATH}` }
-  assert.match(runRaw(['remember', 'Use pnpm here', '--scope', 'global', '--role', 'worker'], { ...env, HC_TERMINAL_ID: 't1' }).out, /^proposed/)
-  assert.match(readFileSync(join(t, 'pending', readdirSync(join(t, 'pending'))[0]), 'utf8'), /"by": "worker-1"/)
 })

@@ -2,7 +2,7 @@
 import { realpathSync } from 'node:fs'
 import { dirname, resolve, sep, join } from 'node:path'
 
-// hc-safe (a terminal name), and the project key is basename(root): lowercase, digits, - _ (≤32).
+// herdr-safe, and the project key is basename(root): lowercase, digits, - _ (≤32).
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/
 export const validName = (n) => typeof n === 'string' && NAME_RE.test(n)
 

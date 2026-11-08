@@ -6,21 +6,19 @@ import { spawn } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { noCore } from './test-nocore.mjs'
 
 let child, base, cookie
-const nc = noCore() // WP-378 F4: the real hc never runs (it would start a core)
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 before(async () => {
   const root = mkdtempSync(join(tmpdir(), 'wt-delroutes-'))
   mkdirSync(join(root, 'data'), { recursive: true })
-  child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: { ...nc.env(), PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root } })
+  child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root } })
   base = `http://127.0.0.1:${PORT}`
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
   cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
   await fetch(`${base}/api/rooms`, { headers: { cookie } }) // rooms settings load on first use; a user-authed call before that is a 500
 })
-after(() => { child?.kill(); assert.equal(nc.started(), false, 'the server called hc: ' + nc.calls()); nc.close() })
+after(() => child?.kill())
 
 test('check-finish is the pane\'s own call: no pane id, or the user, is refused', async () => {
   { const r = await fetch(`${base}/api/messages/check-finish`); assert.equal(r.status, 403, await r.text()) }

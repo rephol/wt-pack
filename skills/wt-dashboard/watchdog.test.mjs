@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, INFRA_RE, resumeBlock, respawnArgs, psStarts, staleAgents } from './watchdog.mjs'
+import { CHECKS, cleanWatchdogSettings, evaluate, diffFindings, enteredAt, keepStarts, inboxOps, investigatePrompt, exitedAgents, goalLoop, INFRA_RE, shellForeground, resumeBlock, resumeArgv, psStarts, staleAgents } from './watchdog.mjs'
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const min = (n) => new Date(now - n * 60_000).toISOString()
@@ -14,9 +14,7 @@ const card = (x) => ({ id: 'WP-1', column: 'ready', created: min(60), history: [
 test('settings: defaults, off switch, bad thresholds fall back', () => {
   const s = cleanWatchdogSettings({ disk: { on: false }, db: { threshold: -1 }, jev: { threshold: 50 }, nope: {} })
   assert.equal(Object.keys(s).length, CHECKS.length)
-  assert.deepEqual([s.disk.on, s.db.threshold, s.jev.threshold, s.hc.on], [false, 200, 50, true])
-  assert.equal(s.herdr, undefined) // legacy-herdr
-  assert.deepEqual(cleanWatchdogSettings({ herdr: { on: false, threshold: 9 } }).hc, { on: false, threshold: 9 }, 'a setting saved under the old id carries over') // legacy-herdr
+  assert.deepEqual([s.disk.on, s.db.threshold, s.jev.threshold, s.herdr.on], [false, 200, 50, true])
 })
 
 test('restarts: counts starts in the last hour', () => {
@@ -52,11 +50,10 @@ test('orphans: a Building card whose agent is gone or stalled; unknown agent lis
   assert.deepEqual(checks({ boards, agents: null }), ['orphans|WP-2'])
 })
 
-test('hc: core down past the threshold', () => {
-  assert.deepEqual(checks({ hc: { ok: false, lastOkAt: min(5) } }), ['hc|down'])
-  assert.deepEqual(checks({ hc: { ok: false, lastOkAt: min(1) } }), [])
-  assert.deepEqual(checks({ hc: { ok: true, lastOkAt: min(0) } }), [])
-  assert.match(evaluate({ hc: { ok: false, lastOkAt: min(5) } }, {}, now)[0].title, /hc core/)
+test('herdr: down past the threshold', () => {
+  assert.deepEqual(checks({ herdr: { ok: false, lastOkAt: min(5) } }), ['herdr|down'])
+  assert.deepEqual(checks({ herdr: { ok: false, lastOkAt: min(1) } }), [])
+  assert.deepEqual(checks({ herdr: { ok: true, lastOkAt: min(0) } }), [])
 })
 
 test('disk and db: thresholds in GB and MB; unknown never fires', () => {
@@ -123,13 +120,16 @@ test('exited: only table rows that exited fire; running, paused and missing (tab
   assert.deepEqual(exitedAgents(undefined), [])
 })
 
-test('resume: blocked when running again, name taken or ticket reassigned', () => {
+test('resume: argv mirrors spawn plus --resume; blocked when running again, name taken or ticket reassigned', () => {
   const r = { name: 'wt-pack-worker-01', session: 's-1', ticket: 'WP-9' }
-  assert.equal(resumeBlock('t1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 't1' } }]), null)
-  assert.match(resumeBlock('t1', r, [{ local: true, id: 't1', name: 'x' }]), /running an agent again/)
-  assert.match(resumeBlock('t1', r, [{ local: true, id: 't9', name: r.name }]), /already running in pane t9/)
-  assert.match(resumeBlock('t1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 't9' } }]), /now assigned/)
-  assert.match(resumeBlock('t1', { name: 'x' }, []), /no session id/)
+  assert.deepEqual(resumeArgv('w1:p1', r, ['--strict-mcp-config', '--mcp-config', '/c/mcp.json']),
+    ['agent', 'start', 'wt-pack-worker-01', '--kind', 'claude', '--pane', 'w1:p1', '--', '--resume', 's-1', '--name', 'wt-pack-worker-01', '--strict-mcp-config', '--mcp-config', '/c/mcp.json'])
+  assert.ok(!resumeArgv('w1:p1', r, []).includes('--model')) // WP-128: a resumed session keeps its transcript's model
+  assert.equal(resumeBlock('w1:p1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 'w1:p1' } }]), null)
+  assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'x' }]), /running an agent again/)
+  assert.match(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p9', name: r.name }]), /already running in pane w1:p9/)
+  assert.match(resumeBlock('w1:p1', r, [], [{ id: 'WP-9', assignee: { name: r.name, pane: 'w1:p9' } }]), /now assigned/)
+  assert.match(resumeBlock('w1:p1', { name: 'x' }, []), /no session id/)
 })
 
 test('WP-120 stale-hooks: ps parse, agents started before the guard flagged, after not, no guard → nothing', () => {
@@ -156,11 +156,18 @@ test('WP-120 stale-hooks: ps parse, agents started before the guard flagged, aft
   assert.deepEqual(checks({ stale: null }), [])
 })
 
-test('WP-378: Resume is agents.sh respawn by name (it rebuilds MCP, labels and env itself); it ignores an exited agent hc still lists', () => {
-  assert.deepEqual(respawnArgs({ name: 'wt-pack-worker-01', session: 's-1' }), ['respawn', 'wt-pack-worker-01'])
+test('WP-221 shellForeground: shell in the foreground = claude exited', () => {
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5 }), true)
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 9 }), false)
+  assert.equal(shellForeground(undefined), false)
+})
+
+test('WP-221 review: exec claude (shell pid reused) is alive; Resume ignores the exited agent herdr still lists', () => {
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5, foreground_processes: [{ pid: 5, name: '2.1.289' }] }), false)
+  assert.equal(shellForeground({ shell_pid: 5, foreground_process_group_id: 5, foreground_processes: [{ pid: 5, name: 'zsh' }] }), true)
   const r = { name: 'w', session: 's', ticket: null }
-  assert.equal(resumeBlock('t1', r, [{ local: true, id: 't1', name: 'w', status: 'exited' }]), null)
-  assert.equal(resumeBlock('t1', r, [{ local: true, id: 't1', name: 'w', status: 'idle' }]), 'the pane is running an agent again')
+  assert.equal(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'w', status: 'exited' }]), null)
+  assert.equal(resumeBlock('w1:p1', r, [{ local: true, id: 'w1:p1', name: 'w', status: 'idle' }]), 'the pane is running an agent again')
 })
 
 // WP-220: goalLoop — a /goal agent repeating one infra error.

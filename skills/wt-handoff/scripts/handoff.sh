@@ -1,5 +1,5 @@
 #!/bin/sh
-# Hand a prompt to an hc agent (a claude terminal of the herdr-core), instead of the clipboard.
+# Hand a prompt to a herdr agent, instead of the clipboard.
 #
 #   handoff.sh --list <cwd>                              # free workers, one per line
 #   handoff.sh [--pane <id>|--new] [--role worker|planner|reviewer|lead] [--persona <name>] [--team <name>] [--pr N --sha X] [--clear] [--goal] [--task "<TICKET> <title>"] [--mcp a,b] [--skill name] [--effort low|medium|high] [--kind k] [--from name] [--dry-run] <cwd> [prompt-file]
@@ -14,17 +14,14 @@
 # [ticket=…]>…</wt-message> (skills/wt-shared/scripts/wt-message.mjs), so the target knows it is wt-pack traffic,
 # not its user. --kind (default handoff) and --from (default: the sender's agent name) are for server callers.
 #
-# Handoff agents live in their own pool, the hc label wt.pool=<repo>-workers (override
-# with HANDOFF_WORKSPACE); agents.sh creates it with the first spawn. That pool IS the
-# pool: an agent is eligible when it carries the label, is FREE (idle or done — a worker
-# that finished a job reports "done", not "idle"), is running claude (never a shell), and
-# sits in the main checkout of <cwd>'s repo. Terminals outside the pool are never touched,
-# and neither is a worker parked inside a worktree — that is work already in flight.
-# A target is an hc terminal address (t7). A message is typed with `hc send` (never --force),
-# from a call with HC_TERMINAL_ID unset so it arrives untagged (S4); a blocked target
-# (a dialog is open) is not typed into: the script exits 1 and the caller retries.
+# Handoff agents live in their own herdr workspace, "<repo>-workers" (override
+# with HANDOFF_WORKSPACE), created on demand. That workspace IS the pool: an
+# agent is eligible when it is in there, FREE (idle or done — a worker that
+# finished a job reports "done", not "idle"), and sitting in the main checkout
+# of <cwd>'s repo. Panes in your own project workspace are never touched, and
+# neither is a worker parked inside a worktree — that is work already in flight.
 #
-# --list prints "<terminal>\t<name>\t<cwd>" per candidate, so the caller can
+# --list prints "<pane-id>\t<tab label>\t<cwd>" per candidate, so the caller can
 # offer the choice instead of guessing. --clear sends /clear to the chosen agent
 # first. NOTE: /clear drops the conversation, but a SessionStart memory hook
 # (claude-mem here) re-injects project context right after — so treat --clear as
@@ -57,9 +54,9 @@
 # the pool: at the cap, exits 3 with "pool full: <n>/<cap> workers in <repo>" and sends nothing (no queue —
 # dispatch's card stays in Ready and retries later).
 #
-# --task labels the target terminal (hc label `task`, shown by wt-dashboard); without it the
-# ticket is taken from <cwd>'s branch (ENG-123 or WP-12). Both terminals are told about each other through
-# labels (target: task, ticket, handoff_from[_pane], handoff_at; sender: handoff_to[_pane]), and
+# --task labels the target pane (herdr token `task`, shown by wt-dashboard); without it the
+# ticket is taken from <cwd>'s branch (ENG-123 or WP-12). Both panes are told about each other through
+# tokens (target: task, ticket, handoff_from[_pane], handoff_at; sender: handoff_to[_pane]), and
 # the prompt gets a footer naming the sender so the target can answer it.
 #
 # Prints "reused <pane>" or "created <label> <pane>" on the FIRST line (callers parse it), then
@@ -103,9 +100,9 @@ recorded=0 # WP-352: set by record_message when the dashboard answered 2xx; a po
 record_message() { # <pane> <text> <state>
   recorded=0
   command -v curl >/dev/null && command -v jq >/dev/null || return 0
-  [ -n "${deliver_token:-}${HC_TERMINAL_ID:-}" ] || return 0
+  [ -n "${deliver_token:-}${HERDR_PANE_ID:-}" ] || return 0
   code=$(jq -n --arg p "$1" --arg t "$2" --arg s "$3" --arg r "$request_id" '{target:$p,body:$t,state:$s} + (if $r == "" then {} else {requestId:$r} end)' \
-    | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HC_TERMINAL_ID:-}")" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
+    | curl -sS --max-time 3 -X POST -H "$( [ -n "${deliver_token:-}" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- -o /dev/null -w '%{http_code}' "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages" 2>/dev/null) || code=
   case "$code" in 2??) recorded=1 ;; esac
   return 0
@@ -173,7 +170,7 @@ deliver_token=${WT_DELIVER_TOKEN:-}; unset WT_DELIVER_TOKEN
 # failed or slow post is retried, then fails loudly (exit 3) so the caller retries with the same --request-id, which the
 # dashboard answers with the id it already recorded.
 pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
-  [ -n "${HC_TERMINAL_ID:-}" ] && [ -z "$deliver_token" ] && command -v curl >/dev/null && command -v jq >/dev/null || return 0
+  [ -n "${HERDR_PANE_ID:-}" ] && [ -z "$deliver_token" ] && command -v curl >/dev/null && command -v jq >/dev/null || return 0
   payload=$(jq -n --arg p "$1" --arg k "$2" --arg b "$3" --arg t "$4" --arg g "$5" --arg r "$request_id" --arg pr "$pr" --arg sh "$sha" \
     '{pane:$p,kind:$k,body:$b} + (if $t == "" then {} else {ticket:$t} end) + (if $g == "1" then {goal:true} else {} end)
      + (if $r == "" then {} else {requestId:$r} end) + (if $pr == "" then {} else {pr:$pr} end) + (if $sh == "" then {} else {sha:$sh} end)')
@@ -181,7 +178,7 @@ pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
   while [ "$n" -lt "${WT_POST_TRIES:-3}" ]; do
     [ "$n" -eq 0 ] || sleep "${WT_POST_RETRY_S:-1}"
     n=$((n + 1))
-    ans=$(printf '%s' "$payload" | curl -sS --max-time "${WT_POST_TIMEOUT_S:-10}" -X POST -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
+    ans=$(printf '%s' "$payload" | curl -sS --max-time "${WT_POST_TIMEOUT_S:-10}" -X POST -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>&1) || true
     if printf '%s' "$ans" | jq -e '.text != null' >/dev/null 2>&1; then printf '%s' "$ans" | jq -c .; return 0; fi
     why=$(printf '%s' "$ans" | jq -r '.error // empty' 2>/dev/null); why=${why:-${ans:-no answer from the dashboard}}
@@ -197,103 +194,37 @@ pane_post() { # <pane> <kind> <body> <ticket> <goal 0|1>
 # WP-251: a repeated request id returns the earlier output (a lost Enter, a restart, Dispatch re-evaluating a card).
 [ -z "$request_id" ] || [ "$dry" -eq 1 ] || ! node "$RECEIPTS" get "$request_id" 2>/dev/null || exit 0
 
-command -v hc >/dev/null || { echo "hc not on PATH" >&2; exit 1; }
-# WP-378 F5: every hc call (even `hc connect`/`get`) STARTS a stopped core, and nothing in the pack may. Each path that talks to hc asks first
-# (hc.mjs core-up connects to the core's socket, never to hc) and stops before anything is recorded or sent. A headless target needs no hc.
-core_is_up() { node "$SELFDIR/../../wt-shared/scripts/hc.mjs" core-up >/dev/null 2>&1; }
-core_up() { core_is_up || { echo "hc core is down — ask the user to start it (hc server start); nothing was recorded or sent, retry when it is up" >&2; exit 1; }; }
+command -v herdr >/dev/null || { echo "herdr not on PATH" >&2; exit 1; }
 
-# Who is sending: $HC_TERMINAL_ID (t7). Outside an hc terminal there is no sender and no sender-side labels.
-# The live terminals as one JSON array [{id,name,cwd,status,kind,prog,labels}], from ONE terminal.list over `hc connect` (hc ls --json
-# is a slim summary with no labels). `machine/t3` rows (another machine) are dropped. status = idle|working|done|blocked|"" (a plain
-# program reports none); prog = basename of the foreground's argv[0] (claude, zsh, ...).
-rows() {
-  _r=$(printf '{"jsonrpc":"2.0","id":1,"method":"terminal.list","params":{"all":false}}\n' | hc connect 2>/dev/null | jq -c '
-    [(.result.terminals // [])[] | select(.state == "live" and ((.address | contains("/")) | not))
-     | {id: .address, name: (.name // ""), cwd: (.cwd // ""), labels: (.labels // {}),
-        status: (.status | if type == "object" then (.state // "") else "" end),
-        kind: (.status | if type == "object" then (.kind // "") else "" end),
-        prog: ((.foreground.argv // .argv // [])[0] // "" | split("/") | last)}]' 2>/dev/null) || _r=
-  printf '%s\n' "${_r:-[]}"
-}
-row_of() { rows | jq -c --arg t "$1" '.[] | select(.id == $t)' 2>/dev/null | head -1; }
-label_of() { rows | jq -r --arg t "$1" --arg k "$2" '.[] | select(.id == $t) | .labels[$k] // empty' 2>/dev/null | head -1; } # <id> <key>
-pane_of() { rows | jq -r --arg t "$1" '.[] | select(.id == $t) | .id' 2>/dev/null | head -1; }   # the id when it is a live terminal
-name_of() { rows | jq -r --arg t "$1" '.[] | select(.id == $t) | .name' 2>/dev/null | head -1; }
-pane_of_name() { rows | jq -r --arg n "$1" '.[] | select(.name == $n) | .id' 2>/dev/null | head -1; }
+# Who is sending: $HERDR_PANE_ID may be herdr's stable id, so resolve it to the pane id
+# `agent list` uses. Outside herdr there is no sender and no sender-side tokens.
+pane_of() { herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.pane_id // empty'; }
+name_of() { herdr agent list | jq -r --arg p "$1" '.result.agents[] | select(.pane_id == $p) | .name // empty' | head -1; }
+pane_of_name() { herdr agent list | jq -r --arg n "$1" '.result.agents[] | select(.name == $n) | .pane_id' | head -1; }
 
-# The old pane tokens are hc labels. tag <id> [--token k=v | --clear-token k]...: best effort, values cut to the pack's 80.
-tag() {
-  p=$1; shift; n=$#
-  while [ "$n" -gt 0 ]; do
-    case "$1" in
-      --token) kv=$2; set -- "$@" "${kv%%=*}=$(printf '%.80s' "${kv#*=}")"; shift 2 ;;
-      --clear-token) set -- "$@" "$2="; shift 2 ;;
-      *) shift ;;
-    esac
-    n=$((n - 2))
-  done
-  [ $# -eq 0 ] || hc label --json "$p" "$@" >/dev/null 2>&1 || true
-}
-
-# ONE typed send. Never --force (a blocked target is not typed into). hc wraps text from an agent terminal in <hc from=...> tags
-# unless HC_TERMINAL_ID is unset for the call (spike S4), and a wrapped pointer would no longer be the exact recorded line: `env -u`.
-#   idle: types only while the agent is idle; a finished turn rests at `done`, which hc's --if idle refuses ("is done, not idle"), so exactly
-#         that refusal is retried once as a plain send. Working, blocked and a shell ("silent, not idle") are never retried.
-#   any : a reply may land while the target works (claude queues it); a terminal that is not an agent (a shell, gone) is still refused.
-hc_send() { # <id> <text> [idle|any]
-  if [ "${3:-idle}" = any ]; then
-    _row=$(row_of "$1")
-    printf '%s' "$_row" | jq -e '.prog == "claude" or .status != ""' >/dev/null 2>&1 \
-      || { echo "$1 is not an agent (a shell, or gone): nothing sent" >&2; return 1; }
-    _flag=
-  else _flag="--if idle"; fi
-  _rc=0; _e=$(env -u HC_TERMINAL_ID hc send --json $_flag "$1" "$2" 2>&1 >/dev/null) || _rc=$?
-  if [ "$_rc" -ne 0 ] && [ -n "$_flag" ] && printf '%s' "$_e" | grep -q 'is done, not idle'; then
-    _rc=0; _e=$(env -u HC_TERMINAL_ID hc send --json "$1" "$2" 2>&1 >/dev/null) || _rc=$?
-  fi
-  case "$_rc" in
-    0) return 0 ;;
-    9) echo "$1 is blocked (a dialog is open): nothing sent; retry when it is answered" >&2 ;;
-    *) echo "hc send $1 failed: $(printf '%s' "$_e" | jq -r '.error.message // empty' 2>/dev/null || true)${_e:+ }$(printf '%s' "$_e" | head -c 120)" >&2 ;;
-  esac
-  return "$_rc"
-}
-# Wait up to <secs> for the agent to be idle or done. hc wait ends on a turn end, a block, its own check-in or a message to the waiter,
-# so it is looped against the deadline, with the status read between waits.
-settled() { # <id> <secs>
-  _end=$(( $(date +%s) + $2 ))
-  while :; do
-    case "$(row_of "$1" | jq -r '.status // empty' 2>/dev/null)" in idle|done) return 0 ;; blocked) return 1 ;; esac
-    _left=$(( _end - $(date +%s) )); [ "$_left" -gt 0 ] || return 1
-    hc wait --json "$1" --timeout "$_left" >/dev/null 2>&1 || sleep 1
-  done
-}
-
-# WP-317: a live headless run (no hc terminal) by id, name or a unique id prefix → "<id> <name>"; a terminal address (t7) is never one.
+# WP-317: a live headless run (no herdr pane) by id, name or a unique id prefix → "<id> <name>"; a pane id has a ':' so is never one.
 # Ended/failed rows are skipped, so a name an ended run left behind never wins over the live run that reuses it.
 HL_URL="${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/headless"
 hl_resolve() { # <target>
-  [ -n "$1" ] || return 1
-  ! printf '%s' "$1" | grep -qE '^t[0-9a-z]+$' || return 1 # WP-378: a terminal address (t7) is never a headless run
-  r=$(curl -sS --max-time 3 ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$HL_URL" 2>/dev/null | jq -r --arg t "$1" \
+  case "$1" in *:*|'') return 1 ;; esac
+  r=$(curl -sS --max-time 3 ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} "$HL_URL" 2>/dev/null | jq -r --arg t "$1" \
     '[.[]? | select(.state != "ended" and .state != "failed")] as $l | ($l | map(select(.id == $t or .name == $t))) as $x
      | ($x | if length > 0 then . else ($l | map(select(.id | startswith($t)))) end) | if length == 1 then "\(.[0].id) \(.[0].name)" else empty end' 2>/dev/null) || return 1
   [ -n "$r" ] && printf '%s\n' "$r"
 }
 # WP-328: the headless message route still takes a locally wrapped envelope (audit finding 3 is WP-330's scope).
 hl_post() { # <id> <text>: deliver as the run's next user message (an agent pane may; the server says 409 if it is not live)
-  o=$(jq -n --arg t "$2" '{text:$t}' | curl -sS --max-time 10 -X POST ${HC_TERMINAL_ID:+-H "x-herdr-pane: $HC_TERMINAL_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+  o=$(jq -n --arg t "$2" '{text:$t}' | curl -sS --max-time 10 -X POST ${HERDR_PANE_ID:+-H "x-herdr-pane: $HERDR_PANE_ID"} ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     --data @- "$HL_URL/$1/message" 2>/dev/null) || { echo "wt-dashboard not reachable" >&2; return 1; }
   e=$(printf '%s' "$o" | jq -r '.error // empty' 2>/dev/null || true)
   [ -z "$e" ] || { echo "headless $1: $e" >&2; return 1; }
 }
 
-# --ack <id> [--answered]: tell the dashboard this agent has the message (WP-257). Needs a pane (HC_TERMINAL_ID).
+# --ack <id> [--answered]: tell the dashboard this agent has the message (WP-257). Needs a pane (HERDR_PANE_ID).
 if [ -n "$ack_id" ]; then
   case "$ack_id" in *[!A-Za-z0-9_-]*) echo "--ack: bad id" >&2; exit 2 ;; esac
-  [ -n "${HC_TERMINAL_ID:-}" ] || { echo "--ack needs an hc terminal (HC_TERMINAL_ID)" >&2; exit 2; }
-  curl -sS --max-time 5 -X POST -H "x-herdr-pane: $HC_TERMINAL_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+  [ -n "${HERDR_PANE_ID:-}" ] || { echo "--ack needs a herdr pane (HERDR_PANE_ID)" >&2; exit 2; }
+  curl -sS --max-time 5 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     --data "$(jq -n --arg s "$ack_state" '{state:$s}')" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/messages/$ack_id/ack" | jq -r 'if .error then "ack failed: " + .error else "\(.id) \(.state)" end'
   exit 0
 fi
@@ -315,8 +246,8 @@ if [ -n "$reply" ]; then
     fi
   fi
   [ -n "$text" ] || { echo "--reply: no text" >&2; exit 2; }
-  me=${HC_TERMINAL_ID:-}
-  nm=$( [ -n "$me" ] && core_is_up && name_of "$me" || true) # a headless reply target needs no hc: no core, no name lookup
+  me=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
+  nm=$( [ -n "$me" ] && name_of "$me" || true)
   msg=$(printf '%s' "$text" | node "$WTMSG" --kind reply --from "${from_arg:-${nm:-${me:-wt-handoff}}}") || { echo "wt-message wrap failed" >&2; exit 1; }
   [ "$dry" -eq 1 ] && { echo "dry-run: would reply to $reply"; echo "send: $msg"; exit 0; }
   if hl=$(hl_resolve "$reply"); then # WP-317: the sender is a headless run
@@ -327,12 +258,6 @@ if [ -n "$reply" ]; then
     echo "replied ${hl%% *} (headless ${hl#* })"
     exit 0
   fi
-  core_up
-  # WP-378 D25: a blocked target (a dialog is open) takes nothing; refuse BEFORE any record or post, as hand_to does (D16), or a `delivered`
-  # reply row is left that hc send then refused (exit 9) and never typed.
-  if [ "$(row_of "$reply" | jq -r '.status // empty' 2>/dev/null)" = blocked ]; then
-    echo "$reply is blocked (a dialog is open): nothing sent; retry when it is answered" >&2; exit 1
-  fi
   # WP-210: a target whose wt-deliver-mod is live takes the reply through the dashboard queue (the mod submits it as a
   # prompt); any failure, or a pane without the mod, pastes as before. Only a pane-identified sender can ask.
   # WP-328: the dashboard builds the envelope and records it; an old or unreachable one falls back to the local wrap above.
@@ -340,43 +265,46 @@ if [ -n "$reply" ]; then
   if [ -n "$srv" ]; then
     msg=$(printf '%s' "$srv" | jq -r .text)
     [ "$(printf '%s' "$srv" | jq -r '.queued // false')" = true ] && { echo "replied $reply (queued)"; exit 0; }
-  elif [ -n "${HC_TERMINAL_ID:-}" ] && command -v curl >/dev/null; then
-    q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HC_TERMINAL_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
+  elif [ -n "${HERDR_PANE_ID:-}" ] && command -v curl >/dev/null; then
+    q=$(jq -n --arg p "$reply" --arg t "$msg" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
       -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r '.queued // false' 2>/dev/null) || q=false
     [ "$q" = true ] && { record_message "$reply" "$msg" queued; echo "replied $reply (queued)"; exit 0; }
   fi
   rec=1; [ -n "$srv" ] || { record_message "$reply" "$msg" delivered; rec=$recorded; } # recorded BEFORE typing: the pointer is verified against this row
-  hc_send "$reply" "$(ptr "$reply" "$msg" "$rec")" any || exit 1
+  herdr agent prompt "$reply" "$(ptr "$reply" "$msg" "$rec")" >/dev/null
   echo "replied $reply"
   exit 0
 fi
 
-# --cancel: stop a /goal-driven agent for real. A /goal keeps the agent working toward its
+# --cancel: stop a /goal-driven agent for real. A herdr /goal keeps the agent working toward its
 # condition regardless of what's typed at it (WP-131 incident: told to stop, kept going) — so this
 # escapes whatever it's mid-doing, then ends the goal itself, verifying that the agent actually went
 # idle; a goal that doesn't let go (or an agent already blocked past escape) falls back to /clear.
 if [ -n "$cancel" ]; then
   why=${1:-}
-  core_up
-  pane=$(pane_of "$cancel")
+  case "$cancel" in
+    *:*) pane=$(pane_of "$cancel" || true) ;;
+    *)   pane= ;;
+  esac
   [ -n "$pane" ] || pane=$(pane_of_name "$cancel")
-  [ -n "$pane" ] || { echo "--cancel: no such terminal or agent: $cancel" >&2; exit 1; }
+  [ -n "$pane" ] || { echo "--cancel: no such pane or agent: $cancel" >&2; exit 1; }
 
   [ "$dry" -eq 1 ] && { echo "dry-run: would cancel $cancel ($pane)${why:+: $why}"; exit 0; }
 
-  task=$(label_of "$pane" task)
-  ticket=$(label_of "$pane" ticket)
+  info=$(herdr pane get "$pane" 2>/dev/null || true)
+  task=$(printf '%s' "$info" | jq -r '.result.pane.tokens.task // empty' 2>/dev/null || true)
+  ticket=$(printf '%s' "$info" | jq -r '.result.pane.tokens.ticket // empty' 2>/dev/null || true)
 
-  hc keys --json "$pane" esc >/dev/null 2>&1 || true
-  if hc_send "$pane" "/goal clear" any 2>/dev/null && settled "$pane" "${WT_CANCEL_WAIT_S:-8}"; then
+  herdr agent send-keys "$pane" esc >/dev/null 2>&1 || true
+  if herdr agent prompt "$pane" "/goal clear" --wait --until idle --until done --timeout 8000 >/dev/null 2>&1; then
     cleared="goal cleared"
-  elif hc_send "$pane" "/clear" any 2>/dev/null; then
+  elif herdr agent prompt "$pane" "/clear" >/dev/null 2>&1; then
     cleared="goal clear unverified, sent /clear"
   else
     cleared="goal clear unverified, /clear also rejected (agent still blocked?)"
   fi
 
-  hc label --json "$pane" task= ticket= >/dev/null 2>&1 || true
+  herdr pane report-metadata "$pane" --source wt-dashboard --clear-token task --clear-token ticket >/dev/null 2>&1 || true
 
   T="$SELFDIR/../../wt-ticket/scripts/wt-ticket"
   board=
@@ -416,41 +344,60 @@ main_checkout=$(dirname "$(git -C "$cwd" rev-parse --path-format=absolute --git-
 
 ws_label=${HANDOFF_WORKSPACE:-$(basename "${main_checkout:-$cwd}")-workers}
 
-# Every free agent (idle or done, running claude) of the pool whose own toplevel IS that main checkout, as
-# "<terminal>\t<name>\t<cwd>\t<model label>\t<effort label>".
+# Resolve the worker workspace, creating it on first use. Never focus it: the
+# point is that work lands somewhere out of the way, not that it steals the view.
+worker_ws() {
+  id=$(herdr workspace list \
+    | jq -r --arg l "$ws_label" '.result.workspaces[] | select(.label == $l) | .workspace_id' \
+    | head -1)
+  [ -n "$id" ] || [ "$dry" -eq 1 ] || id=$(herdr workspace create --label "$ws_label" --cwd "$main_checkout" --no-focus \
+    | jq -r '.result.workspace.workspace_id')
+  echo "$id"
+}
+
+# Every free agent (idle or done) whose own toplevel IS that main checkout, as
+# "<pane-id>\t<tab label>\t<cwd>\t<model token>\t<effort token>".
 candidates() {
   [ -n "$main_checkout" ] || return 0
   tab=$(printf '\t')
+  ws=$(worker_ws)
   # WP-341: the sender is never its own target.
-  me=${HC_TERMINAL_ID:-}
-  all=$(rows)
-  # WP-225: an agent already holding an open card (its assignee, or its task/ticket label names one) is never
+  me=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
+  panes=$(herdr pane list | jq -c '[(.result.panes // [])[] | {key: .pane_id, value: (.tokens // {})}] | from_entries')
+  # WP-225: an agent already holding an open card (its assignee, or its task/ticket token names one) is never
   # a candidate. Best-effort: no board (server down, Linear key) → [] and nobody is excluded, as before.
   held=$(cd "$main_checkout" && "$SELFDIR/../../wt-ticket/scripts/wt-ticket" list --json 2>/dev/null \
     | jq -c '[.tickets[]? | select(.column != "done" and .column != "cancelled") | {id, a: (.assignee.name // "")}]' 2>/dev/null) || held=
   [ -n "$held" ] || held='[]'
-  # A shell (a kept terminal, or claude gone) has no status and is never listed; the prog test is the second guard.
-  printf '%s' "$all" \
-    | jq -r --arg pool "$ws_label" --arg persona "$persona" --arg team "$team" \
-      '.[] | select(.labels["wt.pool"] == $pool) | select(.status == "idle" or .status == "done") | select(.prog == "claude" or .prog == "")
-       | . as $a | $a.labels as $t
+  herdr agent list \
+    | jq -r --arg ws "$ws" --arg persona "$persona" --arg team "$team" --argjson panes "$panes" \
+      '.result.agents[] | select(.agent_status == "idle" or .agent_status == "done") | select(.workspace_id == $ws)
+       | . as $a | ($panes[$a.pane_id] // {}) as $t
        | select(($t.dnd // "") == "") | select(($t.pair // "") == "")
        | select(($t.persona // "") == $persona) | select(($t.team // "") == $team)
-       | [$a.id, ($a.name | if . == "" then "-" else . end), $a.cwd, ($t.model // "-"), ($t.effort // "-"), ($t.task // $t.ticket // "-" | split(" ")[0])] | @tsv' \
-    | while IFS="$tab" read -r id nm acwd amodel aeffort tk; do # "-" stands for an empty field: a tab is whitespace to read, which would collapse them
-        [ "$nm" != - ] || nm=; [ "$amodel" != - ] || amodel=; [ "$aeffort" != - ] || aeffort=; [ "$tk" != - ] || tk=
+       | [$a.pane_id, $a.tab_id, $a.cwd, ($t.model // ""), ($t.effort // "")] | @tsv' \
+    | while IFS="$tab" read -r id tid acwd amodel aeffort; do
+        # Target by PANE ID, not name: an agent started by hand rather than by
+        # `herdr agent start <name>` has an empty name, and most do.
         [ -n "$id" ] && [ -n "$acwd" ] || continue
         [ -d "$acwd" ] || continue
         [ -z "$me" ] || [ "$id" != "$me" ] || continue
+        tk=$(printf '%s' "$panes" | jq -r --arg p "$id" '(.[$p].task // .[$p].ticket // "") | split(" ")[0]')
+        nm=$(name_of "$id")
         printf '%s' "$held" | jq -e --arg tk "$tk" --arg nm "$nm" \
           'any(.[]; ($tk != "" and .id == $tk) or ($nm != "" and .a == $nm))' >/dev/null && continue
+        # WP-221: herdr can still say idle/done after claude exits; the shell back in the foreground means a dead pane.
+        herdr pane process-info --pane "$id" 2>/dev/null \
+          | jq -e '.result.process_info | .shell_pid != null and .foreground_process_group_id == .shell_pid
+            and all(.foreground_processes[]?; (.name // .argv0 // "") | test("^-?(zsh|bash|fish|sh|dash|ksh|tcsh)$"))' >/dev/null && continue
         top=$(git -C "$acwd" rev-parse --show-toplevel 2>/dev/null) || continue
         [ "$top" = "$main_checkout" ] || continue
-        printf '%s\t%s\t%s\t%s\t%s\n' "$id" "${nm:-?}" "$acwd" "$amodel" "$aeffort"
+        tlabel=$(herdr tab get "$tid" 2>/dev/null | jq -r '.result.tab.label // "?"')
+        printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$tlabel" "$acwd" "$amodel" "$aeffort"
       done
 }
 
-[ "$mode" = list ] && { core_up; candidates; exit 0; }
+[ "$mode" = list ] && { candidates; exit 0; }
 
 # MCP picks from Jev (before the footer is added: it judges the task, not the routing).
 jev=
@@ -497,37 +444,33 @@ has_picks() {
 }
 
 # WP-248: a session that has just spawned is still loading its start-up context and drops typed input, so wait until
-# it reports idle or done before typing, and after typing check the text left the input box (Enter again if not).
-# Env knobs: WT_READY_TIMEOUT s, WT_SUBMIT_SETTLE_MS. A target that never got ready is typed to only as `any` (still never a shell).
+# it is registered and idle before typing (a missed registration is nudged once with a rename), and after typing
+# check the text left the input box (Enter again if not). Env knobs: WT_READY_TIMEOUT s, WT_SUBMIT_SETTLE_MS.
 PANE_SUBMIT="$SELFDIR/../../wt-shared/scripts/pane-submit.mjs"
-fresh=0
-sendmode=idle
-wait_ready() { # <terminal>
+fresh=0; fresh_label=
+wait_ready() { # <pane>
   node "$PANE_SUBMIT" ready "$1" --timeout "${WT_READY_TIMEOUT:-60}" 2>/dev/null && return 0
-  echo "warning: $1 not ready after ${WT_READY_TIMEOUT:-60}s, sending anyway" >&2
-  sendmode=any
+  [ -z "$fresh_label" ] || herdr agent rename "$1" "$fresh_label" >/dev/null 2>&1 || true
+  node "$PANE_SUBMIT" ready "$1" --timeout "$(( ${WT_READY_TIMEOUT:-60} / 6 ))" 2>/dev/null \
+    || echo "warning: $1 not ready after ${WT_READY_TIMEOUT:-60}s, sending anyway" >&2
 }
 hand_to() {
-  # A reused agent that reports no status yet (claude still starting) gets the fresh-spawn treatment: waited on until ready.
-  # An explicit --pane target may be busy (a follow-up to a working worker): it is typed to as `any`, not only while idle.
-  [ "$mode" != pane ] || sendmode=any
-  # WP-378 D16: a blocked target (a dialog is open) takes nothing; refuse BEFORE any record or post, or a `delivered` row is left that was never typed.
-  # No script-side queue (a script has no lifetime to hold one). The exit-9 branch of hc_send stays as the race backstop.
-  if [ "$(row_of "$1" | jq -r '.status // empty' 2>/dev/null)" = blocked ]; then
-    echo "$1 is blocked (a dialog is open): nothing sent; retry when it is answered" >&2; exit 1
-  fi
-  if [ "$fresh" -eq 0 ]; then
-    _row=$(row_of "$1")
-    printf '%s' "$_row" | jq -e '.status == "" and .prog == "claude"' >/dev/null 2>&1 && fresh=1
+  # WP-249: a reused agent that never registered (absent from `agent list`) gets the fresh-spawn treatment: renamed
+  # to its tab label, then waited on until ready.
+  if [ "$fresh" -eq 0 ] && [ -z "$(name_of "$1")" ]; then
+    tab_id=$(herdr pane get "$1" 2>/dev/null | jq -r '.result.pane.tab_id // empty')
+    fresh_label=$(herdr tab list 2>/dev/null | jq -r --arg t "$tab_id" '.result.tabs[] | select(.tab_id == $t) | .label // empty' | head -1)
+    [ -z "$fresh_label" ] || herdr agent rename "$1" "$fresh_label" >/dev/null 2>&1 || true
+    fresh=1
   fi
   [ "$fresh" -eq 0 ] || wait_ready "$1"
   # /clear is the user's call, never a default: a reused agent's prior context
   # can be exactly what makes it the right one to continue in.
   if [ "$clear" -eq 1 ]; then
-    hc_send "$1" "/clear" any || true
+    herdr agent prompt "$1" "/clear" >/dev/null || true
     sleep 2
   fi
-  # WP-240/243: hc send pastes, and so does any long burst of typed text, which Claude Code hands the model as
+  # WP-240/243: herdr's prompt pastes, and so does any long burst of typed text, which Claude Code hands the model as
   # pasted content it will not act on. So the message goes to a mode-600 file and only a SHORT line naming it is
   # typed: no queue, no ordering (a queue only drains between turns, and /goal's Stop hook keeps the turn open).
   # WP-272 (WP-352: the typed line is now the recorded pointer, not "Do the task in <file>"): when the target's delivery mod is live,
@@ -552,11 +495,16 @@ hand_to() {
   save_message >/dev/null || true
   typed=$(ptr "$1" "$send" "$server_recorded")
   if [ "$typed" = "$send" ]; then # no pointer (no recorded row, or a keyless pane): paste the full text as before
-    text=${send_full:-$send}
+    herdr agent prompt "$1" "${send_full:-$send}" >/dev/null
   else
-    text=$typed; [ "$goal" -eq 0 ] || text="/goal ${typed#/goal }"
+    if herdr pane send-text "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null 2>&1; then
+      sleep 0.4 # an Enter sent in the same instant as the text is dropped
+      herdr pane send-keys "$1" enter >/dev/null
+    else
+      echo "warning: could not type the pointer into $1 (send-text failed): pasting it" >&2
+      herdr agent prompt "$1" "$( [ "$goal" -eq 1 ] && printf '/goal %s' "${typed#/goal }" || printf '%s' "$typed")" >/dev/null
+    fi
   fi
-  hc_send "$1" "$text" "$sendmode" || exit 1 # hc send pastes and presses Enter; a blocked or non-agent target is never typed into
   node "$PANE_SUBMIT" confirm "$1" --settle "${WT_SUBMIT_SETTLE_MS:-1500}" 2>/dev/null \
     || { echo "prompt not submitted: it is still in the input box of $1" >&2; exit 1; }
 }
@@ -574,8 +522,8 @@ save_message() {
 queue_prompt() { # <pane> <text>
   command -v curl >/dev/null || return 1
   # A server-run handoff (Dispatch, routines) has no pane id: it proves itself with the dashboard's private token instead.
-  set -- "$1" "$2" -H "$( [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HC_TERMINAL_ID:-}")"
-  [ -n "$deliver_token${HC_TERMINAL_ID:-}" ] || return 1
+  set -- "$1" "$2" -H "$( [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}")"
+  [ -n "$deliver_token${HERDR_PANE_ID:-}" ] || return 1
   qid=$(jq -n --arg p "$1" --arg t "$2" '{pane:$p,text:$t}' | curl -sS --max-time 3 -X POST "$3" "$4" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} \
     -H 'content-type: application/json' --data @- "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/deliveries" 2>/dev/null | jq -r 'if .queued == true then .id else empty end' 2>/dev/null)
   [ -n "$qid" ]
@@ -603,13 +551,11 @@ queue_pulled() { # <pane>
   [ "$c" = true ] && return 1
   return 0 # the mod pulled it as we cancelled
 }
-auth_header() { [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HC_TERMINAL_ID:-}"; }
+auth_header() { [ -n "$deliver_token" ] && echo "x-wt-server: $deliver_token" || echo "x-herdr-pane: ${HERDR_PANE_ID:-}"; }
 
-# every path below reads or writes hc, except a headless --pane target
-if [ "$mode" = pane ] && hl_resolve "$pane_arg" >/dev/null 2>&1; then :; else core_up; fi
 task_text=$prompt  # the request itself, before the footer: what model routing judges (WP-128)
-from_pane=${HC_TERMINAL_ID:-}
-from_name=$( [ -n "$from_pane" ] && core_is_up && name_of "$from_pane" || true)
+from_pane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
+from_name=$( [ -n "$from_pane" ] && name_of "$from_pane" || true)
 # WP-354: a worker's work happens in a worktree under <main>/.claude/worktrees, never a ../<repo>-* sibling or /tmp.
 # Only for the RESOLVED worker role (set above, after routing), and not when the prompt already names such a worktree.
 WTSH="$(cd "$SELFDIR/../../wt-plan/scripts" 2>/dev/null && pwd -P)/worktree.sh" # absolute: a handoff into another repo has no skills/ of its own
@@ -623,7 +569,7 @@ esac
 
 Handed off by ${from_name:-$from_pane} (pane $from_pane). To reply: $SELF --reply $from_pane \"...\""
 
-# The task label starts with the ticket when there is one, and is cut to the pack's 80 characters here.
+# The task label starts with the ticket when there is one, and is cut to herdr's 80 characters here.
 # A ticket is <TEAM>-N for a Linear team in WT_LINEAR_TEAMS (~/.config/wt-dashboard/env) or <KEY>-N for a local
 # board key (wt-ticket keys; empty when the server is down).
 T="$SELFDIR/../../wt-ticket/scripts/wt-ticket"
@@ -679,7 +625,7 @@ else
   # ok/send-back/returned. The worker's tier is already fixed (nothing will be applied), so this logs it as
   # source=reuse with no Jev call, purely for the ref. Left empty when the target has no model token (e.g. a
   # worker started without an explicit tier) — there is nothing known to log.
-  pmodel=$( core_is_up && label_of "$pane_arg" model || true) # F6: a headless target has no labels, and `hc connect` with the core down would START it
+  pmodel=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.model // empty')
   case "$pmodel" in
     haiku|sonnet|opus)
       r=$(printf '%s' "$task_text" | node "$SELFDIR/../../wt-shared/scripts/model-route.mjs" pick --json --skill "${skill:-wt-handoff}" --role "$role" \
@@ -712,7 +658,9 @@ else
   send=$prompt
 fi
 
-# Display-only labels the dashboard reads (tag(), above; best effort). handoff_at tells the dashboard these are newer than its mirrored ticket.
+# Display-only tokens under the source wt-dashboard reads (best effort: an older herdr has no
+# report-metadata). handoff_at tells the dashboard these are newer than its mirrored ticket.
+tag() { p=$1; shift; herdr pane report-metadata "$p" --source wt-dashboard "$@" >/dev/null 2>&1 || true; }
 finish() {  # <first output line> <target pane>
   to=$(pane_of "$2"); to=${to:-$2}
   to_name=$(name_of "$to")
@@ -725,7 +673,7 @@ finish() {  # <first output line> <target pane>
   tag "$@"
   [ -n "$from_pane" ] && tag "$from_pane" --token "handoff_to=${to_name:-$to}" --token "handoff_to_pane=$to"
   # A planner handing its plan over: its task label moves on to "handed to <worker>".
-  if [ -n "$from_pane" ] && [ "$(label_of "$from_pane" role)" = planner ]; then
+  if [ -n "$from_pane" ] && [ "$(herdr pane get "$from_pane" 2>/dev/null | jq -r '.result.pane.tokens.role // empty')" = planner ]; then
     tag "$from_pane" --token "task_state=handed to ${to_name:-$to}"
   fi
   # A local board ticket handed to a worker moves to Building, assigned to it (never blocks the handoff).
@@ -740,16 +688,16 @@ finish() {  # <first output line> <target pane>
   # sender pane for auth, so it silently no-ops from a server-side dispatch — dispatch.mjs sets that directly).
   if [ -n "$buddy_arg" ] && [ -n "$ticket" ]; then
     bpane=$buddy_arg
-    [ "$bpane" != self ] || bpane=$( [ -n "${HC_TERMINAL_ID:-}" ] && pane_of "$HC_TERMINAL_ID" || true)
+    [ "$bpane" != self ] || bpane=$( [ -n "${HERDR_PANE_ID:-}" ] && pane_of "$HERDR_PANE_ID" || true)
     if [ -n "$bpane" ]; then
       tag "$to" --token "pair=$ticket"
       tag "$bpane" --token "pair=$ticket"
       if [ -n "$local_ticket" ]; then
-        brole=$(label_of "$bpane" role); brole=${brole:-reviewer}
+        brole=$(herdr pane get "$bpane" 2>/dev/null | jq -r '.result.pane.tokens.role // "reviewer"')
         bname=$(name_of "$bpane")
         payload=$(node -e 'const[w,wp,b,bp,br]=process.argv.slice(1);console.log(JSON.stringify({pair:{worker:{name:w,pane:wp},buddy:{name:b,pane:bp,role:br}}}))' \
           "${to_name:-$to}" "$to" "${bname:-$bpane}" "$bpane" "$brole")
-        curl -sS --max-time 5 -X PATCH -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+        curl -sS --max-time 5 -X PATCH -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
           --data "$payload" "${HERDR_DASH_URL:-http://127.0.0.1:7777}/api/tickets/$local_ticket" >/dev/null 2>&1 || true
       fi
     fi
@@ -781,7 +729,7 @@ dry() {  # <what would happen>
 # pinned to that tier even against --model/--effort (WT_LEAD_AGENT overrides the agent name).
 [ "$role" != lead ] || { route_tier=opus; route_effort=low; }
 
-if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id> (no hc: the core may be down)
+if [ "$mode" = pane ] && hl=$(hl_resolve "$pane_arg"); then # WP-317: --pane <headless name|id>
   [ "$dry" -eq 1 ] && dry "would hand to headless ${hl#* } (${hl%% *})"
   if [ -n "$deliver_token" ]; then hl_post "${hl%% *}" "$send" || exit 1; record_message "${hl%% *}" "$send" delivered # WP-330: as for --reply
   else hl_post "${hl%% *}" "$raw_prompt" || exit 1; fi
@@ -798,7 +746,7 @@ if [ "$mode" = pane ]; then
     card_json=$("$T" show "$local_ticket" --json 2>/dev/null || true)
     if printf '%s' "$card_json" | jq -e '.id' >/dev/null 2>&1; then
       card_team=$(printf '%s' "$card_json" | jq -r '.team // empty')
-      agent_team=$(label_of "$pane_arg" team)
+      agent_team=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.team // empty')
       if [ "$card_team" != "$agent_team" ]; then
         who=$(name_of "$pane_arg"); who=${who:-$pane_arg}
         [ -n "$agent_team" ] && at="on team $agent_team" || at="not on a team"
@@ -816,7 +764,7 @@ if [ "$mode" = pane ]; then
   case "$(printf '%s' "$row" | jq -r '.state // empty' 2>/dev/null)" in
     paused|exited|missing) echo "$(printf '%s' "$row" | jq -r '.name') is $(printf '%s' "$row" | jq -r '.state'): resume it first" >&2; exit 1 ;;
   esac
-  target_dnd=$(label_of "$pane_arg" dnd)
+  target_dnd=$(herdr pane get "$pane_arg" 2>/dev/null | jq -r '.result.pane.tokens.dnd // empty')
   [ -z "$target_dnd" ] || echo "warning: $(name_of "$pane_arg") is DND" >&2
   [ "$dry" -eq 1 ] && dry "would hand to pane $pane_arg"
   hand_to "$pane_arg"
@@ -849,8 +797,12 @@ if [ "$role" = worker ] && [ -z "$team" ]; then # a team is capped by its roster
     # WP-205: the cap counts the agents this handoff could otherwise have reused — the same persona token (none for
     # a plain handoff) — so idle persona agents never fill the cap against a plain ticket, nor the reverse.
     # WP-247: team members do not count — a team is capped by its own roster, so its workers must not fill the plain pool.
-    n=$(rows | jq --arg pool "$ws_label" --arg persona "$persona" \
-      '[.[] | select(.labels["wt.pool"] == $pool) | select((.labels.team // "") == "") | select((.labels.persona // "") == $persona)] | length' 2>/dev/null) || n=0
+    pt=$(herdr pane list 2>/dev/null | jq -c '[(.result.panes // [])[] | select(.pane_id != null) | {key: .pane_id, value: (.tokens.persona // "")}] | from_entries' 2>/dev/null) || pt=
+    [ -n "$pt" ] || pt='{}'
+    tm=$(herdr pane list 2>/dev/null | jq -c '[(.result.panes // [])[] | select(.pane_id != null and (.tokens.team // "") != "") | .pane_id]' 2>/dev/null) || tm=
+    [ -n "$tm" ] || tm='[]'
+    n=$(herdr agent list | jq --arg ws "$(worker_ws)" --arg persona "$persona" --argjson pt "$pt" --argjson tm "$tm" \
+      '[.result.agents[] | select(.workspace_id == $ws) | select(.pane_id as $p | $tm | index($p) | not) | select(($pt[.pane_id // ""] // "") == $persona)] | length')
     if [ "$n" -ge "$cap" ]; then
       full="pool full: $n/$cap ${persona:-plain} workers in $(basename "${main_checkout:-$cwd}")"
       [ "$dry" -eq 1 ] && dry "$full"
@@ -865,7 +817,7 @@ if [ -n "$team" ]; then
   want=${persona:-$role}
   seats=$(node "$SELFDIR/../../wt-shared/scripts/teams.mjs" seats "$team" "$want" --cwd "${main_checkout:-$cwd}" 2>/dev/null) || seats=0
   [ "${seats:-0}" -gt 0 ] || { echo "team $team has no $want member (wt-roles team check)" >&2; exit 2; }
-  have=$(rows | jq --arg t "$team" --arg p "$want" '[.[] | select(.labels.team == $t and (.labels.persona // .labels.role) == $p)] | length' 2>/dev/null) || have=0
+  have=$(herdr pane list 2>/dev/null | jq --arg t "$team" --arg p "$want" '[(.result.panes // [])[] | select(.tokens.team == $t and (.tokens.persona // .tokens.role) == $p)] | length' 2>/dev/null) || have=0
   . "$SELFDIR/../../wt-shared/scripts/agent-pane.sh"; have=$(( ${have:-0} + $(agent_paused_in_team "$team" "$want") )) # WP-348: a paused member still holds its seat
   if [ "${have:-0}" -ge "$seats" ]; then
     full="team full: $have/$seats $want in $team"

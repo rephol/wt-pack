@@ -5,12 +5,12 @@
 #   wt-keepwarm status            one human line: warm|cold|off, next ping, pings today
 #   wt-keepwarm on                arm keepwarm for this agent (undoes off)
 #   wt-keepwarm off               turn keepwarm off for this agent until it is armed again (in the dashboard or with on)
-# Identity: $HC_TERMINAL_ID (+ $WT_PANE_KEY). Exit: 0 ok, 1 API error / dashboard down, 2 usage.
+# Identity: $HERDR_PANE_ID (+ $WT_PANE_KEY). Exit: 0 ok, 1 API error / dashboard down, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 call() { # <method> <path> [json]
   local out code
-  out=$(curl -sS --max-time 10 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+  out=$(curl -sS --max-time 10 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-keepwarm: wt-dashboard not reachable at $API" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}
   if [ "$code" -ge 400 ]; then echo "wt-keepwarm: $code $out" >&2; exit 1; fi

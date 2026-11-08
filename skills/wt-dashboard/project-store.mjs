@@ -1,5 +1,5 @@
 // WP-347: the dashboard's own list of projects (name → main checkout) in wt.db, so a project stays listed with no running
-// agent or hc pool. projectRoots() adds every project it derives and reads the rest back from here.
+// agent or herdr workspace. projectRoots() adds every project it derives and reads the rest back from here.
 export class ProjectStore {
   // open: () => db, called on first use so importing the server (tests) opens nothing.
   constructor(open) { this.open = open }

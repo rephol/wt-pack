@@ -195,7 +195,7 @@ test('reconcile: origin without origin/<base> falls back to the local base (WP-2
   assert.ok(seen.includes('log --merges --first-parent --since=7.days --format=%H%x09%ct%x09%s main'), seen.join('|'))
 })
 
-test('reconcile: gone twice → Ready with assignee null; gone once, hc down or a user claim → untouched', async () => {
+test('reconcile: gone twice → Ready with assignee null; gone once, herdr down or a user claim → untouched', async () => {
   const other = { name: 'someone-else', local: true, status: 'working' }
   const { tickets, d } = await setup({ agents: [other] })
   await tickets.setSettings('wt-pack', { dispatch: false })
@@ -206,7 +206,7 @@ test('reconcile: gone twice → Ready with assignee null; gone once, hc down or 
   await tickets.patch(u.id, {}, user, { name: 'Rep' })
   await d.tick()
   assert.equal((await tickets.get(t.id)).column, 'building') // once
-  d.deps.agents = async () => [] // hc down / no local agents: skipped, the count holds
+  d.deps.agents = async () => [] // herdr down / no local agents: skipped, the count holds
   await d.tick()
   assert.equal((await tickets.get(t.id)).column, 'building')
   d.deps.agents = async () => [other]
@@ -330,22 +330,16 @@ test('WP-177: still unconfirmed 60s after the resend flags it — Inbox item, ti
   assert.equal(notified.length, 1) // not re-notified every tick
 })
 
-test('runHandoff: prompt on stdin, HC_TERMINAL_ID (and its scope/socket) blanked, 120 s timeout', async () => {
+test('runHandoff: prompt on stdin, HERDR_PANE_ID blanked, 120 s timeout', async () => {
   let seen
   const execFile = (bin, args, opts, cb) => {
     seen = { bin, args, opts }
-    return { stdin: { end: (p) => { seen.prompt = p; cb(null, 'reused t1\n', '') } } }
+    return { stdin: { end: (p) => { seen.prompt = p; cb(null, 'reused w1:p1\n', '') } } }
   }
-  const was = { id: process.env.HC_TERMINAL_ID, sc: process.env.HC_SCOPE, so: process.env.HC_TERMINAL_SOCKET }
-  Object.assign(process.env, { HC_TERMINAL_ID: 't9', HC_SCOPE: 's9', HC_TERMINAL_SOCKET: '/tmp/x.sock' })
-  try {
-    const out = await (await import('./dispatch.mjs')).runHandoff(execFile, '/h.sh')(['--role', 'worker'], 'hi', '/repo')
-    assert.equal(out, 'reused t1\n')
-    const e = seen.opts.env
-    assert.deepEqual([seen.bin, seen.opts.cwd, e.HC_TERMINAL_ID, e.HC_SCOPE, e.HC_TERMINAL_SOCKET, seen.opts.timeout, seen.prompt], ['/h.sh', '/repo', '', '', '', 120_000, 'hi'])
-  } finally {
-    for (const [k, v] of [['HC_TERMINAL_ID', was.id], ['HC_SCOPE', was.sc], ['HC_TERMINAL_SOCKET', was.so]]) v === undefined ? delete process.env[k] : (process.env[k] = v)
-  }
+  process.env.HERDR_PANE_ID = 'w9:p9'
+  const out = await (await import('./dispatch.mjs')).runHandoff(execFile, '/h.sh')(['--role', 'worker'], 'hi', '/repo')
+  assert.equal(out, 'reused w1:p1\n')
+  assert.deepEqual([seen.bin, seen.opts.cwd, seen.opts.env.HERDR_PANE_ID, seen.opts.timeout, seen.prompt], ['/h.sh', '/repo', '', 120_000, 'hi'])
 })
 
 test('reconcile: a merge older than the card latest move (reopened) is ignored', async () => {

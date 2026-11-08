@@ -102,23 +102,3 @@ test('WP-352: pointerOf keeps id/kind/sender/ticket and a hoisted /goal; isPoint
   assert.notEqual(bodyHash(full), bodyHash(full.replace('long', 'short')))
   assert.equal(bodyHash(`${full} and more`), null) // text after the closing tag: not an envelope body
 })
-
-// WP-378: `wt-message show` identifies the terminal by HC_TERMINAL_ID (header name x-herdr-pane unchanged) and never by HERDR_PANE_ID.
-import { createServer } from 'node:http'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-test('wt-message show: sends the hc terminal id as x-herdr-pane with the pane key; no HC_TERMINAL_ID exits 1; HERDR_PANE_ID alone is not an identity', async () => {
-  const seen = []
-  const srv = createServer((req, res) => { seen.push({ url: req.url, pane: req.headers['x-herdr-pane'], key: req.headers['x-wt-pane-key'] }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ body: 'the full body' })) })
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r))
-  const cli = fileURLToPath(new URL('./wt-message-cli.mjs', import.meta.url))
-  const base = { PATH: process.env.PATH, HERDR_DASH_URL: `http://127.0.0.1:${srv.address().port}` }
-  const run = promisify(execFile)
-  try {
-    const ok = await run('node', [cli, 'show', 'abc123'], { env: { ...base, HC_TERMINAL_ID: 't7', WT_PANE_KEY: 'k'.repeat(64) } })
-    assert.equal(ok.stdout, 'the full body\n')
-    assert.deepEqual(seen, [{ url: '/api/messages/abc123', pane: 't7', key: 'k'.repeat(64) }])
-    await assert.rejects(run('node', [cli, 'show', 'abc123'], { env: { ...base, HERDR_PANE_ID: 'wW:p1' } }), (e) => e.code === 1 && /needs an hc terminal \(HC_TERMINAL_ID\)/.test(e.stderr)) // legacy-herdr
-    assert.equal(seen.length, 1)
-  } finally { srv.close() }
-})

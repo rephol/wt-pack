@@ -1,155 +1,125 @@
-// Run: node --test skills/wt-agents/scripts/respawn.test.mjs — WP-125 on hc (WP-378): respawn keeps name/role/cwd/session/labels in a
-// NEW terminal (the kill shims and the launcher are fixed at a terminal's start), refuses a working agent without --force;
-// --stale picks only agents whose claude lacks the shim.
-import test, { after } from 'node:test'
+// Run: node --test skills/wt-agents/scripts/respawn.test.mjs — WP-125: respawn keeps name/role/cwd/session/tokens
+// in a NEW tab (the kill shims are tab-create env), refuses a working agent without --force; --stale picks only
+// agents whose claude lacks the shim.
+import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fakeCore, harness, installFakeApp, listCase, runCase, term } from './hc-test-kit.mjs'
 
 const here = import.meta.dirname
 const tmp = mkdtempSync(join(tmpdir(), 'wt-respawn-'))
-const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'demo'), agentRow = join(tmp, 'agent-row.json')
+const bin = join(tmp, 'bin'), log = join(tmp, 'calls.log'), repo = join(tmp, 'demo'), agents = join(tmp, 'agents.json'), tabs = join(tmp, 'tabs.json')
 mkdirSync(bin); mkdirSync(repo); mkdirSync(join(tmp, '.claude', 'projects', 'x'), { recursive: true })
 writeFileSync(join(tmp, '.claude', 'projects', 'x', 's-old.jsonl'), '{}\n')
 writeFileSync(join(tmp, '.claude', 'projects', 'x', 's-ok.jsonl'), '{}\n')
-const stub = (name, body) => { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755) }
-// Fake process table: agent 01 has no shim env, 02 has it. claude's own list maps each terminal's pid to its session.
+const stub = (name, body) => { writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> ${log}\n${body}\n`); chmodSync(join(bin, name), 0o755) }
+stub('herdr', `case "$1 $2" in
+  "workspace list") echo '{"result":{"workspaces":[{"label":"demo-workers","workspace_id":"w1"},{"label":"other-workers","workspace_id":"w2"}]}}' ;;
+  "agent list") printf '{"result":{"agents":%s}}' "$(cat ${agents})" ;;
+  "agent get") jq -c --arg p "$3" '{result:{agent:(.[] | select(.pane_id == $p))}}' ${agents} ;;
+  "tab list") cat ${tabs} 2>/dev/null || echo '{"result":{"tabs":[]}}' ;;
+  "tab create") echo '{"result":{"root_pane":{"pane_id":"w1:p9"}}}' ;;
+esac`)
+// Fake process table: old agent has no shim env, ok agent has it.
 stub('ps', `case "$*" in
   "-axo pid=,command=") printf '101 /usr/bin/claude --name demo-worker-01\\n102 claude --name demo-worker-02 --resume x\\n' ;;
-  "-o etime= -p 102") echo "05:00" ;;
+  "-o etime= -p 102") echo "05:00" ;; # started 5 min ago
   *"-p 101"*) echo "claude --name demo-worker-01 PATH=/usr/bin" ;;
   *"-p 102"*) echo "claude --name demo-worker-02 WT_KILL_SHIM_DIR=/x/wt-agents/bin" ;;
 esac`)
-stub('claude', `[ "$1 $2" = "agents --json" ] && echo '[{"pid":101,"sessionId":"s-old"},{"pid":102,"sessionId":"s-ok"}]'`)
-stub('curl', `case "$*" in *"/api/agents/by-name/"*) cat ${agentRow} 2>/dev/null || exit 22 ;; *) exit 22 ;; esac`)
 execFileSync('git', ['-C', repo, 'init', '-q'])
-const core = await fakeCore()
-const made = []
-after(() => { core.stop(); made.forEach((h) => h.fake.cleanup()); rmSync(tmp, { recursive: true, force: true }) })
+const row = (n, status, session, extra = {}) => ({ name: `demo-worker-0${n}`, pane_id: `w1:p${n}`, tab_id: `w1:t${n}`, workspace_id: 'w1',
+  agent_status: status, cwd: repo, agent_session: { kind: 'id', value: session }, tokens: { role: 'worker', project: 'demo', created: '2026-01-01', ...extra } })
+const setAgents = (a) => writeFileSync(agents, JSON.stringify(a))
 
-const agent = (n, status, labels = {}, extra = {}) => term(`t${n}`, `demo-worker-0${n}`, { status, cwd: repo, pid: 100 + n, labels: { 'wt.pool': 'demo-workers', role: 'worker', project: 'demo', created: '2026-01-01', ...labels }, ...extra })
-const run = (args, rows, { cases = {} } = {}) => {
-  const app = installFakeApp({ ls: { exit: 0, stdout: JSON.stringify({ spaces: [{ id: 'sp1', name: 'demo-workers', machine: null }], recent: [] }) } })
-  const h = harness({ tmp, app, cases: { 'connect:terminal.list': listCase(...rows), 'connect:terminal.run': runCase('t9'), ...cases }, extraEnv: core.env })
-  h.env.PATH = `${app.bin}:${h.env.PATH.split(':')[0]}:${bin}:${process.env.PATH}`
-  made.push(h)
-  const r = spawnSync(join(here, 'agents.sh'), args, { cwd: repo, encoding: 'utf8', env: h.env })
-  const calls = h.fake.calls()
-  const runs = calls.filter((c) => c.args[0] === 'connect').map((c) => JSON.parse(c.stdin)).filter((q) => q.method === 'terminal.run').map((q) => q.params)
-  return { ...r, calls, run: runs[0], runs, verbs: calls.map((c) => `${c.args[0]} ${c.args.at(-1)}`), claude: (runs[0]?.argv ?? []).join(' ') }
+const run = (args) => {
+  rmSync(log, { force: true })
+  const r = spawnSync(join(here, 'agents.sh'), args, { cwd: repo, encoding: 'utf8',
+    env: { PATH: `${bin}:${process.env.PATH}`, HOME: tmp, XDG_CACHE_HOME: tmp, WT_DASHBOARD_DATA: tmp, WT_DASHBOARD_ENV: join(tmp, 'env') } })
+  return { ...r, calls: (() => { try { return readFileSync(log, 'utf8').split('\n') } catch { return [] } })() }
 }
-const at = (r, re) => r.verbs.findIndex((v) => re.test(v))
-const runIdx = (r) => r.calls.findIndex((c) => c.args[0] === 'connect' && c.stdin.includes('terminal.run'))
+const idx = (calls, re) => calls.findIndex((l) => re.test(l))
 
-test('respawn <name>: ends the old terminal first, the new one has the shims, resumes under the same name, carries labels', () => {
-  const r = run(['respawn', 'demo-worker-01'], [agent(1, 'idle', { task: 'WP-9 fix', ticket: 'WP-9' })])
+test('respawn <name>: closes the old tab first, new tab has the shims, resumes under the same name, carries tokens', () => {
+  setAgents([row(1, 'idle', 's-old', { task: 'WP-9 fix', ticket: 'WP-9' })])
+  const r = run(['respawn', 'demo-worker-01'])
   assert.equal(r.status, 0, r.stderr)
-  assert.equal(r.stdout.trim(), 'demo-worker-01 t9')
-  assert.ok(at(r, /^kill t1/) >= 0 && at(r, /^kill t1/) < runIdx(r) && at(r, /^rm t1/) < runIdx(r), r.verbs.join(' | '))
-  assert.match(r.run.env.WT_KILL_SHIM_DIR, /\/bin$/)
-  assert.match(r.claude, /claude --name demo-worker-01 --resume s-old/)
-  assert.equal(r.run.name, 'demo-worker-01'); assert.equal(r.run.labels.role, 'worker')
-  const labelCalls = r.calls.filter((c) => c.args[0] === 'label').map((c) => c.args.slice(2))
-  assert.ok(labelCalls.some((a) => a[0] === 't9' && a[1] === 'task=WP-9 fix'), JSON.stringify(labelCalls))
-  assert.ok(labelCalls.some((a) => a[0] === 't9' && a[1] === 'ticket=WP-9'))
-  assert.ok(!labelCalls.some((a) => /^(created|wt\.pool|herdr\.space)=/.test(a[1])), 'spawn sets those itself') // legacy-herdr
+  assert.equal(r.stdout.trim(), 'demo-worker-01 w1:p9')
+  const close = idx(r.calls, /^herdr tab close w1:t1/), create = idx(r.calls, /^herdr tab create/), start = idx(r.calls, /^herdr agent start/)
+  assert.ok(close >= 0 && close < create && create < start)
+  assert.match(r.calls[create], /--env WT_KILL_SHIM_DIR=\S+\/bin/)
+  assert.match(r.calls[start], /agent start demo-worker-01 .*--name demo-worker-01 --resume s-old/)
+  assert.ok(r.calls.some((l) => /report-metadata w1:p9 .*--token task=WP-9 fix/.test(l)))
+  assert.ok(r.calls.some((l) => /report-metadata w1:p9 .*--token ticket=WP-9/.test(l)))
+  assert.ok(!r.calls.some((l) => /--token created=2026-01-01/.test(l)))
 })
 
 test('respawn refuses a working agent without --force; no transcript → fresh start', () => {
-  let r = run(['respawn', 't1'], [agent(1, 'working')])
+  setAgents([row(1, 'working', 's-old')])
+  let r = run(['respawn', 'w1:p1'])
   assert.equal(r.status, 1)
   assert.match(r.stderr, /is working; re-run with --force/)
-  assert.ok(!r.verbs.some((v) => v.startsWith('kill')))
-  r = run(['respawn', 't1', '--force'], [agent(1, 'working', {}, { pid: 555 })]) // pid claude does not know → no session → dashboard row, none here
-  assert.equal(r.status, 1); assert.match(r.stderr, /no claude session id to resume/)
-  writeFileSync(agentRow, JSON.stringify({ name: 'demo-worker-01', session: 's-none', state: 'running', role: 'worker', cwd: repo }))
-  try {
-    r = run(['respawn', 't1', '--force'], [agent(1, 'working', {}, { pid: 555 })])
-    assert.equal(r.status, 0, r.stderr)
-    assert.match(r.stderr, /no transcript/)
-    assert.doesNotMatch(r.claude, /--resume/)
-  } finally { rmSync(agentRow, { force: true }) }
+  assert.ok(!r.calls.some((l) => l.startsWith('herdr tab close')))
+  setAgents([row(1, 'working', 's-none')])
+  r = run(['respawn', 'w1:p1', '--force'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stderr, /no transcript/)
+  assert.doesNotMatch(r.calls[idx(r.calls, /^herdr agent start/)], /--resume/)
 })
 
 test('respawn --stale: only the agent whose claude lacks the shim', () => {
-  const r = run(['respawn', '--stale'], [agent(1, 'idle'), agent(2, 'idle')])
+  setAgents([row(1, 'idle', 's-old'), row(2, 'idle', 's-ok')])
+  const r = run(['respawn', '--stale'])
   assert.equal(r.status, 0, r.stderr)
-  assert.match(r.stdout, /^respawned demo-worker-01 t9 \(no kill shim\)$/m)
+  assert.match(r.stdout, /^respawned demo-worker-01 w1:p9 \(no kill shim\)$/m)
   assert.doesNotMatch(r.stdout, /demo-worker-02/)
-  assert.ok(!r.calls.some((c) => /pgrep|pkill/.test(c.args.join(' '))))
-})
-
-test('--stale never touches the caller\'s own terminal', () => {
-  const env = { HC_TERMINAL_ID: 't1' }
-  const h = harness({ tmp, cases: { 'connect:terminal.list': listCase(agent(1, 'idle'), agent(2, 'idle')) }, extraEnv: { ...core.env, ...env } })
-  made.push(h)
-  h.env.PATH = `${h.env.PATH.split(':')[0]}:${bin}:${process.env.PATH}`
-  h.env.HC_TERMINAL_ID = 't1'
-  const r = spawnSync(join(here, 'agents.sh'), ['respawn', '--stale'], { cwd: repo, encoding: 'utf8', env: h.env })
-  assert.equal(r.stdout.trim(), 'no stale agents')
+  assert.ok(!r.calls.some((l) => /pgrep|pkill/.test(l)))
 })
 
 test('WP-194: --stale flags an agent started before the plugin install (etime, no BSD date -j)', () => {
   const ip = join(tmp, 'plugin'), f = join(tmp, '.claude', 'plugins', 'installed_plugins.json')
   mkdirSync(ip); mkdirSync(join(tmp, '.claude', 'plugins'), { recursive: true })
   writeFileSync(f, JSON.stringify({ plugins: { 'wt-memory@wt-pack': [{ installPath: ip }] } }))
-  try { assert.match(run(['respawn', '--stale'], [agent(2, 'idle')]).stdout, /^respawned demo-worker-02 .*\(predates the plugin guard\)$/m) } finally { rmSync(f) }
+  try {
+    setAgents([row(2, 'idle', 's-ok')])
+    assert.match(run(['respawn', '--stale']).stdout, /^respawned demo-worker-02 .*\(predates the plugin guard\)$/m)
+  } finally { rmSync(f) }
 })
 
-test('WP-143: respawn passes --model/--effort from the old labels, and does not carry them as plain labels too', () => {
-  const r = run(['respawn', 'demo-worker-01'], [agent(1, 'idle', { model: 'opus', effort: 'high' })])
+test('WP-143: respawn passes --model/--effort from the old tokens, and does not carry them as plain tokens too', () => {
+  setAgents([row(1, 'idle', 's-old', { model: 'opus', effort: 'high' })])
+  const r = run(['respawn', 'demo-worker-01'])
   assert.equal(r.status, 0, r.stderr)
-  assert.match(r.claude, /--model claude-opus-5-5/) // WP-158: the old tier's explicit id, not the bare alias
-  assert.match(r.claude, /--effort high/)
-  assert.equal(r.run.labels.model, 'opus'); assert.equal(r.run.labels.effort, 'high')
-  assert.ok(!r.calls.some((c) => c.args[0] === 'label' && /^(model|effort)=/.test(c.args[3] ?? '')))
+  const start = r.calls[idx(r.calls, /^herdr agent start/)]
+  assert.match(start, /--model claude-opus-5-5/) // WP-158: the old tier's explicit id, not the bare alias
+  assert.match(start, /--effort high/)
+  assert.ok(!r.calls.some((l) => /report-metadata w1:p9 .*--token model=/.test(l) && !l.includes('--token model=opus')))
+  assert.ok(!r.calls.some((l) => /report-metadata w1:p9 .*--token effort=/.test(l) && !l.includes('--token effort=high')))
 })
 
 test('respawn --stale: nothing stale; working agent is skipped and reported', () => {
-  assert.equal(run(['respawn', '--stale'], [agent(2, 'idle')]).stdout.trim(), 'no stale agents')
-  assert.match(run(['respawn', '--stale'], [agent(1, 'working')]).stdout, /^skipped demo-worker-01: .*is working/m)
+  setAgents([row(2, 'idle', 's-ok')])
+  assert.equal(run(['respawn', '--stale']).stdout.trim(), 'no stale agents')
+  setAgents([row(1, 'working', 's-old')])
+  assert.match(run(['respawn', '--stale']).stdout, /^skipped demo-worker-01: .*is working/m)
 })
 
-test('D8: an exited agent (finished terminal) respawns from the dashboard\'s row; rm of it just removes the record; a name nobody holds is "no such agent"', () => {
-  writeFileSync(agentRow, JSON.stringify({ name: 'demo-worker-01', session: 's-old', state: 'exited', role: 'worker', cwd: repo }))
-  try {
-    let r = run(['respawn', 'demo-worker-01'], [agent(1, 'idle', {}, { state: 'finished' })])
-    assert.equal(r.status, 0, r.stderr)
-    assert.equal(r.stdout.trim(), 'demo-worker-01 t9'); assert.match(r.claude, /--resume s-old/)
-    r = run(['rm', 'demo-worker-01'], [agent(1, 'idle', {}, { state: 'finished' })])
-    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /removed demo-worker-01 \(t1, was exited\)/)
-    // a kept terminal is a login shell with no labels: the agents-table row is the identity, and it is never typed into (no send is made)
-    r = run(['respawn', 'demo-worker-01'], [term('t1', 'demo-worker-01', { cwd: repo, program: 'zsh', pid: 777 })])
-    assert.equal(r.status, 0, r.stderr); assert.equal(r.run.labels.role, 'worker'); assert.ok(!r.calls.some((c) => c.args[0] === 'send'))
-  } finally { rmSync(agentRow, { force: true }) }
-  assert.equal(run(['rm', 'demo-worker-77'], []).status, 1)
-})
-
-test('WP-378 F5: rm and respawn act on a pack agent only: a plain shell, a stranger terminal and a dashboard shell are refused with no kill/rm', () => {
-  const shell = term('t1', 'my-shell', { cwd: repo, program: 'zsh', pid: 888 })
-  const dashShell = term('t2', 'sh-demo-01', { cwd: repo, program: 'zsh', pid: 889, labels: { 'wt.pool': 'demo-shells' } })
-  for (const [name, row] of [['my-shell', shell], ['sh-demo-01', dashShell]]) {
-    for (const verb of [['rm', name], ['rm', name, '--force'], ['respawn', name, '--force']]) {
-      const r = run(verb, [row])
-      assert.notEqual(r.status, 0, `${verb.join(' ')}: ${r.stdout}`)
-      assert.match(r.stderr, /not a pack agent.*only pack agents can be removed or respawned here \(the user closes other terminals in herdr-app\)/s)
-      assert.deepEqual(r.calls.filter((c) => ['kill', 'rm', 'interrupt'].includes(c.args[0]) || c.stdin?.includes('terminal.run')), [], `${verb.join(' ')} made a destructive call`)
-    }
-  }
-  // by id too
-  const r = run(['rm', 't1'], [shell]); assert.notEqual(r.status, 0); assert.ok(!r.calls.some((c) => c.args[0] === 'kill' || c.args[0] === 'rm'))
-  // a pack agent still goes
-  assert.equal(run(['rm', 'demo-worker-01'], [agent(1, 'idle')]).status, 0)
-})
-
-test('WP-378 F6: a role-less agent that carries a (non -shells) wt.pool label IS a pack agent: rm and respawn accept it (require_pack_agent pool branch)', () => {
-  const poolOnly = agent(1, 'idle', { role: undefined }) // labels: wt.pool=demo-workers, no role, no agents-table row
-  let r = run(['rm', 'demo-worker-01'], [poolOnly])
-  assert.equal(r.status, 0, r.stderr); assert.doesNotMatch(r.stderr, /not a pack agent/)
-  assert.ok(r.calls.some((c) => ['kill', 'rm'].includes(c.args[0])), 'it was ended')
-  r = run(['respawn', 'demo-worker-01'], [poolOnly])
-  assert.doesNotMatch(r.stderr, /not a pack agent/)
+test('WP-222: spawn closes a bare-shell tab named after the agent; rm of an exited agent closes its tab', () => {
+  const tab = (id, label, status) => ({ tab_id: id, label, pane_count: 1, agent_status: status, workspace_id: 'w1' })
+  writeFileSync(tabs, JSON.stringify({ result: { tabs: [tab('w1:t7', 'demo-worker-01', 'unknown'), tab('w1:t8', 'demo-worker-02', 'idle'), tab('w1:t9', 'other', 'unknown')] } }))
+  setAgents([row(1, 'idle', 's-old')])
+  let r = run(['respawn', 'demo-worker-01'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(idx(r.calls, /^herdr tab close w1:t7/) < idx(r.calls, /^herdr tab create/))
+  assert.ok(!r.calls.some((l) => /tab close w1:t(8|9)/.test(l)))
+  setAgents([])
+  r = run(['rm', 'demo-worker-01'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(r.calls.includes('herdr tab close w1:t7'))
+  r = run(['rm', 'demo-worker-02'])
+  assert.equal(r.status, 1)
+  assert.match(r.stderr, /no such agent/)
+  rmSync(tabs)
 })

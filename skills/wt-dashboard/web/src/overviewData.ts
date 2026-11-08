@@ -1,6 +1,4 @@
 // Pure helpers for the Overview tiles (tested in overviewData.test.ts).
-// WP-378 F5: a finished turn rests at `done` under hc; for every count and rule it is idle.
-export const isResting = (status: string): boolean => status === 'idle' || status === 'done'
 export type ProjectAgents = { project: string; working: number; idle: number; blocked: number }
 
 // Agents per project by state, busiest first; agents without a project group under "other".
@@ -9,8 +7,7 @@ export function agentsByProject(agents: { project: string | null; status: string
   for (const a of agents) {
     const p = a.project ?? 'other'
     const g = m.get(p) ?? { project: p, working: 0, idle: 0, blocked: 0 }
-    if (a.status === 'working' || a.status === 'blocked') g[a.status]++
-    else if (isResting(a.status)) g.idle++ // WP-378 F5: `done` is the resting state under hc
+    if (a.status === 'working' || a.status === 'idle' || a.status === 'blocked') g[a.status]++
     m.set(p, g)
   }
   return [...m.values()].sort((a, b) => b.working - a.working || b.blocked - a.blocked || a.project.localeCompare(b.project))

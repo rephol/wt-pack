@@ -155,12 +155,12 @@ test('server: unknown pane → 403 on GET /api/asks/ping and /api/asks/:id', asy
   const { spawn } = await import('node:child_process')
   const root = await mkdtemp(join(tmpdir(), 'asks-srv-'))
   const port = 20000 + Math.floor(Math.random() * 20000)
-  // Never the real hc core: a stubbed core that lists no agents and fails everything else, first on PATH (test-hc.mjs).
-  const { hcStub } = await import('./test-hc.mjs')
-  const hc = await hcStub({ terminals: [] })
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(HERDR_|HC_)/.test(k)))
+  // Never the real herdr: no HERDR_* env, and a stub first on PATH that lists no agents and fails everything else.
+  const bin = join(root, 'bin'); await mkdir(bin)
+  await writeFile(join(bin, 'herdr'), '#!/bin/sh\n[ "$1 $2" = "agent list" ] && echo \'{"result":{"agents":[]}}\' && exit 0\nexit 1\n', { mode: 0o755 })
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('HERDR_')))
   const srv = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
-    env: { ...env, ...hc.env, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+    env: { ...env, PATH: `${bin}:${process.env.PATH}`, PORT: String(port), WT_DASHBOARD_DATA: root, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     await new Promise((res, rej) => {
       let out = '', err = ''
@@ -170,10 +170,10 @@ test('server: unknown pane → 403 on GET /api/asks/ping and /api/asks/:id', asy
       setTimeout(() => rej(new Error('server not listening after 30s')), 30_000).unref()
     })
     const get = (path, headers) => fetch(`http://127.0.0.1:${port}${path}`, { headers })
-    assert.equal((await get('/api/asks/ping', { 'x-herdr-pane': 't999' })).status, 403)
-    assert.equal((await get('/api/asks/some-id', { 'x-herdr-pane': 't999' })).status, 403)
+    assert.equal((await get('/api/asks/ping', { 'x-herdr-pane': 'w999:p999' })).status, 403)
+    assert.equal((await get('/api/asks/some-id', { 'x-herdr-pane': 'w999:p999' })).status, 403)
     assert.equal((await get('/api/asks/ping', {})).status, 403) // neither a session nor a pane
-  } finally { srv.kill(); await hc.close() }
+  } finally { srv.kill() }
 })
 
 test('placeAsk (WP-232): ticket room, else project room, else none; only for noDeliver asks that name no room', async () => {

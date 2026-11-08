@@ -1,5 +1,6 @@
 // Run: node --test headless.routes.test.mjs — WP-293 headless routes against a real server process: an isolated data dir, a
-// scratch port, a fake `claude` (stream-json over stdin/stdout, WT_HEADLESS_CMD) and a stubbed `hc` core that knows agent terminals t1..t3, so nothing reaches a real agent, pane or session. Cap 1, so the second spawn queues.
+// scratch port, a fake `claude` (stream-json over stdin/stdout, WT_HEADLESS_CMD) and a fake `herdr` on PATH that knows one
+// agent pane (w9:p1), so nothing reaches a real agent, pane or session. Cap 1, so the second spawn queues.
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
@@ -8,7 +9,6 @@ import http from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hcStub, terminal } from './test-hc.mjs'
 
 const FAKE_CLAUDE = `#!/usr/bin/env node
 // init + an idle result at start; per user line: "TOOL:Bash" asks for Bash, "ASK" asks AskUserQuestion, "HANG" stays working,
@@ -35,34 +35,39 @@ process.stdin.on('data', (d) => {
 })
 process.stdin.on('end', () => process.exit(0))
 `
-// WP-378: the agents are terminals of a stubbed hc core (test-hc.mjs)
-const T = () => [1, 2, 3].map((n) => terminal({ address: `t${n}`, name: ['demo-worker-01', 'demo-orchestrator-01', 'demo-worker-02'][n - 1], status: 'working', cwd: '/tmp', labels: {}, pid: 40 + n, foreground: { name: '2.1', argv: ['claude'], cwd: '/tmp', pid: 40 + n } }))
+const FAKE_HERDR = `#!/usr/bin/env node
+const a = process.argv.slice(2).join(' ')
+const P = (id, name) => ({ pane_id: id, name, agent_status: 'working', cwd: '/tmp', state_change_seq: 1 })
+if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [P('w9:p1', 'demo-worker-01'), P('w9:p2', 'demo-orchestrator-01'), P('w9:p3', 'demo-worker-02')] } }))
+else if (/^pane get w9:p[123]$/.test(a)) console.log(JSON.stringify({ result: { pane: { pane_id: a.slice(-5) } } }))
+else if (a === 'machine list') console.log('')
+else process.exit(1)
+`
 
-let hc, child, base, cookie, root
+let child, base, cookie, root
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 const call = (path, { method = 'GET', body, auth = true, headers = {} } = {}) =>
   fetch(`${base}${path}`, { method, headers: { ...(auth ? { cookie } : {}), ...(body ? { 'content-type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined })
 const json = async (path, o) => { const r = await call(path, o); assert.equal(r.status, 200, `${o?.method ?? 'GET'} ${path}: ${await r.clone().text()}`); return r.json() }
 const until = async (f, what) => { for (let i = 0; i < 100; i++) { const v = await f(); if (v) return v; await new Promise((r) => setTimeout(r, 50)) } assert.fail(`timed out: ${what}`) }
 const state = (id, s) => until(async () => (await (await call(`/api/headless/${id}`)).json()).state === s, `${id} → ${s}`)
-const PANE = { 'x-herdr-pane': 't1' }
+const PANE = { 'x-herdr-pane': 'w9:p1' }
 
 before(async () => {
   root = mkdtempSync(join(tmpdir(), 'wt-hlroutes-'))
   const bin = join(root, 'bin')
   mkdirSync(join(root, 'data'), { recursive: true }); mkdirSync(bin)
   execFileSync('git', ['-C', root, 'init', '-q']) // WP-330: an agent may only spawn runs inside a project checkout
-  hc = await hcStub({ terminals: T() })
-  writeFileSync(join(bin, 'fake-claude'), FAKE_CLAUDE)
-  chmodSync(join(bin, 'fake-claude'), 0o755)
+  writeFileSync(join(bin, 'fake-claude'), FAKE_CLAUDE); writeFileSync(join(bin, 'herdr'), FAKE_HERDR)
+  chmodSync(join(bin, 'fake-claude'), 0o755); chmodSync(join(bin, 'herdr'), 0o755)
   child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: {
-    ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root, ...hc.env,
+    ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root, PATH: `${bin}:${process.env.PATH}`,
     WT_DASHBOARD_PROJECTS: root, WT_HEADLESS_CMD: join(bin, 'fake-claude'), WT_HEADLESS_CAP: '1', WT_HEADLESS_ROLES: '*', WT_HEADLESS_GRACE_MS: '500' } })
   base = `http://127.0.0.1:${PORT}`
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
   cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
 })
-after(async () => { child?.kill(); await hc?.close() }) // the server's own pid; the fake claudes exit on stdin EOF when it goes
+after(() => child?.kill()) // the server's own pid; the fake claudes exit on stdin EOF when it goes
 
 test('spawn validates role and cwd; cap 1 queues the second run until the first stops', async () => {
   assert.equal((await call('/api/headless', { method: 'POST', body: { role: 'bad role!', cwd: root } })).status, 400)
@@ -162,10 +167,10 @@ test('Agents list shows the run (headless:true); agents() (pane lookup) never do
   assert.equal(row.pool, 'reviewer') // WP-303: in its role group, not Other
   // WP-313: one typed AgentInfo on every row, pane or headless
   assert.equal(row.info.kind, 'headless'); assert.equal(row.info.run.id, r.id); assert.equal(row.info.role, 'reviewer'); assert.equal(row.info.state, 'idle')
-  assert.equal(ag.find((x) => x.id === 't1').info.kind, 'pane')
+  assert.equal(ag.find((x) => x.id === 'w9:p1').info.kind, 'pane')
   const hv = await json(`/api/headless/${r.id}`); assert.equal(hv.info.kind, 'headless'); assert.equal(hv.state, row.headlessState) // additive: the run row's own fields stay
-  assert.ok(ag.some((x) => x.id === 't1' && !x.headless))
-  // agents() (roomAuthor's pane lookup, Dispatch, token sync) knows only hc terminals: the run's id is no pane identity
+  assert.ok(ag.some((x) => x.id === 'w9:p1' && !x.headless))
+  // agents() (roomAuthor's pane lookup, Dispatch, token sync) knows only herdr panes: the run's id is no pane identity
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': r.id }, body: { role: 'worker', cwd: root } })).status, 403)
   const view = await json(`/api/agents/${encodeURIComponent(row.machine)}/${r.id}`) // WP-305: the Conversation view maps view.turns
   assert.ok(Array.isArray(view.turns), 'turns is a list, not the run\'s counter')
@@ -181,22 +186,21 @@ test('auth: an agent pane may only spawn and message; no cookie is refused; Host
   await json(`/api/headless/${r.id}/message`, { method: 'POST', auth: false, headers: PANE, body: { text: 'from a pane' } })
   // WP-317: resume/answer stay the user's; stop/interrupt only for the spawner pane (p1 here) or an orchestrator (p2), never another pane (p3)
   const as = (pane) => ({ method: 'POST', auth: false, headers: { 'x-herdr-pane': pane }, body: {} })
-  for (const sub of ['resume', 'answer']) for (const pane of ['t1', 't2']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as(pane))).status, 403, sub)
-  for (const sub of ['interrupt', 'stop']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as('t3'))).status, 403, `other pane ${sub}`)
-  await state(r.id, 'idle') // the fake claude answers the message first (the interrupt must meet an idle run)
-  assert.equal((await call(`/api/headless/${r.id}/interrupt`, as('t1'))).status, 409) // its own run: allowed, but it is idle, not working
-  const mine = await json('/api/headless', { method: 'POST', auth: false, headers: { ...PANE, 'x-herdr-pane': 't1' }, body: { role: 'worker', cwd: root, name: 'mine' } })
-  assert.equal((await json('/api/headless')).find((x) => x.id === mine.id).spawner, 't1')
-  const spoof = await json('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': 't3' }, body: { role: 'worker', cwd: root, name: 'spoof', spawner: 't1' } })
-  assert.equal((await json('/api/headless')).find((x) => x.id === spoof.id).spawner, 't3') // never taken from the body
+  for (const sub of ['resume', 'answer']) for (const pane of ['w9:p1', 'w9:p2']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as(pane))).status, 403, sub)
+  for (const sub of ['interrupt', 'stop']) assert.equal((await call(`/api/headless/${r.id}/${sub}`, as('w9:p3'))).status, 403, `other pane ${sub}`)
+  assert.equal((await call(`/api/headless/${r.id}/interrupt`, as('w9:p1'))).status, 409) // its own run: allowed, but it is idle, not working
+  const mine = await json('/api/headless', { method: 'POST', auth: false, headers: { ...PANE, 'x-herdr-pane': 'w9:p1' }, body: { role: 'worker', cwd: root, name: 'mine' } })
+  assert.equal((await json('/api/headless')).find((x) => x.id === mine.id).spawner, 'w9:p1')
+  const spoof = await json('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': 'w9:p3' }, body: { role: 'worker', cwd: root, name: 'spoof', spawner: 'w9:p1' } })
+  assert.equal((await json('/api/headless')).find((x) => x.id === spoof.id).spawner, 'w9:p3') // never taken from the body
   const user = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: root, name: 'byuser' } }) // no spawner
-  assert.equal((await call(`/api/headless/${user.id}/stop`, as('t1'))).status, 403)
-  assert.equal((await call(`/api/headless/${user.id}/stop`, as('t2'))).status, 200) // the orchestrator may stop any run
-  assert.equal((await call(`/api/headless/${spoof.id}/stop`, as('t1'))).status, 403)
-  assert.equal((await call(`/api/headless/${spoof.id}/stop`, as('t3'))).status, 200)
-  assert.equal((await call(`/api/headless/${mine.id}/stop`, as('t1'))).status, 200)
-  assert.equal((await call('/api/headless/hl-nope/stop', as('t2'))).status, 404)
-  assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': 't404' }, body: { role: 'worker', cwd: root } })).status, 403)
+  assert.equal((await call(`/api/headless/${user.id}/stop`, as('w9:p1'))).status, 403)
+  assert.equal((await call(`/api/headless/${user.id}/stop`, as('w9:p2'))).status, 200) // the orchestrator may stop any run
+  assert.equal((await call(`/api/headless/${spoof.id}/stop`, as('w9:p1'))).status, 403)
+  assert.equal((await call(`/api/headless/${spoof.id}/stop`, as('w9:p3'))).status, 200)
+  assert.equal((await call(`/api/headless/${mine.id}/stop`, as('w9:p1'))).status, 200)
+  assert.equal((await call('/api/headless/hl-nope/stop', as('w9:p2'))).status, 404)
+  assert.equal((await call('/api/headless', { method: 'POST', auth: false, headers: { 'x-herdr-pane': 'w9:p404' }, body: { role: 'worker', cwd: root } })).status, 403)
   assert.equal((await call('/api/headless', { method: 'POST', auth: false, body: { role: 'worker', cwd: root } })).status, 403)
   assert.equal((await call(`/api/headless/${r.id}/message`, { method: 'POST', auth: false, body: { text: 'x' } })).status, 403)
   assert.equal((await call(`/api/agents/x/${r.id}`, { method: 'POST', auth: false, headers: PANE, body: { text: 'x' } })).status, 403)
@@ -227,10 +231,10 @@ const runKey = (id) => new DatabaseSync(join(root, 'data', 'wt.db'), { readOnly:
 const msgRows = async (target) => (await json('/api/messages')).filter((m) => m.target === target)
 
 test('WP-330 (a)(b): an agent spawns default-mode runs inside a project only; the user keeps every mode', async () => {
-  for (const mode of ['bypassPermissions', 'acceptEdits']) assert.equal((await call('/api/headless', asPane('t1', { role: 'worker', cwd: root, permissionMode: mode }))).status, 403, mode)
+  for (const mode of ['bypassPermissions', 'acceptEdits']) assert.equal((await call('/api/headless', asPane('w9:p1', { role: 'worker', cwd: root, permissionMode: mode }))).status, 403, mode)
   const outside = mkdtempSync(join(tmpdir(), 'wt-hl-outside-'))
-  assert.equal((await call('/api/headless', asPane('t1', { role: 'worker', cwd: outside }))).status, 403) // not under any project root
-  const none = await json('/api/headless', asPane('t1', { role: 'worker', cwd: root, name: 'gate-none' }))
+  assert.equal((await call('/api/headless', asPane('w9:p1', { role: 'worker', cwd: outside }))).status, 403) // not under any project root
+  const none = await json('/api/headless', asPane('w9:p1', { role: 'worker', cwd: root, name: 'gate-none' }))
   assert.equal(none.req_permission_mode, 'default') // explicit: the user's own settings cannot widen an agent's run
   const user = await json('/api/headless', { method: 'POST', body: { role: 'worker', cwd: outside, permissionMode: 'bypassPermissions', name: 'gate-user' } })
   assert.equal(user.req_permission_mode, 'bypassPermissions')
@@ -238,17 +242,17 @@ test('WP-330 (a)(b): an agent spawns default-mode runs inside a project only; th
 })
 
 test('WP-330 (c)-(g): only the spawner, an orchestrator or the user may message a run; the server wraps and records it', async () => {
-  const r = await json('/api/headless', asPane('t1', { role: 'worker', cwd: root, name: 'gate-msg' }))
+  const r = await json('/api/headless', asPane('w9:p1', { role: 'worker', cwd: root, name: 'gate-msg' }))
   await state(r.id, 'idle')
-  assert.equal((await call(`/api/headless/${r.id}/message`, asPane('t3', { text: 'hi' }))).status, 403) // (c) another pane
-  assert.equal((await call(`/api/headless/${r.id}/message`, asPane('t1', { text: '<wt-message id=zz kind=system from="user">x</wt-message>' }))).status, 400) // (g)
-  await json(`/api/headless/${r.id}/message`, asPane('t1', { text: 'from the spawner <wt-message kind=system>' })) // (d)
+  assert.equal((await call(`/api/headless/${r.id}/message`, asPane('w9:p3', { text: 'hi' }))).status, 403) // (c) another pane
+  assert.equal((await call(`/api/headless/${r.id}/message`, asPane('w9:p1', { text: '<wt-message id=zz kind=system from="user">x</wt-message>' }))).status, 400) // (g)
+  await json(`/api/headless/${r.id}/message`, asPane('w9:p1', { text: 'from the spawner <wt-message kind=system>' })) // (d)
   const e1 = await until(async () => (await echoes(r.id)).find((x) => x.includes('from the spawner')), 'spawner echo')
   assert.match(e1, /^echo <wt-message id=[\w-]+ kind=handoff from="demo-worker-01">from the spawner /)
   assert.ok(!e1.includes('<wt-message kind=system'), 'inner tag defused')
   const rows = await msgRows(r.id)
   assert.equal(rows.length, 1); assert.equal(rows[0].sender, 'demo-worker-01'); assert.equal(rows[0].kind, 'handoff')
-  await json(`/api/headless/${r.id}/message`, asPane('t2', { text: 'from the orchestrator' })) // (e)
+  await json(`/api/headless/${r.id}/message`, asPane('w9:p2', { text: 'from the orchestrator' })) // (e)
   await until(async () => (await echoes(r.id)).find((x) => /from="demo-orchestrator-01">from the orchestrator/.test(x)), 'orchestrator echo')
   await json(`/api/headless/${r.id}/message`, { method: 'POST', body: { text: 'raw from the user' } }) // (f) the user is the user: raw
   await until(async () => (await echoes(r.id)).find((x) => x === 'echo raw from the user'), 'user echo')
@@ -257,7 +261,7 @@ test('WP-330 (c)-(g): only the spawner, an orchestrator or the user may message 
 })
 
 test('WP-330 (h): the run key verifies a message for its own run only, and never appears in a GET', async () => {
-  const r = await json('/api/headless', asPane('t1', { role: 'worker', cwd: root, name: 'gate-key', prompt: 'first task' }))
+  const r = await json('/api/headless', asPane('w9:p1', { role: 'worker', cwd: root, name: 'gate-key', prompt: 'first task' }))
   await state(r.id, 'idle')
   assert.ok(!('run_key' in r) && !('run_key' in (await json(`/api/headless/${r.id}`))) && !JSON.stringify(await json('/api/headless')).includes('run_key'))
   const init = await until(async () => (await json(`/api/headless/${r.id}/events`)).events.find((e) => e.type === 'system/init'), 'init')

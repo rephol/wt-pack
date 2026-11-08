@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wt-deliver — the wt-deliver-mod's calls to wt-dashboard's delivery queue (WP-210). Identity: $HC_TERMINAL_ID.
+# wt-deliver — the wt-deliver-mod's calls to wt-dashboard's delivery queue (WP-210). Identity: $HERDR_PANE_ID.
 #   wt-deliver hello           liveness: the dashboard queues for this pane while hellos are fresh
 #   wt-deliver next            print the oldest queued delivery as JSON ({} when none)
 #   wt-deliver ack <id> [delivered|failed]
@@ -7,34 +7,19 @@
 # Exit 0 ok, 1 unreachable or API error.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
-[ -n "${HC_TERMINAL_ID:-}" ] || exit 1
-# WP-320: a claude started from inside a terminal inherits HC_TERMINAL_ID; only the terminal's own (outermost) claude
-# may take its deliveries. Another `claude` between this one and the hc holder in the process tree means we are nested: stand down.
-# WP-378 (S3): the holder is `<dir>/hc hold --socket …` (the default core shows `herdr-core hold …`); the core and whatever started it sit
-# above and do not count (a core started from an agent's shell has that claude above it).
-# D7: the holder is argv[0] hc|herdr-core with argv[1] `hold` (a script holder shows as `<interpreter> <dir>/hc hold`); a process whose args merely
-# MENTION `hc hold` (a claude, a grep) is not one.
-is_holder() {
-  local -a W; read -ra W <<< "$1"
-  local b0=${W[0]-} b1=${W[1]-}; b0=${b0##*/}; b1=${b1##*/} # unset elements: set -u aborts on bash 4.4+/5
-  case "$b0" in
-    hc|herdr-core) [ "${W[1]-}" = hold ] ;;
-    sh|bash|zsh|dash|node|env) case "$b1" in hc|herdr-core) [ "${W[2]-}" = hold ] ;; *) return 1 ;; esac ;;
-    *) return 1 ;;
-  esac
-}
+[ -n "${HERDR_PANE_ID:-}" ] || exit 1
+# WP-320: a claude started from inside a pane inherits HERDR_PANE_ID; only the pane's own (outermost) claude
+# may take its deliveries. Another `claude` between this one and herdr in the process tree means we are nested: stand down.
 p=$$; seen=0
 while [ "${p:-0}" -gt 1 ]; do
-  pp=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ') || break
-  c=$(ps -o comm= -p "$p" 2>/dev/null); a=$(ps -o args= -p "$p" 2>/dev/null)
-  is_holder "$a" && break
-  case "${c##*/}" in claude) seen=$((seen + 1)) ;; esac
+  read -r pp c <<<"$(ps -o ppid=,comm= -p "$p" 2>/dev/null)" || break
+  case "${c##*/}" in herdr) break ;; claude) seen=$((seen + 1)) ;; esac  # herdr owns the pane: nothing above counts
   p=${pp:-0}
 done
 [ "$seen" -le 1 ] || exit 1
 call() {
   local out code
-  out=$(curl -sS --max-time 4 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: $HC_TERMINAL_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' ${3:+--data "$3"} "$API$2" 2>/dev/null) || exit 1
+  out=$(curl -sS --max-time 4 -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: $HERDR_PANE_ID" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' ${3:+--data "$3"} "$API$2" 2>/dev/null) || exit 1
   code=${out##*$'\n'}; out=${out%$'\n'*}
   [ "$code" -lt 400 ] || exit 1
   printf '%s\n' "$out"

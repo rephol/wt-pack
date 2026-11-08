@@ -1,6 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { guard, maybeGated, GATE_MAX } from './guards'
-import cases, { variants } from '../../wt-shared/scripts/fixtures/gate-cases.mjs'
+import { guard } from './guards'
 
 test('refuses draft PRs, commit -a, a foreign author, skills paths in sent strings', () => {
   expect(guard('gh pr create --draft --title x')).toMatch(/draft/)
@@ -23,15 +22,7 @@ test('lets the normal forms through', () => {
 test('repo rules apply only in a wt-pack checkout; the skills-path rule everywhere', () => {
   expect(guard('gh pr create --draft', false)).toBeNull()
   expect(guard('git commit -am m', false)).toBeNull()
-  expect(guard('hc send t7 "see ~/.claude/skills/x"', false)).toMatch(/skills/)
-})
-
-test('WP-378: SENDS covers every hc verb and herdr-app do (flag before the verb too)', () => {
-  for (const c of ['hc send t7 "see ~/.claude/skills/x"', 'hc label t7 note="~/.claude/skills/x"', 'hc put t7 ~/.claude/skills/x/f', 'hc --json send t7 "$HOME/.claude/skills/x"',
-    'env -u HC_TERMINAL_ID hc keys t7 "~/.claude/skills/x"', 'herdr-app do send "~/.claude/skills/x"', 'herdr-app --json do open ~/.claude/skills/x'])
-    expect(guard(c, false)).toMatch(/skills/)
-  expect(guard('hc ls', false)).toBeNull()
-  expect(guard('echo "wchc" ~/.claude/skills/x', false)).toBeNull() // \bhc\b is a word, not a substring
+  expect(guard('herdr pane send p "see ~/.claude/skills/x"', false)).toMatch(/skills/)
 })
 
 const stub = (on: any, exitCode: number) => {
@@ -132,99 +123,18 @@ test('WP-357: a peer-requested action is denied with the peer reason, not "I ask
 
 test('WP-332: an ordinary command never spawns the gate; allowed (exit 0) and a broken gate both let it run', async ($, on) => {
   const runs = gateRig(on, () => ({ exitCode: 0, stdout: '' }))
-  for (const command of ['npm test', 'git status', 'ls -la']) {
+  for (const command of ['npm test', 'git status', 'git commit skills/a -m "push"', 'ls -la']) {
     const r: any = await $.tool.call({ tool: 'Bash', command })
     expect(r.deny).toBeUndefined()
   }
   expect(runs.length).toBe(0)
-  // WP-378 F9: a message that merely mentions `push` now reaches wt-gate (the prefilter is a superset of classify); the gate allows it (gate.test.mjs pins classify === null)
-  const msg: any = await $.tool.call({ tool: 'Bash', command: 'git commit skills/a -m "push"' })
-  expect(msg.deny).toBeUndefined()
-  expect(runs.length).toBe(1)
   const ok: any = await $.tool.call({ tool: 'Bash', command: 'git push' }) // exit 0 = allowed
   expect(ok.deny).toBeUndefined()
-  expect(runs.length).toBe(2)
+  expect(runs.length).toBe(1)
 })
 
 test('WP-332: a gate that cannot run fails open (it must not wedge every agent)', async ($, on) => {
   gateRig(on, () => 'throw')
   const r: any = await $.tool.call({ tool: 'Bash', command: 'git push' })
   expect(r.deny).toBeUndefined()
-})
-
-// WP-378 F8: the prefilter must pass every command wt-gate would classify. The cases are wt-shared's fixtures/gate-cases.mjs, the same list gate.test.mjs holds the
-// policy to, so a new gate class with no prefilter path fails here.
-test('WP-378 F8: the prefilter lets every command the gate classifies through to wt-gate', () => {
-  expect((cases as { cmd: string }[]).length).toBeGreaterThan(150)
-  const missed = (cases as { cmd: string; rule: string }[]).filter((c) => !maybeGated(c.cmd)).map((c) => `${c.rule}: ${c.cmd.slice(0, 80)}`)
-  expect(missed).toEqual([])
-})
-
-test('WP-378 F8: the prefilter reads quoted hc, wrapped hc and hc run payloads; commands with no tool word do not spawn the gate', () => {
-  for (const c of ['hc kill t3', '"hc" kill t3', "'hc' rm t3", '\\hc kill t3', "sh -c 'hc kill t3'", 'eval "hc kill t3"', 'hc run "git push"', "hc run 'rm -rf /etc/x'", "bash -c 'git push'", 'env -i hc send t3 x'])
-    expect(maybeGated(c)).toBe(true)
-  for (const c of ['npm test', 'git status', 'ls -la', "sh -c 'echo hi'", 'eval "echo hi"', 'echo hi && cat x'])
-    expect(maybeGated(c)).toBe(false)
-})
-
-test('WP-378 F8: a command over the gate limit that reaches the gate is denied by the mod, not passed to argv', async ($, on) => {
-  const runs = gateRig(on, () => ({ exitCode: 0, stdout: '' }))
-  const big = 'git push ' + ' '.repeat(GATE_MAX + 10)
-  const r: any = await $.tool.call({ tool: 'Bash', command: big })
-  expect(r.deny).toMatch(/too long for the gate/)
-  expect(r.deny).toMatch(/Split/)
-  expect(r.deny).toMatch(/long-command/)
-  expect(runs.length).toBe(0)
-  const ok: any = await $.tool.call({ tool: 'Bash', command: 'echo ' + 'a'.repeat(GATE_MAX + 10) }) // nothing gated in it: runs
-  expect(ok.deny).toBeUndefined()
-  expect(runs.length).toBe(0)
-})
-
-test('WP-378 F8: the prefilter is linear on a long line (git git git … of 120 KB; over 32 KB a git mention passes)', () => {
-  const t = Date.now()
-  expect(maybeGated('git '.repeat(30000))).toBe(true)
-  expect(maybeGated('x '.repeat(60000))).toBe(false)
-  expect(maybeGated('(' .repeat(120000) + 'sh -c')).toBe(false)
-  expect(Date.now() - t).toBeLessThan(500)
-})
-
-// WP-378 F9: the prefilter is a superset of classify BY CONSTRUCTION (it tests the text with backslash-newline joined and every quote and backslash removed). A command whose
-// message merely mentions a tool word now spawns wt-gate (~60 ms, classify allows it) instead of being skipped: the old "does not spawn" pins became "the gate allows it" (gate.test.mjs).
-test('WP-378 F9: the prefilter passes every fixture case under a quoted tool word, a comment apostrophe, a heredoc apostrophe', () => {
-  const missed: string[] = []
-  let n = 0
-  for (const c of cases as { cmd: string; rule: string; a?: number }[]) for (const v of variants(c.cmd, !!c.a)) { n++; if (!maybeGated(v.cmd)) missed.push(`${c.rule} ${v.kind}: ${v.cmd.slice(0, 80)}`) }
-  expect(n).toBeGreaterThan(400)
-  expect(missed).toEqual([])
-})
-
-test('WP-378 F10: the prefilter is a plain word test: a message that only mentions a tool word spawns the gate (and the gate allows it), wherever the words sit', () => {
-  for (const c of ['git commit skills/a -m "push"', 'git commit -m "docs: A & git merge notes"', 'echo "git push"', 'git status; echo push', 'git status\necho merge', 'git log && echo branch', 'ls | grep worktree; git status', 'gh issue list; echo pr'])
-    expect(maybeGated(c)).toBe(true)
-  // no tool word, or git / gh with none of their subcommand words: no spawn
-  for (const c of ["git status; echo 'it's", 'git log --oneline', 'gh issue list', 'echo push merge branch worktree pr', 'ls -la | grep foo', 'npm test && node x.mjs', 'echo "sh -c" eval'])
-    expect(maybeGated(c)).toBe(false)
-})
-
-test('WP-378 F10: each trigger word is load-bearing (rmdir, ncat and every network tool alone pass; a nested shell chain with no tool word passes at 7)', () => {
-  for (const c of ['rmdir /etc/x', 'ncat -l 80', 'nc h 1', 'wget x', 'scp a b:c', 'rsync a b:c', 'curl x', 'hc ls', 'rm x', '\\rmdir x', '"ncat" h 1', 'git branch -D x', 'git worktree remove x', 'git merge x', 'git push', 'gh pr merge 1'])
-    expect(maybeGated(c)).toBe(true)
-  const nest = (n: number) => { let c = 'echo hi'; for (let k = 0; k < n; k++) c = 'sh -c "' + c.replace(/(["$`\\])/g, '\\$1') + '"'; return c }
-  expect(maybeGated(nest(7))).toBe(true)
-  expect(maybeGated(nest(3))).toBe(false)
-})
-
-test('WP-378 F10: a command over 32 KB that mentions any tool word passes (classify fails closed there), one without does not', () => {
-  const pad = ' '.repeat(40000)
-  for (const t of ['git', 'gh', 'hc', 'rm']) expect(maybeGated(`echo ${pad} ${t}`)).toBe(true)
-  expect(maybeGated(`echo ${pad} ok`)).toBe(false)
-})
-
-test('WP-378 F9: the over-limit deny is the mod\'s own, also for a quoted or lone tool word (it fails if the early deny is removed)', async ($, on) => {
-  const runs = gateRig(on, () => ({ exitCode: 0, stdout: '' }))
-  for (const head of ['"git" push ', "'rm' -rf x ", 'curl ', 'hc ']) {
-    const r: any = await $.tool.call({ tool: 'Bash', command: head + ' '.repeat(GATE_MAX + 10) })
-    expect(r.deny).toMatch(/too long for the gate/)
-  }
-  expect(runs.length).toBe(0)
 })

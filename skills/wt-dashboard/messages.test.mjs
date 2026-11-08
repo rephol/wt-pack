@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Messages, parseEnvelope, envelopeOf, movedOn, workingOn, MAX_ATTEMPTS, NUDGE_MS, nudgeText, nudgeEligible } from './messages.mjs'
+import { Messages, parseEnvelope, envelopeOf, movedOn, MAX_ATTEMPTS, NUDGE_MS, nudgeText, nudgeEligible } from './messages.mjs'
 
 async function setup() {
   const clock = { t: Date.parse('2026-01-01T00:00:00Z') }
@@ -280,39 +280,4 @@ test('WP-360: the sweep resend sees attempt 2 (counted before it types) and the 
   clock.t += 6 * 60_000
   await m.sweep({ resend: async (row) => { seen.push(row.attempts); m.record(draft(), { bump: false }) } })
   assert.deepEqual(seen, [2]); assert.equal(m.get('a1').attempts, 2)
-})
-
-test('WP-378: only a WORKING target proves it took the message; a blocked one (hc send refused it) does not', () => {
-  const row = { ticket: 'WP-1' }, tag = () => 'WP-1'
-  assert.equal(workingOn({ status: 'working' }, row, tag), true)
-  assert.equal(workingOn({ status: 'blocked' }, row, tag), false)
-  assert.equal(workingOn({ status: 'idle' }, row, tag), false)
-  assert.equal(workingOn(undefined, row, tag), false)
-  assert.equal(workingOn({ status: 'working' }, row, () => 'WP-2'), false, 'working on another card')
-  assert.equal(workingOn({ status: 'working' }, { ticket: null }, () => 'WP-2'), true, 'a ticketless message only needs a working target')
-})
-
-test('WP-378: a blocked first send is un-counted (uncount), and the typed send later counts', async () => {
-  const { m, draft } = await setup()
-  assert.equal(m.record(draft()).row.attempts, 1)
-  assert.equal(m.uncount('a1').attempts, 0)
-  assert.equal(m.get('a1').state, 'queued')
-  assert.equal(m.uncount('a1').attempts, 0, 'never below zero')
-  assert.equal(m.record(draft()).row.attempts, 1, 'the typed send counts')
-})
-
-test('WP-378: a sweep resend that hc refuses (blocked / not idle) is not an attempt; any other failure is', async () => {
-  const { m, clock, draft } = await setup()
-  m.record(draft())
-  m.move('a1', 'delivered')
-  clock.t += 6 * 60_000
-  const refuse = (kind) => async () => { throw Object.assign(new Error(`t is ${kind}`), { kind }) }
-  assert.deepEqual(await m.sweep({ resend: refuse('blocked') }), [{ id: 'a1', did: 'resend-failed' }])
-  assert.equal(m.get('a1').attempts, 1, 'blocked: not counted')
-  clock.t += 6 * 60_000
-  assert.deepEqual(await m.sweep({ resend: refuse('status_mismatch') }), [{ id: 'a1', did: 'resend-failed' }])
-  assert.equal(m.get('a1').attempts, 1, 'working: not counted')
-  clock.t += 6 * 60_000
-  assert.deepEqual(await m.sweep({ resend: async () => { throw new Error('pane gone') } }), [{ id: 'a1', did: 'resend-failed' }])
-  assert.equal(m.get('a1').attempts, 2, 'a real failure is an attempt')
 })

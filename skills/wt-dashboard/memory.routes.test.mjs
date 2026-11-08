@@ -1,28 +1,36 @@
 // Run: node --test memory.routes.test.mjs — WP-369: /api/memory/preview passes the agent's persona to wt-memory, so a
-// `[role: <persona>]` line previews for that persona. Real server process, temp data dir and WT_MEMORY_HOME, stubbed hc (WP-378).
+// `[role: <persona>]` line previews for that persona. Real server process, temp data dir and WT_MEMORY_HOME, fake herdr (WP-348).
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { hcStub } from './test-hc.mjs'
 
-let hc, child, base, cookie
+// Quiet fake herdr first on PATH, so the server's agent sync never touches the user's real herdr.
+const FAKE_HERDR = `#!/usr/bin/env node
+const a = process.argv.slice(2).join(' ')
+if (a === 'agent list') console.log(JSON.stringify({ result: { agents: [] } }))
+else if (a === 'pane list') console.log(JSON.stringify({ result: { panes: [] } }))
+else if (a === 'workspace list') console.log(JSON.stringify({ result: { workspaces: [] } }))
+else if (a === 'machine list') console.log('')
+else process.exit(1)
+`
+let child, base, cookie
 const PORT = 30000 + Math.floor(Math.random() * 20000)
 const get = (path) => fetch(`${base}${path}`, { headers: { cookie } }).then((r) => r.json())
 before(async () => {
   const root = mkdtempSync(join(tmpdir(), 'wt-memroutes-'))
   mkdirSync(join(root, 'data'), { recursive: true })
-  hc = await hcStub({ terminals: [] }) // a quiet hc core, so the server's agent sync never touches the user's real one
+  const bin = join(root, 'bin'); mkdirSync(bin); writeFileSync(join(bin, 'herdr'), FAKE_HERDR); chmodSync(join(bin, 'herdr'), 0o755)
   const mem = join(root, 'mem'); mkdirSync(mem)
   writeFileSync(join(mem, 'global.md'), '- for-all\n- [role: p] persona-only\n')
-  child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root, WT_MEMORY_HOME: mem, ...hc.env } })
+  child = spawn(process.execPath, ['server.mjs'], { cwd: import.meta.dirname, stdio: ['ignore', 'ignore', 'inherit'], env: { ...process.env, PORT: String(PORT), WT_DASHBOARD_DATA: root, HOME: root, WT_MEMORY_HOME: mem, PATH: `${bin}:${process.env.PATH}` } })
   base = `http://127.0.0.1:${PORT}`
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/push`)).ok) break } catch { /* not up yet */ } await new Promise((r) => setTimeout(r, 100)) }
   cookie = `hd_session=${readFileSync(join(root, 'session'), 'utf8').trim()}`
 })
-after(async () => { child?.kill(); await hc?.close() })
+after(() => child?.kill())
 
 test('preview with a persona shows its [role: persona] line, tag stripped; without it the line is absent', async () => {
   const withP = (await get('/api/memory/preview?role=worker&persona=p')).text

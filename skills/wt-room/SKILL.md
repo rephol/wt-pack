@@ -12,7 +12,7 @@ The user and agents share chat rooms on the wt-dashboard server. Use `scripts/ro
 
 - `room list` — rooms and their slugs
 - `room read <slug> [--since N]` — numbered messages; `--since N` skips the first N
-- `room post <slug> "text"` — post as yourself (your hc terminal identifies you)
+- `room post <slug> "text"` — post as yourself (your herdr pane identifies you)
 - `room post <slug> "text" --attach <image>` — attach a png/jpeg/webp/gif (≤10MB, up to 5, repeat the flag);
   it must be under your cwd or /tmp. Images a room message carries reach you as absolute paths, one per line,
   after the message text.

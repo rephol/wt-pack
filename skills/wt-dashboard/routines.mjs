@@ -1,5 +1,5 @@
 // Routines (WP-48): recurring agent work run by the dashboard server. Schedules, the store (DATA/wt.db, migration 5)
-// and the tick. The server injects every side effect (agents, host, prompt, spawn, remove, actions), so tests need no hc.
+// and the tick. The server injects every side effect (agents, host, prompt, spawn, remove, actions), so tests need no herdr.
 import { join } from 'node:path'
 import { open } from './store.mjs'
 

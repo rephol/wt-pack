@@ -9,13 +9,13 @@
 # post also takes --no-deliver: the answer is not sent back as a wt-message (the caller --waits for it).
 # --room defaults to the ticket's room (its id, lowercased — e.g. WP-164 -> wp-164) when --ticket is given and
 # --room is not; otherwise the ask has no room and shows only in the Inbox.
-# Identity: $HC_TERMINAL_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
+# Identity: $HERDR_PANE_ID; the server rejects unknown panes. Exit: 0 ok, 1 API error, 2 usage.
 set -u
 API=${HERDR_DASH_URL:-http://127.0.0.1:7777}
 usage() { sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 call() {
   local out code
-  out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HC_TERMINAL_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
+  out=$(curl -sS --max-time "${MAXT:-10}" -w '\n%{http_code}' -X "$1" -H "x-herdr-pane: ${HERDR_PANE_ID:-}" ${WT_PANE_KEY:+-H "x-wt-pane-key: $WT_PANE_KEY"} -H 'content-type: application/json' \
     ${3:+--data "$3"} "$API$2" 2>/dev/null) || { echo "wt-dashboard not reachable at $API — wt-ask needs it running (see README › Install)" >&2; exit 1; }
   code=${out##*$'\n'}; out=${out%$'\n'*}; out=${out%$'\n'}
   if [ "$code" -ge 400 ]; then echo "wt-ask: $code $out" >&2; exit 1; fi

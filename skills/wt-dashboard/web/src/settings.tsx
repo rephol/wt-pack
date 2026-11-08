@@ -362,7 +362,7 @@ function AboutSection() {
   return (
     <>
       <SettingsCard title="wt-dashboard">
-        <SettingsRow title="A local control room for hc-managed Claude Code agents"
+        <SettingsRow title="A local control room for herdr-managed Claude Code agents"
           description={`${isDesktop ? 'Desktop app (Tauri).' : 'Browser.'} Server details are under Server.`} control={<InstallRow />} />
       </SettingsCard>
       <SettingsCard title="Keyboard shortcuts">

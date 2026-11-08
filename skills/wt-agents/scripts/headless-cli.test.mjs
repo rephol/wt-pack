@@ -30,12 +30,12 @@ const run = (args, env = {}) => promisify(execFile)('sh', [SH, ...args], { env: 
 test('spawn --headless POSTs role/cwd/options with the pane header and prints "<name> <id> <state>"', async () => {
   reqs = []; reply = () => [200, { name: 'worker-ab12', id: 'hl-ab12cd34ef', state: 'queued' }]
   const dir = mkdtempSync(join(tmpdir(), 'wt-hlcli-'))
-  const r = await run(['spawn', '--headless', 'worker', dir, '--prompt', 'do "it" now', '--model', 'sonnet', '--name', 'w1'], { HC_TERMINAL_ID: 't2' })
+  const r = await run(['spawn', '--headless', 'worker', dir, '--prompt', 'do "it" now', '--model', 'sonnet', '--name', 'w1'], { HERDR_PANE_ID: 'w1:p2' })
   assert.equal(r.code, 0, r.stderr)
   assert.equal(r.stdout, 'worker-ab12 hl-ab12cd34ef queued\n')
   assert.equal(reqs.length, 1)
   const q = reqs[0]
-  assert.deepEqual([q.method, q.path, q.pane, q.type], ['POST', '/api/headless', 't2', 'application/json'])
+  assert.deepEqual([q.method, q.path, q.pane, q.type], ['POST', '/api/headless', 'w1:p2', 'application/json'])
   assert.deepEqual(q.body, { role: 'worker', cwd: (await promisify(execFile)('sh', ['-c', `cd '${dir}' && pwd`])).stdout.trim(), prompt: 'do "it" now', model: 'sonnet', name: 'w1' })
 })
 
@@ -70,17 +70,17 @@ test('list --headless prints rows; rm --headless POSTs stop', async () => {
   r = await run(['rm', '--headless', 'hl-1'])
   assert.equal(r.stdout, 'a hl-1 ended\n')
   assert.deepEqual([reqs[0].method, reqs[0].path], ['POST', '/api/headless/hl-1/stop'])
-  r = await run(['stop', '--headless', 'hl-1'], { HC_TERMINAL_ID: 't2' }) // stop is rm
-  assert.equal(r.stdout, 'a hl-1 ended\n'); assert.deepEqual([reqs.at(-1).path, reqs.at(-1).pane], ['/api/headless/hl-1/stop', 't2'])
-  r = await run(['rm', '--headless', 't2'])
+  r = await run(['stop', '--headless', 'hl-1'], { HERDR_PANE_ID: 'w1:p2' }) // stop is rm
+  assert.equal(r.stdout, 'a hl-1 ended\n'); assert.deepEqual([reqs.at(-1).path, reqs.at(-1).pane], ['/api/headless/hl-1/stop', 'w1:p2'])
+  r = await run(['rm', '--headless', 'w1:p2'])
   assert.equal(r.code, 2)
 })
 
 test('context (WP-312): the caller\'s AgentInfo context for a headless run or a pane; exit 1 when unknown', async () => {
   const row = (id, kind, extra, used) => ({ id, info: { kind, ...extra, contextUsed: used, contextWindow: 200000, contextPct: 50, model: { id: 'claude-opus-5-5', name: 'Opus 5.5' } } })
-  reply = () => [200, [row('t9', 'pane', { pane: { id: 't9' } }, 100000), row('hl-aa', 'headless', { run: { id: 'hl-aa' } }, 100000), row('hl-bb', 'headless', { run: { id: 'hl-bb' } }, null)]]
+  reply = () => [200, [row('w9:p9', 'pane', { pane: { id: 'w9:p9' } }, 100000), row('hl-aa', 'headless', { run: { id: 'hl-aa' } }, 100000), row('hl-bb', 'headless', { run: { id: 'hl-bb' } }, null)]]
   const want = { used: 100000, window: 200000, pct: 50, model: 'claude-opus-5-5' }
-  for (const env of [{ WT_HEADLESS_ID: 'hl-aa' }, { HC_TERMINAL_ID: 't9' }]) {
+  for (const env of [{ WT_HEADLESS_ID: 'hl-aa' }, { HERDR_PANE_ID: 'w9:p9' }]) {
     const r = await run(['context'], env)
     assert.equal(r.code, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), want)
   }
@@ -93,9 +93,9 @@ test('send --headless (WP-317): a live run by name beats the ended one sharing i
     { name: 'q', id: 'hl-new3', state: 'working', cwd: '/x', role: 'worker' }]
   reply = (req) => (req.method === 'GET' ? [200, rows] : [200, { ok: true }])
   reqs = []
-  let r = await run(['send', '--headless', 'p-01', 'next "task"'], { HC_TERMINAL_ID: 't2' })
+  let r = await run(['send', '--headless', 'p-01', 'next "task"'], { HERDR_PANE_ID: 'w1:p2' })
   assert.equal(r.code, 0, r.stderr); assert.equal(r.stdout, 'sent hl-new2\n')
-  assert.deepEqual([reqs[1].method, reqs[1].path, reqs[1].pane, reqs[1].body], ['POST', '/api/headless/hl-new2/message', 't2', { text: 'next "task"' }])
+  assert.deepEqual([reqs[1].method, reqs[1].path, reqs[1].pane, reqs[1].body], ['POST', '/api/headless/hl-new2/message', 'w1:p2', { text: 'next "task"' }])
   reqs = []; r = await run(['send', '--headless', 'hl-new3', 'x'])
   assert.equal(r.stdout, 'sent hl-new3\n')
   r = await run(['send', '--headless', 'hl-new', 'x']) // prefix matches two live runs

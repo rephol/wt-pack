@@ -62,7 +62,7 @@ export function TagsDialog({ agent, mode, onClose }: { agent: AgentLite; mode: '
               <TextInput label="Ticket" value={ticket} onChange={setTicket} placeholder="ABC-123" />
               <TextInput label="Branch" value={branch} onChange={setBranch} placeholder="short branch name" />
             </>}
-        <Text type="supporting" size="sm">Stored by the dashboard and shown in hc as terminal labels (display only; titles and status are not changed).</Text>
+        <Text type="supporting" size="sm">Stored by the dashboard and shown in herdr as pane tokens (display only; herdr titles and status are not changed).</Text>
         <HStack justify="end" gap={2}>
           <Button label="Cancel" variant="ghost" onClick={onClose} />
           <Button label="Save" variant="primary" isLoading={save.isPending} onClick={() => save.mutate()} />

@@ -28,10 +28,6 @@ export const parseEnvelope = (text) => { const e = parseWt(text); return e && { 
 const roomTag = (t) => { const m = String(t).match(/^<room-message id=([\w-]+) room=\S+ from="([^"]*)" kind=(\w+)/); return m && m[3] !== 'context' ? { id: m[1], kind: 'room', sender: m[2], ticket: null } : null }
 export const envelopeOf = (text) => parseEnvelope(text) ?? roomTag(text)
 
-// WP-378: does this agent's state prove it took the message? Only `working` (on the card, when the message has one). A `blocked` agent
-// is waiting on a dialog and `hc send` refuses it (exit 9), so it says nothing about delivery.
-export const workingOn = (agent, row, ticketOf) => !!agent && agent.status === 'working' && (!row.ticket || ticketOf(agent) === row.ticket)
-
 // WP-260: has the card a handoff/dispatch was sent for moved on? Then the message did its job and is acknowledged:
 // the card is done or blocked, or someone other than dispatch moved it after the message went out (the target taking it
 // ready → building counts). Never resend a message for a finished ticket. `card` is the board card, null when unknown.
@@ -80,12 +76,6 @@ export class Messages {
     this.db.prepare(`INSERT INTO wt_messages (id, sender, target, kind, ticket, request_id, body, state, created, updated, delivered_at, sender_pane)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, String(sender ?? ''), target, kind, ticket, requestId, body.slice(0, 100_000), state, at, at, state === 'delivered' ? at : null, senderPane)
     return { row: this.get(id), duplicate: false }
-  }
-
-  // WP-378: a send that typed nothing (hc refused: the target is blocked or busy) is not an attempt; attempts count typed sends only.
-  uncount(id) {
-    this.db.prepare('UPDATE wt_messages SET attempts = MAX(attempts - 1, 0), updated = ? WHERE id = ?').run(this.#at(), id)
-    return this.get(id)
   }
 
   // The one state writer: illegal moves are a 409, a repeat of the current state is a no-op (acks are idempotent).
@@ -154,7 +144,6 @@ export class Messages {
         this.db.prepare("UPDATE wt_messages SET state = 'delivered', updated = ?, error = NULL WHERE id = ?").run(this.#at(), row.id)
         done.push({ id: row.id, did: 'resent' })
       } catch (e) {
-        if (e.kind === 'blocked' || e.kind === 'status_mismatch') this.db.prepare('UPDATE wt_messages SET attempts = MAX(attempts - 1, 0) WHERE id = ?').run(row.id) // WP-378: refused, nothing typed
         this.db.prepare('UPDATE wt_messages SET updated = ?, error = ? WHERE id = ?').run(this.#at(), e.message.slice(0, 200), row.id)
         done.push({ id: row.id, did: 'resend-failed' })
       }

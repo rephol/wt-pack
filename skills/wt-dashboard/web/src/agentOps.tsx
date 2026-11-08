@@ -26,7 +26,7 @@ export function useAgentOps(agent: Agent, opts: { canStop?: boolean; onStop?: ()
   const items: Record<ActionId, Item> = {
     pause: { label: 'Pause agent…', description: 'Save it and close its tab; Resume brings it back with its session', onClick: () => setAsk('pause') },
     remove: { label: 'Remove agent…', description: 'Close its tab and end its conversation', onClick: () => openRemove(agent as SpawnAgentLite) },
-    'remove-remote': { label: 'Remove agent…', description: 'Remote machines are not supported with the hc backend', isDisabled: true, onClick: () => {} },
+    'remove-remote': { label: 'Remove agent…', description: 'Remote agents: not supported yet', isDisabled: true, onClick: () => {} },
     resume: { label: 'Resume agent', description: 'Respawn it with its saved session (one cold cache write)', onClick: () => run.mutate('resume') },
     respawn: { label: 'Respawn agent', description: 'Start it again with its saved session', onClick: () => run.mutate('resume') },
     forget: { label: 'Forget agent', description: 'Drop its saved row; its number becomes free (transcript kept)', onClick: () => run.mutate('forget') },
